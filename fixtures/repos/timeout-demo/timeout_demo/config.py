@@ -12,8 +12,8 @@ DEFAULT_TIMEOUT = 30
 def load_settings(env: Mapping[str, str] | None = None) -> dict[str, object]:
     """Load client settings from environment variables.
 
-    The missing-timeout branch is intentional fixture data: the declared
-    default is not applied, so client initialization receives no timeout.
+    Read the endpoint and optional timeout from the supplied mapping.
+    Return the settings used to initialize the local client.
     """
 
     source = os.environ if env is None else env

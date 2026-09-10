@@ -20,7 +20,7 @@
     },
     {
       "path": "timeout_demo/config.py",
-      "sha256": "2fec96cba832cbd0b1ef211625cc2df8597c8e2e6db4b53b9b4c77482ae5acf1"
+      "sha256": "913f40a2c51c3cce2a687e2dd3ab1b42810bdf2769b463bacd275dff7c1af01f"
     },
     {
       "path": "timeout_demo/dispatch.py",
