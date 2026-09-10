@@ -1,0 +1,1413 @@
+{
+  "events": {
+    "events": [
+      {
+        "payload": {
+          "budget": {
+            "max_seconds": 120,
+            "max_source_lines": 200,
+            "max_tool_calls": 12,
+            "tool_calls_used": 0
+          },
+          "index_id": "index-timeout-demo-v1",
+          "issue_id": "issue-timeout-missing",
+          "mode": "fixture"
+        },
+        "run_id": "run-success-timeout-missing",
+        "sequence": 1,
+        "timestamp": "2026-09-10T00:00:00Z",
+        "type": "run.started"
+      },
+      {
+        "payload": {
+          "stage": "retrieval"
+        },
+        "run_id": "run-success-timeout-missing",
+        "sequence": 2,
+        "timestamp": "2026-09-10T00:00:02Z",
+        "type": "stage.started"
+      },
+      {
+        "payload": {
+          "request": {
+            "index_id": "index-timeout-demo-v1",
+            "params": {
+              "limit": 10,
+              "query": "timeout default initialize_client",
+              "tool": "search_code"
+            },
+            "request_id": "request-success-search",
+            "run_id": "run-success-timeout-missing"
+          }
+        },
+        "run_id": "run-success-timeout-missing",
+        "sequence": 3,
+        "timestamp": "2026-09-10T00:00:03Z",
+        "type": "tool.started"
+      },
+      {
+        "payload": {
+          "result": {
+            "completed_sequence": 4,
+            "index_id": "index-timeout-demo-v1",
+            "kind": "search_code.succeeded",
+            "matches": [
+              {
+                "matched_terms": [
+                  "timeout",
+                  "default"
+                ],
+                "rank": 1,
+                "symbol": {
+                  "end_line": 25,
+                  "index_id": "index-timeout-demo-v1",
+                  "kind": "function",
+                  "path": "timeout_demo/config.py",
+                  "qualified_name": "timeout_demo.config.load_settings",
+                  "start_line": 12,
+                  "symbol_id": "sym-load-settings"
+                }
+              },
+              {
+                "matched_terms": [
+                  "timeout",
+                  "initialize"
+                ],
+                "rank": 2,
+                "symbol": {
+                  "end_line": 19,
+                  "index_id": "index-timeout-demo-v1",
+                  "kind": "function",
+                  "path": "timeout_demo/client.py",
+                  "qualified_name": "timeout_demo.client.initialize_client",
+                  "start_line": 16,
+                  "symbol_id": "sym-initialize-client"
+                }
+              }
+            ],
+            "request_id": "request-success-search",
+            "run_id": "run-success-timeout-missing",
+            "tool": "search_code"
+          }
+        },
+        "run_id": "run-success-timeout-missing",
+        "sequence": 4,
+        "timestamp": "2026-09-10T00:00:04Z",
+        "type": "tool.completed"
+      },
+      {
+        "payload": {
+          "request": {
+            "index_id": "index-timeout-demo-v1",
+            "params": {
+              "end_line": 25,
+              "path": "timeout_demo/config.py",
+              "start_line": 9,
+              "tool": "read_source"
+            },
+            "request_id": "request-success-config",
+            "run_id": "run-success-timeout-missing"
+          }
+        },
+        "run_id": "run-success-timeout-missing",
+        "sequence": 5,
+        "timestamp": "2026-09-10T00:00:05Z",
+        "type": "tool.started"
+      },
+      {
+        "payload": {
+          "result": {
+            "completed_sequence": 6,
+            "evidence": {
+              "content_hash": "913f40a2c51c3cce2a687e2dd3ab1b42810bdf2769b463bacd275dff7c1af01f",
+              "end_line": 25,
+              "evidence_id": "evidence-timeout-config",
+              "excerpt": "DEFAULT_TIMEOUT = 30\n\n\ndef load_settings(env: Mapping[str, str] | None = None) -> dict[str, object]:\n    \"\"\"Load client settings from environment variables.\n\n    Read the endpoint and optional timeout from the supplied mapping.\n    Return the settings used to initialize the local client.\n    \"\"\"\n\n    source = os.environ if env is None else env\n    settings: dict[str, object] = {\n        \"endpoint\": source.get(\"TIMEOUT_DEMO_ENDPOINT\", \"https://example.test\"),\n    }\n    if \"TIMEOUT_DEMO_TIMEOUT\" in source:\n        settings[\"timeout\"] = int(source[\"TIMEOUT_DEMO_TIMEOUT\"])\n    return settings",
+              "index_id": "index-timeout-demo-v1",
+              "kind": "source",
+              "path": "timeout_demo/config.py",
+              "start_line": 9
+            },
+            "index_id": "index-timeout-demo-v1",
+            "kind": "read_source.succeeded",
+            "request_id": "request-success-config",
+            "run_id": "run-success-timeout-missing",
+            "tool": "read_source"
+          }
+        },
+        "run_id": "run-success-timeout-missing",
+        "sequence": 6,
+        "timestamp": "2026-09-10T00:00:06Z",
+        "type": "tool.completed"
+      },
+      {
+        "payload": {
+          "request": {
+            "index_id": "index-timeout-demo-v1",
+            "params": {
+              "depth": 2,
+              "direction": "callees",
+              "limit": 10,
+              "symbol_id": "sym-start",
+              "tool": "get_neighbors"
+            },
+            "request_id": "request-success-neighbors",
+            "run_id": "run-success-timeout-missing"
+          }
+        },
+        "run_id": "run-success-timeout-missing",
+        "sequence": 7,
+        "timestamp": "2026-09-10T00:00:07Z",
+        "type": "tool.started"
+      },
+      {
+        "payload": {
+          "result": {
+            "completed_sequence": 8,
+            "index_id": "index-timeout-demo-v1",
+            "kind": "get_neighbors.succeeded",
+            "neighbors": [
+              {
+                "edge": {
+                  "edge_id": "edge-call-start-initialize",
+                  "extraction_method": "fixture",
+                  "index_id": "index-timeout-demo-v1",
+                  "kind": "calls",
+                  "source_id": "sym-start",
+                  "source_location": {
+                    "end_line": 19,
+                    "path": "timeout_demo/app.py",
+                    "start_line": 19
+                  },
+                  "target_id": "sym-initialize-client"
+                },
+                "symbol": {
+                  "end_line": 19,
+                  "index_id": "index-timeout-demo-v1",
+                  "kind": "function",
+                  "path": "timeout_demo/client.py",
+                  "qualified_name": "timeout_demo.client.initialize_client",
+                  "start_line": 16,
+                  "symbol_id": "sym-initialize-client"
+                }
+              }
+            ],
+            "request_id": "request-success-neighbors",
+            "run_id": "run-success-timeout-missing",
+            "tool": "get_neighbors"
+          }
+        },
+        "run_id": "run-success-timeout-missing",
+        "sequence": 8,
+        "timestamp": "2026-09-10T00:00:08Z",
+        "type": "tool.completed"
+      },
+      {
+        "payload": {
+          "request": {
+            "index_id": "index-timeout-demo-v1",
+            "params": {
+              "end_line": 19,
+              "path": "timeout_demo/client.py",
+              "start_line": 16,
+              "tool": "read_source"
+            },
+            "request_id": "request-success-client",
+            "run_id": "run-success-timeout-missing"
+          }
+        },
+        "run_id": "run-success-timeout-missing",
+        "sequence": 9,
+        "timestamp": "2026-09-10T00:00:09Z",
+        "type": "tool.started"
+      },
+      {
+        "payload": {
+          "result": {
+            "completed_sequence": 10,
+            "evidence": {
+              "content_hash": "ecff3e9212b90cb22e464c8d44085dba5c763af7f3b200196ce11613d4308a5d",
+              "end_line": 19,
+              "evidence_id": "evidence-timeout-client",
+              "excerpt": "def initialize_client(settings: Mapping[str, object]) -> Client:\n    \"\"\"Create a client from loaded settings.\"\"\"\n\n    return Client(endpoint=str(settings[\"endpoint\"]), timeout=int(settings[\"timeout\"]))",
+              "index_id": "index-timeout-demo-v1",
+              "kind": "source",
+              "path": "timeout_demo/client.py",
+              "start_line": 16
+            },
+            "index_id": "index-timeout-demo-v1",
+            "kind": "read_source.succeeded",
+            "request_id": "request-success-client",
+            "run_id": "run-success-timeout-missing",
+            "tool": "read_source"
+          }
+        },
+        "run_id": "run-success-timeout-missing",
+        "sequence": 10,
+        "timestamp": "2026-09-10T00:00:10Z",
+        "type": "tool.completed"
+      },
+      {
+        "payload": {
+          "stage": "analysis"
+        },
+        "run_id": "run-success-timeout-missing",
+        "sequence": 11,
+        "timestamp": "2026-09-10T00:00:11Z",
+        "type": "stage.started"
+      },
+      {
+        "payload": {
+          "graph": {
+            "candidate_links": [
+              {
+                "candidate_id": "candidate-timeout-flow",
+                "evidence_ids": [
+                  "evidence-timeout-config",
+                  "evidence-timeout-client"
+                ],
+                "index_id": "index-timeout-demo-v1",
+                "relation": "Missing timeout setting flows into client initialization",
+                "source_symbol_id": "sym-load-settings",
+                "target_symbol_id": "sym-initialize-client"
+              }
+            ],
+            "index_id": "index-timeout-demo-v1",
+            "nodes": [
+              {
+                "end_line": 18,
+                "index_id": "index-timeout-demo-v1",
+                "kind": "module",
+                "path": "timeout_demo/__main__.py",
+                "qualified_name": "timeout_demo.__main__",
+                "start_line": 1,
+                "symbol_id": "sym-module-main"
+              },
+              {
+                "end_line": 14,
+                "index_id": "index-timeout-demo-v1",
+                "kind": "function",
+                "path": "timeout_demo/__main__.py",
+                "qualified_name": "timeout_demo.__main__.main",
+                "start_line": 11,
+                "symbol_id": "sym-main"
+              },
+              {
+                "end_line": 20,
+                "index_id": "index-timeout-demo-v1",
+                "kind": "module",
+                "path": "timeout_demo/app.py",
+                "qualified_name": "timeout_demo.app",
+                "start_line": 1,
+                "symbol_id": "sym-module-app"
+              },
+              {
+                "end_line": 20,
+                "index_id": "index-timeout-demo-v1",
+                "kind": "function",
+                "path": "timeout_demo/app.py",
+                "qualified_name": "timeout_demo.app.start",
+                "start_line": 12,
+                "symbol_id": "sym-start"
+              },
+              {
+                "end_line": 25,
+                "index_id": "index-timeout-demo-v1",
+                "kind": "module",
+                "path": "timeout_demo/config.py",
+                "qualified_name": "timeout_demo.config",
+                "start_line": 1,
+                "symbol_id": "sym-module-config"
+              },
+              {
+                "end_line": 25,
+                "index_id": "index-timeout-demo-v1",
+                "kind": "function",
+                "path": "timeout_demo/config.py",
+                "qualified_name": "timeout_demo.config.load_settings",
+                "start_line": 12,
+                "symbol_id": "sym-load-settings"
+              },
+              {
+                "end_line": 19,
+                "index_id": "index-timeout-demo-v1",
+                "kind": "module",
+                "path": "timeout_demo/client.py",
+                "qualified_name": "timeout_demo.client",
+                "start_line": 1,
+                "symbol_id": "sym-module-client"
+              },
+              {
+                "end_line": 13,
+                "index_id": "index-timeout-demo-v1",
+                "kind": "class",
+                "path": "timeout_demo/client.py",
+                "qualified_name": "timeout_demo.client.Client",
+                "start_line": 8,
+                "symbol_id": "sym-client"
+              },
+              {
+                "end_line": 19,
+                "index_id": "index-timeout-demo-v1",
+                "kind": "function",
+                "path": "timeout_demo/client.py",
+                "qualified_name": "timeout_demo.client.initialize_client",
+                "start_line": 16,
+                "symbol_id": "sym-initialize-client"
+              },
+              {
+                "end_line": 20,
+                "index_id": "index-timeout-demo-v1",
+                "kind": "module",
+                "path": "timeout_demo/dispatch.py",
+                "qualified_name": "timeout_demo.dispatch",
+                "start_line": 1,
+                "symbol_id": "sym-module-dispatch"
+              },
+              {
+                "end_line": 20,
+                "index_id": "index-timeout-demo-v1",
+                "kind": "function",
+                "path": "timeout_demo/dispatch.py",
+                "qualified_name": "timeout_demo.dispatch.dispatch",
+                "start_line": 15,
+                "symbol_id": "sym-dispatch"
+              },
+              {
+                "end_line": 15,
+                "index_id": "index-timeout-demo-v1",
+                "kind": "module",
+                "path": "timeout_demo/handlers.py",
+                "qualified_name": "timeout_demo.handlers",
+                "start_line": 1,
+                "symbol_id": "sym-module-handlers"
+              },
+              {
+                "end_line": 15,
+                "index_id": "index-timeout-demo-v1",
+                "kind": "function",
+                "path": "timeout_demo/handlers.py",
+                "qualified_name": "timeout_demo.handlers.handle",
+                "start_line": 8,
+                "symbol_id": "sym-primary-handle"
+              },
+              {
+                "end_line": 15,
+                "index_id": "index-timeout-demo-v1",
+                "kind": "module",
+                "path": "timeout_demo/other_handlers.py",
+                "qualified_name": "timeout_demo.other_handlers",
+                "start_line": 1,
+                "symbol_id": "sym-module-other-handlers"
+              },
+              {
+                "end_line": 15,
+                "index_id": "index-timeout-demo-v1",
+                "kind": "function",
+                "path": "timeout_demo/other_handlers.py",
+                "qualified_name": "timeout_demo.other_handlers.handle",
+                "start_line": 8,
+                "symbol_id": "sym-secondary-handle"
+              }
+            ],
+            "static_edges": [
+              {
+                "edge_id": "edge-contains-main",
+                "extraction_method": "fixture",
+                "index_id": "index-timeout-demo-v1",
+                "kind": "contains",
+                "source_id": "sym-module-main",
+                "source_location": {
+                  "end_line": 14,
+                  "path": "timeout_demo/__main__.py",
+                  "start_line": 11
+                },
+                "target_id": "sym-main"
+              },
+              {
+                "edge_id": "edge-contains-start",
+                "extraction_method": "fixture",
+                "index_id": "index-timeout-demo-v1",
+                "kind": "contains",
+                "source_id": "sym-module-app",
+                "source_location": {
+                  "end_line": 20,
+                  "path": "timeout_demo/app.py",
+                  "start_line": 12
+                },
+                "target_id": "sym-start"
+              },
+              {
+                "edge_id": "edge-contains-load",
+                "extraction_method": "fixture",
+                "index_id": "index-timeout-demo-v1",
+                "kind": "contains",
+                "source_id": "sym-module-config",
+                "source_location": {
+                  "end_line": 25,
+                  "path": "timeout_demo/config.py",
+                  "start_line": 12
+                },
+                "target_id": "sym-load-settings"
+              },
+              {
+                "edge_id": "edge-contains-client",
+                "extraction_method": "fixture",
+                "index_id": "index-timeout-demo-v1",
+                "kind": "contains",
+                "source_id": "sym-module-client",
+                "source_location": {
+                  "end_line": 13,
+                  "path": "timeout_demo/client.py",
+                  "start_line": 8
+                },
+                "target_id": "sym-client"
+              },
+              {
+                "edge_id": "edge-contains-initialize",
+                "extraction_method": "fixture",
+                "index_id": "index-timeout-demo-v1",
+                "kind": "contains",
+                "source_id": "sym-module-client",
+                "source_location": {
+                  "end_line": 19,
+                  "path": "timeout_demo/client.py",
+                  "start_line": 16
+                },
+                "target_id": "sym-initialize-client"
+              },
+              {
+                "edge_id": "edge-contains-dispatch",
+                "extraction_method": "fixture",
+                "index_id": "index-timeout-demo-v1",
+                "kind": "contains",
+                "source_id": "sym-module-dispatch",
+                "source_location": {
+                  "end_line": 20,
+                  "path": "timeout_demo/dispatch.py",
+                  "start_line": 15
+                },
+                "target_id": "sym-dispatch"
+              },
+              {
+                "edge_id": "edge-contains-primary",
+                "extraction_method": "fixture",
+                "index_id": "index-timeout-demo-v1",
+                "kind": "contains",
+                "source_id": "sym-module-handlers",
+                "source_location": {
+                  "end_line": 15,
+                  "path": "timeout_demo/handlers.py",
+                  "start_line": 8
+                },
+                "target_id": "sym-primary-handle"
+              },
+              {
+                "edge_id": "edge-contains-secondary",
+                "extraction_method": "fixture",
+                "index_id": "index-timeout-demo-v1",
+                "kind": "contains",
+                "source_id": "sym-module-other-handlers",
+                "source_location": {
+                  "end_line": 15,
+                  "path": "timeout_demo/other_handlers.py",
+                  "start_line": 8
+                },
+                "target_id": "sym-secondary-handle"
+              },
+              {
+                "edge_id": "edge-import-main-app",
+                "extraction_method": "explicit_import",
+                "index_id": "index-timeout-demo-v1",
+                "kind": "imports",
+                "source_id": "sym-module-main",
+                "source_location": {
+                  "end_line": 8,
+                  "path": "timeout_demo/__main__.py",
+                  "start_line": 8
+                },
+                "target_id": "sym-module-app"
+              },
+              {
+                "edge_id": "edge-import-app-client",
+                "extraction_method": "explicit_import",
+                "index_id": "index-timeout-demo-v1",
+                "kind": "imports",
+                "source_id": "sym-module-app",
+                "source_location": {
+                  "end_line": 7,
+                  "path": "timeout_demo/app.py",
+                  "start_line": 7
+                },
+                "target_id": "sym-module-client"
+              },
+              {
+                "edge_id": "edge-import-app-config",
+                "extraction_method": "explicit_import",
+                "index_id": "index-timeout-demo-v1",
+                "kind": "imports",
+                "source_id": "sym-module-app",
+                "source_location": {
+                  "end_line": 8,
+                  "path": "timeout_demo/app.py",
+                  "start_line": 8
+                },
+                "target_id": "sym-module-config"
+              },
+              {
+                "edge_id": "edge-import-app-dispatch",
+                "extraction_method": "explicit_import",
+                "index_id": "index-timeout-demo-v1",
+                "kind": "imports",
+                "source_id": "sym-module-app",
+                "source_location": {
+                  "end_line": 9,
+                  "path": "timeout_demo/app.py",
+                  "start_line": 9
+                },
+                "target_id": "sym-module-dispatch"
+              },
+              {
+                "edge_id": "edge-import-dispatch-handlers",
+                "extraction_method": "explicit_import",
+                "index_id": "index-timeout-demo-v1",
+                "kind": "imports",
+                "source_id": "sym-module-dispatch",
+                "source_location": {
+                  "end_line": 5,
+                  "path": "timeout_demo/dispatch.py",
+                  "start_line": 5
+                },
+                "target_id": "sym-module-handlers"
+              },
+              {
+                "edge_id": "edge-import-dispatch-other",
+                "extraction_method": "explicit_import",
+                "index_id": "index-timeout-demo-v1",
+                "kind": "imports",
+                "source_id": "sym-module-dispatch",
+                "source_location": {
+                  "end_line": 5,
+                  "path": "timeout_demo/dispatch.py",
+                  "start_line": 5
+                },
+                "target_id": "sym-module-other-handlers"
+              },
+              {
+                "edge_id": "edge-import-dispatch-client",
+                "extraction_method": "explicit_import",
+                "index_id": "index-timeout-demo-v1",
+                "kind": "imports",
+                "source_id": "sym-module-dispatch",
+                "source_location": {
+                  "end_line": 6,
+                  "path": "timeout_demo/dispatch.py",
+                  "start_line": 6
+                },
+                "target_id": "sym-module-client"
+              },
+              {
+                "edge_id": "edge-call-main-start",
+                "extraction_method": "fixture",
+                "index_id": "index-timeout-demo-v1",
+                "kind": "calls",
+                "source_id": "sym-main",
+                "source_location": {
+                  "end_line": 14,
+                  "path": "timeout_demo/__main__.py",
+                  "start_line": 14
+                },
+                "target_id": "sym-start"
+              },
+              {
+                "edge_id": "edge-call-start-load",
+                "extraction_method": "fixture",
+                "index_id": "index-timeout-demo-v1",
+                "kind": "calls",
+                "source_id": "sym-start",
+                "source_location": {
+                  "end_line": 18,
+                  "path": "timeout_demo/app.py",
+                  "start_line": 18
+                },
+                "target_id": "sym-load-settings"
+              },
+              {
+                "edge_id": "edge-call-start-initialize",
+                "extraction_method": "fixture",
+                "index_id": "index-timeout-demo-v1",
+                "kind": "calls",
+                "source_id": "sym-start",
+                "source_location": {
+                  "end_line": 19,
+                  "path": "timeout_demo/app.py",
+                  "start_line": 19
+                },
+                "target_id": "sym-initialize-client"
+              },
+              {
+                "edge_id": "edge-call-start-dispatch",
+                "extraction_method": "fixture",
+                "index_id": "index-timeout-demo-v1",
+                "kind": "calls",
+                "source_id": "sym-start",
+                "source_location": {
+                  "end_line": 20,
+                  "path": "timeout_demo/app.py",
+                  "start_line": 20
+                },
+                "target_id": "sym-dispatch"
+              }
+            ],
+            "truncated": false,
+            "truncation_reason": null,
+            "unresolved": [
+              {
+                "end_line": 19,
+                "expression": "getattr(module, \"handle\")",
+                "index_id": "index-timeout-demo-v1",
+                "path": "timeout_demo/dispatch.py",
+                "possible_target_ids": [
+                  "sym-primary-handle",
+                  "sym-secondary-handle"
+                ],
+                "reason": "The module is selected through HANDLER_MODULES at runtime",
+                "source_symbol_id": "sym-dispatch",
+                "start_line": 19,
+                "unresolved_id": "unresolved-dispatch-handle"
+              }
+            ]
+          }
+        },
+        "run_id": "run-success-timeout-missing",
+        "sequence": 12,
+        "timestamp": "2026-09-10T00:00:12Z",
+        "type": "graph.updated"
+      },
+      {
+        "payload": {
+          "finding": {
+            "evidence_ids": [
+              "evidence-timeout-client"
+            ],
+            "finding_id": "finding-timeout-read",
+            "kind": "observation",
+            "symbol_ids": [
+              "sym-initialize-client"
+            ],
+            "text": "initialize_client reads settings['timeout'], which explains the observed KeyError."
+          }
+        },
+        "run_id": "run-success-timeout-missing",
+        "sequence": 13,
+        "timestamp": "2026-09-10T00:00:13Z",
+        "type": "finding.created"
+      },
+      {
+        "payload": {
+          "outcome": "candidate_found",
+          "report_id": "report-success-timeout-missing",
+          "status": "succeeded"
+        },
+        "run_id": "run-success-timeout-missing",
+        "sequence": 14,
+        "timestamp": "2026-09-10T00:00:14Z",
+        "type": "run.completed"
+      }
+    ],
+    "run_id": "run-success-timeout-missing",
+    "schema_version": "0.1.0"
+  },
+  "index": {
+    "dirty": false,
+    "index_id": "index-timeout-demo-v1",
+    "repository_id": "repository-timeout-demo",
+    "revision": "fixture-timeout-demo-v1",
+    "schema_version": "0.1.0",
+    "snapshot_hash": "b1c5c5538e60b43882b2fef5dc0270fb0ec2aedcb49763353fd8b1edfa0d57dd",
+    "status": "ready"
+  },
+  "mode": "fixture",
+  "model_output": {
+    "candidate_links": [
+      {
+        "candidate_id": "candidate-timeout-flow",
+        "evidence_ids": [
+          "evidence-timeout-config",
+          "evidence-timeout-client"
+        ],
+        "index_id": "index-timeout-demo-v1",
+        "relation": "Missing timeout setting flows into client initialization",
+        "source_symbol_id": "sym-load-settings",
+        "target_symbol_id": "sym-initialize-client"
+      }
+    ],
+    "evidence_ids": [
+      "evidence-timeout-config",
+      "evidence-timeout-client"
+    ],
+    "findings": [
+      {
+        "evidence_ids": [
+          "evidence-timeout-config"
+        ],
+        "finding_id": "finding-timeout-default",
+        "kind": "observation",
+        "symbol_ids": [
+          "sym-load-settings"
+        ],
+        "text": "load_settings declares DEFAULT_TIMEOUT but does not add it when TIMEOUT_DEMO_TIMEOUT is absent."
+      },
+      {
+        "evidence_ids": [
+          "evidence-timeout-client"
+        ],
+        "finding_id": "finding-timeout-read",
+        "kind": "observation",
+        "symbol_ids": [
+          "sym-initialize-client"
+        ],
+        "text": "initialize_client reads settings['timeout'], which explains the observed KeyError."
+      }
+    ],
+    "fixture_mode": true,
+    "generated_after_sequence": 11,
+    "index_id": "index-timeout-demo-v1",
+    "outcome": "candidate_found",
+    "output_id": "model-output-success-timeout-missing",
+    "run_id": "run-success-timeout-missing",
+    "schema_version": "0.1.0",
+    "summary": "定位到 timeout 默认值缺失与客户端初始化读取之间的候选关联。"
+  },
+  "report": {
+    "candidate_links": [
+      {
+        "candidate_id": "candidate-timeout-flow",
+        "evidence_ids": [
+          "evidence-timeout-config",
+          "evidence-timeout-client"
+        ],
+        "index_id": "index-timeout-demo-v1",
+        "relation": "Missing timeout setting flows into client initialization",
+        "source_symbol_id": "sym-load-settings",
+        "target_symbol_id": "sym-initialize-client"
+      }
+    ],
+    "evidence": [
+      {
+        "content_hash": "913f40a2c51c3cce2a687e2dd3ab1b42810bdf2769b463bacd275dff7c1af01f",
+        "end_line": 25,
+        "evidence_id": "evidence-timeout-config",
+        "excerpt": "DEFAULT_TIMEOUT = 30\n\n\ndef load_settings(env: Mapping[str, str] | None = None) -> dict[str, object]:\n    \"\"\"Load client settings from environment variables.\n\n    Read the endpoint and optional timeout from the supplied mapping.\n    Return the settings used to initialize the local client.\n    \"\"\"\n\n    source = os.environ if env is None else env\n    settings: dict[str, object] = {\n        \"endpoint\": source.get(\"TIMEOUT_DEMO_ENDPOINT\", \"https://example.test\"),\n    }\n    if \"TIMEOUT_DEMO_TIMEOUT\" in source:\n        settings[\"timeout\"] = int(source[\"TIMEOUT_DEMO_TIMEOUT\"])\n    return settings",
+        "index_id": "index-timeout-demo-v1",
+        "kind": "source",
+        "path": "timeout_demo/config.py",
+        "start_line": 9
+      },
+      {
+        "content_hash": "ecff3e9212b90cb22e464c8d44085dba5c763af7f3b200196ce11613d4308a5d",
+        "end_line": 19,
+        "evidence_id": "evidence-timeout-client",
+        "excerpt": "def initialize_client(settings: Mapping[str, object]) -> Client:\n    \"\"\"Create a client from loaded settings.\"\"\"\n\n    return Client(endpoint=str(settings[\"endpoint\"]), timeout=int(settings[\"timeout\"]))",
+        "index_id": "index-timeout-demo-v1",
+        "kind": "source",
+        "path": "timeout_demo/client.py",
+        "start_line": 16
+      }
+    ],
+    "findings": [
+      {
+        "evidence_ids": [
+          "evidence-timeout-config"
+        ],
+        "finding_id": "finding-timeout-default",
+        "kind": "observation",
+        "symbol_ids": [
+          "sym-load-settings"
+        ],
+        "text": "load_settings declares DEFAULT_TIMEOUT but does not add it when TIMEOUT_DEMO_TIMEOUT is absent."
+      },
+      {
+        "evidence_ids": [
+          "evidence-timeout-client"
+        ],
+        "finding_id": "finding-timeout-read",
+        "kind": "observation",
+        "symbol_ids": [
+          "sym-initialize-client"
+        ],
+        "text": "initialize_client reads settings['timeout'], which explains the observed KeyError."
+      }
+    ],
+    "fixture_mode": true,
+    "graph": {
+      "candidate_links": [
+        {
+          "candidate_id": "candidate-timeout-flow",
+          "evidence_ids": [
+            "evidence-timeout-config",
+            "evidence-timeout-client"
+          ],
+          "index_id": "index-timeout-demo-v1",
+          "relation": "Missing timeout setting flows into client initialization",
+          "source_symbol_id": "sym-load-settings",
+          "target_symbol_id": "sym-initialize-client"
+        }
+      ],
+      "index_id": "index-timeout-demo-v1",
+      "nodes": [
+        {
+          "end_line": 18,
+          "index_id": "index-timeout-demo-v1",
+          "kind": "module",
+          "path": "timeout_demo/__main__.py",
+          "qualified_name": "timeout_demo.__main__",
+          "start_line": 1,
+          "symbol_id": "sym-module-main"
+        },
+        {
+          "end_line": 14,
+          "index_id": "index-timeout-demo-v1",
+          "kind": "function",
+          "path": "timeout_demo/__main__.py",
+          "qualified_name": "timeout_demo.__main__.main",
+          "start_line": 11,
+          "symbol_id": "sym-main"
+        },
+        {
+          "end_line": 20,
+          "index_id": "index-timeout-demo-v1",
+          "kind": "module",
+          "path": "timeout_demo/app.py",
+          "qualified_name": "timeout_demo.app",
+          "start_line": 1,
+          "symbol_id": "sym-module-app"
+        },
+        {
+          "end_line": 20,
+          "index_id": "index-timeout-demo-v1",
+          "kind": "function",
+          "path": "timeout_demo/app.py",
+          "qualified_name": "timeout_demo.app.start",
+          "start_line": 12,
+          "symbol_id": "sym-start"
+        },
+        {
+          "end_line": 25,
+          "index_id": "index-timeout-demo-v1",
+          "kind": "module",
+          "path": "timeout_demo/config.py",
+          "qualified_name": "timeout_demo.config",
+          "start_line": 1,
+          "symbol_id": "sym-module-config"
+        },
+        {
+          "end_line": 25,
+          "index_id": "index-timeout-demo-v1",
+          "kind": "function",
+          "path": "timeout_demo/config.py",
+          "qualified_name": "timeout_demo.config.load_settings",
+          "start_line": 12,
+          "symbol_id": "sym-load-settings"
+        },
+        {
+          "end_line": 19,
+          "index_id": "index-timeout-demo-v1",
+          "kind": "module",
+          "path": "timeout_demo/client.py",
+          "qualified_name": "timeout_demo.client",
+          "start_line": 1,
+          "symbol_id": "sym-module-client"
+        },
+        {
+          "end_line": 13,
+          "index_id": "index-timeout-demo-v1",
+          "kind": "class",
+          "path": "timeout_demo/client.py",
+          "qualified_name": "timeout_demo.client.Client",
+          "start_line": 8,
+          "symbol_id": "sym-client"
+        },
+        {
+          "end_line": 19,
+          "index_id": "index-timeout-demo-v1",
+          "kind": "function",
+          "path": "timeout_demo/client.py",
+          "qualified_name": "timeout_demo.client.initialize_client",
+          "start_line": 16,
+          "symbol_id": "sym-initialize-client"
+        },
+        {
+          "end_line": 20,
+          "index_id": "index-timeout-demo-v1",
+          "kind": "module",
+          "path": "timeout_demo/dispatch.py",
+          "qualified_name": "timeout_demo.dispatch",
+          "start_line": 1,
+          "symbol_id": "sym-module-dispatch"
+        },
+        {
+          "end_line": 20,
+          "index_id": "index-timeout-demo-v1",
+          "kind": "function",
+          "path": "timeout_demo/dispatch.py",
+          "qualified_name": "timeout_demo.dispatch.dispatch",
+          "start_line": 15,
+          "symbol_id": "sym-dispatch"
+        },
+        {
+          "end_line": 15,
+          "index_id": "index-timeout-demo-v1",
+          "kind": "module",
+          "path": "timeout_demo/handlers.py",
+          "qualified_name": "timeout_demo.handlers",
+          "start_line": 1,
+          "symbol_id": "sym-module-handlers"
+        },
+        {
+          "end_line": 15,
+          "index_id": "index-timeout-demo-v1",
+          "kind": "function",
+          "path": "timeout_demo/handlers.py",
+          "qualified_name": "timeout_demo.handlers.handle",
+          "start_line": 8,
+          "symbol_id": "sym-primary-handle"
+        },
+        {
+          "end_line": 15,
+          "index_id": "index-timeout-demo-v1",
+          "kind": "module",
+          "path": "timeout_demo/other_handlers.py",
+          "qualified_name": "timeout_demo.other_handlers",
+          "start_line": 1,
+          "symbol_id": "sym-module-other-handlers"
+        },
+        {
+          "end_line": 15,
+          "index_id": "index-timeout-demo-v1",
+          "kind": "function",
+          "path": "timeout_demo/other_handlers.py",
+          "qualified_name": "timeout_demo.other_handlers.handle",
+          "start_line": 8,
+          "symbol_id": "sym-secondary-handle"
+        }
+      ],
+      "static_edges": [
+        {
+          "edge_id": "edge-contains-main",
+          "extraction_method": "fixture",
+          "index_id": "index-timeout-demo-v1",
+          "kind": "contains",
+          "source_id": "sym-module-main",
+          "source_location": {
+            "end_line": 14,
+            "path": "timeout_demo/__main__.py",
+            "start_line": 11
+          },
+          "target_id": "sym-main"
+        },
+        {
+          "edge_id": "edge-contains-start",
+          "extraction_method": "fixture",
+          "index_id": "index-timeout-demo-v1",
+          "kind": "contains",
+          "source_id": "sym-module-app",
+          "source_location": {
+            "end_line": 20,
+            "path": "timeout_demo/app.py",
+            "start_line": 12
+          },
+          "target_id": "sym-start"
+        },
+        {
+          "edge_id": "edge-contains-load",
+          "extraction_method": "fixture",
+          "index_id": "index-timeout-demo-v1",
+          "kind": "contains",
+          "source_id": "sym-module-config",
+          "source_location": {
+            "end_line": 25,
+            "path": "timeout_demo/config.py",
+            "start_line": 12
+          },
+          "target_id": "sym-load-settings"
+        },
+        {
+          "edge_id": "edge-contains-client",
+          "extraction_method": "fixture",
+          "index_id": "index-timeout-demo-v1",
+          "kind": "contains",
+          "source_id": "sym-module-client",
+          "source_location": {
+            "end_line": 13,
+            "path": "timeout_demo/client.py",
+            "start_line": 8
+          },
+          "target_id": "sym-client"
+        },
+        {
+          "edge_id": "edge-contains-initialize",
+          "extraction_method": "fixture",
+          "index_id": "index-timeout-demo-v1",
+          "kind": "contains",
+          "source_id": "sym-module-client",
+          "source_location": {
+            "end_line": 19,
+            "path": "timeout_demo/client.py",
+            "start_line": 16
+          },
+          "target_id": "sym-initialize-client"
+        },
+        {
+          "edge_id": "edge-contains-dispatch",
+          "extraction_method": "fixture",
+          "index_id": "index-timeout-demo-v1",
+          "kind": "contains",
+          "source_id": "sym-module-dispatch",
+          "source_location": {
+            "end_line": 20,
+            "path": "timeout_demo/dispatch.py",
+            "start_line": 15
+          },
+          "target_id": "sym-dispatch"
+        },
+        {
+          "edge_id": "edge-contains-primary",
+          "extraction_method": "fixture",
+          "index_id": "index-timeout-demo-v1",
+          "kind": "contains",
+          "source_id": "sym-module-handlers",
+          "source_location": {
+            "end_line": 15,
+            "path": "timeout_demo/handlers.py",
+            "start_line": 8
+          },
+          "target_id": "sym-primary-handle"
+        },
+        {
+          "edge_id": "edge-contains-secondary",
+          "extraction_method": "fixture",
+          "index_id": "index-timeout-demo-v1",
+          "kind": "contains",
+          "source_id": "sym-module-other-handlers",
+          "source_location": {
+            "end_line": 15,
+            "path": "timeout_demo/other_handlers.py",
+            "start_line": 8
+          },
+          "target_id": "sym-secondary-handle"
+        },
+        {
+          "edge_id": "edge-import-main-app",
+          "extraction_method": "explicit_import",
+          "index_id": "index-timeout-demo-v1",
+          "kind": "imports",
+          "source_id": "sym-module-main",
+          "source_location": {
+            "end_line": 8,
+            "path": "timeout_demo/__main__.py",
+            "start_line": 8
+          },
+          "target_id": "sym-module-app"
+        },
+        {
+          "edge_id": "edge-import-app-client",
+          "extraction_method": "explicit_import",
+          "index_id": "index-timeout-demo-v1",
+          "kind": "imports",
+          "source_id": "sym-module-app",
+          "source_location": {
+            "end_line": 7,
+            "path": "timeout_demo/app.py",
+            "start_line": 7
+          },
+          "target_id": "sym-module-client"
+        },
+        {
+          "edge_id": "edge-import-app-config",
+          "extraction_method": "explicit_import",
+          "index_id": "index-timeout-demo-v1",
+          "kind": "imports",
+          "source_id": "sym-module-app",
+          "source_location": {
+            "end_line": 8,
+            "path": "timeout_demo/app.py",
+            "start_line": 8
+          },
+          "target_id": "sym-module-config"
+        },
+        {
+          "edge_id": "edge-import-app-dispatch",
+          "extraction_method": "explicit_import",
+          "index_id": "index-timeout-demo-v1",
+          "kind": "imports",
+          "source_id": "sym-module-app",
+          "source_location": {
+            "end_line": 9,
+            "path": "timeout_demo/app.py",
+            "start_line": 9
+          },
+          "target_id": "sym-module-dispatch"
+        },
+        {
+          "edge_id": "edge-import-dispatch-handlers",
+          "extraction_method": "explicit_import",
+          "index_id": "index-timeout-demo-v1",
+          "kind": "imports",
+          "source_id": "sym-module-dispatch",
+          "source_location": {
+            "end_line": 5,
+            "path": "timeout_demo/dispatch.py",
+            "start_line": 5
+          },
+          "target_id": "sym-module-handlers"
+        },
+        {
+          "edge_id": "edge-import-dispatch-other",
+          "extraction_method": "explicit_import",
+          "index_id": "index-timeout-demo-v1",
+          "kind": "imports",
+          "source_id": "sym-module-dispatch",
+          "source_location": {
+            "end_line": 5,
+            "path": "timeout_demo/dispatch.py",
+            "start_line": 5
+          },
+          "target_id": "sym-module-other-handlers"
+        },
+        {
+          "edge_id": "edge-import-dispatch-client",
+          "extraction_method": "explicit_import",
+          "index_id": "index-timeout-demo-v1",
+          "kind": "imports",
+          "source_id": "sym-module-dispatch",
+          "source_location": {
+            "end_line": 6,
+            "path": "timeout_demo/dispatch.py",
+            "start_line": 6
+          },
+          "target_id": "sym-module-client"
+        },
+        {
+          "edge_id": "edge-call-main-start",
+          "extraction_method": "fixture",
+          "index_id": "index-timeout-demo-v1",
+          "kind": "calls",
+          "source_id": "sym-main",
+          "source_location": {
+            "end_line": 14,
+            "path": "timeout_demo/__main__.py",
+            "start_line": 14
+          },
+          "target_id": "sym-start"
+        },
+        {
+          "edge_id": "edge-call-start-load",
+          "extraction_method": "fixture",
+          "index_id": "index-timeout-demo-v1",
+          "kind": "calls",
+          "source_id": "sym-start",
+          "source_location": {
+            "end_line": 18,
+            "path": "timeout_demo/app.py",
+            "start_line": 18
+          },
+          "target_id": "sym-load-settings"
+        },
+        {
+          "edge_id": "edge-call-start-initialize",
+          "extraction_method": "fixture",
+          "index_id": "index-timeout-demo-v1",
+          "kind": "calls",
+          "source_id": "sym-start",
+          "source_location": {
+            "end_line": 19,
+            "path": "timeout_demo/app.py",
+            "start_line": 19
+          },
+          "target_id": "sym-initialize-client"
+        },
+        {
+          "edge_id": "edge-call-start-dispatch",
+          "extraction_method": "fixture",
+          "index_id": "index-timeout-demo-v1",
+          "kind": "calls",
+          "source_id": "sym-start",
+          "source_location": {
+            "end_line": 20,
+            "path": "timeout_demo/app.py",
+            "start_line": 20
+          },
+          "target_id": "sym-dispatch"
+        }
+      ],
+      "truncated": false,
+      "truncation_reason": null,
+      "unresolved": [
+        {
+          "end_line": 19,
+          "expression": "getattr(module, \"handle\")",
+          "index_id": "index-timeout-demo-v1",
+          "path": "timeout_demo/dispatch.py",
+          "possible_target_ids": [
+            "sym-primary-handle",
+            "sym-secondary-handle"
+          ],
+          "reason": "The module is selected through HANDLER_MODULES at runtime",
+          "source_symbol_id": "sym-dispatch",
+          "start_line": 19,
+          "unresolved_id": "unresolved-dispatch-handle"
+        }
+      ]
+    },
+    "index_id": "index-timeout-demo-v1",
+    "outcome": "candidate_found",
+    "report_id": "report-success-timeout-missing",
+    "run_id": "run-success-timeout-missing",
+    "schema_version": "0.1.0",
+    "status": "succeeded",
+    "summary": "固定样本显示缺少 timeout 会在客户端初始化时抛出 KeyError；候选位置和证据已绑定当前快照。",
+    "terminal_sequence": 14
+  },
+  "run": {
+    "budget": {
+      "max_seconds": 120,
+      "max_source_lines": 200,
+      "max_tool_calls": 12,
+      "tool_calls_used": 4
+    },
+    "ended_at": "2026-09-10T00:00:14Z",
+    "index_id": "index-timeout-demo-v1",
+    "issue": {
+      "body": "启动 timeout-demo 时没有设置 TIMEOUT_DEMO_TIMEOUT，客户端初始化抛出 KeyError。显式设置 timeout 后应能正常启动。",
+      "issue_id": "issue-timeout-missing",
+      "mentioned_paths": [],
+      "schema_version": "0.1.0",
+      "stacktrace": null,
+      "title": "配置未填写 timeout 时初始化失败"
+    },
+    "mode": "fixture",
+    "model": "fixture:timeout-demo",
+    "prompt_version": "fixture-v1",
+    "run_id": "run-success-timeout-missing",
+    "schema_version": "0.1.0",
+    "started_at": "2026-09-10T00:00:00Z",
+    "status": "succeeded"
+  },
+  "scenario_id": "success-timeout-missing",
+  "schema_version": "0.1.0",
+  "tool_results": [
+    {
+      "completed_sequence": 4,
+      "index_id": "index-timeout-demo-v1",
+      "kind": "search_code.succeeded",
+      "matches": [
+        {
+          "matched_terms": [
+            "timeout",
+            "default"
+          ],
+          "rank": 1,
+          "symbol": {
+            "end_line": 25,
+            "index_id": "index-timeout-demo-v1",
+            "kind": "function",
+            "path": "timeout_demo/config.py",
+            "qualified_name": "timeout_demo.config.load_settings",
+            "start_line": 12,
+            "symbol_id": "sym-load-settings"
+          }
+        },
+        {
+          "matched_terms": [
+            "timeout",
+            "initialize"
+          ],
+          "rank": 2,
+          "symbol": {
+            "end_line": 19,
+            "index_id": "index-timeout-demo-v1",
+            "kind": "function",
+            "path": "timeout_demo/client.py",
+            "qualified_name": "timeout_demo.client.initialize_client",
+            "start_line": 16,
+            "symbol_id": "sym-initialize-client"
+          }
+        }
+      ],
+      "request_id": "request-success-search",
+      "run_id": "run-success-timeout-missing",
+      "tool": "search_code"
+    },
+    {
+      "completed_sequence": 6,
+      "evidence": {
+        "content_hash": "913f40a2c51c3cce2a687e2dd3ab1b42810bdf2769b463bacd275dff7c1af01f",
+        "end_line": 25,
+        "evidence_id": "evidence-timeout-config",
+        "excerpt": "DEFAULT_TIMEOUT = 30\n\n\ndef load_settings(env: Mapping[str, str] | None = None) -> dict[str, object]:\n    \"\"\"Load client settings from environment variables.\n\n    Read the endpoint and optional timeout from the supplied mapping.\n    Return the settings used to initialize the local client.\n    \"\"\"\n\n    source = os.environ if env is None else env\n    settings: dict[str, object] = {\n        \"endpoint\": source.get(\"TIMEOUT_DEMO_ENDPOINT\", \"https://example.test\"),\n    }\n    if \"TIMEOUT_DEMO_TIMEOUT\" in source:\n        settings[\"timeout\"] = int(source[\"TIMEOUT_DEMO_TIMEOUT\"])\n    return settings",
+        "index_id": "index-timeout-demo-v1",
+        "kind": "source",
+        "path": "timeout_demo/config.py",
+        "start_line": 9
+      },
+      "index_id": "index-timeout-demo-v1",
+      "kind": "read_source.succeeded",
+      "request_id": "request-success-config",
+      "run_id": "run-success-timeout-missing",
+      "tool": "read_source"
+    },
+    {
+      "completed_sequence": 8,
+      "index_id": "index-timeout-demo-v1",
+      "kind": "get_neighbors.succeeded",
+      "neighbors": [
+        {
+          "edge": {
+            "edge_id": "edge-call-start-initialize",
+            "extraction_method": "fixture",
+            "index_id": "index-timeout-demo-v1",
+            "kind": "calls",
+            "source_id": "sym-start",
+            "source_location": {
+              "end_line": 19,
+              "path": "timeout_demo/app.py",
+              "start_line": 19
+            },
+            "target_id": "sym-initialize-client"
+          },
+          "symbol": {
+            "end_line": 19,
+            "index_id": "index-timeout-demo-v1",
+            "kind": "function",
+            "path": "timeout_demo/client.py",
+            "qualified_name": "timeout_demo.client.initialize_client",
+            "start_line": 16,
+            "symbol_id": "sym-initialize-client"
+          }
+        }
+      ],
+      "request_id": "request-success-neighbors",
+      "run_id": "run-success-timeout-missing",
+      "tool": "get_neighbors"
+    },
+    {
+      "completed_sequence": 10,
+      "evidence": {
+        "content_hash": "ecff3e9212b90cb22e464c8d44085dba5c763af7f3b200196ce11613d4308a5d",
+        "end_line": 19,
+        "evidence_id": "evidence-timeout-client",
+        "excerpt": "def initialize_client(settings: Mapping[str, object]) -> Client:\n    \"\"\"Create a client from loaded settings.\"\"\"\n\n    return Client(endpoint=str(settings[\"endpoint\"]), timeout=int(settings[\"timeout\"]))",
+        "index_id": "index-timeout-demo-v1",
+        "kind": "source",
+        "path": "timeout_demo/client.py",
+        "start_line": 16
+      },
+      "index_id": "index-timeout-demo-v1",
+      "kind": "read_source.succeeded",
+      "request_id": "request-success-client",
+      "run_id": "run-success-timeout-missing",
+      "tool": "read_source"
+    }
+  ]
+}

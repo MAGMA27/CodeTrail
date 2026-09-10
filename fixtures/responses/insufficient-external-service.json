@@ -1,0 +1,204 @@
+{
+  "events": {
+    "events": [
+      {
+        "payload": {
+          "budget": {
+            "max_seconds": 120,
+            "max_source_lines": 200,
+            "max_tool_calls": 12,
+            "tool_calls_used": 0
+          },
+          "index_id": "index-timeout-demo-v1",
+          "issue_id": "issue-external-service-empty-response",
+          "mode": "fixture"
+        },
+        "run_id": "run-insufficient-external-service",
+        "sequence": 1,
+        "timestamp": "2026-09-10T00:00:00Z",
+        "type": "run.started"
+      },
+      {
+        "payload": {
+          "stage": "retrieval"
+        },
+        "run_id": "run-insufficient-external-service",
+        "sequence": 2,
+        "timestamp": "2026-09-10T00:00:02Z",
+        "type": "stage.started"
+      },
+      {
+        "payload": {
+          "request": {
+            "index_id": "index-timeout-demo-v1",
+            "params": {
+              "limit": 10,
+              "query": "external payment service empty response",
+              "tool": "search_code"
+            },
+            "request_id": "request-insufficient-search",
+            "run_id": "run-insufficient-external-service"
+          }
+        },
+        "run_id": "run-insufficient-external-service",
+        "sequence": 3,
+        "timestamp": "2026-09-10T00:00:03Z",
+        "type": "tool.started"
+      },
+      {
+        "payload": {
+          "result": {
+            "completed_sequence": 4,
+            "index_id": "index-timeout-demo-v1",
+            "kind": "search_code.succeeded",
+            "matches": [],
+            "request_id": "request-insufficient-search",
+            "run_id": "run-insufficient-external-service",
+            "tool": "search_code"
+          }
+        },
+        "run_id": "run-insufficient-external-service",
+        "sequence": 4,
+        "timestamp": "2026-09-10T00:00:04Z",
+        "type": "tool.completed"
+      },
+      {
+        "payload": {
+          "stage": "analysis"
+        },
+        "run_id": "run-insufficient-external-service",
+        "sequence": 5,
+        "timestamp": "2026-09-10T00:00:05Z",
+        "type": "stage.started"
+      },
+      {
+        "payload": {
+          "finding": {
+            "evidence_ids": [],
+            "finding_id": "finding-insufficient-external",
+            "kind": "observation",
+            "symbol_ids": [],
+            "text": "The fixture contains no local symbol or source evidence for the external payment service."
+          }
+        },
+        "run_id": "run-insufficient-external-service",
+        "sequence": 6,
+        "timestamp": "2026-09-10T00:00:06Z",
+        "type": "finding.created"
+      },
+      {
+        "payload": {
+          "outcome": "insufficient_evidence",
+          "report_id": "report-insufficient-external-service",
+          "status": "succeeded"
+        },
+        "run_id": "run-insufficient-external-service",
+        "sequence": 7,
+        "timestamp": "2026-09-10T00:00:07Z",
+        "type": "run.completed"
+      }
+    ],
+    "run_id": "run-insufficient-external-service",
+    "schema_version": "0.1.0"
+  },
+  "index": {
+    "dirty": false,
+    "index_id": "index-timeout-demo-v1",
+    "repository_id": "repository-timeout-demo",
+    "revision": "fixture-timeout-demo-v1",
+    "schema_version": "0.1.0",
+    "snapshot_hash": "b1c5c5538e60b43882b2fef5dc0270fb0ec2aedcb49763353fd8b1edfa0d57dd",
+    "status": "ready"
+  },
+  "mode": "fixture",
+  "model_output": {
+    "candidate_links": [],
+    "evidence_ids": [],
+    "findings": [
+      {
+        "evidence_ids": [],
+        "finding_id": "finding-insufficient-external",
+        "kind": "observation",
+        "symbol_ids": [],
+        "text": "The fixture contains no local symbol or source evidence for the external payment service."
+      }
+    ],
+    "fixture_mode": true,
+    "generated_after_sequence": 4,
+    "index_id": "index-timeout-demo-v1",
+    "outcome": "insufficient_evidence",
+    "output_id": "model-output-insufficient-external-service",
+    "run_id": "run-insufficient-external-service",
+    "schema_version": "0.1.0",
+    "summary": "当前样本没有外部支付服务的本地实现或证据，不能确认根因。"
+  },
+  "report": {
+    "candidate_links": [],
+    "evidence": [],
+    "findings": [
+      {
+        "evidence_ids": [],
+        "finding_id": "finding-insufficient-external",
+        "kind": "observation",
+        "symbol_ids": [],
+        "text": "The fixture contains no local symbol or source evidence for the external payment service."
+      }
+    ],
+    "fixture_mode": true,
+    "graph": {
+      "candidate_links": [],
+      "index_id": "index-timeout-demo-v1",
+      "nodes": [],
+      "static_edges": [],
+      "truncated": false,
+      "truncation_reason": null,
+      "unresolved": []
+    },
+    "index_id": "index-timeout-demo-v1",
+    "outcome": "insufficient_evidence",
+    "report_id": "report-insufficient-external-service",
+    "run_id": "run-insufficient-external-service",
+    "schema_version": "0.1.0",
+    "status": "succeeded",
+    "summary": "证据不足：需要外部服务日志、集成样本或对应仓库才能继续核查。",
+    "terminal_sequence": 7
+  },
+  "run": {
+    "budget": {
+      "max_seconds": 120,
+      "max_source_lines": 200,
+      "max_tool_calls": 12,
+      "tool_calls_used": 1
+    },
+    "ended_at": "2026-09-10T00:00:07Z",
+    "index_id": "index-timeout-demo-v1",
+    "issue": {
+      "body": "生产环境偶发收到外部支付服务的空响应。当前演示仓库不包含该外部服务、网络交互或对应响应样本，请判断现有代码是否足以定位根因。",
+      "issue_id": "issue-external-service-empty-response",
+      "mentioned_paths": [],
+      "schema_version": "0.1.0",
+      "stacktrace": null,
+      "title": "外部支付服务返回空响应"
+    },
+    "mode": "fixture",
+    "model": "fixture:timeout-demo",
+    "prompt_version": "fixture-v1",
+    "run_id": "run-insufficient-external-service",
+    "schema_version": "0.1.0",
+    "started_at": "2026-09-10T00:00:00Z",
+    "status": "succeeded"
+  },
+  "scenario_id": "insufficient-external-service",
+  "schema_version": "0.1.0",
+  "tool_results": [
+    {
+      "completed_sequence": 4,
+      "index_id": "index-timeout-demo-v1",
+      "kind": "search_code.succeeded",
+      "matches": [],
+      "request_id": "request-insufficient-search",
+      "run_id": "run-insufficient-external-service",
+      "tool": "search_code"
+    }
+  ]
+}

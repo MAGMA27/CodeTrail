@@ -10,6 +10,8 @@
 - `scenarios/insufficient-external-service/`：样本没有外部服务证据的证据不足场景。
 - `scenarios/tool-failure-read-source/`：复用成功定位 Issue、定义 `read_source` 确定性失败的场景。
 - `repos/timeout-demo` 之外的 `expected.json`：预期位置、关系、unresolved 和失败表现。它们不应进入后续模型上下文。
+- `responses/`：三个 `FixtureResponseSet` 固定响应包，包含工具结果、结构化模型输出、报告和事件序列。
+- `../contracts/schemas/codetrail.json`：版本为 `0.1.0` 的聚合 JSON Schema。
 
 每个场景目录的 `scenario.json` 具有稳定场景 ID，并引用独立的 Issue、演示控制和预期结果文件。工具失败场景的注入目前只有定义，`implemented` 明确为 `false`，不能当作已实现或已验证。
 
@@ -35,3 +37,17 @@ python -m timeout_demo
 ## 固定版本
 
 `scenarios/source-manifest.json` 记录 `repos/timeout-demo/` 每个源码文件的 SHA-256。修改样本源码后，必须同步预期位置、关系清单和 manifest；场景答案仍然属于开发数据，不是修复后的代码。
+
+## 契约与固定响应校验
+
+契约模型位于 `apps/api/app/contracts.py`，拒绝未声明字段，并校验跨快照引用、证据来源、事件顺序、终态和工具失败边界。Schema 由固定命令生成，响应包由生成器构造后再次经过 Pydantic 校验：
+
+```powershell
+Set-Location apps/api
+uv run python -m app.export_schema
+uv run pytest -q
+Set-Location ../..
+uv run --project apps/api python fixtures/generate_responses.py
+```
+
+当前校验不启动 API、不调用真实模型，也不执行场景 JSON 中的任意 `command`。工具失败响应没有源码 evidence，失败前已返回的 evidence 会保留；证据不足响应正常结束但 outcome 为 `insufficient_evidence`。

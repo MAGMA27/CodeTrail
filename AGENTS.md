@@ -29,7 +29,18 @@ pnpm web:build
 Set-Location apps/api
 uv sync --locked
 uv run python -m compileall -q app
+uv run pytest -q
 uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+生成契约 Schema 和固定响应：
+
+```powershell
+Set-Location apps/api
+uv run python -m app.export_schema
+uv run pytest -q
+Set-Location ../..
+uv run --project apps/api python fixtures/generate_responses.py
 ```
 
 另开 PowerShell 请求健康接口：
@@ -58,9 +69,9 @@ python -m timeout_demo
 # 预期退出码 0，输出固定 JSON
 ```
 
-样本场景 JSON 解析、源码 manifest 校验和同名/动态调用检查已实际通过；当前工具失败场景仍只是定义，不是已实现的注入测试。
+样本场景 JSON 解析、源码 manifest 校验、同名/动态调用检查、三套固定响应的 Pydantic 校验和契约 pytest 已实际通过；当前工具失败场景仍只是定义，不是已实现的注入测试。
 
-已实际验证：API 健康请求返回 HTTP `200` 和 `{"status":"ok","service":"codetrail-api","version":"0.1.0"}`；前端类型检查、生产构建和 Python 编译检查通过；浏览器已验证后端连接成功、停止后的失败提示和恢复后的重新检查。当前没有自动化测试套件，且本步不是离线分析演示；首页明确显示分析功能尚未实现。
+已实际验证：API 健康请求返回 HTTP `200` 和 `{"status":"ok","service":"codetrail-api","version":"0.1.0"}`；前端类型检查、生产构建、Python 编译检查和 `pytest` 离线契约测试通过；浏览器已验证后端连接成功、停止后的失败提示和恢复后的重新检查。本步仍不是端到端离线分析演示；首页明确显示分析功能尚未实现。
 
 计划技术：Next.js、React Flow、TypeScript、Python、FastAPI、Pydantic、LangGraph、SQLite FTS5、Python ast。依赖版本在脚手架阶段核实兼容性并锁定。
 
@@ -81,6 +92,7 @@ python -m timeout_demo
 - apps/api/：API/SSE、Agent、索引、检索、持久化。
 - fixtures/：自有演示仓库、Issue、固定模型响应。
 - evals/：独立评测集、基线、评分脚本与结果。
+- contracts/：版本化数据契约与供前端使用的 JSON Schema。
 - memory-bank/：设计与进度文档。
 - .codetrail/：本地运行和索引数据，实施时加入忽略规则。
 
