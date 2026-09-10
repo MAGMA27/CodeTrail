@@ -1,0 +1,25 @@
+{
+  "scenario_id": "tool-failure-read-source",
+  "repository_root": "fixtures/repos/timeout-demo",
+  "issue_reuse": "success-timeout-missing",
+  "runs": [
+    {
+      "id": "read-source-injected-failure",
+      "command": null,
+      "environment": {},
+      "expected_exit_code": null
+    }
+  ],
+  "failure_injection": {
+    "implemented": false,
+    "tool": "read_source",
+    "match": {
+      "path": "timeout_demo/client.py",
+      "symbol": "initialize_client"
+    },
+    "error_code": "fixture_read_source_error",
+    "message": "Deterministic fixture read_source failure"
+  },
+  "mode": "definition_only",
+  "model_context": "issue_only"
+}

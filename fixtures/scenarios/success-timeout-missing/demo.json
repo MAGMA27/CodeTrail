@@ -1,0 +1,27 @@
+{
+  "scenario_id": "success-timeout-missing",
+  "repository_root": "fixtures/repos/timeout-demo",
+  "runs": [
+    {
+      "id": "missing-timeout",
+      "command": "python -m timeout_demo",
+      "environment": {
+        "TIMEOUT_DEMO_ENDPOINT": "https://example.test"
+      },
+      "expected_exit_code": 1,
+      "expected_exception": "KeyError: 'timeout'"
+    },
+    {
+      "id": "explicit-timeout",
+      "command": "python -m timeout_demo",
+      "environment": {
+        "TIMEOUT_DEMO_ENDPOINT": "https://example.test",
+        "TIMEOUT_DEMO_TIMEOUT": "5"
+      },
+      "expected_exit_code": 0,
+      "expected_stdout": "{\"endpoint\": \"https://example.test\", \"handler\": \"primary\", \"timeout\": 5}"
+    }
+  ],
+  "mode": "deterministic_local_fixture",
+  "model_context": "issue_only"
+}

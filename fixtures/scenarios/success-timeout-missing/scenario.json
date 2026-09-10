@@ -1,0 +1,8 @@
+{
+  "id": "success-timeout-missing",
+  "name": "成功定位：缺少 timeout 导致初始化失败",
+  "kind": "success_location",
+  "issue_ref": "../issues/timeout-missing.json",
+  "demo_ref": "demo.json",
+  "expected_ref": "expected.json"
+}

@@ -1,0 +1,14 @@
+{
+  "scenario_id": "insufficient-external-service",
+  "outcome": "insufficient_evidence",
+  "reason": "The issue concerns an external payment service that is absent from the fixture repository.",
+  "must_not_claim": [
+    "A root cause in timeout_demo",
+    "A static call edge to an external payment service",
+    "Runtime coverage of the external service"
+  ],
+  "required_disclosure": [
+    "No matching local symbol or source evidence is available",
+    "Additional logs, an integration fixture, or the external service repository are required"
+  ]
+}

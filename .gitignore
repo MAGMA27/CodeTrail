@@ -1,0 +1,26 @@
+# Node / Next.js
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+coverage/
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# Local configuration and runtime data
+.env
+.env.*
+!.env.example
+.codetrail/
+
+# Project planning docs are maintained outside Git
+/memory-bank/
+
+# Local logs
+*.log

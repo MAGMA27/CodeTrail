@@ -1,0 +1,8 @@
+{
+  "id": "insufficient-external-service",
+  "name": "证据不足：外部服务空响应",
+  "kind": "insufficient_evidence",
+  "issue_ref": "../issues/external-service.json",
+  "demo_ref": "demo.json",
+  "expected_ref": "expected.json"
+}

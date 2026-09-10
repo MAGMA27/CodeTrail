@@ -1,0 +1,15 @@
+{
+  "scenario_id": "tool-failure-read-source",
+  "outcome": "tool_failure",
+  "failure": {
+    "tool": "read_source",
+    "error_code": "fixture_read_source_error",
+    "message": "Deterministic fixture read_source failure"
+  },
+  "expected_behavior": [
+    "Display the tool failure explicitly",
+    "Do not present a fabricated source excerpt",
+    "Preserve any evidence collected before the failure",
+    "Mark this as a planned simulation until an adapter implements the injection"
+  ]
+}

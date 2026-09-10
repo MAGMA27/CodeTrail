@@ -1,0 +1,38 @@
+{
+  "repository_root": "fixtures/repos/timeout-demo",
+  "algorithm": "SHA-256",
+  "files": [
+    {
+      "path": "timeout_demo/__init__.py",
+      "sha256": "b0f48c059b906a3d89235aaf6feee91867fbe8efa807ae80cebb16036a92b6ca"
+    },
+    {
+      "path": "timeout_demo/__main__.py",
+      "sha256": "9cd291cd83f1de96a5e181c9054854ea3aa40667dc09db89def705fce1e33005"
+    },
+    {
+      "path": "timeout_demo/app.py",
+      "sha256": "861508f2bca2943a986dcad7ff896738d1164c2939bf104a07cd88f83d192653"
+    },
+    {
+      "path": "timeout_demo/client.py",
+      "sha256": "ecff3e9212b90cb22e464c8d44085dba5c763af7f3b200196ce11613d4308a5d"
+    },
+    {
+      "path": "timeout_demo/config.py",
+      "sha256": "2fec96cba832cbd0b1ef211625cc2df8597c8e2e6db4b53b9b4c77482ae5acf1"
+    },
+    {
+      "path": "timeout_demo/dispatch.py",
+      "sha256": "fa5d31e5c7994217f880fbfe4c90ed172e87d432671e8db02df4050e493a1d79"
+    },
+    {
+      "path": "timeout_demo/handlers.py",
+      "sha256": "ba693febc68bb18608bd4b424e6d39cca9c61cbd477039fd25cf477fc8ad39ab"
+    },
+    {
+      "path": "timeout_demo/other_handlers.py",
+      "sha256": "4a3bf086afb2aa3249b02801a1e0fa1cefe763da46c3ee51a3159a6aa9663c09"
+    }
+  ]
+}

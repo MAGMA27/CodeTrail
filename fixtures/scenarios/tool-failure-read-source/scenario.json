@@ -1,0 +1,8 @@
+{
+  "id": "tool-failure-read-source",
+  "name": "工具失败：read_source 确定性错误",
+  "kind": "tool_failure",
+  "issue_ref": "../issues/timeout-missing.json",
+  "demo_ref": "demo.json",
+  "expected_ref": "expected.json"
+}

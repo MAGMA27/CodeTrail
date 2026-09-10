@@ -1,0 +1,77 @@
+{
+  "scenario_id": "success-timeout-missing",
+  "outcome": "candidate_location",
+  "runtime": {
+    "missing_timeout_exception": "KeyError: 'timeout'",
+    "explicit_timeout_result": {
+      "endpoint": "https://example.test",
+      "handler": "primary",
+      "timeout": 5
+    }
+  },
+  "candidate_locations": [
+    {
+      "path": "timeout_demo/config.py",
+      "symbol": "load_settings",
+      "start_line": 12,
+      "end_line": 25,
+      "reason": "DEFAULT_TIMEOUT is declared but not inserted when TIMEOUT_DEMO_TIMEOUT is absent"
+    },
+    {
+      "path": "timeout_demo/client.py",
+      "symbol": "initialize_client",
+      "start_line": 16,
+      "end_line": 19,
+      "reason": "The initializer reads the missing timeout key"
+    }
+  ],
+  "expected_static_relations": [
+    {
+      "source": "timeout_demo.__main__.main",
+      "target": "timeout_demo.app.start",
+      "kind": "calls"
+    },
+    {
+      "source": "timeout_demo.app.start",
+      "target": "timeout_demo.config.load_settings",
+      "kind": "calls"
+    },
+    {
+      "source": "timeout_demo.app.start",
+      "target": "timeout_demo.client.initialize_client",
+      "kind": "calls"
+    },
+    {
+      "source": "timeout_demo.app.start",
+      "target": "timeout_demo.dispatch.dispatch",
+      "kind": "calls"
+    },
+    {
+      "source": "timeout_demo.dispatch",
+      "target": "timeout_demo.handlers",
+      "kind": "imports"
+    },
+    {
+      "source": "timeout_demo.dispatch",
+      "target": "timeout_demo.other_handlers",
+      "kind": "imports"
+    }
+  ],
+  "same_name_symbols": [
+    "timeout_demo.handlers.handle",
+    "timeout_demo.other_handlers.handle"
+  ],
+  "unresolved": [
+    {
+      "source": "timeout_demo.dispatch.dispatch",
+      "expression": "getattr(module, \"handle\")",
+      "start_line": 15,
+      "end_line": 20,
+      "reason": "The module is selected through HANDLER_MODULES at runtime",
+      "possible_targets": [
+        "timeout_demo.handlers.handle",
+        "timeout_demo.other_handlers.handle"
+      ]
+    }
+  ]
+}
