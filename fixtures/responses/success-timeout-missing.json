@@ -87,7 +87,9 @@
             ],
             "request_id": "request-success-search",
             "run_id": "run-success-timeout-missing",
-            "tool": "search_code"
+            "tool": "search_code",
+            "truncated": false,
+            "truncation_reason": null
           }
         },
         "run_id": "run-success-timeout-missing",
@@ -194,7 +196,9 @@
             ],
             "request_id": "request-success-neighbors",
             "run_id": "run-success-timeout-missing",
-            "tool": "get_neighbors"
+            "tool": "get_neighbors",
+            "truncated": false,
+            "truncation_reason": null
           }
         },
         "run_id": "run-success-timeout-missing",
@@ -1337,7 +1341,9 @@
       ],
       "request_id": "request-success-search",
       "run_id": "run-success-timeout-missing",
-      "tool": "search_code"
+      "tool": "search_code",
+      "truncated": false,
+      "truncation_reason": null
     },
     {
       "completed_sequence": 6,
@@ -1389,7 +1395,9 @@
       ],
       "request_id": "request-success-neighbors",
       "run_id": "run-success-timeout-missing",
-      "tool": "get_neighbors"
+      "tool": "get_neighbors",
+      "truncated": false,
+      "truncation_reason": null
     },
     {
       "completed_sequence": 10,

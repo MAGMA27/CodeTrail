@@ -54,7 +54,9 @@
             "matches": [],
             "request_id": "request-insufficient-search",
             "run_id": "run-insufficient-external-service",
-            "tool": "search_code"
+            "tool": "search_code",
+            "truncated": false,
+            "truncation_reason": null
           }
         },
         "run_id": "run-insufficient-external-service",
@@ -198,7 +200,9 @@
       "matches": [],
       "request_id": "request-insufficient-search",
       "run_id": "run-insufficient-external-service",
-      "tool": "search_code"
+      "tool": "search_code",
+      "truncated": false,
+      "truncation_reason": null
     }
   ]
 }

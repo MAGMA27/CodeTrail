@@ -66,6 +66,15 @@ class SymbolSearchResult:
 
 
 @dataclass(frozen=True)
+class SearchQueryResult:
+    """Bounded symbol search results with an explicit result cap."""
+
+    matches: tuple[SymbolSearchResult, ...]
+    truncated: bool
+    truncation_reason: str | None
+
+
+@dataclass(frozen=True)
 class NeighborQueryResult:
     """Bounded static neighbors and all nodes needed to render their edges."""
 
@@ -372,6 +381,17 @@ class IndexStore:
     ) -> tuple[SymbolSearchResult, ...]:
         """Search qualified names and captured source text using safe FTS tokens."""
 
+        return self.search_symbols_bounded(index_id, query, limit=limit).matches
+
+    def search_symbols_bounded(
+        self,
+        index_id: str,
+        query: str,
+        *,
+        limit: int = 40,
+    ) -> SearchQueryResult:
+        """Search and report whether the result cap omitted additional matches."""
+
         self._require_index(index_id)
         try:
             params = SearchCodeParams(query=query, limit=limit)
@@ -379,7 +399,7 @@ class IndexStore:
             raise StorageInputError(str(exc)) from exc
         tokens = _search_tokens(params.query)
         if not tokens:
-            return ()
+            return SearchQueryResult((), False, None)
         fts_query = " AND ".join(f'"{token.replace(chr(34), chr(34) * 2)}"' for token in tokens)
         try:
             rows = self._connection.execute(
@@ -387,13 +407,14 @@ class IndexStore:
                 "WHERE index_id = ? AND symbol_fts MATCH ? "
                 "ORDER BY bm25(symbol_fts), qualified_name COLLATE BINARY, symbol_id "
                 "LIMIT ?",
-                (index_id, fts_query, params.limit),
+                (index_id, fts_query, params.limit + 1),
             ).fetchall()
         except sqlite3.OperationalError as exc:
             raise StorageError(f"symbol search failed: {exc}") from exc
 
+        truncated = len(rows) > params.limit
         results: list[SymbolSearchResult] = []
-        for rank, row in enumerate(rows, start=1):
+        for rank, row in enumerate(rows[: params.limit], start=1):
             symbol = self._load_symbol(index_id, row["symbol_id"])
             source_text = row["source_text"]
             matched_terms = [
@@ -411,7 +432,11 @@ class IndexStore:
                     snippet=_snippet(source_text, tokens, row["qualified_name"]),
                 )
             )
-        return tuple(results)
+        return SearchQueryResult(
+            matches=tuple(results),
+            truncated=truncated,
+            truncation_reason="max_results reached" if truncated else None,
+        )
 
     def read_evidence(
         self,

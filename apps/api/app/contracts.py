@@ -87,6 +87,44 @@ class IndexSnapshot(VersionedModel):
     status: Literal["ready", "building", "failed"]
 
 
+IndexIssueKind: TypeAlias = Literal[
+    "decode_error",
+    "file_too_large",
+    "read_error",
+    "symlink",
+    "syntax_error",
+    "outside_root",
+]
+
+
+class IndexIssue(ContractModel):
+    path: str = Field(min_length=1, max_length=500)
+    kind: IndexIssueKind
+    message: str = Field(min_length=1, max_length=2_000)
+    size: NonNegativeInt | None = None
+
+
+class CreateIndexRequest(VersionedModel):
+    repository_id: Identifier
+    revision: str = Field(default="working-tree", min_length=1, max_length=200)
+    dirty: bool = True
+
+
+class IndexResponse(VersionedModel):
+    index: IndexSnapshot
+    issues: list[IndexIssue] = Field(default_factory=list)
+    truncated: bool = False
+    truncation_reason: str | None = Field(default=None, max_length=1_000)
+
+    @model_validator(mode="after")
+    def validate_truncation(self) -> IndexResponse:
+        if self.truncated and not self.truncation_reason:
+            raise ValueError("truncated indexes must explain the truncation")
+        if not self.truncated and self.truncation_reason:
+            raise ValueError("non-truncated indexes cannot have a truncation reason")
+        return self
+
+
 SymbolKind: TypeAlias = Literal["module", "file", "class", "function", "test"]
 
 
@@ -138,6 +176,8 @@ class Evidence(LineRangeModel):
     @model_validator(mode="after")
     def validate_excerpt_lines(self) -> Evidence:
         excerpt_line_count = len(self.excerpt.splitlines())
+        if self.excerpt.endswith(("\n", "\r")):
+            excerpt_line_count += 1
         expected_line_count = self.end_line - self.start_line + 1
         if excerpt_line_count != expected_line_count:
             raise ValueError("excerpt line count must match the evidence line range")
@@ -367,6 +407,16 @@ class SearchCodeSuccess(ToolResultBase):
     kind: Literal["search_code.succeeded"] = "search_code.succeeded"
     tool: Literal["search_code"] = "search_code"
     matches: list[SearchMatch]
+    truncated: bool = False
+    truncation_reason: str | None = Field(default=None, max_length=1_000)
+
+    @model_validator(mode="after")
+    def validate_truncation(self) -> SearchCodeSuccess:
+        if self.truncated and not self.truncation_reason:
+            raise ValueError("truncated searches must explain the truncation")
+        if not self.truncated and self.truncation_reason:
+            raise ValueError("non-truncated searches cannot have a truncation reason")
+        return self
 
 
 class SearchCodeFailure(ToolResultBase):
@@ -391,12 +441,71 @@ class GetNeighborsSuccess(ToolResultBase):
     kind: Literal["get_neighbors.succeeded"] = "get_neighbors.succeeded"
     tool: Literal["get_neighbors"] = "get_neighbors"
     neighbors: list[Neighbor]
+    truncated: bool = False
+    truncation_reason: str | None = Field(default=None, max_length=1_000)
+
+    @model_validator(mode="after")
+    def validate_truncation(self) -> GetNeighborsSuccess:
+        if self.truncated and not self.truncation_reason:
+            raise ValueError("truncated neighbor results must explain the truncation")
+        if not self.truncated and self.truncation_reason:
+            raise ValueError("non-truncated neighbor results cannot have a truncation reason")
+        return self
 
 
 class GetNeighborsFailure(ToolResultBase):
     kind: Literal["get_neighbors.failed"] = "get_neighbors.failed"
     tool: Literal["get_neighbors"] = "get_neighbors"
     error: ToolError
+
+
+class SearchIndexResponse(VersionedModel):
+    index_id: Identifier
+    matches: list[SearchMatch] = Field(default_factory=list)
+    truncated: bool = False
+    truncation_reason: str | None = Field(default=None, max_length=1_000)
+
+    @model_validator(mode="after")
+    def validate_truncation(self) -> SearchIndexResponse:
+        if self.truncated and not self.truncation_reason:
+            raise ValueError("truncated searches must explain the truncation")
+        if not self.truncated and self.truncation_reason:
+            raise ValueError("non-truncated searches cannot have a truncation reason")
+        return self
+
+
+class SourceIndexResponse(VersionedModel):
+    index_id: Identifier
+    evidence: Evidence
+
+
+class NeighborsIndexResponse(VersionedModel):
+    index_id: Identifier
+    neighbors: list[Neighbor] = Field(default_factory=list)
+    truncated: bool = False
+    truncation_reason: str | None = Field(default=None, max_length=1_000)
+
+    @model_validator(mode="after")
+    def validate_truncation(self) -> NeighborsIndexResponse:
+        if self.truncated and not self.truncation_reason:
+            raise ValueError("truncated neighbor results must explain the truncation")
+        if not self.truncated and self.truncation_reason:
+            raise ValueError("non-truncated neighbor results cannot have a truncation reason")
+        return self
+
+
+ApiErrorCode: TypeAlias = Literal[
+    "not_found",
+    "invalid_input",
+    "conflict",
+    "budget_exceeded",
+    "internal_error",
+]
+
+
+class ApiErrorResponse(VersionedModel):
+    code: ApiErrorCode
+    message: str = Field(min_length=1, max_length=2_000)
 
 
 ToolSuccessResult: TypeAlias = Annotated[

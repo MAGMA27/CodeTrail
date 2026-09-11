@@ -71,7 +71,7 @@ python -m timeout_demo
 
 样本场景 JSON 解析、源码 manifest 校验、同名/动态调用检查、三套固定响应的 Pydantic 校验和契约 pytest 已实际通过；当前工具失败场景仍只是定义，不是已实现的注入测试。
 
-已实际验证：API 健康请求返回 HTTP `200` 和 `{"status":"ok","service":"codetrail-api","version":"0.1.0"}`；前端类型检查、生产构建、Python 编译检查和 `pytest` 离线测试通过，当前后端测试为 41 passed，覆盖快照/定义提取、保守导入/调用关系及 SQLite/FTS5 持久化、事务回滚、全文检索、旧快照证据和受限邻接查询；SQLite FTS5 在当前运行时可用。浏览器已验证后端连接成功、停止后的失败提示和恢复后的重新检查。本步仍不是业务 API 驱动的端到端离线分析演示；首页明确显示分析功能尚未实现。
+已实际验证：API 健康请求返回 HTTP `200` 和 `{"status":"ok","service":"codetrail-api","version":"0.1.0"}`；前端类型检查、生产构建、Python 编译检查和 `pytest` 离线测试通过，当前后端测试为 46 passed，覆盖快照/定义提取、保守导入/调用关系、SQLite/FTS5 持久化、事务回滚、全文检索、旧快照证据、受限邻接查询，以及 allow-list、索引/查询 HTTP API、工具适配、并发上限和安全错误；SQLite FTS5 在当前运行时可用。实际 Uvicorn HTTP 闭环已验证 health、create、search、neighbors、source 均成功返回；本步仍不是 Run/Agent/SSE 驱动的端到端离线分析演示，前端首页仍明确显示分析功能尚未实现。
 
 计划技术：Next.js、React Flow、TypeScript、Python、FastAPI、Pydantic、LangGraph、SQLite FTS5、Python ast。依赖版本在脚手架阶段核实兼容性并锁定。
 

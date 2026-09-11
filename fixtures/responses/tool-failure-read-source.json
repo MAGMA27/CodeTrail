@@ -70,7 +70,9 @@
             ],
             "request_id": "request-failure-search",
             "run_id": "run-tool-failure-read-source",
-            "tool": "search_code"
+            "tool": "search_code",
+            "truncated": false,
+            "truncation_reason": null
           }
         },
         "run_id": "run-tool-failure-read-source",
@@ -714,7 +716,9 @@
       ],
       "request_id": "request-failure-search",
       "run_id": "run-tool-failure-read-source",
-      "tool": "search_code"
+      "tool": "search_code",
+      "truncated": false,
+      "truncation_reason": null
     },
     {
       "completed_sequence": 6,
