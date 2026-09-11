@@ -7,16 +7,23 @@ import os
 import threading
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, TypeVar
+from uuid import uuid4
 
 from .contracts import (
     CreateIndexRequest,
+    CreateProjectIndexRequest,
+    CreateProjectRequest,
     GetNeighborsParams,
     GetNeighborsSuccess,
     IndexIssue,
     IndexResponse,
     NeighborsIndexResponse,
+    Project,
+    ProjectIndexListResponse,
+    ProjectListResponse,
     ReadSourceParams,
     ReadSourceSuccess,
     SearchCodeParams,
@@ -31,6 +38,7 @@ from .indexing import SnapshotBoundaryError, build_source_snapshot, extract_defi
 from .relations import extract_relations
 from .storage import (
     IndexStore,
+    ProjectRecord,
     StorageConflictError,
     StorageError,
     StorageInputError,
@@ -147,7 +155,12 @@ class IndexService:
         self.max_file_bytes = max_file_bytes
         self._index_slots = threading.BoundedSemaphore(max_concurrent_indexes)
 
-    def create_index(self, request: CreateIndexRequest) -> IndexResponse:
+    def create_index(
+        self,
+        request: CreateIndexRequest,
+        *,
+        on_snapshot_ready: Callable[[str], None] | None = None,
+    ) -> IndexResponse:
         root = self.registry.root_for(request.repository_id)
         if not self._index_slots.acquire(blocking=False):
             raise ServiceError("budget_exceeded", 429, "index capacity is currently busy")
@@ -162,6 +175,8 @@ class IndexService:
                 )
                 definitions = extract_definitions(snapshot)
                 relation = extract_relations(definitions)
+                if on_snapshot_ready is not None:
+                    on_snapshot_ready(snapshot.index.index_id)
                 with self.registry.store_for_repository(request.repository_id) as store:
                     store.write_index(relation)
                     persisted = store.load_index(snapshot.index.index_id)
@@ -307,6 +322,189 @@ class IndexService:
             raise ServiceError("invalid_input", 400, "query parameters are invalid") from exc
         except StorageError as exc:
             raise ServiceError("internal_error", 500, "local index storage failed") from exc
+
+
+class WorkspaceService:
+    """Own project identity, index associations, and project-scoped queries."""
+
+    def __init__(self, registry: RepositoryRegistry, index_service: IndexService) -> None:
+        self.registry = registry
+        self.index_service = index_service
+        self._recover_interrupted_builds()
+
+    def create_project(self, request: CreateProjectRequest) -> Project:
+        self.registry.root_for(request.repository_id)
+        project_id = _new_project_id()
+        with self.registry.store_for_repository(request.repository_id) as store:
+            store.ensure_legacy_project(
+                _legacy_project_id(request.repository_id),
+                request.repository_id,
+                request.repository_id,
+                datetime.now(timezone.utc),
+            )
+            record = store.create_project(
+                project_id,
+                request.name,
+                request.repository_id,
+                datetime.now(timezone.utc),
+            )
+        return _project_response(record)
+
+    def list_projects(self) -> ProjectListResponse:
+        self._ensure_legacy_projects()
+        records: list[ProjectRecord] = []
+        for repository_id in self.registry.repository_ids:
+            database_path = self.registry.root_for(repository_id) / ".codetrail" / "index.sqlite3"
+            if not database_path.is_file():
+                continue
+            with self.registry.store_for_repository(repository_id) as store:
+                records.extend(store.list_projects())
+        records.sort(key=lambda record: (record.created_at, record.project_id))
+        return ProjectListResponse(projects=[_project_response(record) for record in records])
+
+    def get_project(self, project_id: str) -> Project:
+        return _project_response(self._find_project(project_id))
+
+    def list_project_indexes(self, project_id: str) -> ProjectIndexListResponse:
+        project = self._find_project(project_id)
+        with self.registry.store_for_repository(project.repository_id) as store:
+            indexes = store.list_project_indexes(project.project_id)
+            current = store.load_project(project.project_id)
+        return ProjectIndexListResponse(
+            project_id=project.project_id,
+            indexes=list(indexes),
+            latest_index_id=current.latest_index_id,
+            building_index_id=current.building_index_id,
+        )
+
+    def create_project_index(
+        self,
+        project_id: str,
+        request: CreateProjectIndexRequest,
+    ) -> IndexResponse:
+        project = self._find_project(project_id)
+        pending_id = f"pending-{uuid4().hex}"
+        with self.registry.store_for_repository(project.repository_id) as store:
+            store.set_project_building(project.project_id, pending_id)
+
+        def mark_snapshot_ready(index_id: str) -> None:
+            with self.registry.store_for_repository(project.repository_id) as store:
+                store.set_project_building(project.project_id, index_id)
+
+        try:
+            response = self.index_service.create_index(
+                CreateIndexRequest(
+                    repository_id=project.repository_id,
+                    revision=request.revision,
+                    dirty=request.dirty,
+                ),
+                on_snapshot_ready=mark_snapshot_ready,
+            )
+            with self.registry.store_for_repository(project.repository_id) as store:
+                store.finish_project_index(project.project_id, response.index.index_id)
+            return response
+        finally:
+            with self.registry.store_for_repository(project.repository_id) as store:
+                store.clear_project_building(project.project_id)
+
+    def get_project_index(self, project_id: str, index_id: str) -> IndexResponse:
+        self._require_project_index(project_id, index_id)
+        return self.index_service.get_index(index_id)
+
+    def search(self, project_id: str, index_id: str, query: str, limit: int) -> SearchIndexResponse:
+        self._require_project_index(project_id, index_id)
+        return self.index_service.search(index_id, query, limit)
+
+    def neighbors(
+        self,
+        project_id: str,
+        index_id: str,
+        symbol_id: str,
+        direction: str,
+        depth: int,
+        limit: int,
+        edge_kinds: tuple[str, ...] | None = None,
+    ) -> NeighborsIndexResponse:
+        self._require_project_index(project_id, index_id)
+        return self.index_service.neighbors(index_id, symbol_id, direction, depth, limit, edge_kinds)
+
+    def read_source(
+        self,
+        project_id: str,
+        index_id: str,
+        path: str,
+        start_line: int,
+        end_line: int,
+    ) -> SourceIndexResponse:
+        self._require_project_index(project_id, index_id)
+        return self.index_service.read_source(index_id, path, start_line, end_line)
+
+    def _find_project(self, project_id: str) -> ProjectRecord:
+        self._ensure_legacy_projects()
+        for repository_id in self.registry.repository_ids:
+            database_path = self.registry.root_for(repository_id) / ".codetrail" / "index.sqlite3"
+            if not database_path.is_file():
+                continue
+            with self.registry.store_for_repository(repository_id) as store:
+                try:
+                    project = store.load_project(project_id)
+                except StorageNotFoundError:
+                    continue
+                if project.repository_id != repository_id:
+                    raise ServiceError("internal_error", 500, "project repository association is invalid")
+                return project
+        raise ServiceError("not_found", 404, "project was not found")
+
+    def _require_project_index(self, project_id: str, index_id: str) -> ProjectRecord:
+        project = self._find_project(project_id)
+        with self.registry.store_for_repository(project.repository_id) as store:
+            if not store.project_has_index(project_id, index_id):
+                raise ServiceError("not_found", 404, "index does not belong to the project")
+        return project
+
+    def _ensure_legacy_projects(self) -> None:
+        for repository_id in self.registry.repository_ids:
+            database_path = self.registry.root_for(repository_id) / ".codetrail" / "index.sqlite3"
+            if not database_path.is_file():
+                continue
+            with self.registry.store_for_repository(repository_id) as store:
+                store.ensure_legacy_project(
+                    _legacy_project_id(repository_id),
+                    repository_id,
+                    repository_id,
+                    datetime.now(timezone.utc),
+                )
+
+    def _recover_interrupted_builds(self) -> None:
+        for repository_id in self.registry.repository_ids:
+            database_path = self.registry.root_for(repository_id) / ".codetrail" / "index.sqlite3"
+            if not database_path.is_file():
+                continue
+            with self.registry.store_for_repository(repository_id) as store:
+                store.recover_building_projects()
+
+
+def _new_project_id() -> str:
+    return f"project-{uuid4().hex}"
+
+
+def _legacy_project_id(repository_id: str) -> str:
+    import hashlib
+
+    digest = hashlib.sha256(f"legacy:{repository_id}".encode("utf-8")).hexdigest()[:24]
+    return f"project-legacy-{digest}"
+
+
+def _project_response(record: ProjectRecord) -> Project:
+    return Project(
+        project_id=record.project_id,
+        name=record.name,
+        repository_id=record.repository_id,
+        created_at=record.created_at,
+        available_index_ids=list(record.available_index_ids),
+        latest_index_id=record.latest_index_id,
+        building_index_id=record.building_index_id,
+    )
 
 
 def _index_response(relation) -> IndexResponse:

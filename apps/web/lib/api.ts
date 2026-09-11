@@ -77,6 +77,30 @@ export type IndexResponse = {
   truncation_reason: string | null;
 };
 
+export type ProjectRecord = {
+  schema_version: typeof SCHEMA_VERSION;
+  project_id: string;
+  name: string;
+  repository_id: string;
+  created_at: string;
+  available_index_ids: string[];
+  latest_index_id: string | null;
+  building_index_id: string | null;
+};
+
+export type ProjectListResponse = {
+  schema_version: typeof SCHEMA_VERSION;
+  projects: ProjectRecord[];
+};
+
+export type ProjectIndexesResponse = {
+  schema_version: typeof SCHEMA_VERSION;
+  project_id: string;
+  indexes: IndexSnapshot[];
+  latest_index_id: string | null;
+  building_index_id: string | null;
+};
+
 export type SearchMatch = {
   rank: number;
   symbol: SymbolRecord;
@@ -222,6 +246,45 @@ function isIndexSnapshot(value: unknown): value is IndexSnapshot {
     typeof value.dirty === "boolean" &&
     isString(value.snapshot_hash) &&
     ["ready", "building", "failed"].includes(String(value.status))
+  );
+}
+
+function isNullableString(value: unknown): value is string | null {
+  return value === null || isString(value);
+}
+
+export function isProjectRecord(value: unknown): value is ProjectRecord {
+  return (
+    isRecord(value) &&
+    value.schema_version === SCHEMA_VERSION &&
+    isString(value.project_id) &&
+    isString(value.name) &&
+    isString(value.repository_id) &&
+    isString(value.created_at) &&
+    isStringArray(value.available_index_ids) &&
+    isNullableString(value.latest_index_id) &&
+    isNullableString(value.building_index_id)
+  );
+}
+
+export function isProjectListResponse(value: unknown): value is ProjectListResponse {
+  return (
+    isRecord(value) &&
+    value.schema_version === SCHEMA_VERSION &&
+    Array.isArray(value.projects) &&
+    value.projects.every(isProjectRecord)
+  );
+}
+
+export function isProjectIndexesResponse(value: unknown): value is ProjectIndexesResponse {
+  return (
+    isRecord(value) &&
+    value.schema_version === SCHEMA_VERSION &&
+    isString(value.project_id) &&
+    Array.isArray(value.indexes) &&
+    value.indexes.every(isIndexSnapshot) &&
+    isNullableString(value.latest_index_id) &&
+    isNullableString(value.building_index_id)
   );
 }
 
@@ -372,6 +435,82 @@ export function createIndex(
   );
 }
 
+export function createProject(
+  name: string,
+  repositoryId: string,
+  signal?: AbortSignal,
+): Promise<ProjectRecord> {
+  return requestJson(
+    "/api/projects",
+    isProjectRecord,
+    {
+      method: "POST",
+      signal,
+      body: JSON.stringify({
+        schema_version: SCHEMA_VERSION,
+        name,
+        repository_id: repositoryId,
+      }),
+    },
+  );
+}
+
+export function listProjects(signal?: AbortSignal): Promise<ProjectListResponse> {
+  return requestJson("/api/projects", isProjectListResponse, { signal });
+}
+
+export function getProject(projectId: string, signal?: AbortSignal): Promise<ProjectRecord> {
+  return requestJson(
+    `/api/projects/${encodeURIComponent(projectId)}`,
+    isProjectRecord,
+    { signal },
+  );
+}
+
+export function listProjectIndexes(
+  projectId: string,
+  signal?: AbortSignal,
+): Promise<ProjectIndexesResponse> {
+  return requestJson(
+    `/api/projects/${encodeURIComponent(projectId)}/indexes`,
+    isProjectIndexesResponse,
+    { signal },
+  );
+}
+
+export function createProjectIndex(
+  projectId: string,
+  revision: string,
+  dirty: boolean,
+  signal?: AbortSignal,
+): Promise<IndexResponse> {
+  return requestJson(
+    `/api/projects/${encodeURIComponent(projectId)}/indexes`,
+    isIndexResponse,
+    {
+      method: "POST",
+      signal,
+      body: JSON.stringify({
+        schema_version: SCHEMA_VERSION,
+        revision,
+        dirty,
+      }),
+    },
+  );
+}
+
+export function openProjectIndex(
+  projectId: string,
+  indexId: string,
+  signal?: AbortSignal,
+): Promise<IndexResponse> {
+  return requestJson(
+    `/api/projects/${encodeURIComponent(projectId)}/indexes/${encodeURIComponent(indexId)}`,
+    isIndexResponse,
+    { signal },
+  );
+}
+
 export function getHealth(signal?: AbortSignal): Promise<HealthResponse> {
   return requestJson("/api/health", isHealthResponse, { signal });
 }
@@ -389,6 +528,21 @@ export function searchIndex(
   const params = new URLSearchParams({ query, limit: String(limit) });
   return requestJson(
     `/api/indexes/${encodeURIComponent(indexId)}/search?${params.toString()}`,
+    isSearchResponse,
+    { signal },
+  );
+}
+
+export function searchProjectIndex(
+  projectId: string,
+  indexId: string,
+  query: string,
+  limit = 40,
+  signal?: AbortSignal,
+): Promise<SearchResponse> {
+  const params = new URLSearchParams({ query, limit: String(limit) });
+  return requestJson(
+    `/api/projects/${encodeURIComponent(projectId)}/indexes/${encodeURIComponent(indexId)}/search?${params.toString()}`,
     isSearchResponse,
     { signal },
   );
@@ -417,6 +571,30 @@ export function getNeighbors(
   );
 }
 
+export function getProjectNeighbors(
+  projectId: string,
+  indexId: string,
+  symbolId: string,
+  direction: NeighborDirection,
+  edgeKinds: EdgeKind[],
+  signal?: AbortSignal,
+): Promise<NeighborsResponse> {
+  const params = new URLSearchParams({
+    symbol_id: symbolId,
+    direction,
+    depth: "2",
+    limit: "40",
+  });
+  for (const edgeKind of edgeKinds) {
+    params.append("edge_kinds", edgeKind);
+  }
+  return requestJson(
+    `/api/projects/${encodeURIComponent(projectId)}/indexes/${encodeURIComponent(indexId)}/neighbors?${params.toString()}`,
+    isNeighborsResponse,
+    { signal },
+  );
+}
+
 export function readSource(
   indexId: string,
   path: string,
@@ -431,6 +609,26 @@ export function readSource(
   });
   return requestJson(
     `/api/indexes/${encodeURIComponent(indexId)}/source?${params.toString()}`,
+    isSourceResponse,
+    { signal },
+  );
+}
+
+export function readProjectSource(
+  projectId: string,
+  indexId: string,
+  path: string,
+  startLine: number,
+  endLine: number,
+  signal?: AbortSignal,
+): Promise<SourceResponse> {
+  const params = new URLSearchParams({
+    path,
+    start_line: String(startLine),
+    end_line: String(endLine),
+  });
+  return requestJson(
+    `/api/projects/${encodeURIComponent(projectId)}/indexes/${encodeURIComponent(indexId)}/source?${params.toString()}`,
     isSourceResponse,
     { signal },
   );

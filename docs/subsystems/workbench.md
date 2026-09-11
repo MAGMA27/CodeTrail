@@ -2,27 +2,27 @@
 
 ## 状态
 
-已实现基于真实索引 API 的代码关系工作台；Issue 分析、Run 生命周期和报告界面尚未实现。
+已实现基于真实索引 API 的多项目代码关系工作台；项目创建/列表/切换、索引归属与刷新恢复已实现。Issue 分析、Run 生命周期、报告界面和功能概览尚未实现。
 
 ## 职责与范围
 
-通过公开 API 创建/打开索引，展示受限搜索结果、静态邻接子图、分组折叠和快照源码证据；不直接访问 SQLite。
+通过公开 API 创建/列出/切换项目，创建或打开项目所属索引，展示受限搜索结果、静态邻接子图、分组折叠和快照源码证据；不直接访问 SQLite。
 
 ## 接口与依赖
 
-[page.tsx](../../apps/web/app/page.tsx) 挂载工作台，[workbench.tsx](../../apps/web/app/workbench.tsx) 管理交互，[api.ts](../../apps/web/lib/api.ts) 验证 HTTP 边界，[graph.ts](../../apps/web/lib/graph.ts) 管理图合并和分组；Next.js 局部规则见 [AGENTS.md](../../apps/web/AGENTS.md)。
+[apps/web README](../../apps/web/README.md) 记录目录职责；[page.tsx](../../apps/web/app/page.tsx) 挂载工作台，[workbench.tsx](../../apps/web/app/workbench.tsx) 管理交互，[api.ts](../../apps/web/lib/api.ts) 验证 HTTP 边界，[graph.ts](../../apps/web/lib/graph.ts) 管理图合并和分组；Next.js 局部规则见 [AGENTS.md](../../apps/web/AGENTS.md)。
 
 ## 数据与生命周期
 
-索引状态覆盖未打开、创建中、载入中、就绪、部分完成和错误；搜索、邻接、源码请求各自维护 loading、success、empty、error 状态，切换 index_id 会清空旧图和旧选择。
+项目状态覆盖列表载入、空列表、就绪和错误；索引状态覆盖未打开、创建中、载入中、就绪、部分完成和错误。切换 project_id 会取消或忽略旧请求，清空旧 index_id、图、源码和错误，再恢复该项目最新可用索引；浏览器只保存最近项目 ID，项目与索引数据从服务端持久化恢复。
 
 ## 错误与限制
 
-前端只提交服务端配置的 repository_id，不接受宿主路径；响应经过运行时形状校验，过期请求通过 AbortController 和递增请求 ID 忽略，API 停止或返回错误时保留明确失败状态。
+前端只提交服务端配置的 repository_id，不接受宿主路径；项目作用域端点拒绝不属于当前 project_id 的 index_id。响应经过运行时形状校验，过期请求通过 AbortController 和递增请求 ID 忽略，API 停止或返回错误时保留明确失败状态。
 
 ## 验证
 
-pnpm --dir apps/web test、pnpm web:typecheck 和 pnpm web:build；浏览器核对真实索引创建/打开、搜索、关系方向、分组折叠、源码证据、unresolved、API 停止和恢复重试。
+pnpm --dir apps/web test、pnpm web:typecheck 和 pnpm web:build；浏览器核对两个项目创建、分别建索引、切换、刷新恢复、同名源码隔离，以及既有搜索、关系方向、分组折叠、源码证据、unresolved、API 停止和恢复重试。
 
 ## 相关决策
 

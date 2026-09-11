@@ -85,6 +85,16 @@ def copy_fixture(tmp_path: Path) -> Path:
     return destination
 
 
+def copy_fixture_named(tmp_path: Path, name: str) -> Path:
+    destination = tmp_path / name
+    shutil.copytree(
+        FIXTURE_ROOT,
+        destination,
+        ignore=shutil.ignore_patterns("__pycache__", ".codetrail"),
+    )
+    return destination
+
+
 def create_request() -> dict:
     return {"repository_id": "timeout-demo", "revision": "fixture-v1", "dirty": False}
 
@@ -152,6 +162,21 @@ def test_http_index_query_and_snapshot_evidence_flow(tmp_path: Path) -> None:
     assert "load_settings" in source["evidence"]["excerpt"]
     assert source["evidence"]["index_id"] == index_id
 
+    status, projects = request(application, "GET", "/api/projects")
+    assert status == 200
+    legacy_project = next(
+        project for project in projects["projects"] if project["repository_id"] == "timeout-demo"
+    )
+    assert legacy_project["latest_index_id"] == index_id
+    assert index_id in legacy_project["available_index_ids"]
+    status, project_indexes = request(
+        application,
+        "GET",
+        f"/api/projects/{legacy_project['project_id']}/indexes",
+    )
+    assert status == 200
+    assert [item["index_id"] for item in project_indexes["indexes"]] == [index_id]
+
     status, dispatch_search = request(
         application,
         "GET",
@@ -177,6 +202,122 @@ def test_http_index_query_and_snapshot_evidence_flow(tmp_path: Path) -> None:
         not in {"timeout_demo.handlers.handle", "timeout_demo.other_handlers.handle"}
         for item in dispatch_graph["neighbors"]
     )
+
+
+def test_project_workspace_isolated_and_restores_after_service_reopen(tmp_path: Path) -> None:
+    repository_one = copy_fixture_named(tmp_path, "project-one")
+    repository_two = copy_fixture_named(tmp_path, "project-two")
+    config_two = repository_two / "timeout_demo" / "config.py"
+    config_two.write_text(
+        config_two.read_text(encoding="utf-8").replace("DEFAULT_TIMEOUT = 30", "DEFAULT_TIMEOUT = 99"),
+        encoding="utf-8",
+    )
+    roots = {"repo-one": repository_one, "repo-two": repository_two}
+    application = create_app(roots)
+
+    status, empty = request(application, "GET", "/api/projects")
+    assert status == 200
+    assert empty["projects"] == []
+
+    status, project_one = request(
+        application,
+        "POST",
+        "/api/projects",
+        {"name": "First fixture", "repository_id": "repo-one"},
+    )
+    assert status == 200
+    status, project_two = request(
+        application,
+        "POST",
+        "/api/projects",
+        {"name": "Second fixture", "repository_id": "repo-two"},
+    )
+    assert status == 200
+    assert project_one["project_id"] != project_two["project_id"]
+
+    status, index_one = request(
+        application,
+        "POST",
+        f"/api/projects/{project_one['project_id']}/indexes",
+        {"revision": "project-one", "dirty": False},
+    )
+    assert status == 200
+    status, index_two = request(
+        application,
+        "POST",
+        f"/api/projects/{project_two['project_id']}/indexes",
+        {"revision": "project-two", "dirty": False},
+    )
+    assert status == 200
+    index_one_id = index_one["index"]["index_id"]
+    index_two_id = index_two["index"]["index_id"]
+    assert index_one_id != index_two_id
+
+    status, source_one = request(
+        application,
+        "GET",
+        f"/api/projects/{project_one['project_id']}/indexes/{index_one_id}/source?path=timeout_demo%2Fconfig.py&start_line=9&end_line=9",
+    )
+    assert status == 200
+    status, source_two = request(
+        application,
+        "GET",
+        f"/api/projects/{project_two['project_id']}/indexes/{index_two_id}/source?path=timeout_demo%2Fconfig.py&start_line=9&end_line=9",
+    )
+    assert status == 200
+    assert source_one["evidence"]["excerpt"] == "DEFAULT_TIMEOUT = 30"
+    assert source_two["evidence"]["excerpt"] == "DEFAULT_TIMEOUT = 99"
+
+    status, wrong_project = request(
+        application,
+        "GET",
+        f"/api/projects/{project_two['project_id']}/indexes/{index_one_id}",
+    )
+    assert status == 404
+    assert wrong_project["code"] == "not_found"
+
+    original_create = application.state.index_service.create_index
+
+    def fail_create(*_args, **_kwargs):
+        raise ServiceError("internal_error", 500, "injected index failure")
+
+    application.state.index_service.create_index = fail_create
+    try:
+        status, failed = request(
+            application,
+            "POST",
+            f"/api/projects/{project_one['project_id']}/indexes",
+            {"revision": "failed-build", "dirty": True},
+        )
+    finally:
+        application.state.index_service.create_index = original_create
+    assert status == 500
+    assert failed["code"] == "internal_error"
+
+    status, project_after_failure = request(
+        application,
+        "GET",
+        f"/api/projects/{project_one['project_id']}",
+    )
+    assert status == 200
+    assert project_after_failure["latest_index_id"] == index_one_id
+    assert project_after_failure["building_index_id"] is None
+
+    reopened = create_app(roots)
+    status, projects = request(reopened, "GET", "/api/projects")
+    assert status == 200
+    assert {project["project_id"] for project in projects["projects"]} == {
+        project_one["project_id"],
+        project_two["project_id"],
+    }
+    status, restored_indexes = request(
+        reopened,
+        "GET",
+        f"/api/projects/{project_two['project_id']}/indexes",
+    )
+    assert status == 200
+    assert restored_indexes["latest_index_id"] == index_two_id
+    assert [item["index_id"] for item in restored_indexes["indexes"]] == [index_two_id]
 
 
 def test_http_errors_are_stable_and_do_not_expose_repository_paths(tmp_path: Path) -> None:

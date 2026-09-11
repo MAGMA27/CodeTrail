@@ -200,6 +200,178 @@ select {
   box-shadow: var(--shadow);
 }
 
+.project-bar {
+  width: 100%;
+  max-width: 1900px;
+  margin: 0 auto;
+  padding: 14px 16px 16px;
+}
+
+.project-bar-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.project-bar-heading h2 {
+  margin: 4px 0 0;
+  color: var(--ink);
+  font-family: var(--display);
+  font-size: 1.3rem;
+  font-weight: 500;
+  letter-spacing: -0.045em;
+}
+
+.project-bar-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 280px);
+  gap: 14px;
+  padding-top: 14px;
+}
+
+.project-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+
+.project-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 0;
+  background: rgba(5, 15, 13, 0.38);
+  color: var(--ink);
+  text-align: left;
+  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+}
+
+.project-card:hover,
+.project-card.is-selected {
+  border-color: var(--mint);
+  background: rgba(121, 200, 194, 0.1);
+  transform: translateY(-1px);
+}
+
+.project-card.is-selected {
+  box-shadow: inset 3px 0 0 var(--amber);
+}
+
+.project-card-mark {
+  display: grid;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid var(--amber);
+  color: var(--amber);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.project-card-copy {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.project-card-copy strong {
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-card-copy small,
+.project-card-state {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.project-card-state {
+  margin-left: auto;
+  color: var(--quiet);
+  white-space: nowrap;
+}
+
+.project-card.is-selected .project-card-state {
+  color: var(--amber);
+}
+
+.project-create-form {
+  display: grid;
+  align-content: start;
+  gap: 7px;
+  padding-left: 14px;
+  border-left: 1px solid var(--line);
+}
+
+.project-create-form label {
+  color: var(--quiet);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.project-create-form .primary-button {
+  width: 100%;
+  margin-top: 3px;
+}
+
+.project-empty {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 72px;
+  padding: 12px;
+  border: 1px dashed var(--line-strong);
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.project-empty span {
+  color: var(--amber);
+  font-size: 20px;
+}
+
+.project-empty p {
+  margin: 0;
+}
+
+.project-context-readout {
+  display: grid;
+  flex: 1 1 180px;
+  align-content: center;
+  min-width: 150px;
+  gap: 4px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  background: rgba(5, 15, 13, 0.5);
+}
+
+.project-context-readout strong {
+  overflow: hidden;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-context-readout code {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .command-group {
   display: grid;
   gap: 7px;
@@ -1209,6 +1381,17 @@ input[type="checkbox"] {
     grid-template-columns: 1fr;
   }
 
+  .project-bar-body {
+    grid-template-columns: 1fr;
+  }
+
+  .project-create-form {
+    padding-top: 12px;
+    padding-left: 0;
+    border-top: 1px solid var(--line);
+    border-left: 0;
+  }
+
   .health-button {
     justify-self: start;
   }
@@ -1252,6 +1435,14 @@ input[type="checkbox"] {
 }
 
 @media (max-width: 580px) {
+  .project-bar {
+    padding: 12px;
+  }
+
+  .project-bar-heading {
+    display: grid;
+  }
+
   .command-input-row {
     flex-wrap: wrap;
   }

@@ -10,6 +10,7 @@ import sqlite3
 import time
 from collections import Counter, deque
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
@@ -87,6 +88,19 @@ class NeighborQueryResult:
     truncation_reason: str | None
 
 
+@dataclass(frozen=True)
+class ProjectRecord:
+    """Persisted project identity and its index associations."""
+
+    project_id: str
+    name: str
+    repository_id: str
+    created_at: datetime
+    available_index_ids: tuple[str, ...]
+    latest_index_id: str | None
+    building_index_id: str | None
+
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS index_snapshots (
     index_id TEXT PRIMARY KEY,
@@ -100,6 +114,28 @@ CREATE TABLE IF NOT EXISTS index_snapshots (
     truncation_reason TEXT,
     payload_hash TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS projects (
+    project_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    repository_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    latest_index_id TEXT,
+    building_index_id TEXT,
+    FOREIGN KEY (latest_index_id) REFERENCES index_snapshots(index_id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS project_indexes (
+    project_id TEXT NOT NULL,
+    index_id TEXT NOT NULL,
+    associated_at TEXT NOT NULL,
+    PRIMARY KEY (project_id, index_id),
+    FOREIGN KEY (project_id) REFERENCES projects(project_id) ON DELETE CASCADE,
+    FOREIGN KEY (index_id) REFERENCES index_snapshots(index_id) ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS project_indexes_index_id
+    ON project_indexes(index_id);
 
 CREATE TABLE IF NOT EXISTS snapshot_files (
     index_id TEXT NOT NULL,
@@ -242,6 +278,197 @@ class IndexStore:
             "SELECT 1 FROM index_snapshots WHERE index_id = ?",
             (index_id,),
         ).fetchone() is not None
+
+    def has_any_index(self) -> bool:
+        return self._connection.execute("SELECT 1 FROM index_snapshots LIMIT 1").fetchone() is not None
+
+    def create_project(
+        self,
+        project_id: str,
+        name: str,
+        repository_id: str,
+        created_at: datetime,
+    ) -> ProjectRecord:
+        """Persist one project without implicitly claiming existing indexes."""
+
+        try:
+            self._connection.execute("BEGIN IMMEDIATE")
+            self._connection.execute(
+                "INSERT INTO projects (project_id, name, repository_id, created_at) VALUES (?, ?, ?, ?)",
+                (project_id, name, repository_id, _datetime_text(created_at)),
+            )
+            self._connection.execute("COMMIT")
+        except sqlite3.IntegrityError as exc:
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise StorageConflictError(f"project_id {project_id!r} already exists") from exc
+        except sqlite3.Error as exc:
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise StorageError(f"could not create project: {exc}") from exc
+        return self.load_project(project_id)
+
+    def list_projects(self) -> tuple[ProjectRecord, ...]:
+        rows = self._connection.execute(
+            "SELECT project_id, name, repository_id, created_at, latest_index_id, building_index_id "
+            "FROM projects ORDER BY created_at COLLATE BINARY, project_id COLLATE BINARY"
+        ).fetchall()
+        return tuple(self._project_from_row(row) for row in rows)
+
+    def load_project(self, project_id: str) -> ProjectRecord:
+        row = self._connection.execute(
+            "SELECT project_id, name, repository_id, created_at, latest_index_id, building_index_id "
+            "FROM projects WHERE project_id = ?",
+            (project_id,),
+        ).fetchone()
+        if row is None:
+            raise StorageNotFoundError(f"project {project_id!r} was not found")
+        return self._project_from_row(row)
+
+    def ensure_legacy_project(
+        self,
+        project_id: str,
+        name: str,
+        repository_id: str,
+        created_at: datetime,
+    ) -> ProjectRecord | None:
+        """Associate pre-project indexes with one explicit repository project."""
+
+        if not self.has_any_index():
+            return None
+        existing = self._connection.execute(
+            "SELECT 1 FROM projects WHERE project_id = ?",
+            (project_id,),
+        ).fetchone()
+        unowned = self._connection.execute(
+            "SELECT 1 FROM index_snapshots AS i "
+            "LEFT JOIN project_indexes AS pi ON pi.index_id = i.index_id "
+            "WHERE i.repository_id = ? AND pi.index_id IS NULL LIMIT 1",
+            (repository_id,),
+        ).fetchone()
+        if existing is None and unowned is None:
+            return None
+        try:
+            self._connection.execute("BEGIN IMMEDIATE")
+            if existing is None:
+                self._connection.execute(
+                    "INSERT INTO projects (project_id, name, repository_id, created_at) VALUES (?, ?, ?, ?)",
+                    (project_id, name, repository_id, _datetime_text(created_at)),
+                )
+            rows = self._connection.execute(
+                "SELECT i.index_id FROM index_snapshots AS i "
+                "LEFT JOIN project_indexes AS pi ON pi.index_id = i.index_id "
+                "WHERE i.repository_id = ? AND pi.index_id IS NULL ORDER BY i.rowid",
+                (repository_id,),
+            ).fetchall()
+            association_time = _datetime_text(datetime.now(timezone.utc))
+            for row in rows:
+                self._connection.execute(
+                    "INSERT INTO project_indexes (project_id, index_id, associated_at) VALUES (?, ?, ?)",
+                    (project_id, row["index_id"], association_time),
+                )
+            latest = self._connection.execute(
+                "SELECT index_id FROM project_indexes WHERE project_id = ? "
+                "ORDER BY associated_at DESC, index_id DESC LIMIT 1",
+                (project_id,),
+            ).fetchone()
+            if latest is not None:
+                self._connection.execute(
+                    "UPDATE projects SET latest_index_id = ? WHERE project_id = ?",
+                    (latest["index_id"], project_id),
+                )
+            self._connection.execute("COMMIT")
+        except sqlite3.IntegrityError as exc:
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise StorageConflictError("legacy indexes could not be associated with a project") from exc
+        except sqlite3.Error as exc:
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise StorageError(f"could not migrate legacy project indexes: {exc}") from exc
+        return self.load_project(project_id)
+
+    def list_project_indexes(self, project_id: str) -> tuple[IndexSnapshot, ...]:
+        self.load_project(project_id)
+        rows = self._connection.execute(
+            "SELECT i.* FROM index_snapshots AS i "
+            "JOIN project_indexes AS pi ON pi.index_id = i.index_id "
+            "WHERE pi.project_id = ? ORDER BY pi.associated_at DESC, i.index_id DESC",
+            (project_id,),
+        ).fetchall()
+        return tuple(_index_from_row(row) for row in rows)
+
+    def project_has_index(self, project_id: str, index_id: str) -> bool:
+        self.load_project(project_id)
+        return self._connection.execute(
+            "SELECT 1 FROM project_indexes WHERE project_id = ? AND index_id = ?",
+            (project_id, index_id),
+        ).fetchone() is not None
+
+    def set_project_building(self, project_id: str, building_index_id: str) -> None:
+        self.load_project(project_id)
+        cursor = self._connection.execute(
+            "UPDATE projects SET building_index_id = ? WHERE project_id = ?",
+            (building_index_id, project_id),
+        )
+        if cursor.rowcount != 1:
+            raise StorageNotFoundError(f"project {project_id!r} was not found")
+
+    def finish_project_index(self, project_id: str, index_id: str) -> None:
+        project = self.load_project(project_id)
+        index_row = self._require_index(index_id)
+        if index_row["repository_id"] != project.repository_id:
+            raise StorageInputError("project and index repository IDs do not match")
+        if index_row["status"] != "ready":
+            raise StorageInputError("only ready indexes can be associated with a project")
+        owner = self._connection.execute(
+            "SELECT project_id FROM project_indexes WHERE index_id = ?",
+            (index_id,),
+        ).fetchone()
+        if owner is not None and owner["project_id"] != project_id:
+            raise StorageConflictError("index already belongs to another project")
+        try:
+            self._connection.execute("BEGIN IMMEDIATE")
+            self._connection.execute(
+                "INSERT OR IGNORE INTO project_indexes (project_id, index_id, associated_at) VALUES (?, ?, ?)",
+                (project_id, index_id, _datetime_text(datetime.now(timezone.utc))),
+            )
+            self._connection.execute(
+                "UPDATE projects SET latest_index_id = ?, building_index_id = NULL WHERE project_id = ?",
+                (index_id, project_id),
+            )
+            self._connection.execute("COMMIT")
+        except sqlite3.IntegrityError as exc:
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise StorageConflictError("index could not be associated with the project") from exc
+        except sqlite3.Error as exc:
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise StorageError(f"could not finish project index: {exc}") from exc
+
+    def clear_project_building(self, project_id: str) -> None:
+        self._connection.execute(
+            "UPDATE projects SET building_index_id = NULL WHERE project_id = ?",
+            (project_id,),
+        )
+
+    def recover_building_projects(self) -> None:
+        """Clear markers left by a synchronous build interrupted by a restart."""
+
+        self._connection.execute("UPDATE projects SET building_index_id = NULL")
 
     def write_index(self, relation: RelationIndex) -> None:
         """Write one complete relation index atomically and idempotently."""
@@ -651,6 +878,22 @@ class IndexStore:
             for row in unresolved_rows
         )
 
+    def _project_from_row(self, row: sqlite3.Row) -> ProjectRecord:
+        available_rows = self._connection.execute(
+            "SELECT index_id FROM project_indexes WHERE project_id = ? "
+            "ORDER BY associated_at DESC, index_id DESC",
+            (row["project_id"],),
+        ).fetchall()
+        return ProjectRecord(
+            project_id=row["project_id"],
+            name=row["name"],
+            repository_id=row["repository_id"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+            available_index_ids=tuple(item["index_id"] for item in available_rows),
+            latest_index_id=row["latest_index_id"],
+            building_index_id=row["building_index_id"],
+        )
+
     def _check_fts5(self) -> None:
         try:
             self._connection.execute(
@@ -937,6 +1180,10 @@ def _snippet(source_text: str, tokens: list[str], qualified_name: str, max_chars
 def _source_lines(source_text: str) -> list[str]:
     lines = source_text.splitlines()
     return lines or [""]
+
+
+def _datetime_text(value: datetime) -> str:
+    return value.astimezone(timezone.utc).isoformat()
 
 
 def _model_size(model: object) -> int:

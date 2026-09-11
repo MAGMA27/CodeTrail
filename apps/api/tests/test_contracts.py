@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -13,6 +14,7 @@ from app.contracts import (
     FixtureResponseSet,
     ReadSourceParams,
     ReadSourceSuccess,
+    Project,
     SseEventFrame,
 )
 from app.export_schema import build_schema_document
@@ -146,3 +148,26 @@ def test_sse_frame_metadata_must_match_event() -> None:
 
     with pytest.raises(ValidationError):
         SseEventFrame(id=99, event=event.type, data=event)
+
+
+def test_project_contract_keeps_latest_and_building_indexes_separate() -> None:
+    created_at = datetime.now(timezone.utc)
+    project = Project(
+        project_id="project-one",
+        name="Project One",
+        repository_id="repo-one",
+        created_at=created_at,
+        available_index_ids=["index-one"],
+        latest_index_id="index-one",
+        building_index_id="pending-index",
+    )
+
+    assert project.latest_index_id == "index-one"
+    with pytest.raises(ValidationError):
+        Project(
+            project_id="project-one",
+            name="Project One",
+            repository_id="repo-one",
+            created_at=created_at,
+            available_index_ids=["index-one", "index-one"],
+        )

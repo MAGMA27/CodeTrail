@@ -110,6 +110,16 @@ class CreateIndexRequest(VersionedModel):
     dirty: bool = True
 
 
+class CreateProjectRequest(VersionedModel):
+    name: str = Field(min_length=1, max_length=200)
+    repository_id: Identifier
+
+
+class CreateProjectIndexRequest(VersionedModel):
+    revision: str = Field(default="working-tree", min_length=1, max_length=200)
+    dirty: bool = True
+
+
 class IndexResponse(VersionedModel):
     index: IndexSnapshot
     issues: list[IndexIssue] = Field(default_factory=list)
@@ -122,6 +132,47 @@ class IndexResponse(VersionedModel):
             raise ValueError("truncated indexes must explain the truncation")
         if not self.truncated and self.truncation_reason:
             raise ValueError("non-truncated indexes cannot have a truncation reason")
+        return self
+
+
+class Project(VersionedModel):
+    project_id: Identifier
+    name: str = Field(min_length=1, max_length=200)
+    repository_id: Identifier
+    created_at: datetime
+    available_index_ids: list[Identifier] = Field(default_factory=list)
+    latest_index_id: Identifier | None = None
+    building_index_id: Identifier | None = None
+
+    @model_validator(mode="after")
+    def validate_index_associations(self) -> Project:
+        available_ids = set(self.available_index_ids)
+        if len(available_ids) != len(self.available_index_ids):
+            raise ValueError("project available index IDs must be unique")
+        if self.latest_index_id is not None and self.latest_index_id not in available_ids:
+            raise ValueError("project latest index must be available")
+        if self.building_index_id is not None and self.building_index_id in available_ids:
+            raise ValueError("project building index must not be marked available")
+        return self
+
+
+class ProjectListResponse(VersionedModel):
+    projects: list[Project] = Field(default_factory=list)
+
+
+class ProjectIndexListResponse(VersionedModel):
+    project_id: Identifier
+    indexes: list[IndexSnapshot] = Field(default_factory=list)
+    latest_index_id: Identifier | None = None
+    building_index_id: Identifier | None = None
+
+    @model_validator(mode="after")
+    def validate_index_list(self) -> ProjectIndexListResponse:
+        index_ids = {index.index_id for index in self.indexes}
+        if len(index_ids) != len(self.indexes):
+            raise ValueError("project indexes must have unique index IDs")
+        if self.latest_index_id is not None and self.latest_index_id not in index_ids:
+            raise ValueError("project latest index must be present in the index list")
         return self
 
 

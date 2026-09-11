@@ -17,13 +17,18 @@ from pydantic import BaseModel
 from .contracts import (
     ApiErrorResponse,
     CreateIndexRequest,
+    CreateProjectIndexRequest,
+    CreateProjectRequest,
     EdgeKind,
     IndexResponse,
     NeighborsIndexResponse,
+    Project,
+    ProjectIndexListResponse,
+    ProjectListResponse,
     SearchIndexResponse,
     SourceIndexResponse,
 )
-from .service import IndexService, RepositoryRegistry, ServiceError
+from .service import IndexService, RepositoryRegistry, ServiceError, WorkspaceService
 from .storage import StorageError
 
 
@@ -63,6 +68,7 @@ def create_app(repository_roots: Mapping[str, str | Path] | None = None) -> Fast
         else RepositoryRegistry(repository_roots)
     )
     index_service = IndexService(registry)
+    workspace_service = WorkspaceService(registry, index_service)
     application = FastAPI(title="CodeTrail API", version="0.1.0")
     application.state.index_service = index_service
     application.add_middleware(
@@ -90,6 +96,116 @@ def create_app(repository_roots: Mapping[str, str | Path] | None = None) -> Fast
         """Report that the local API is available."""
 
         return HealthResponse(status="ok", service="codetrail-api", version="0.1.0")
+
+    @application.post(
+        "/api/projects",
+        response_model=Project,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def create_project(request: CreateProjectRequest) -> Project:
+        return await run_in_threadpool(workspace_service.create_project, request)
+
+    @application.get(
+        "/api/projects",
+        response_model=ProjectListResponse,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def list_projects() -> ProjectListResponse:
+        return await run_in_threadpool(workspace_service.list_projects)
+
+    @application.get(
+        "/api/projects/{project_id}/indexes",
+        response_model=ProjectIndexListResponse,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def list_project_indexes(project_id: str) -> ProjectIndexListResponse:
+        return await run_in_threadpool(workspace_service.list_project_indexes, project_id)
+
+    @application.post(
+        "/api/projects/{project_id}/indexes",
+        response_model=IndexResponse,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def create_project_index(
+        project_id: str,
+        request: CreateProjectIndexRequest,
+    ) -> IndexResponse:
+        return await run_in_threadpool(workspace_service.create_project_index, project_id, request)
+
+    @application.get(
+        "/api/projects/{project_id}/indexes/{index_id}",
+        response_model=IndexResponse,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def get_project_index(project_id: str, index_id: str) -> IndexResponse:
+        return await run_in_threadpool(workspace_service.get_project_index, project_id, index_id)
+
+    @application.get(
+        "/api/projects/{project_id}/indexes/{index_id}/search",
+        response_model=SearchIndexResponse,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def search_project_index(
+        project_id: str,
+        index_id: str,
+        query: str = Query(min_length=1, max_length=500),
+        limit: int = Query(default=40, ge=1, le=40),
+    ) -> SearchIndexResponse:
+        return await run_in_threadpool(workspace_service.search, project_id, index_id, query, limit)
+
+    @application.get(
+        "/api/projects/{project_id}/indexes/{index_id}/neighbors",
+        response_model=NeighborsIndexResponse,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def get_project_neighbors(
+        project_id: str,
+        index_id: str,
+        symbol_id: str,
+        direction: Literal["callers", "callees", "both"],
+        depth: int = Query(default=2, ge=1, le=2),
+        limit: int = Query(default=40, ge=1, le=40),
+        edge_kinds: list[EdgeKind] | None = Query(default=None),
+    ) -> NeighborsIndexResponse:
+        return await run_in_threadpool(
+            workspace_service.neighbors,
+            project_id,
+            index_id,
+            symbol_id,
+            direction,
+            depth,
+            limit,
+            tuple(edge_kinds) if edge_kinds else None,
+        )
+
+    @application.get(
+        "/api/projects/{project_id}/indexes/{index_id}/source",
+        response_model=SourceIndexResponse,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def read_project_source(
+        project_id: str,
+        index_id: str,
+        path: str = Query(min_length=1, max_length=500),
+        start_line: int = Query(ge=1),
+        end_line: int = Query(ge=1),
+    ) -> SourceIndexResponse:
+        return await run_in_threadpool(
+            workspace_service.read_source,
+            project_id,
+            index_id,
+            path,
+            start_line,
+            end_line,
+        )
+
+    @application.get(
+        "/api/projects/{project_id}",
+        response_model=Project,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def get_project(project_id: str) -> Project:
+        return await run_in_threadpool(workspace_service.get_project, project_id)
 
     @application.post(
         "/api/indexes",

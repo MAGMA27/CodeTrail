@@ -17,19 +17,23 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   ApiRequestError,
-  createIndex,
+  createProject,
+  createProjectIndex,
   getHealth,
-  getNeighbors,
+  getProjectNeighbors,
+  listProjectIndexes,
+  listProjects,
   isHealthResponse,
-  openIndex,
-  readSource,
-  searchIndex,
+  openProjectIndex,
+  readProjectSource,
+  searchProjectIndex,
   type CodeEdge,
   type EdgeKind,
   type Evidence,
   type HealthResponse,
   type IndexResponse,
   type NeighborDirection,
+  type ProjectRecord,
   type SearchMatch,
   type SourceResponse,
   type SymbolRecord,
@@ -173,6 +177,12 @@ export default function Workbench() {
   const [connectionState, setConnectionState] = useState<"checking" | "connected" | "error">("checking");
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [projects, setProjects] = useState<ProjectRecord[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [projectName, setProjectName] = useState("Timeout Demo");
+  const [projectStatus, setProjectStatus] = useState<AsyncStatus>("idle");
+  const [projectError, setProjectError] = useState<string | null>(null);
+  const [projectIndexes, setProjectIndexes] = useState<IndexResponse["index"][]>([]);
   const [repositoryId, setRepositoryId] = useState("timeout-demo");
   const [revision, setRevision] = useState("fixture-v1");
   const [dirty, setDirty] = useState(false);
@@ -198,11 +208,13 @@ export default function Workbench() {
   const [flowInstance, setFlowInstance] = useState<ReactFlowInstance<FlowNode, FlowEdge> | null>(null);
 
   const healthController = useRef<AbortController | null>(null);
+  const projectController = useRef<AbortController | null>(null);
   const indexController = useRef<AbortController | null>(null);
   const searchController = useRef<AbortController | null>(null);
   const graphController = useRef<AbortController | null>(null);
   const sourceController = useRef<AbortController | null>(null);
   const indexRequestId = useRef(0);
+  const projectRequestId = useRef(0);
   const searchRequestId = useRef(0);
   const graphRequestId = useRef(0);
   const sourceRequestId = useRef(0);
@@ -231,10 +243,38 @@ export default function Workbench() {
     }
   }, []);
 
+  const loadProjects = useCallback(async () => {
+    projectController.current?.abort();
+    const controller = new AbortController();
+    projectController.current = controller;
+    const requestId = ++projectRequestId.current;
+    setProjectStatus("loading");
+    setProjectError(null);
+    try {
+      const response = await listProjects(controller.signal);
+      if (!isLatestRequest(requestId, projectRequestId.current)) {
+        return;
+      }
+      setProjects(response.projects);
+      setProjectStatus(response.projects.length > 0 ? "success" : "empty");
+      const savedProjectId = window.localStorage.getItem("codetrail.selectedProjectId");
+      const nextProject =
+        response.projects.find((project) => project.project_id === savedProjectId) ?? response.projects[0] ?? null;
+      setSelectedProjectId(nextProject?.project_id ?? null);
+    } catch (error) {
+      if (isAbortError(error) || !isLatestRequest(requestId, projectRequestId.current)) {
+        return;
+      }
+      setProjectStatus("error");
+      setProjectError(errorMessage(error));
+    }
+  }, []);
+
   useEffect(() => {
     void checkHealth();
     return () => {
       healthController.current?.abort();
+      projectController.current?.abort();
       indexController.current?.abort();
       searchController.current?.abort();
       graphController.current?.abort();
@@ -280,22 +320,43 @@ export default function Workbench() {
     [clearExploration],
   );
 
-  const createNewIndex = useCallback(
-    async (event: React.FormEvent<HTMLFormElement>) => {
-      event.preventDefault();
-      const repository = repositoryId.trim();
-      if (!repository) {
-        setIndexError("请输入服务端 allow-list 中的 repository_id。");
-        return;
-      }
+  const loadSelectedProject = useCallback(
+    async (projectId: string) => {
       indexController.current?.abort();
       const controller = new AbortController();
       indexController.current = controller;
       const requestId = ++indexRequestId.current;
-      setIndexStatus("creating");
+      setIndexResponse(null);
+      setIndexIdInput("");
       setIndexError(null);
+      setProjectIndexes([]);
+      setIndexStatus("loading");
+      clearExploration();
       try {
-        const response = await createIndex(repository, revision.trim() || "working-tree", dirty, controller.signal);
+        const projectIndexResponse = await listProjectIndexes(projectId, controller.signal);
+        if (!isLatestRequest(requestId, indexRequestId.current)) {
+          return;
+        }
+        setProjectIndexes(projectIndexResponse.indexes);
+        setProjects((previous) => previous.map((project) => (
+          project.project_id === projectId
+            ? {
+                ...project,
+                available_index_ids: projectIndexResponse.indexes.map((index) => index.index_id),
+                latest_index_id: projectIndexResponse.latest_index_id,
+                building_index_id: projectIndexResponse.building_index_id,
+              }
+            : project
+        )));
+        if (!projectIndexResponse.latest_index_id) {
+          setIndexStatus("unindexed");
+          return;
+        }
+        const response = await openProjectIndex(
+          projectId,
+          projectIndexResponse.latest_index_id,
+          controller.signal,
+        );
         if (!isLatestRequest(requestId, indexRequestId.current)) {
           return;
         }
@@ -308,12 +369,128 @@ export default function Workbench() {
         setIndexError(errorMessage(error));
       }
     },
-    [applyIndexResponse, dirty, repositoryId, revision],
+    [applyIndexResponse, clearExploration],
+  );
+
+  useEffect(() => {
+    void loadProjects();
+  }, [loadProjects]);
+
+  useEffect(() => {
+    if (!selectedProjectId) {
+      indexController.current?.abort();
+      indexRequestId.current += 1;
+      setProjectIndexes([]);
+      setIndexResponse(null);
+      setIndexIdInput("");
+      setIndexStatus("unindexed");
+      setIndexError(null);
+      clearExploration();
+      return;
+    }
+    const project = projects.find((candidate) => candidate.project_id === selectedProjectId);
+    if (!project) {
+      return;
+    }
+    setProjectName(project.name);
+    setRepositoryId(project.repository_id);
+    window.localStorage.setItem("codetrail.selectedProjectId", project.project_id);
+    void loadSelectedProject(project.project_id);
+  }, [clearExploration, loadSelectedProject, selectedProjectId]);
+
+  const createNewProject = useCallback(
+    async (event: React.FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      const name = projectName.trim();
+      const repository = repositoryId.trim();
+      if (!name || !repository) {
+        setProjectError("请输入项目名称和服务端 allow-list 中的 repository_id。");
+        return;
+      }
+      projectController.current?.abort();
+      const controller = new AbortController();
+      projectController.current = controller;
+      const requestId = ++projectRequestId.current;
+      setProjectStatus("loading");
+      setProjectError(null);
+      try {
+        const project = await createProject(name, repository, controller.signal);
+        if (!isLatestRequest(requestId, projectRequestId.current)) {
+          return;
+        }
+        setProjects((previous) => [...previous, project]);
+        setSelectedProjectId(project.project_id);
+        setProjectStatus("success");
+      } catch (error) {
+        if (isAbortError(error) || !isLatestRequest(requestId, projectRequestId.current)) {
+          return;
+        }
+        setProjectStatus("error");
+        setProjectError(errorMessage(error));
+      }
+    },
+    [projectName, repositoryId],
+  );
+
+  const createNewIndex = useCallback(
+    async (event: React.FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      if (!selectedProjectId) {
+        setIndexError("请先创建或切换到一个项目。");
+        return;
+      }
+      indexController.current?.abort();
+      const controller = new AbortController();
+      indexController.current = controller;
+      const requestId = ++indexRequestId.current;
+      setIndexStatus("creating");
+      setIndexError(null);
+      try {
+        const response = await createProjectIndex(
+          selectedProjectId,
+          revision.trim() || "working-tree",
+          dirty,
+          controller.signal,
+        );
+        if (!isLatestRequest(requestId, indexRequestId.current)) {
+          return;
+        }
+        applyIndexResponse(response);
+        setProjectIndexes((previous) => [
+          response.index,
+          ...previous.filter((index) => index.index_id !== response.index.index_id),
+        ]);
+        setProjects((previous) => previous.map((project) => (
+          project.project_id === selectedProjectId
+            ? {
+                ...project,
+                available_index_ids: [
+                  response.index.index_id,
+                  ...project.available_index_ids.filter((indexId) => indexId !== response.index.index_id),
+                ],
+                latest_index_id: response.index.index_id,
+                building_index_id: null,
+              }
+            : project
+        )));
+      } catch (error) {
+        if (isAbortError(error) || !isLatestRequest(requestId, indexRequestId.current)) {
+          return;
+        }
+        setIndexStatus("error");
+        setIndexError(errorMessage(error));
+      }
+    },
+    [applyIndexResponse, dirty, revision, selectedProjectId],
   );
 
   const openExistingIndex = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault();
+      if (!selectedProjectId) {
+        setIndexError("请先创建或切换到一个项目。");
+        return;
+      }
       const indexId = indexIdInput.trim();
       if (!indexId) {
         setIndexError("请输入已有 index_id。");
@@ -326,7 +503,7 @@ export default function Workbench() {
       setIndexStatus("loading");
       setIndexError(null);
       try {
-        const response = await openIndex(indexId, controller.signal);
+        const response = await openProjectIndex(selectedProjectId, indexId, controller.signal);
         if (!isLatestRequest(requestId, indexRequestId.current)) {
           return;
         }
@@ -339,12 +516,12 @@ export default function Workbench() {
         setIndexError(errorMessage(error));
       }
     },
-    [applyIndexResponse, indexIdInput],
+    [applyIndexResponse, indexIdInput, selectedProjectId],
   );
 
   const loadSource = useCallback(
     async (symbol: SymbolRecord, startLine = symbol.start_line) => {
-      if (!indexResponse) {
+      if (!indexResponse || !selectedProjectId) {
         return;
       }
       sourceController.current?.abort();
@@ -356,7 +533,8 @@ export default function Workbench() {
       setSourceStatus("loading");
       setSourceError(null);
       try {
-        const response = await readSource(
+        const response = await readProjectSource(
+          selectedProjectId,
           indexResponse.index.index_id,
           symbol.path,
           startLine,
@@ -377,7 +555,7 @@ export default function Workbench() {
         setSourceError(errorMessage(error));
       }
     },
-    [indexResponse],
+    [indexResponse, selectedProjectId],
   );
 
   const selectSymbol = useCallback(
@@ -396,6 +574,9 @@ export default function Workbench() {
       requestedDirection = direction,
       requestedEdgeKinds = edgeKinds,
     ) => {
+      if (!selectedProjectId) {
+        return;
+      }
       graphController.current?.abort();
       const controller = new AbortController();
       graphController.current = controller;
@@ -409,7 +590,8 @@ export default function Workbench() {
         knownGroupKeys.current.clear();
       }
       try {
-        const response = await getNeighbors(
+        const response = await getProjectNeighbors(
+          selectedProjectId,
           indexId,
           symbolId,
           requestedDirection,
@@ -433,14 +615,14 @@ export default function Workbench() {
         setGraphError(errorMessage(error));
       }
     },
-    [direction, edgeKinds],
+    [direction, edgeKinds, selectedProjectId],
   );
 
   const runSearch = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault();
-      if (!indexResponse) {
-        setSearchError("请先创建或打开一个索引。");
+      if (!indexResponse || !selectedProjectId) {
+        setSearchError("请先创建项目并打开一个索引。");
         return;
       }
       const query = searchQuery.trim();
@@ -466,7 +648,13 @@ export default function Workbench() {
       setExpandedGroups(new Set());
       knownGroupKeys.current.clear();
       try {
-        const response = await searchIndex(indexResponse.index.index_id, query, 40, controller.signal);
+        const response = await searchProjectIndex(
+          selectedProjectId,
+          indexResponse.index.index_id,
+          query,
+          40,
+          controller.signal,
+        );
         if (!isLatestRequest(requestId, searchRequestId.current)) {
           return;
         }
@@ -487,15 +675,18 @@ export default function Workbench() {
         setSearchError(errorMessage(error));
       }
     },
-    [indexResponse, loadNeighborhood, searchQuery, selectSymbol],
+    [indexResponse, loadNeighborhood, searchQuery, selectSymbol, selectedProjectId],
   );
 
   const handleSearchResult = useCallback(
     (match: SearchMatch) => {
+      if (!selectedProjectId || !indexResponse) {
+        return;
+      }
       selectSymbol(match.symbol);
-      void loadNeighborhood(indexResponse?.index.index_id ?? "", match.symbol.symbol_id, true);
+      void loadNeighborhood(indexResponse.index.index_id, match.symbol.symbol_id, true);
     },
-    [indexResponse, loadNeighborhood, selectSymbol],
+    [indexResponse, loadNeighborhood, selectSymbol, selectedProjectId],
   );
 
   const selectedSymbol = useMemo(() => {
@@ -648,6 +839,10 @@ export default function Workbench() {
   }, [graph.edges, selectedId]);
 
   const indexIdentity = indexResponse?.index;
+  const selectedProject = useMemo(
+    () => projects.find((project) => project.project_id === selectedProjectId) ?? null,
+    [projects, selectedProjectId],
+  );
   const sourceHasPrevious = selectedSymbol && sourceWindowStart > selectedSymbol.start_line;
   const sourceHasNext =
     selectedSymbol && sourceResponse && sourceResponse.evidence.end_line < selectedSymbol.end_line;
@@ -689,17 +884,69 @@ export default function Workbench() {
         </div>
       </header>
 
-      <section className="command-bar" aria-label="索引控制">
-        <form className="command-group" onSubmit={(event) => void createNewIndex(event)}>
-          <label htmlFor="repository-id">服务端仓库 ID</label>
-          <div className="command-input-row">
+      <section className="project-bar panel-surface" aria-label="工作区项目">
+        <div className="project-bar-heading">
+          <div>
+            <p className="section-index">00 / WORKSPACE</p>
+            <h2>项目工作区</h2>
+          </div>
+          <span className="status-pill" data-state={projectStatus}>
+            {projectStatus === "loading" ? "同步中" : projectStatus === "error" ? "加载失败" : `${projects.length} 个项目`}
+          </span>
+        </div>
+        <div className="project-bar-body">
+          <div className="project-list" aria-label="项目列表">
+            {projects.length > 0 ? projects.map((project) => (
+              <button
+                type="button"
+                className={`project-card${project.project_id === selectedProjectId ? " is-selected" : ""}`}
+                key={project.project_id}
+                onClick={() => setSelectedProjectId(project.project_id)}
+                aria-label={`切换项目 ${project.name}`}
+              >
+                <span className="project-card-mark" aria-hidden="true">{project.name.slice(0, 1).toUpperCase()}</span>
+                <span className="project-card-copy">
+                  <strong>{project.name}</strong>
+                  <small>{project.repository_id} · {project.available_index_ids.length > 0 ? `${project.available_index_ids.length} 个快照` : "未索引"}</small>
+                </span>
+                <span className="project-card-state">{project.project_id === selectedProjectId ? "当前" : "切换"}</span>
+              </button>
+            )) : (
+              <div className="project-empty"><span>∅</span><p>还没有项目，先创建一个服务端仓库项目。</p></div>
+            )}
+          </div>
+          <form className="project-create-form" onSubmit={(event) => void createNewProject(event)}>
+            <label htmlFor="project-name">新项目名称</label>
             <input
-              id="repository-id"
+              id="project-name"
+              value={projectName}
+              onChange={(event) => setProjectName(event.target.value)}
+              placeholder="Timeout Demo"
+              spellCheck={false}
+            />
+            <label htmlFor="project-repository">来源 repository_id</label>
+            <input
+              id="project-repository"
               value={repositoryId}
               onChange={(event) => setRepositoryId(event.target.value)}
               placeholder="timeout-demo"
               spellCheck={false}
             />
+            <button type="submit" className="primary-button" disabled={projectStatus === "loading"}>
+              {projectStatus === "loading" ? "保存中…" : "创建项目"}
+            </button>
+          </form>
+        </div>
+      </section>
+
+      <section className="command-bar" aria-label="索引控制">
+        <form className="command-group" onSubmit={(event) => void createNewIndex(event)}>
+          <label>当前项目 / 服务端仓库</label>
+          <div className="command-input-row">
+            <div className="project-context-readout">
+              <strong>{selectedProject?.name ?? "未选择项目"}</strong>
+              <code>{selectedProject?.repository_id ?? "—"}</code>
+            </div>
             <input
               aria-label="索引 revision"
               value={revision}
@@ -711,13 +958,13 @@ export default function Workbench() {
               <input type="checkbox" checked={dirty} onChange={(event) => setDirty(event.target.checked)} />
               <span>dirty</span>
             </label>
-            <button type="submit" className="primary-button" disabled={indexStatus === "creating"}>
+            <button type="submit" className="primary-button" disabled={!selectedProjectId || indexStatus === "creating"}>
               {indexStatus === "creating" ? "建立中…" : "创建索引"}
             </button>
           </div>
         </form>
         <form className="command-group command-open" onSubmit={(event) => void openExistingIndex(event)}>
-          <label htmlFor="index-id">打开已有 index_id</label>
+          <label htmlFor="index-id">打开当前项目已有 index_id · {projectIndexes.length} 个快照</label>
           <div className="command-input-row">
             <input
               id="index-id"
@@ -726,7 +973,7 @@ export default function Workbench() {
               placeholder="index-timeout-demo-…"
               spellCheck={false}
             />
-            <button type="submit" className="secondary-button" disabled={indexStatus === "loading"}>
+            <button type="submit" className="secondary-button" disabled={!selectedProjectId || indexStatus === "loading"}>
               {indexStatus === "loading" ? "载入中…" : "打开"}
             </button>
           </div>
@@ -736,9 +983,9 @@ export default function Workbench() {
         </button>
       </section>
 
-      {indexError || connectionError ? (
+      {indexError || connectionError || projectError ? (
         <div className="global-alert" role="alert">
-          <span>{indexError ?? connectionError}</span>
+          <span>{indexError ?? projectError ?? connectionError}</span>
           {connectionState === "error" ? (
             <button type="button" onClick={() => void checkHealth()}>
               重新检查
