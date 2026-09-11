@@ -313,6 +313,64 @@ select {
   border-left: 1px solid var(--line);
 }
 
+.project-forms {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  padding-left: 14px;
+  border-left: 1px solid var(--line);
+}
+
+.project-forms .project-create-form {
+  padding-left: 0;
+  border-left: 0;
+}
+
+.project-import-form {
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.form-help {
+  color: var(--quiet);
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.import-status {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.import-status[data-state="ready"] {
+  color: var(--mint);
+}
+
+.import-status[data-state="failed"],
+.import-status[data-state="interrupted"] {
+  color: var(--amber);
+}
+
+.import-status code {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.text-button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+}
+
 .project-create-form label {
   color: var(--quiet);
   font-size: 9px;
@@ -1390,6 +1448,18 @@ input[type="checkbox"] {
     padding-left: 0;
     border-top: 1px solid var(--line);
     border-left: 0;
+  }
+
+  .project-forms {
+    padding-top: 12px;
+    padding-left: 0;
+    border-top: 1px solid var(--line);
+    border-left: 0;
+  }
+
+  .project-forms .project-create-form {
+    padding-top: 0;
+    border-top: 0;
   }
 
   .health-button {

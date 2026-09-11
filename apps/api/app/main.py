@@ -20,7 +20,10 @@ from .contracts import (
     CreateProjectIndexRequest,
     CreateProjectRequest,
     EdgeKind,
+    ImportAttemptResponse,
     IndexResponse,
+    LocalImportRequest,
+    LocalImportResponse,
     NeighborsIndexResponse,
     Project,
     ProjectIndexListResponse,
@@ -28,7 +31,7 @@ from .contracts import (
     SearchIndexResponse,
     SourceIndexResponse,
 )
-from .service import IndexService, RepositoryRegistry, ServiceError, WorkspaceService
+from .service import IndexService, RepositoryRegistry, ServiceError, WorkspaceService, is_loopback_host
 from .storage import StorageError
 
 
@@ -46,6 +49,7 @@ _API_ERROR_RESPONSES = {
     409: {"model": ApiErrorResponse},
     422: {"model": ApiErrorResponse},
     429: {"model": ApiErrorResponse},
+    403: {"model": ApiErrorResponse},
     500: {"model": ApiErrorResponse},
     503: {"model": ApiErrorResponse},
 }
@@ -59,18 +63,29 @@ def _allowed_origins() -> list[str]:
     return [origin.strip() for origin in configured_origins.split(",") if origin.strip()]
 
 
-def create_app(repository_roots: Mapping[str, str | Path] | None = None) -> FastAPI:
+def create_app(
+    repository_roots: Mapping[str, str | Path] | None = None,
+    *,
+    data_root: str | Path | None = None,
+    allowed_import_roots: tuple[str | Path, ...] | list[str | Path] | None = None,
+) -> FastAPI:
     """Create an API with a server-owned repository allow-list."""
 
     registry = (
         RepositoryRegistry.from_environment()
         if repository_roots is None
-        else RepositoryRegistry(repository_roots)
+        else RepositoryRegistry(
+            repository_roots,
+            data_root=data_root,
+            allowed_import_roots=allowed_import_roots,
+        )
     )
     index_service = IndexService(registry)
     workspace_service = WorkspaceService(registry, index_service)
     application = FastAPI(title="CodeTrail API", version="0.1.0")
     application.state.index_service = index_service
+    application.state.registry = registry
+    application.state.workspace_service = workspace_service
     application.add_middleware(
         CORSMiddleware,
         allow_origins=_allowed_origins(),
@@ -96,6 +111,32 @@ def create_app(repository_roots: Mapping[str, str | Path] | None = None) -> Fast
         """Report that the local API is available."""
 
         return HealthResponse(status="ok", service="codetrail-api", version="0.1.0")
+
+    @application.post(
+        "/api/imports/local",
+        response_model=LocalImportResponse,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def import_local(http_request: Request, payload: LocalImportRequest) -> LocalImportResponse:
+        _require_local_write(http_request)
+        return await run_in_threadpool(workspace_service.import_local, payload)
+
+    @application.get(
+        "/api/imports/{attempt_id}",
+        response_model=ImportAttemptResponse,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def get_import_status(attempt_id: str) -> ImportAttemptResponse:
+        return await run_in_threadpool(workspace_service.get_import_status, attempt_id)
+
+    @application.post(
+        "/api/imports/{attempt_id}/retry",
+        response_model=LocalImportResponse,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def retry_import(http_request: Request, attempt_id: str) -> LocalImportResponse:
+        _require_local_write(http_request)
+        return await run_in_threadpool(workspace_service.retry_import, attempt_id)
 
     @application.post(
         "/api/projects",
@@ -278,6 +319,12 @@ def create_app(repository_roots: Mapping[str, str | Path] | None = None) -> Fast
         )
 
     return application
+
+
+def _require_local_write(request: Request) -> None:
+    host = request.client.host if request.client is not None else None
+    if not is_loopback_host(host):
+        raise ServiceError("forbidden", 403, "local import writes require a loopback client")
 
 
 def _error_response(status_code: int, code: str, message: str) -> JSONResponse:

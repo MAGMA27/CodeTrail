@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
+import ipaddress
 import json
 import os
 import threading
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, TypeVar
@@ -18,8 +21,12 @@ from .contracts import (
     CreateProjectRequest,
     GetNeighborsParams,
     GetNeighborsSuccess,
+    ImportAttempt,
+    ImportAttemptResponse,
     IndexIssue,
     IndexResponse,
+    LocalImportRequest,
+    LocalImportResponse,
     NeighborsIndexResponse,
     Project,
     ProjectIndexListResponse,
@@ -38,6 +45,9 @@ from .indexing import SnapshotBoundaryError, build_source_snapshot, extract_defi
 from .relations import extract_relations
 from .storage import (
     IndexStore,
+    ImportAttemptRecord,
+    ManagedSourceRecord,
+    ManagementStore,
     ProjectRecord,
     StorageConflictError,
     StorageError,
@@ -56,54 +66,200 @@ class ServiceError(RuntimeError):
         self.message = message
 
 
-class RepositoryRegistry:
-    """Allow-list of repository IDs and server-owned local roots."""
+@dataclass(frozen=True)
+class RepositorySpec:
+    """Source and storage locations for one configured or managed repository."""
 
-    def __init__(self, roots: Mapping[str, str | Path]) -> None:
-        normalized: dict[str, Path] = {}
+    repository_id: str
+    source_root: Path
+    storage_root: Path
+    normalized_source_path: str
+    managed: bool
+    project_id: str | None = None
+
+
+class RepositoryRegistry:
+    """Allow-list plus persistent managed local sources and service storage."""
+
+    def __init__(
+        self,
+        roots: Mapping[str, str | Path],
+        *,
+        data_root: str | Path | None = None,
+        allowed_import_roots: tuple[str | Path, ...] | list[str | Path] | None = None,
+        mcp_local_import_enabled: bool | None = None,
+    ) -> None:
+        normalized: dict[str, RepositorySpec] = {}
         for repository_id, repository_root in roots.items():
             if not isinstance(repository_id, str) or not repository_id or len(repository_id) > 200:
                 raise ValueError("repository IDs must be non-empty strings of at most 200 characters")
             if not isinstance(repository_root, (str, Path)):
                 raise ValueError("repository roots must be filesystem paths")
             candidate = Path(repository_root)
-            if candidate.is_symlink():
-                raise ValueError("repository roots must not be symbolic links")
+            if _is_reparse_point(candidate):
+                raise ValueError("repository roots must not be symbolic links or junctions")
             try:
                 resolved = candidate.resolve(strict=True)
             except OSError as exc:
                 raise ValueError("configured repository root cannot be resolved") from exc
             if not resolved.is_dir():
                 raise ValueError("configured repository root must be a directory")
-            normalized[repository_id] = resolved
-        self._roots = normalized
+            normalized[repository_id] = RepositorySpec(
+                repository_id=repository_id,
+                source_root=resolved,
+                storage_root=resolved,
+                normalized_source_path=_normalized_path_key(resolved),
+                managed=False,
+            )
+        configured_data_root = data_root or os.getenv("CODETRAIL_DATA_DIR") or (Path.cwd() / ".codetrail")
+        self._data_root = _prepare_data_root(configured_data_root)
+        self._management_store = ManagementStore(self._data_root / "registry.sqlite3")
+        self._allowed_import_roots = self._prepare_allowed_import_roots(
+            allowed_import_roots
+            if allowed_import_roots is not None
+            else tuple(spec.source_root for spec in normalized.values())
+        )
+        self._mcp_local_import_enabled = (
+            _env_flag("CODETRAIL_MCP_LOCAL_IMPORT_ENABLED")
+            if mcp_local_import_enabled is None
+            else mcp_local_import_enabled
+        )
+        self._lock = threading.RLock()
+        self._specs = normalized
+        self.refresh_managed_sources()
 
     @classmethod
     def from_environment(cls) -> RepositoryRegistry:
         raw = os.getenv("CODETRAIL_REPOSITORIES", "").strip()
-        if not raw:
-            return cls({})
-        try:
-            payload = json.loads(raw)
-        except json.JSONDecodeError as exc:
-            raise ValueError("CODETRAIL_REPOSITORIES must be a JSON object") from exc
-        if not isinstance(payload, dict):
-            raise ValueError("CODETRAIL_REPOSITORIES must be a JSON object")
-        return cls(payload)
+        payload: dict[str, str] = {}
+        if raw:
+            try:
+                decoded = json.loads(raw)
+            except json.JSONDecodeError as exc:
+                raise ValueError("CODETRAIL_REPOSITORIES must be a JSON object") from exc
+            if not isinstance(decoded, dict) or not all(isinstance(key, str) and isinstance(value, str) for key, value in decoded.items()):
+                raise ValueError("CODETRAIL_REPOSITORIES must be a JSON object")
+            payload = decoded
+        allowed_raw = os.getenv("CODETRAIL_ALLOWED_IMPORT_ROOTS", "").strip()
+        allowed: list[str] | None = None
+        if allowed_raw:
+            try:
+                allowed_payload = json.loads(allowed_raw)
+            except json.JSONDecodeError as exc:
+                raise ValueError("CODETRAIL_ALLOWED_IMPORT_ROOTS must be a JSON array") from exc
+            if not isinstance(allowed_payload, list) or not all(isinstance(item, str) for item in allowed_payload):
+                raise ValueError("CODETRAIL_ALLOWED_IMPORT_ROOTS must be a JSON array of paths")
+            allowed = allowed_payload
+        return cls(payload, allowed_import_roots=allowed)
 
     @property
     def repository_ids(self) -> tuple[str, ...]:
-        return tuple(sorted(self._roots))
+        self.refresh_managed_sources()
+        with self._lock:
+            return tuple(sorted(self._specs))
+
+    @property
+    def data_root(self) -> Path:
+        return self._data_root
+
+    @property
+    def management_store(self) -> ManagementStore:
+        return self._management_store
+
+    @property
+    def mcp_local_import_enabled(self) -> bool:
+        return self._mcp_local_import_enabled
+
+    @property
+    def allowed_import_roots(self) -> tuple[Path, ...]:
+        return self._allowed_import_roots
+
+    def refresh_managed_sources(self) -> None:
+        records = self._management_store.list_sources()
+        with self._lock:
+            for record in records:
+                existing = self._specs.get(record.repository_id)
+                if existing is not None and not existing.managed:
+                    continue
+                storage_root = Path(record.storage_path)
+                if not _path_is_within(storage_root, self._data_root):
+                    continue
+                self._specs[record.repository_id] = RepositorySpec(
+                    repository_id=record.repository_id,
+                    source_root=Path(record.source_path),
+                    storage_root=storage_root,
+                    normalized_source_path=record.normalized_source_path,
+                    managed=True,
+                    project_id=record.project_id,
+                )
+
+    def spec_for(self, repository_id: str) -> RepositorySpec:
+        self.refresh_managed_sources()
+        with self._lock:
+            spec = self._specs.get(repository_id)
+        if spec is None:
+            raise ServiceError("not_found", 404, "repository is not configured")
+        return spec
 
     def root_for(self, repository_id: str) -> Path:
-        root = self._roots.get(repository_id)
-        if root is None:
-            raise ServiceError("not_found", 404, "repository is not configured")
-        return root
+        return self.spec_for(repository_id).source_root
+
+    def source_root_for(self, repository_id: str) -> Path:
+        return self.spec_for(repository_id).source_root
+
+    def storage_root_for(self, repository_id: str) -> Path:
+        return self.spec_for(repository_id).storage_root
+
+    def is_managed(self, repository_id: str) -> bool:
+        return self.spec_for(repository_id).managed
+
+    def managed_storage_path(self, project_id: str) -> Path:
+        storage_root = (self._data_root / "projects" / project_id).resolve(strict=False)
+        if not _path_is_within(storage_root, self._data_root):
+            raise ServiceError("internal_error", 500, "managed storage path is invalid")
+        return storage_root
+
+    def repository_for_source(self, normalized_source_path: str) -> RepositorySpec | None:
+        self.refresh_managed_sources()
+        with self._lock:
+            return next(
+                (spec for spec in self._specs.values() if spec.normalized_source_path == normalized_source_path),
+                None,
+            )
+
+    def validate_import_source(self, path: str) -> tuple[Path, str]:
+        candidate = Path(path)
+        if not candidate.is_absolute():
+            raise ServiceError("invalid_input", 400, "local import path must be absolute")
+        if _is_reparse_point(candidate):
+            raise ServiceError("invalid_input", 400, "local import path must not be a symbolic link or junction")
+        try:
+            resolved = candidate.resolve(strict=True)
+        except OSError as exc:
+            raise ServiceError("invalid_input", 400, "local import directory cannot be resolved") from exc
+        if not resolved.is_dir():
+            raise ServiceError("invalid_input", 400, "local import path must be a directory")
+        if not os.access(resolved, os.R_OK):
+            raise ServiceError("invalid_input", 400, "local import directory is not readable")
+        allowed_root = next(
+            (root for root in self._allowed_import_roots if _path_is_within(resolved, root)),
+            None,
+        )
+        if allowed_root is None:
+            raise ServiceError("invalid_input", 400, "local import path is outside allowed roots")
+        if _contains_reparse_point(resolved, allowed_root):
+            raise ServiceError("invalid_input", 400, "local import path crosses a symbolic link or junction")
+        if _path_is_within(self._data_root, resolved) or _path_is_within(resolved, self._data_root):
+            raise ServiceError("invalid_input", 400, "local import path conflicts with service data")
+        try:
+            next(resolved.iterdir(), None)
+        except OSError as exc:
+            raise ServiceError("invalid_input", 400, "local import directory cannot be read") from exc
+        return resolved, _normalized_path_key(resolved)
 
     @contextmanager
     def store_for_repository(self, repository_id: str) -> Iterator[IndexStore]:
-        store = IndexStore.for_repository(self.root_for(repository_id))
+        store = IndexStore.for_repository(self.storage_root_for(repository_id))
         try:
             yield store
         finally:
@@ -113,7 +269,7 @@ class RepositoryRegistry:
     def store_for_index(self, index_id: str) -> Iterator[IndexStore]:
         storage_error = False
         for repository_id in self.repository_ids:
-            database_path = self._roots[repository_id] / ".codetrail" / "index.sqlite3"
+            database_path = self.storage_root_for(repository_id) / ".codetrail" / "index.sqlite3"
             if not database_path.is_file():
                 continue
             store: IndexStore | None = None
@@ -134,6 +290,25 @@ class RepositoryRegistry:
         if storage_error:
             raise ServiceError("internal_error", 500, "local index storage failed")
         raise ServiceError("not_found", 404, "index was not found")
+
+    def _prepare_allowed_import_roots(
+        self,
+        roots: tuple[str | Path, ...] | list[str | Path],
+    ) -> tuple[Path, ...]:
+        normalized: list[Path] = []
+        for raw_root in roots:
+            candidate = Path(raw_root)
+            if _is_reparse_point(candidate):
+                raise ValueError("allowed import roots must not be symbolic links or junctions")
+            try:
+                resolved = candidate.resolve(strict=True)
+            except OSError as exc:
+                raise ValueError("allowed import root cannot be resolved") from exc
+            if not resolved.is_dir():
+                raise ValueError("allowed import root must be a directory")
+            if resolved not in normalized:
+                normalized.append(resolved)
+        return tuple(normalized)
 
 
 T = TypeVar("T")
@@ -173,6 +348,12 @@ class IndexService:
                     dirty=request.dirty,
                     max_file_bytes=self.max_file_bytes,
                 )
+                if not snapshot.files:
+                    raise ServiceError(
+                        "invalid_input",
+                        400,
+                        "source directory contains no supported Python files",
+                    )
                 definitions = extract_definitions(snapshot)
                 relation = extract_relations(definitions)
                 if on_snapshot_ready is not None:
@@ -333,15 +514,16 @@ class WorkspaceService:
         self._recover_interrupted_builds()
 
     def create_project(self, request: CreateProjectRequest) -> Project:
-        self.registry.root_for(request.repository_id)
+        spec = self.registry.spec_for(request.repository_id)
         project_id = _new_project_id()
         with self.registry.store_for_repository(request.repository_id) as store:
-            store.ensure_legacy_project(
-                _legacy_project_id(request.repository_id),
-                request.repository_id,
-                request.repository_id,
-                datetime.now(timezone.utc),
-            )
+            if not spec.managed:
+                store.ensure_legacy_project(
+                    _legacy_project_id(request.repository_id),
+                    request.repository_id,
+                    request.repository_id,
+                    datetime.now(timezone.utc),
+                )
             record = store.create_project(
                 project_id,
                 request.name,
@@ -352,9 +534,10 @@ class WorkspaceService:
 
     def list_projects(self) -> ProjectListResponse:
         self._ensure_legacy_projects()
+        self._ensure_managed_projects()
         records: list[ProjectRecord] = []
         for repository_id in self.registry.repository_ids:
-            database_path = self.registry.root_for(repository_id) / ".codetrail" / "index.sqlite3"
+            database_path = self.registry.storage_root_for(repository_id) / ".codetrail" / "index.sqlite3"
             if not database_path.is_file():
                 continue
             with self.registry.store_for_repository(repository_id) as store:
@@ -439,10 +622,236 @@ class WorkspaceService:
         self._require_project_index(project_id, index_id)
         return self.index_service.read_source(index_id, path, start_line, end_line)
 
+    def import_local(
+        self,
+        request: LocalImportRequest,
+        *,
+        via_mcp: bool = False,
+    ) -> LocalImportResponse:
+        """Register, index, and persist one server-local source directory."""
+
+        if via_mcp and not self.registry.mcp_local_import_enabled:
+            raise ServiceError("forbidden", 403, "local MCP import is disabled")
+        source_path, normalized_path = self.registry.validate_import_source(request.path)
+        spec = self.registry.repository_for_source(normalized_path)
+        if spec is None:
+            project_id = _new_project_id()
+            repository_id = _managed_repository_id(normalized_path)
+            record = self.registry.management_store.register_source(
+                repository_id=repository_id,
+                project_id=project_id,
+                name=request.name,
+                source_path=str(source_path),
+                normalized_source_path=normalized_path,
+                storage_path=str(self.registry.managed_storage_path(project_id)),
+                created_at=datetime.now(timezone.utc),
+            )
+            self.registry.refresh_managed_sources()
+            self._ensure_managed_project(record)
+            spec = self.registry.spec_for(record.repository_id)
+        elif spec.managed:
+            record = self.registry.management_store.load_source(spec.repository_id)
+            self._ensure_managed_project(record)
+        else:
+            project = self._configured_project_for_source(spec, request.name)
+            return self._run_import_for_project(
+                project,
+                spec,
+                source_path,
+                normalized_path,
+                request,
+            )
+
+        project = self._load_project_from_spec(spec)
+        return self._run_import_for_project(
+            project,
+            spec,
+            source_path,
+            normalized_path,
+            request,
+        )
+
+    def get_import_status(self, attempt_id: str) -> ImportAttemptResponse:
+        attempt = self.registry.management_store.load_attempt(attempt_id)
+        project = self._find_project(attempt.project_id)
+        latest_index = (
+            self.get_project_index(project.project_id, project.latest_index_id)
+            if project.latest_index_id is not None
+            else None
+        )
+        return ImportAttemptResponse(
+            source_path=attempt.source_path,
+            project=_project_response(project),
+            attempt=_import_attempt_response(attempt),
+            latest_index=latest_index,
+        )
+
+    def retry_import(self, attempt_id: str, *, via_mcp: bool = False) -> LocalImportResponse:
+        if via_mcp and not self.registry.mcp_local_import_enabled:
+            raise ServiceError("forbidden", 403, "local MCP import is disabled")
+        attempt = self.registry.management_store.load_attempt(attempt_id)
+        if attempt.status not in {"failed", "interrupted", "cancelled"}:
+            raise ServiceError("conflict", 409, "only failed or interrupted imports can be retried")
+        self.registry.management_store.update_attempt(
+            attempt_id,
+            status="queued",
+            phase="queued",
+            index_id=None,
+            error_code=None,
+            error_message=None,
+        )
+        return self._run_import_attempt(attempt_id)
+
+    def _run_import_for_project(
+        self,
+        project: ProjectRecord,
+        spec: RepositorySpec,
+        source_path: Path,
+        normalized_path: str,
+        request: LocalImportRequest,
+    ) -> LocalImportResponse:
+        existing = (
+            self.registry.management_store.find_attempt_by_idempotency(
+                request.idempotency_key,
+            )
+            if request.idempotency_key is not None
+            else None
+        )
+        if existing is not None:
+            if not _same_import_request(existing, project, normalized_path, request):
+                raise ServiceError("conflict", 409, "idempotency key conflicts with a different import request")
+            return self._local_import_response(existing)
+
+        if request.idempotency_key is None:
+            active = self.registry.management_store.find_active_attempt(normalized_path)
+            if active is not None:
+                return self._local_import_response(active)
+
+        try:
+            attempt = self.registry.management_store.create_attempt(
+                attempt_id=f"import-{uuid4().hex}",
+                project_id=project.project_id,
+                repository_id=spec.repository_id,
+                source_path=str(source_path),
+                normalized_source_path=normalized_path,
+                name=project.name,
+                revision=request.revision,
+                dirty=request.dirty,
+                idempotency_key=request.idempotency_key,
+                created_at=datetime.now(timezone.utc),
+            )
+        except StorageConflictError:
+            if request.idempotency_key is None:
+                active = self.registry.management_store.find_active_attempt(normalized_path)
+                if active is not None:
+                    return self._local_import_response(active)
+                raise ServiceError("conflict", 409, "an equivalent import is already running")
+            existing = self.registry.management_store.find_attempt_by_idempotency(
+                request.idempotency_key,
+            )
+            if existing is None:
+                raise ServiceError("conflict", 409, "import request conflicts with existing data")
+            if not _same_import_request(existing, project, normalized_path, request):
+                raise ServiceError("conflict", 409, "idempotency key conflicts with a different import request")
+            return self._local_import_response(existing)
+        return self._run_import_attempt(attempt.attempt_id)
+
+    def _run_import_attempt(self, attempt_id: str) -> LocalImportResponse:
+        attempt = self.registry.management_store.load_attempt(attempt_id)
+        try:
+            self.registry.management_store.update_attempt(
+                attempt_id,
+                status="acquiring",
+                phase="acquiring",
+            )
+            source_path, normalized_path = self.registry.validate_import_source(attempt.source_path)
+            if normalized_path != attempt.normalized_source_path:
+                raise ServiceError("invalid_input", 400, "registered source path changed")
+            self.registry.management_store.update_attempt(
+                attempt_id,
+                status="indexing",
+                phase="indexing",
+            )
+            self.create_project_index(
+                attempt.project_id,
+                CreateProjectIndexRequest(revision=attempt.revision, dirty=attempt.dirty),
+            )
+            project = self._find_project(attempt.project_id)
+            index_id = project.latest_index_id
+            if index_id is None:
+                raise ServiceError("internal_error", 500, "import completed without an available index")
+            completed = self.registry.management_store.update_attempt(
+                attempt_id,
+                status="ready",
+                phase="ready",
+                index_id=index_id,
+                error_code=None,
+                error_message=None,
+            )
+            return self._local_import_response(completed)
+        except ServiceError as exc:
+            failed = self.registry.management_store.update_attempt(
+                attempt_id,
+                status="failed",
+                phase="failed",
+                index_id=None,
+                error_code=exc.code,
+                error_message=exc.message,
+            )
+            return self._local_import_response(failed)
+        except Exception:
+            failed = self.registry.management_store.update_attempt(
+                attempt_id,
+                status="failed",
+                phase="failed",
+                index_id=None,
+                error_code="internal_error",
+                error_message="local import failed",
+            )
+            return self._local_import_response(failed)
+
+    def _local_import_response(self, attempt: ImportAttemptRecord) -> LocalImportResponse:
+        project = self._find_project(attempt.project_id)
+        index = None
+        if attempt.status == "ready" and attempt.index_id is not None:
+            index = self.get_project_index(project.project_id, attempt.index_id)
+        return LocalImportResponse(
+            source_path=attempt.source_path,
+            project=_project_response(project),
+            attempt=_import_attempt_response(attempt),
+            index=index,
+        )
+
+    def _load_project_from_spec(self, spec: RepositorySpec) -> ProjectRecord:
+        with self.registry.store_for_repository(spec.repository_id) as store:
+            try:
+                return store.load_project(spec.project_id or "")
+            except StorageNotFoundError as exc:
+                raise ServiceError("internal_error", 500, "managed project registration is incomplete") from exc
+
+    def _configured_project_for_source(self, spec: RepositorySpec, name: str) -> ProjectRecord:
+        with self.registry.store_for_repository(spec.repository_id) as store:
+            projects = [project for project in store.list_projects() if not project.project_id.startswith("project-legacy-")]
+            if projects:
+                return projects[0]
+        return self._find_project(self.create_project(CreateProjectRequest(name=name, repository_id=spec.repository_id)).project_id)
+
+    def _ensure_managed_project(self, record: ManagedSourceRecord) -> None:
+        self.registry.refresh_managed_sources()
+        with self.registry.store_for_repository(record.repository_id) as store:
+            try:
+                store.load_project(record.project_id)
+            except StorageNotFoundError:
+                try:
+                    store.create_project(record.project_id, record.name, record.repository_id, record.created_at)
+                except StorageConflictError:
+                    store.load_project(record.project_id)
+
     def _find_project(self, project_id: str) -> ProjectRecord:
         self._ensure_legacy_projects()
+        self._ensure_managed_projects()
         for repository_id in self.registry.repository_ids:
-            database_path = self.registry.root_for(repository_id) / ".codetrail" / "index.sqlite3"
+            database_path = self.registry.storage_root_for(repository_id) / ".codetrail" / "index.sqlite3"
             if not database_path.is_file():
                 continue
             with self.registry.store_for_repository(repository_id) as store:
@@ -464,7 +873,10 @@ class WorkspaceService:
 
     def _ensure_legacy_projects(self) -> None:
         for repository_id in self.registry.repository_ids:
-            database_path = self.registry.root_for(repository_id) / ".codetrail" / "index.sqlite3"
+            spec = self.registry.spec_for(repository_id)
+            if spec.managed:
+                continue
+            database_path = self.registry.storage_root_for(repository_id) / ".codetrail" / "index.sqlite3"
             if not database_path.is_file():
                 continue
             with self.registry.store_for_repository(repository_id) as store:
@@ -475,13 +887,118 @@ class WorkspaceService:
                     datetime.now(timezone.utc),
                 )
 
+    def _ensure_managed_projects(self) -> None:
+        self.registry.refresh_managed_sources()
+        for record in self.registry.management_store.list_sources():
+            self._ensure_managed_project(record)
+
     def _recover_interrupted_builds(self) -> None:
+        self.registry.management_store.mark_active_attempts_interrupted()
+        self._ensure_managed_projects()
         for repository_id in self.registry.repository_ids:
-            database_path = self.registry.root_for(repository_id) / ".codetrail" / "index.sqlite3"
+            database_path = self.registry.storage_root_for(repository_id) / ".codetrail" / "index.sqlite3"
             if not database_path.is_file():
                 continue
             with self.registry.store_for_repository(repository_id) as store:
                 store.recover_building_projects()
+
+
+def is_loopback_host(host: str | None) -> bool:
+    if host is None or host.casefold() == "localhost":
+        return host is not None
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def _managed_repository_id(normalized_source_path: str) -> str:
+    digest = hashlib.sha256(normalized_source_path.encode("utf-8")).hexdigest()[:32]
+    return f"import-{digest}"
+
+
+def _same_import_request(
+    attempt: ImportAttemptRecord,
+    project: ProjectRecord,
+    normalized_path: str,
+    request: LocalImportRequest,
+) -> bool:
+    return (
+        attempt.project_id == project.project_id
+        and attempt.normalized_source_path == normalized_path
+        and attempt.name == project.name == request.name
+        and attempt.revision == request.revision
+        and attempt.dirty == request.dirty
+    )
+
+
+def _import_attempt_response(record: ImportAttemptRecord) -> ImportAttempt:
+    return ImportAttempt(
+        attempt_id=record.attempt_id,
+        project_id=record.project_id,
+        repository_id=record.repository_id,
+        source_path=record.source_path,
+        status=record.status,  # type: ignore[arg-type]
+        phase=record.phase,  # type: ignore[arg-type]
+        index_id=record.index_id,
+        error_code=record.error_code,
+        error_message=record.error_message,
+        created_at=record.created_at,
+        updated_at=record.updated_at,
+    )
+
+
+def _env_flag(name: str) -> bool:
+    return os.getenv(name, "").strip().casefold() in {"1", "true", "yes", "on"}
+
+
+def _prepare_data_root(value: str | Path) -> Path:
+    candidate = Path(value)
+    if not candidate.is_absolute():
+        candidate = Path.cwd() / candidate
+    if candidate.exists() and _is_reparse_point(candidate):
+        raise ValueError("service data directory must not be a symbolic link or junction")
+    resolved = candidate.resolve(strict=False)
+    resolved.mkdir(parents=True, exist_ok=True)
+    if not resolved.is_dir():
+        raise ValueError("service data directory must be a directory")
+    return resolved
+
+
+def _is_reparse_point(path: Path) -> bool:
+    if path.is_symlink():
+        return True
+    is_junction = getattr(path, "is_junction", None)
+    return bool(callable(is_junction) and is_junction())
+
+
+def _path_is_within(path: Path, parent: Path) -> bool:
+    try:
+        path_key = os.path.normcase(str(path.resolve(strict=False)))
+        parent_key = os.path.normcase(str(parent.resolve(strict=False)))
+        return os.path.commonpath((path_key, parent_key)) == parent_key
+    except (OSError, ValueError):
+        return False
+
+
+def _contains_reparse_point(path: Path, ancestor: Path) -> bool:
+    try:
+        relative_parts = path.resolve(strict=True).relative_to(ancestor.resolve(strict=True)).parts
+    except (OSError, ValueError):
+        return True
+    current = ancestor.resolve(strict=True)
+    if _is_reparse_point(current):
+        return True
+    for part in relative_parts:
+        current = current / part
+        if _is_reparse_point(current):
+            return True
+    return False
+
+
+def _normalized_path_key(path: Path) -> str:
+    value = os.path.normcase(str(path.resolve(strict=False)))
+    return value.rstrip("\\/") or value
 
 
 def _new_project_id() -> str:

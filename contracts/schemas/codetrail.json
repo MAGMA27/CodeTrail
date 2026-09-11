@@ -7401,6 +7401,527 @@
       "title": "GraphSnapshot",
       "type": "object"
     },
+    "ImportAttempt": {
+      "additionalProperties": false,
+      "description": "Persisted lifecycle state for one local source import attempt.",
+      "properties": {
+        "attempt_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Attempt Id",
+          "type": "string"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "error_code": {
+          "anyOf": [
+            {
+              "maxLength": 100,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error Code"
+        },
+        "error_message": {
+          "anyOf": [
+            {
+              "maxLength": 2000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error Message"
+        },
+        "index_id": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Index Id"
+        },
+        "phase": {
+          "enum": [
+            "queued",
+            "acquiring",
+            "indexing",
+            "ready",
+            "failed",
+            "cancelled",
+            "interrupted"
+          ],
+          "title": "Phase",
+          "type": "string"
+        },
+        "project_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Project Id",
+          "type": "string"
+        },
+        "repository_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Repository Id",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "0.1.0",
+          "default": "0.1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "source_path": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Source Path",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "queued",
+            "acquiring",
+            "indexing",
+            "ready",
+            "failed",
+            "cancelled",
+            "interrupted"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "title": "Updated At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "attempt_id",
+        "project_id",
+        "repository_id",
+        "source_path",
+        "status",
+        "phase",
+        "created_at",
+        "updated_at"
+      ],
+      "title": "ImportAttempt",
+      "type": "object"
+    },
+    "ImportAttemptResponse": {
+      "$defs": {
+        "ImportAttempt": {
+          "additionalProperties": false,
+          "description": "Persisted lifecycle state for one local source import attempt.",
+          "properties": {
+            "attempt_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Attempt Id",
+              "type": "string"
+            },
+            "created_at": {
+              "format": "date-time",
+              "title": "Created At",
+              "type": "string"
+            },
+            "error_code": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Error Code"
+            },
+            "error_message": {
+              "anyOf": [
+                {
+                  "maxLength": 2000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Error Message"
+            },
+            "index_id": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Id"
+            },
+            "phase": {
+              "enum": [
+                "queued",
+                "acquiring",
+                "indexing",
+                "ready",
+                "failed",
+                "cancelled",
+                "interrupted"
+              ],
+              "title": "Phase",
+              "type": "string"
+            },
+            "project_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Project Id",
+              "type": "string"
+            },
+            "repository_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Repository Id",
+              "type": "string"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            },
+            "source_path": {
+              "maxLength": 4000,
+              "minLength": 1,
+              "title": "Source Path",
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "queued",
+                "acquiring",
+                "indexing",
+                "ready",
+                "failed",
+                "cancelled",
+                "interrupted"
+              ],
+              "title": "Status",
+              "type": "string"
+            },
+            "updated_at": {
+              "format": "date-time",
+              "title": "Updated At",
+              "type": "string"
+            }
+          },
+          "required": [
+            "attempt_id",
+            "project_id",
+            "repository_id",
+            "source_path",
+            "status",
+            "phase",
+            "created_at",
+            "updated_at"
+          ],
+          "title": "ImportAttempt",
+          "type": "object"
+        },
+        "IndexIssue": {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "decode_error",
+                "file_too_large",
+                "read_error",
+                "symlink",
+                "syntax_error",
+                "outside_root"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "message": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "title": "Message",
+              "type": "string"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "size": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Size"
+            }
+          },
+          "required": [
+            "path",
+            "kind",
+            "message"
+          ],
+          "title": "IndexIssue",
+          "type": "object"
+        },
+        "IndexResponse": {
+          "additionalProperties": false,
+          "properties": {
+            "index": {
+              "$ref": "#/$defs/IndexSnapshot"
+            },
+            "issues": {
+              "items": {
+                "$ref": "#/$defs/IndexIssue"
+              },
+              "title": "Issues",
+              "type": "array"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            },
+            "truncated": {
+              "default": false,
+              "title": "Truncated",
+              "type": "boolean"
+            },
+            "truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Truncation Reason"
+            }
+          },
+          "required": [
+            "index"
+          ],
+          "title": "IndexResponse",
+          "type": "object"
+        },
+        "IndexSnapshot": {
+          "additionalProperties": false,
+          "properties": {
+            "dirty": {
+              "title": "Dirty",
+              "type": "boolean"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "repository_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Repository Id",
+              "type": "string"
+            },
+            "revision": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Revision",
+              "type": "string"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            },
+            "snapshot_hash": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Snapshot Hash",
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "ready",
+                "building",
+                "failed"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "index_id",
+            "repository_id",
+            "revision",
+            "dirty",
+            "snapshot_hash",
+            "status"
+          ],
+          "title": "IndexSnapshot",
+          "type": "object"
+        },
+        "Project": {
+          "additionalProperties": false,
+          "properties": {
+            "available_index_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "title": "Available Index Ids",
+              "type": "array"
+            },
+            "building_index_id": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Building Index Id"
+            },
+            "created_at": {
+              "format": "date-time",
+              "title": "Created At",
+              "type": "string"
+            },
+            "latest_index_id": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Latest Index Id"
+            },
+            "name": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Name",
+              "type": "string"
+            },
+            "project_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Project Id",
+              "type": "string"
+            },
+            "repository_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Repository Id",
+              "type": "string"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            }
+          },
+          "required": [
+            "project_id",
+            "name",
+            "repository_id",
+            "created_at"
+          ],
+          "title": "Project",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "HTTP response for a persisted import status lookup.",
+      "properties": {
+        "attempt": {
+          "$ref": "#/$defs/ImportAttempt"
+        },
+        "latest_index": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IndexResponse"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "project": {
+          "$ref": "#/$defs/Project"
+        },
+        "schema_version": {
+          "const": "0.1.0",
+          "default": "0.1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "source_path": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Source Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_path",
+        "project",
+        "attempt"
+      ],
+      "title": "ImportAttemptResponse",
+      "type": "object"
+    },
     "IndexSnapshot": {
       "additionalProperties": false,
       "properties": {
@@ -7516,6 +8037,459 @@
       "title": "Issue",
       "type": "object"
     },
+    "LocalImportRequest": {
+      "additionalProperties": false,
+      "description": "A server-local source registration and bounded synchronous import request.",
+      "properties": {
+        "dirty": {
+          "default": true,
+          "title": "Dirty",
+          "type": "boolean"
+        },
+        "idempotency_key": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Idempotency Key"
+        },
+        "name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "path": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "revision": {
+          "default": "working-tree",
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Revision",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "0.1.0",
+          "default": "0.1.0",
+          "title": "Schema Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "path"
+      ],
+      "title": "LocalImportRequest",
+      "type": "object"
+    },
+    "LocalImportResponse": {
+      "$defs": {
+        "ImportAttempt": {
+          "additionalProperties": false,
+          "description": "Persisted lifecycle state for one local source import attempt.",
+          "properties": {
+            "attempt_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Attempt Id",
+              "type": "string"
+            },
+            "created_at": {
+              "format": "date-time",
+              "title": "Created At",
+              "type": "string"
+            },
+            "error_code": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Error Code"
+            },
+            "error_message": {
+              "anyOf": [
+                {
+                  "maxLength": 2000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Error Message"
+            },
+            "index_id": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Id"
+            },
+            "phase": {
+              "enum": [
+                "queued",
+                "acquiring",
+                "indexing",
+                "ready",
+                "failed",
+                "cancelled",
+                "interrupted"
+              ],
+              "title": "Phase",
+              "type": "string"
+            },
+            "project_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Project Id",
+              "type": "string"
+            },
+            "repository_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Repository Id",
+              "type": "string"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            },
+            "source_path": {
+              "maxLength": 4000,
+              "minLength": 1,
+              "title": "Source Path",
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "queued",
+                "acquiring",
+                "indexing",
+                "ready",
+                "failed",
+                "cancelled",
+                "interrupted"
+              ],
+              "title": "Status",
+              "type": "string"
+            },
+            "updated_at": {
+              "format": "date-time",
+              "title": "Updated At",
+              "type": "string"
+            }
+          },
+          "required": [
+            "attempt_id",
+            "project_id",
+            "repository_id",
+            "source_path",
+            "status",
+            "phase",
+            "created_at",
+            "updated_at"
+          ],
+          "title": "ImportAttempt",
+          "type": "object"
+        },
+        "IndexIssue": {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "decode_error",
+                "file_too_large",
+                "read_error",
+                "symlink",
+                "syntax_error",
+                "outside_root"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "message": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "title": "Message",
+              "type": "string"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "size": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Size"
+            }
+          },
+          "required": [
+            "path",
+            "kind",
+            "message"
+          ],
+          "title": "IndexIssue",
+          "type": "object"
+        },
+        "IndexResponse": {
+          "additionalProperties": false,
+          "properties": {
+            "index": {
+              "$ref": "#/$defs/IndexSnapshot"
+            },
+            "issues": {
+              "items": {
+                "$ref": "#/$defs/IndexIssue"
+              },
+              "title": "Issues",
+              "type": "array"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            },
+            "truncated": {
+              "default": false,
+              "title": "Truncated",
+              "type": "boolean"
+            },
+            "truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Truncation Reason"
+            }
+          },
+          "required": [
+            "index"
+          ],
+          "title": "IndexResponse",
+          "type": "object"
+        },
+        "IndexSnapshot": {
+          "additionalProperties": false,
+          "properties": {
+            "dirty": {
+              "title": "Dirty",
+              "type": "boolean"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "repository_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Repository Id",
+              "type": "string"
+            },
+            "revision": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Revision",
+              "type": "string"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            },
+            "snapshot_hash": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Snapshot Hash",
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "ready",
+                "building",
+                "failed"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "index_id",
+            "repository_id",
+            "revision",
+            "dirty",
+            "snapshot_hash",
+            "status"
+          ],
+          "title": "IndexSnapshot",
+          "type": "object"
+        },
+        "Project": {
+          "additionalProperties": false,
+          "properties": {
+            "available_index_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "title": "Available Index Ids",
+              "type": "array"
+            },
+            "building_index_id": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Building Index Id"
+            },
+            "created_at": {
+              "format": "date-time",
+              "title": "Created At",
+              "type": "string"
+            },
+            "latest_index_id": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Latest Index Id"
+            },
+            "name": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Name",
+              "type": "string"
+            },
+            "project_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Project Id",
+              "type": "string"
+            },
+            "repository_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Repository Id",
+              "type": "string"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            }
+          },
+          "required": [
+            "project_id",
+            "name",
+            "repository_id",
+            "created_at"
+          ],
+          "title": "Project",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "HTTP response for one completed or failed local import attempt.",
+      "properties": {
+        "attempt": {
+          "$ref": "#/$defs/ImportAttempt"
+        },
+        "index": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IndexResponse"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "project": {
+          "$ref": "#/$defs/Project"
+        },
+        "schema_version": {
+          "const": "0.1.0",
+          "default": "0.1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "source_path": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Source Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_path",
+        "project",
+        "attempt"
+      ],
+      "title": "LocalImportResponse",
+      "type": "object"
+    },
     "McpError": {
       "additionalProperties": false,
       "description": "Domain failure returned inside a read-only MCP tool result.",
@@ -7526,7 +8500,8 @@
             "invalid_input",
             "conflict",
             "budget_exceeded",
-            "internal_error"
+            "internal_error",
+            "forbidden"
           ],
           "title": "Code",
           "type": "string"
@@ -7554,6 +8529,954 @@
         "message"
       ],
       "title": "McpError",
+      "type": "object"
+    },
+    "McpImportResponse": {
+      "$defs": {
+        "ImportAttempt": {
+          "additionalProperties": false,
+          "description": "Persisted lifecycle state for one local source import attempt.",
+          "properties": {
+            "attempt_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Attempt Id",
+              "type": "string"
+            },
+            "created_at": {
+              "format": "date-time",
+              "title": "Created At",
+              "type": "string"
+            },
+            "error_code": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Error Code"
+            },
+            "error_message": {
+              "anyOf": [
+                {
+                  "maxLength": 2000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Error Message"
+            },
+            "index_id": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Id"
+            },
+            "phase": {
+              "enum": [
+                "queued",
+                "acquiring",
+                "indexing",
+                "ready",
+                "failed",
+                "cancelled",
+                "interrupted"
+              ],
+              "title": "Phase",
+              "type": "string"
+            },
+            "project_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Project Id",
+              "type": "string"
+            },
+            "repository_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Repository Id",
+              "type": "string"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            },
+            "source_path": {
+              "maxLength": 4000,
+              "minLength": 1,
+              "title": "Source Path",
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "queued",
+                "acquiring",
+                "indexing",
+                "ready",
+                "failed",
+                "cancelled",
+                "interrupted"
+              ],
+              "title": "Status",
+              "type": "string"
+            },
+            "updated_at": {
+              "format": "date-time",
+              "title": "Updated At",
+              "type": "string"
+            }
+          },
+          "required": [
+            "attempt_id",
+            "project_id",
+            "repository_id",
+            "source_path",
+            "status",
+            "phase",
+            "created_at",
+            "updated_at"
+          ],
+          "title": "ImportAttempt",
+          "type": "object"
+        },
+        "IndexIssue": {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "decode_error",
+                "file_too_large",
+                "read_error",
+                "symlink",
+                "syntax_error",
+                "outside_root"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "message": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "title": "Message",
+              "type": "string"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "size": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Size"
+            }
+          },
+          "required": [
+            "path",
+            "kind",
+            "message"
+          ],
+          "title": "IndexIssue",
+          "type": "object"
+        },
+        "IndexResponse": {
+          "additionalProperties": false,
+          "properties": {
+            "index": {
+              "$ref": "#/$defs/IndexSnapshot"
+            },
+            "issues": {
+              "items": {
+                "$ref": "#/$defs/IndexIssue"
+              },
+              "title": "Issues",
+              "type": "array"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            },
+            "truncated": {
+              "default": false,
+              "title": "Truncated",
+              "type": "boolean"
+            },
+            "truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Truncation Reason"
+            }
+          },
+          "required": [
+            "index"
+          ],
+          "title": "IndexResponse",
+          "type": "object"
+        },
+        "IndexSnapshot": {
+          "additionalProperties": false,
+          "properties": {
+            "dirty": {
+              "title": "Dirty",
+              "type": "boolean"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "repository_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Repository Id",
+              "type": "string"
+            },
+            "revision": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Revision",
+              "type": "string"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            },
+            "snapshot_hash": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Snapshot Hash",
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "ready",
+                "building",
+                "failed"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "index_id",
+            "repository_id",
+            "revision",
+            "dirty",
+            "snapshot_hash",
+            "status"
+          ],
+          "title": "IndexSnapshot",
+          "type": "object"
+        },
+        "McpError": {
+          "additionalProperties": false,
+          "description": "Domain failure returned inside a read-only MCP tool result.",
+          "properties": {
+            "code": {
+              "enum": [
+                "not_found",
+                "invalid_input",
+                "conflict",
+                "budget_exceeded",
+                "internal_error",
+                "forbidden"
+              ],
+              "title": "Code",
+              "type": "string"
+            },
+            "message": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "title": "Message",
+              "type": "string"
+            },
+            "retryable": {
+              "default": false,
+              "title": "Retryable",
+              "type": "boolean"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "title": "McpError",
+          "type": "object"
+        },
+        "Project": {
+          "additionalProperties": false,
+          "properties": {
+            "available_index_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "title": "Available Index Ids",
+              "type": "array"
+            },
+            "building_index_id": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Building Index Id"
+            },
+            "created_at": {
+              "format": "date-time",
+              "title": "Created At",
+              "type": "string"
+            },
+            "latest_index_id": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Latest Index Id"
+            },
+            "name": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Name",
+              "type": "string"
+            },
+            "project_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Project Id",
+              "type": "string"
+            },
+            "repository_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Repository Id",
+              "type": "string"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            }
+          },
+          "required": [
+            "project_id",
+            "name",
+            "repository_id",
+            "created_at"
+          ],
+          "title": "Project",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Structured MCP result for an enabled local import tool.",
+      "properties": {
+        "attempt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ImportAttempt"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/McpError"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "index": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IndexResponse"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "project": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Project"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "schema_version": {
+          "const": "0.1.0",
+          "default": "0.1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "source_path": {
+          "anyOf": [
+            {
+              "maxLength": 4000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Path"
+        }
+      },
+      "required": [
+        "ok"
+      ],
+      "title": "McpImportResponse",
+      "type": "object"
+    },
+    "McpImportStatusResponse": {
+      "$defs": {
+        "ImportAttempt": {
+          "additionalProperties": false,
+          "description": "Persisted lifecycle state for one local source import attempt.",
+          "properties": {
+            "attempt_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Attempt Id",
+              "type": "string"
+            },
+            "created_at": {
+              "format": "date-time",
+              "title": "Created At",
+              "type": "string"
+            },
+            "error_code": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Error Code"
+            },
+            "error_message": {
+              "anyOf": [
+                {
+                  "maxLength": 2000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Error Message"
+            },
+            "index_id": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Id"
+            },
+            "phase": {
+              "enum": [
+                "queued",
+                "acquiring",
+                "indexing",
+                "ready",
+                "failed",
+                "cancelled",
+                "interrupted"
+              ],
+              "title": "Phase",
+              "type": "string"
+            },
+            "project_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Project Id",
+              "type": "string"
+            },
+            "repository_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Repository Id",
+              "type": "string"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            },
+            "source_path": {
+              "maxLength": 4000,
+              "minLength": 1,
+              "title": "Source Path",
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "queued",
+                "acquiring",
+                "indexing",
+                "ready",
+                "failed",
+                "cancelled",
+                "interrupted"
+              ],
+              "title": "Status",
+              "type": "string"
+            },
+            "updated_at": {
+              "format": "date-time",
+              "title": "Updated At",
+              "type": "string"
+            }
+          },
+          "required": [
+            "attempt_id",
+            "project_id",
+            "repository_id",
+            "source_path",
+            "status",
+            "phase",
+            "created_at",
+            "updated_at"
+          ],
+          "title": "ImportAttempt",
+          "type": "object"
+        },
+        "IndexIssue": {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "decode_error",
+                "file_too_large",
+                "read_error",
+                "symlink",
+                "syntax_error",
+                "outside_root"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "message": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "title": "Message",
+              "type": "string"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "size": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Size"
+            }
+          },
+          "required": [
+            "path",
+            "kind",
+            "message"
+          ],
+          "title": "IndexIssue",
+          "type": "object"
+        },
+        "IndexResponse": {
+          "additionalProperties": false,
+          "properties": {
+            "index": {
+              "$ref": "#/$defs/IndexSnapshot"
+            },
+            "issues": {
+              "items": {
+                "$ref": "#/$defs/IndexIssue"
+              },
+              "title": "Issues",
+              "type": "array"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            },
+            "truncated": {
+              "default": false,
+              "title": "Truncated",
+              "type": "boolean"
+            },
+            "truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Truncation Reason"
+            }
+          },
+          "required": [
+            "index"
+          ],
+          "title": "IndexResponse",
+          "type": "object"
+        },
+        "IndexSnapshot": {
+          "additionalProperties": false,
+          "properties": {
+            "dirty": {
+              "title": "Dirty",
+              "type": "boolean"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "repository_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Repository Id",
+              "type": "string"
+            },
+            "revision": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Revision",
+              "type": "string"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            },
+            "snapshot_hash": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Snapshot Hash",
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "ready",
+                "building",
+                "failed"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "index_id",
+            "repository_id",
+            "revision",
+            "dirty",
+            "snapshot_hash",
+            "status"
+          ],
+          "title": "IndexSnapshot",
+          "type": "object"
+        },
+        "McpError": {
+          "additionalProperties": false,
+          "description": "Domain failure returned inside a read-only MCP tool result.",
+          "properties": {
+            "code": {
+              "enum": [
+                "not_found",
+                "invalid_input",
+                "conflict",
+                "budget_exceeded",
+                "internal_error",
+                "forbidden"
+              ],
+              "title": "Code",
+              "type": "string"
+            },
+            "message": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "title": "Message",
+              "type": "string"
+            },
+            "retryable": {
+              "default": false,
+              "title": "Retryable",
+              "type": "boolean"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "title": "McpError",
+          "type": "object"
+        },
+        "Project": {
+          "additionalProperties": false,
+          "properties": {
+            "available_index_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "title": "Available Index Ids",
+              "type": "array"
+            },
+            "building_index_id": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Building Index Id"
+            },
+            "created_at": {
+              "format": "date-time",
+              "title": "Created At",
+              "type": "string"
+            },
+            "latest_index_id": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Latest Index Id"
+            },
+            "name": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Name",
+              "type": "string"
+            },
+            "project_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Project Id",
+              "type": "string"
+            },
+            "repository_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Repository Id",
+              "type": "string"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            }
+          },
+          "required": [
+            "project_id",
+            "name",
+            "repository_id",
+            "created_at"
+          ],
+          "title": "Project",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Structured MCP result for a bounded local import status lookup.",
+      "properties": {
+        "attempt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ImportAttempt"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/McpError"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "latest_index": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IndexResponse"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "project": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Project"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "schema_version": {
+          "const": "0.1.0",
+          "default": "0.1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "source_path": {
+          "anyOf": [
+            {
+              "maxLength": 4000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Path"
+        }
+      },
+      "required": [
+        "ok"
+      ],
+      "title": "McpImportStatusResponse",
       "type": "object"
     },
     "McpIndexResponse": {
@@ -7718,7 +9641,8 @@
                 "invalid_input",
                 "conflict",
                 "budget_exceeded",
-                "internal_error"
+                "internal_error",
+                "forbidden"
               ],
               "title": "Code",
               "type": "string"
@@ -7863,7 +9787,8 @@
                 "invalid_input",
                 "conflict",
                 "budget_exceeded",
-                "internal_error"
+                "internal_error",
+                "forbidden"
               ],
               "title": "Code",
               "type": "string"
@@ -8247,7 +10172,8 @@
                 "invalid_input",
                 "conflict",
                 "budget_exceeded",
-                "internal_error"
+                "internal_error",
+                "forbidden"
               ],
               "title": "Code",
               "type": "string"
@@ -8380,7 +10306,8 @@
                 "invalid_input",
                 "conflict",
                 "budget_exceeded",
-                "internal_error"
+                "internal_error",
+                "forbidden"
               ],
               "title": "Code",
               "type": "string"
@@ -8557,7 +10484,8 @@
                 "invalid_input",
                 "conflict",
                 "budget_exceeded",
-                "internal_error"
+                "internal_error",
+                "forbidden"
               ],
               "title": "Code",
               "type": "string"
@@ -8720,7 +10648,8 @@
                 "invalid_input",
                 "conflict",
                 "budget_exceeded",
-                "internal_error"
+                "internal_error",
+                "forbidden"
               ],
               "title": "Code",
               "type": "string"
@@ -9074,7 +11003,8 @@
                 "invalid_input",
                 "conflict",
                 "budget_exceeded",
-                "internal_error"
+                "internal_error",
+                "forbidden"
               ],
               "title": "Code",
               "type": "string"

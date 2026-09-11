@@ -21,17 +21,22 @@ import {
   createProjectIndex,
   getHealth,
   getProjectNeighbors,
+  importLocalPath,
   listProjectIndexes,
   listProjects,
   isHealthResponse,
   openProjectIndex,
   readProjectSource,
+  retryLocalImport,
   searchProjectIndex,
   type CodeEdge,
   type EdgeKind,
   type Evidence,
   type HealthResponse,
+  type ImportStatus,
   type IndexResponse,
+  type ImportAttempt,
+  type LocalImportResponse,
   type NeighborDirection,
   type ProjectRecord,
   type SearchMatch,
@@ -166,6 +171,18 @@ function queryStatusLabel(status: AsyncStatus): string {
   }[status];
 }
 
+function importStatusLabel(status: ImportStatus): string {
+  return {
+    queued: "排队中",
+    acquiring: "校验来源",
+    indexing: "建立索引",
+    ready: "导入完成",
+    failed: "导入失败",
+    cancelled: "已取消",
+    interrupted: "重启中断",
+  }[status];
+}
+
 function evidenceLines(evidence: Evidence): Array<{ number: number; text: string }> {
   return evidence.excerpt.split("\n").map((text, offset) => ({
     number: evidence.start_line + offset,
@@ -222,6 +239,11 @@ export default function Workbench() {
   const [projectName, setProjectName] = useState("Timeout Demo");
   const [projectStatus, setProjectStatus] = useState<AsyncStatus>("idle");
   const [projectError, setProjectError] = useState<string | null>(null);
+  const [importName, setImportName] = useState("Local project");
+  const [localPath, setLocalPath] = useState("");
+  const [importStatus, setImportStatus] = useState<ImportStatus | null>(null);
+  const [importAttempt, setImportAttempt] = useState<ImportAttempt | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
   const [projectIndexes, setProjectIndexes] = useState<IndexResponse["index"][]>([]);
   const [repositoryId, setRepositoryId] = useState("timeout-demo");
   const [revision, setRevision] = useState("fixture-v1");
@@ -250,12 +272,14 @@ export default function Workbench() {
 
   const healthController = useRef<AbortController | null>(null);
   const projectController = useRef<AbortController | null>(null);
+  const importController = useRef<AbortController | null>(null);
   const indexController = useRef<AbortController | null>(null);
   const searchController = useRef<AbortController | null>(null);
   const graphController = useRef<AbortController | null>(null);
   const sourceController = useRef<AbortController | null>(null);
   const indexRequestId = useRef(0);
   const projectRequestId = useRef(0);
+  const importRequestId = useRef(0);
   const searchRequestId = useRef(0);
   const graphRequestId = useRef(0);
   const sourceRequestId = useRef(0);
@@ -332,6 +356,7 @@ export default function Workbench() {
     return () => {
       healthController.current?.abort();
       projectController.current?.abort();
+      importController.current?.abort();
       indexController.current?.abort();
       searchController.current?.abort();
       graphController.current?.abort();
@@ -561,6 +586,88 @@ export default function Workbench() {
     },
     [projectName, repositoryId],
   );
+
+  const applyImportResponse = useCallback((response: LocalImportResponse) => {
+    setImportAttempt(response.attempt);
+    setImportStatus(response.attempt.status);
+    setImportError(
+      response.attempt.status === "ready"
+        ? null
+        : response.attempt.error_message ?? "本地导入未完成。",
+    );
+    setProjects((previous) => [
+      ...previous.filter((project) => project.project_id !== response.project.project_id),
+      response.project,
+    ]);
+    setSelectedProjectId(response.project.project_id);
+    setProjectStatus("success");
+  }, []);
+
+  const importLocalProject = useCallback(
+    async (event: React.FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      const name = importName.trim();
+      const path = localPath.trim();
+      if (!name || !path) {
+        setImportError("请输入项目名称和 API 服务端可见的绝对路径。");
+        setImportStatus("failed");
+        return;
+      }
+      importController.current?.abort();
+      const controller = new AbortController();
+      importController.current = controller;
+      const requestId = ++importRequestId.current;
+      setImportStatus("queued");
+      setImportAttempt(null);
+      setImportError(null);
+      try {
+        const response = await importLocalPath(
+          name,
+          path,
+          revision.trim() || "working-tree",
+          dirty,
+          undefined,
+          controller.signal,
+        );
+        if (!isLatestRequest(requestId, importRequestId.current)) {
+          return;
+        }
+        applyImportResponse(response);
+      } catch (error) {
+        if (isAbortError(error) || !isLatestRequest(requestId, importRequestId.current)) {
+          return;
+        }
+        setImportStatus("failed");
+        setImportError(errorMessage(error));
+      }
+    },
+    [applyImportResponse, dirty, importName, localPath, revision],
+  );
+
+  const retryLocalProjectImport = useCallback(async () => {
+    if (!importAttempt) {
+      return;
+    }
+    importController.current?.abort();
+    const controller = new AbortController();
+    importController.current = controller;
+    const requestId = ++importRequestId.current;
+    setImportStatus("queued");
+    setImportError(null);
+    try {
+      const response = await retryLocalImport(importAttempt.attempt_id, controller.signal);
+      if (!isLatestRequest(requestId, importRequestId.current)) {
+        return;
+      }
+      applyImportResponse(response);
+    } catch (error) {
+      if (isAbortError(error) || !isLatestRequest(requestId, importRequestId.current)) {
+        return;
+      }
+      setImportStatus("failed");
+      setImportError(errorMessage(error));
+    }
+  }, [applyImportResponse, importAttempt]);
 
   const createNewIndex = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
@@ -1046,27 +1153,62 @@ export default function Workbench() {
               <div className="project-empty"><span>∅</span><p>还没有项目，先创建一个服务端仓库项目。</p></div>
             )}
           </div>
-          <form className="project-create-form" onSubmit={(event) => void createNewProject(event)}>
-            <label htmlFor="project-name">新项目名称</label>
-            <input
-              id="project-name"
-              value={projectName}
-              onChange={(event) => setProjectName(event.target.value)}
-              placeholder="Timeout Demo"
-              spellCheck={false}
-            />
-            <label htmlFor="project-repository">来源 repository_id</label>
-            <input
-              id="project-repository"
-              value={repositoryId}
-              onChange={(event) => setRepositoryId(event.target.value)}
-              placeholder="timeout-demo"
-              spellCheck={false}
-            />
-            <button type="submit" className="primary-button" disabled={projectStatus === "loading"}>
-              {projectStatus === "loading" ? "保存中…" : "创建项目"}
-            </button>
-          </form>
+          <div className="project-forms">
+            <form className="project-create-form" onSubmit={(event) => void createNewProject(event)}>
+              <label htmlFor="project-name">新项目名称</label>
+              <input
+                id="project-name"
+                value={projectName}
+                onChange={(event) => setProjectName(event.target.value)}
+                placeholder="Timeout Demo"
+                spellCheck={false}
+              />
+              <label htmlFor="project-repository">来源 repository_id</label>
+              <input
+                id="project-repository"
+                value={repositoryId}
+                onChange={(event) => setRepositoryId(event.target.value)}
+                placeholder="timeout-demo"
+                spellCheck={false}
+              />
+              <button type="submit" className="primary-button" disabled={projectStatus === "loading"}>
+                {projectStatus === "loading" ? "保存中…" : "创建项目"}
+              </button>
+            </form>
+            <form className="project-create-form project-import-form" onSubmit={(event) => void importLocalProject(event)}>
+              <label htmlFor="import-name">导入本地目录 / 项目名称</label>
+              <input
+                id="import-name"
+                value={importName}
+                onChange={(event) => setImportName(event.target.value)}
+                placeholder="Local project"
+                spellCheck={false}
+              />
+              <label htmlFor="local-path">API 服务端绝对路径</label>
+              <input
+                id="local-path"
+                value={localPath}
+                onChange={(event) => setLocalPath(event.target.value)}
+                placeholder="D:\\projects\\my-repo"
+                spellCheck={false}
+              />
+              <small className="form-help">路径由 API 服务端读取，不是浏览器本机路径；来源目录保持只读。</small>
+              <button type="submit" className="primary-button" disabled={importStatus === "queued" || importStatus === "acquiring" || importStatus === "indexing"}>
+                {importStatus === "indexing" ? "建立中…" : "导入并建立索引"}
+              </button>
+              {importAttempt ? (
+                <div className="import-status" data-state={importAttempt.status}>
+                  <span>{importStatusLabel(importAttempt.status)}</span>
+                  <code>{importAttempt.attempt_id}</code>
+                  {importAttempt.status === "failed" || importAttempt.status === "interrupted" ? (
+                    <button type="button" className="text-button" onClick={() => void retryLocalProjectImport()}>
+                      重试
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+            </form>
+          </div>
         </div>
       </section>
 
@@ -1114,9 +1256,9 @@ export default function Workbench() {
         </button>
       </section>
 
-      {indexError || connectionError || projectError ? (
+      {indexError || connectionError || projectError || importError ? (
         <div className="global-alert" role="alert">
-          <span>{indexError ?? projectError ?? connectionError}</span>
+          <span>{indexError ?? projectError ?? importError ?? connectionError}</span>
           {connectionState === "error" ? (
             <button type="button" onClick={() => void checkHealth()}>
               重新检查

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
+import hashlib
 import json
 import shutil
 from pathlib import Path
@@ -28,7 +30,14 @@ ROOT = Path(__file__).resolve().parents[3]
 FIXTURE_ROOT = ROOT / "fixtures" / "repos" / "timeout-demo"
 
 
-async def _request(application, method: str, target: str, payload: dict | None = None) -> tuple[int, dict]:
+async def _request(
+    application,
+    method: str,
+    target: str,
+    payload: dict | None = None,
+    *,
+    client_host: str = "127.0.0.1",
+) -> tuple[int, dict]:
     parsed = urlsplit(target)
     body = b"" if payload is None else json.dumps(payload).encode("utf-8")
     messages: list[dict] = []
@@ -57,7 +66,7 @@ async def _request(application, method: str, target: str, payload: dict | None =
         "raw_path": parsed.path.encode("ascii"),
         "query_string": parsed.query.encode("ascii"),
         "headers": headers,
-        "client": ("testclient", 50000),
+        "client": (client_host, 50000),
         "server": ("testserver", 80),
         "root_path": "",
     }
@@ -71,8 +80,15 @@ async def _request(application, method: str, target: str, payload: dict | None =
     return response_start["status"], json.loads(response_body or b"{}")
 
 
-def request(application, method: str, target: str, payload: dict | None = None) -> tuple[int, dict]:
-    return asyncio.run(_request(application, method, target, payload))
+def request(
+    application,
+    method: str,
+    target: str,
+    payload: dict | None = None,
+    *,
+    client_host: str = "127.0.0.1",
+) -> tuple[int, dict]:
+    return asyncio.run(_request(application, method, target, payload, client_host=client_host))
 
 
 def copy_fixture(tmp_path: Path) -> Path:
@@ -97,6 +113,14 @@ def copy_fixture_named(tmp_path: Path, name: str) -> Path:
 
 def create_request() -> dict:
     return {"repository_id": "timeout-demo", "revision": "fixture-v1", "dirty": False}
+
+
+def file_manifest(root: Path) -> dict[str, str]:
+    return {
+        path.relative_to(root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in root.rglob("*")
+        if path.is_file()
+    }
 
 
 def test_http_index_query_and_snapshot_evidence_flow(tmp_path: Path) -> None:
@@ -318,6 +342,222 @@ def test_project_workspace_isolated_and_restores_after_service_reopen(tmp_path: 
     assert status == 200
     assert restored_indexes["latest_index_id"] == index_two_id
     assert [item["index_id"] for item in restored_indexes["indexes"]] == [index_two_id]
+
+
+def test_local_import_is_bounded_persistent_idempotent_and_retryable(tmp_path: Path) -> None:
+    source = copy_fixture_named(tmp_path, "local-source")
+    data_root = tmp_path / "service-data"
+    before_manifest = file_manifest(source)
+    application = create_app({}, data_root=data_root, allowed_import_roots=(tmp_path,))
+    payload = {
+        "name": "Imported timeout demo",
+        "path": str(source),
+        "revision": "local-v1",
+        "dirty": False,
+        "idempotency_key": "local-import-1",
+    }
+
+    status, imported = request(application, "POST", "/api/imports/local", payload)
+    assert status == 200
+    assert imported["attempt"]["status"] == "ready"
+    project_id = imported["project"]["project_id"]
+    first_index_id = imported["index"]["index"]["index_id"]
+    first_attempt_id = imported["attempt"]["attempt_id"]
+    assert file_manifest(source) == before_manifest
+    assert not (source / ".codetrail").exists()
+    assert (data_root / "registry.sqlite3").is_file()
+    assert (data_root / "projects" / project_id / ".codetrail" / "index.sqlite3").is_file()
+
+    status, repeated = request(
+        application,
+        "POST",
+        "/api/imports/local",
+        {**payload, "path": str(source).upper()},
+    )
+    assert status == 200
+    assert repeated["project"]["project_id"] == project_id
+    assert repeated["attempt"]["attempt_id"] == first_attempt_id
+    assert repeated["index"]["index"]["index_id"] == first_index_id
+
+    status, conflict = request(
+        application,
+        "POST",
+        "/api/imports/local",
+        {**payload, "name": "Changed name"},
+    )
+    assert status == 409
+    assert conflict["code"] == "conflict"
+
+    config_path = source / "timeout_demo" / "config.py"
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8").replace("DEFAULT_TIMEOUT = 30", "DEFAULT_TIMEOUT = 99"),
+        encoding="utf-8",
+    )
+    modified_manifest = file_manifest(source)
+    status, reindexed = request(
+        application,
+        "POST",
+        "/api/imports/local",
+        {
+            "name": "Ignored duplicate display name",
+            "path": str(source),
+            "revision": "local-v2",
+            "dirty": True,
+        },
+    )
+    assert status == 200
+    assert reindexed["project"]["project_id"] == project_id
+    assert reindexed["attempt"]["attempt_id"] != first_attempt_id
+    assert reindexed["index"]["index"]["index_id"] != first_index_id
+    assert file_manifest(source) == modified_manifest
+
+    original_create = application.state.index_service.create_index
+
+    def fail_create(*_args, **_kwargs):
+        raise ServiceError("internal_error", 500, "injected import failure")
+
+    application.state.index_service.create_index = fail_create
+    try:
+        status, failed = request(
+            application,
+            "POST",
+            "/api/imports/local",
+            {
+                "name": "Imported timeout demo",
+                "path": str(source),
+                "revision": "local-v2",
+                "dirty": True,
+                "idempotency_key": "local-import-failure",
+            },
+        )
+    finally:
+        application.state.index_service.create_index = original_create
+    assert status == 200
+    assert failed["attempt"]["status"] == "failed"
+    assert failed["attempt"]["error_code"] == "internal_error"
+    status, after_failure = request(application, "GET", f"/api/projects/{project_id}")
+    assert status == 200
+    assert after_failure["latest_index_id"] == reindexed["index"]["index"]["index_id"]
+
+    status, retried = request(application, "POST", f"/api/imports/{failed['attempt']['attempt_id']}/retry")
+    assert status == 200
+    assert retried["attempt"]["status"] == "ready", (
+        retried["attempt"]["error_code"],
+        retried["attempt"]["error_message"],
+    )
+    assert retried["index"]["index"]["index_id"] == reindexed["index"]["index"]["index_id"]
+
+    outside = tmp_path.parent / f"codetrail-outside-{tmp_path.name}"
+    outside.mkdir()
+    status, boundary_error = request(
+        application,
+        "POST",
+        "/api/imports/local",
+        {"name": "Outside", "path": str(outside)},
+    )
+    assert status == 400
+    assert boundary_error["code"] == "invalid_input"
+
+    empty = tmp_path / "empty-source"
+    empty.mkdir()
+    (empty / "README.md").write_text("not Python", encoding="utf-8")
+    status, unsupported = request(
+        application,
+        "POST",
+        "/api/imports/local",
+        {"name": "Empty source", "path": str(empty), "idempotency_key": "empty-source"},
+    )
+    assert status == 200
+    assert unsupported["attempt"]["status"] == "failed"
+    assert unsupported["attempt"]["error_code"] == "invalid_input"
+
+    status, denied = request(
+        application,
+        "POST",
+        "/api/imports/local",
+        payload,
+        client_host="10.0.0.4",
+    )
+    assert status == 403
+    assert denied["code"] == "forbidden"
+
+    link = tmp_path / "source-link"
+    try:
+        link.symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pass
+    else:
+        status, link_error = request(
+            application,
+            "POST",
+            "/api/imports/local",
+            {"name": "Linked source", "path": str(link)},
+        )
+        assert status == 400
+        assert link_error["code"] == "invalid_input"
+
+    reopened = create_app({}, data_root=data_root, allowed_import_roots=(tmp_path,))
+    status, projects = request(reopened, "GET", "/api/projects")
+    assert status == 200
+    assert project_id in {project["project_id"] for project in projects["projects"]}
+    status, attempt_status = request(reopened, "GET", f"/api/imports/{first_attempt_id}")
+    assert status == 200
+    assert attempt_status["attempt"]["status"] == "ready"
+
+
+def test_restart_marks_active_local_import_interrupted_without_losing_latest(tmp_path: Path) -> None:
+    source = copy_fixture_named(tmp_path, "interrupted-source")
+    data_root = tmp_path / "service-data"
+    application = create_app({}, data_root=data_root, allowed_import_roots=(tmp_path,))
+    status, imported = request(
+        application,
+        "POST",
+        "/api/imports/local",
+        {"name": "Interrupted source", "path": str(source), "idempotency_key": "interrupted"},
+    )
+    assert status == 200
+    attempt_id = imported["attempt"]["attempt_id"]
+    project_id = imported["project"]["project_id"]
+    latest_index_id = imported["index"]["index"]["index_id"]
+    application.state.registry.management_store.update_attempt(
+        attempt_id,
+        status="indexing",
+        phase="indexing",
+    )
+
+    reopened = create_app({}, data_root=data_root, allowed_import_roots=(tmp_path,))
+    status, attempt_status = request(reopened, "GET", f"/api/imports/{attempt_id}")
+    assert status == 200
+    assert attempt_status["attempt"]["status"] == "interrupted"
+    assert attempt_status["attempt"]["error_code"] == "interrupted"
+    assert attempt_status["latest_index"]["index"]["index_id"] == latest_index_id
+    status, project_status = request(reopened, "GET", f"/api/projects/{project_id}")
+    assert status == 200
+    assert project_status["latest_index_id"] == latest_index_id
+
+
+def test_concurrent_duplicate_local_import_uses_one_project_and_attempt(tmp_path: Path) -> None:
+    source = copy_fixture_named(tmp_path, "concurrent-source")
+    application = create_app({}, data_root=tmp_path / "service-data", allowed_import_roots=(tmp_path,))
+    payload = {
+        "name": "Concurrent source",
+        "path": str(source),
+        "revision": "concurrent-v1",
+        "dirty": False,
+        "idempotency_key": "concurrent-import",
+    }
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        responses = list(
+            executor.map(
+                lambda _: request(application, "POST", "/api/imports/local", payload),
+                range(2),
+            )
+        )
+
+    assert {status for status, _ in responses} == {200}
+    assert len({body["project"]["project_id"] for _, body in responses}) == 1
+    assert len({body["attempt"]["attempt_id"] for _, body in responses}) == 1
 
 
 def test_http_errors_are_stable_and_do_not_expose_repository_paths(tmp_path: Path) -> None:

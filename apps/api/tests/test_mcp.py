@@ -49,7 +49,7 @@ async def _request(application, method: str, target: str, payload: dict | None =
         "raw_path": parsed.path.encode("ascii"),
         "query_string": parsed.query.encode("ascii"),
         "headers": headers,
-        "client": ("testclient", 50000),
+        "client": ("127.0.0.1", 50000),
         "server": ("testserver", 80),
         "root_path": "",
     }
@@ -224,7 +224,7 @@ def test_real_stdio_client_scopes_two_projects_with_same_named_symbols(tmp_path:
         cwd=API_ROOT,
     )
 
-    async def exercise() -> None:
+    async def exercise() -> str:
         async with Client(parameters, read_timeout_seconds=10) as client:
             projects_result = await client.call_tool("list_projects")
             assert {
@@ -282,6 +282,107 @@ def test_real_stdio_client_scopes_two_projects_with_same_named_symbols(tmp_path:
             assert out_of_range.structured_content["error"]["code"] == "invalid_input"
 
     asyncio.run(exercise())
+
+
+def test_mcp_local_import_is_opt_in_and_shares_http_state(tmp_path: Path) -> None:
+    http_repository = copy_fixture(tmp_path, name="mcp-http")
+    mcp_repository = copy_fixture(tmp_path, name="mcp-agent")
+    data_root = tmp_path / "service-data"
+    application = create_app({}, data_root=data_root, allowed_import_roots=(tmp_path,))
+    status, http_import = request(
+        application,
+        "POST",
+        "/api/imports/local",
+        {
+            "name": "HTTP imported project",
+            "path": str(http_repository),
+            "revision": "http-v1",
+            "dirty": False,
+            "idempotency_key": "http-import",
+        },
+    )
+    assert status == 200
+    assert http_import["attempt"]["status"] == "ready"
+
+    common_environment = {
+        "CODETRAIL_REPOSITORIES": "{}",
+        "CODETRAIL_DATA_DIR": str(data_root),
+        "CODETRAIL_ALLOWED_IMPORT_ROOTS": json.dumps([str(tmp_path)]),
+        "CODETRAIL_WORKBENCH_URL": "http://localhost:3000",
+    }
+
+    def parameters(enabled: bool) -> StdioServerParameters:
+        environment = dict(common_environment)
+        if enabled:
+            environment["CODETRAIL_MCP_LOCAL_IMPORT_ENABLED"] = "1"
+        return StdioServerParameters(
+            command=sys.executable,
+            args=["-m", "app.mcp_server"],
+            env=environment,
+            cwd=API_ROOT,
+        )
+
+    async def exercise() -> None:
+        async with Client(parameters(False), read_timeout_seconds=10) as client:
+            disabled_tools = await client.list_tools()
+            disabled_names = {tool.name for tool in disabled_tools.tools}
+            assert {
+                "list_projects",
+                "get_project",
+                "list_indexes",
+                "get_index",
+                "search_code",
+                "read_source",
+                "get_neighbors",
+            } == disabled_names
+            assert "import_local_path" not in disabled_names
+
+        async with Client(parameters(True), read_timeout_seconds=10) as client:
+            enabled_tools = await client.list_tools()
+            enabled_names = {tool.name for tool in enabled_tools.tools}
+            assert {"import_local_path", "get_import_status", "retry_local_import"} <= enabled_names
+
+            imported = await client.call_tool(
+                "import_local_path",
+                {
+                    "name": "MCP imported project",
+                    "path": str(mcp_repository),
+                    "revision": "mcp-v1",
+                    "dirty": False,
+                    "idempotency_key": "mcp-import",
+                },
+            )
+            assert imported.structured_content["ok"] is True
+            assert imported.structured_content["attempt"]["status"] == "ready"
+            mcp_project_id = imported.structured_content["project"]["project_id"]
+            mcp_index_id = imported.structured_content["index"]["index"]["index_id"]
+            attempt_id = imported.structured_content["attempt"]["attempt_id"]
+
+            status_result = await client.call_tool("get_import_status", {"attempt_id": attempt_id})
+            assert status_result.structured_content["ok"] is True
+            assert status_result.structured_content["attempt"]["status"] == "ready"
+
+            source_result = await client.call_tool(
+                "read_source",
+                {
+                    "project_id": mcp_project_id,
+                    "index_id": mcp_index_id,
+                    "path": "timeout_demo/config.py",
+                    "start_line": 9,
+                    "end_line": 9,
+                },
+            )
+            assert source_result.structured_content["result"]["evidence"]["excerpt"] == "DEFAULT_TIMEOUT = 30"
+            return mcp_project_id
+
+    mcp_project_id = asyncio.run(exercise())
+
+    status, projects = request(application, "GET", "/api/projects")
+    assert status == 200
+    assert {
+        http_import["project"]["project_id"],
+        mcp_project_id,
+    } <= {project["project_id"] for project in projects["projects"]}
 
 
 async def _exercise_stdio(

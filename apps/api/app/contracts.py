@@ -115,6 +115,16 @@ class CreateProjectRequest(VersionedModel):
     repository_id: Identifier
 
 
+class LocalImportRequest(VersionedModel):
+    """A server-local source registration and bounded synchronous import request."""
+
+    name: str = Field(min_length=1, max_length=200)
+    path: str = Field(min_length=1, max_length=4_000)
+    revision: str = Field(default="working-tree", min_length=1, max_length=200)
+    dirty: bool = True
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=200)
+
+
 class CreateProjectIndexRequest(VersionedModel):
     revision: str = Field(default="working-tree", min_length=1, max_length=200)
     dirty: bool = True
@@ -174,6 +184,72 @@ class ProjectIndexListResponse(VersionedModel):
         if self.latest_index_id is not None and self.latest_index_id not in index_ids:
             raise ValueError("project latest index must be present in the index list")
         return self
+
+
+ImportStatus: TypeAlias = Literal[
+    "queued",
+    "acquiring",
+    "indexing",
+    "ready",
+    "failed",
+    "cancelled",
+    "interrupted",
+]
+
+
+class ImportAttempt(VersionedModel):
+    """Persisted lifecycle state for one local source import attempt."""
+
+    attempt_id: Identifier
+    project_id: Identifier
+    repository_id: Identifier
+    source_path: str = Field(min_length=1, max_length=4_000)
+    status: ImportStatus
+    phase: ImportStatus
+    index_id: Identifier | None = None
+    error_code: str | None = Field(default=None, max_length=100)
+    error_message: str | None = Field(default=None, max_length=2_000)
+    created_at: datetime
+    updated_at: datetime
+
+    @model_validator(mode="after")
+    def validate_lifecycle(self) -> ImportAttempt:
+        if self.status != self.phase:
+            raise ValueError("import status and phase must agree")
+        if self.status == "ready" and self.index_id is None:
+            raise ValueError("ready imports must provide an index_id")
+        if self.status in {"failed", "cancelled", "interrupted"} and not self.error_code:
+            raise ValueError("unsuccessful imports must provide an error code")
+        if self.error_code is None and self.error_message is not None:
+            raise ValueError("import error message requires an error code")
+        return self
+
+
+class LocalImportResponse(VersionedModel):
+    """HTTP response for one completed or failed local import attempt."""
+
+    source_path: str = Field(min_length=1, max_length=4_000)
+    project: Project
+    attempt: ImportAttempt
+    index: IndexResponse | None = None
+
+    @model_validator(mode="after")
+    def validate_index_result(self) -> LocalImportResponse:
+        if self.attempt.status == "ready":
+            if self.index is None or self.index.index.index_id != self.attempt.index_id:
+                raise ValueError("ready import response must include its created index")
+        elif self.index is not None:
+            raise ValueError("failed or pending import response cannot include a created index")
+        return self
+
+
+class ImportAttemptResponse(VersionedModel):
+    """HTTP response for a persisted import status lookup."""
+
+    source_path: str = Field(min_length=1, max_length=4_000)
+    project: Project
+    attempt: ImportAttempt
+    latest_index: IndexResponse | None = None
 
 
 SymbolKind: TypeAlias = Literal["module", "file", "class", "function", "test"]
@@ -595,6 +671,7 @@ ApiErrorCode: TypeAlias = Literal[
     "conflict",
     "budget_exceeded",
     "internal_error",
+    "forbidden",
 ]
 
 
@@ -609,6 +686,7 @@ McpErrorCode: TypeAlias = Literal[
     "conflict",
     "budget_exceeded",
     "internal_error",
+    "forbidden",
 ]
 
 
@@ -704,6 +782,47 @@ class McpSourceResponse(McpResultBase):
 
 class McpNeighborsResponse(McpResultBase):
     result: NeighborsIndexResponse | None = None
+
+
+class McpImportResponse(McpResultBase):
+    """Structured MCP result for an enabled local import tool."""
+
+    source_path: str | None = Field(default=None, max_length=4_000)
+    project: Project | None = None
+    attempt: ImportAttempt | None = None
+    index: IndexResponse | None = None
+
+    @model_validator(mode="after")
+    def validate_import_result(self) -> McpImportResponse:
+        if self.ok:
+            if self.source_path is None or self.project is None or self.attempt is None:
+                raise ValueError("successful import results require source, project, and attempt")
+            if self.attempt.status == "ready":
+                if self.index is None or self.index.index.index_id != self.attempt.index_id:
+                    raise ValueError("ready import results require the created index")
+            elif self.index is not None:
+                raise ValueError("pending or failed import results cannot include an index")
+        elif any(value is not None for value in (self.source_path, self.project, self.attempt, self.index)):
+            raise ValueError("failed import results cannot include import data")
+        return self
+
+
+class McpImportStatusResponse(McpResultBase):
+    """Structured MCP result for a bounded local import status lookup."""
+
+    source_path: str | None = Field(default=None, max_length=4_000)
+    project: Project | None = None
+    attempt: ImportAttempt | None = None
+    latest_index: IndexResponse | None = None
+
+    @model_validator(mode="after")
+    def validate_import_status(self) -> McpImportStatusResponse:
+        if self.ok:
+            if self.source_path is None or self.project is None or self.attempt is None:
+                raise ValueError("successful import status requires source, project, and attempt")
+        elif any(value is not None for value in (self.source_path, self.project, self.attempt, self.latest_index)):
+            raise ValueError("failed import status cannot include import data")
+        return self
 
 
 ToolSuccessResult: TypeAlias = Annotated[

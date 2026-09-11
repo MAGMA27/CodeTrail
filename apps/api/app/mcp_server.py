@@ -15,6 +15,8 @@ from .contracts import (
     EvidenceReference,
     Identifier,
     McpError,
+    McpImportResponse,
+    McpImportStatusResponse,
     McpIndexResponse,
     McpNeighborsResponse,
     McpProjectIndexesResponse,
@@ -23,6 +25,8 @@ from .contracts import (
     McpResultBase,
     McpSearchResponse,
     McpSourceResponse,
+    LocalImportRequest,
+    LocalImportResponse,
     ProjectIndexListResponse,
 )
 from .service import IndexService, RepositoryRegistry, ServiceError, WorkspaceService
@@ -39,6 +43,7 @@ _ProjectId = Annotated[Identifier, Field(description="Stable CodeTrail project I
 _IndexId = Annotated[Identifier, Field(description="Immutable CodeTrail index ID.")]
 _Query = Annotated[str, Field(min_length=1, max_length=500, description="Symbol or source text query.")]
 _Path = Annotated[str, Field(min_length=1, max_length=500, description="Relative path in the indexed snapshot.")]
+_LocalPath = Annotated[str, Field(min_length=1, max_length=4_000, description="Absolute path visible to the local API service.")]
 _Line = Annotated[int, Field(ge=1, description="One-based source line.")]
 _Limit = Annotated[int, Field(ge=1, le=40, description="Maximum number of returned items.")]
 _Depth = Annotated[int, Field(ge=1, le=2, description="Static graph traversal depth.")]
@@ -55,13 +60,18 @@ def create_mcp_server(
 
     service = workspace_service or _workspace_from_environment()
     citation_url = _normalize_workbench_url(workbench_url or os.getenv(_WORKBENCH_URL_ENV))
+    local_import_enabled = service.registry.mcp_local_import_enabled
+    server_description = (
+        "Discover CodeTrail projects and query one explicitly selected immutable index. "
+        "All default tools are read-only. Local import/status/retry tools are enabled by explicit local configuration."
+        if local_import_enabled
+        else "Discover CodeTrail projects and query one explicitly selected immutable index. "
+        "All tools are read-only and never execute repository code."
+    )
     server = MCPServer(
         name="codetrail",
-        title="CodeTrail read-only workspace",
-        description=(
-            "Discover CodeTrail projects and query one explicitly selected immutable index. "
-            "All tools are read-only and never execute repository code."
-        ),
+        title="CodeTrail workspace" if local_import_enabled else "CodeTrail read-only workspace",
+        description=server_description,
         version="0.1.0",
         log_level="WARNING",
     )
@@ -253,6 +263,77 @@ def create_mcp_server(
         except Exception:
             return _unexpected_failure("get_neighbors", McpNeighborsResponse)
 
+    if local_import_enabled:
+
+        @server.tool(
+            name="import_local_path",
+            title="Import a local CodeTrail path",
+            description=(
+                "Register and index one absolute local directory already inside the server's allowed import roots. "
+                "This is a bounded write; it never writes to the source directory and returns a persisted attempt."
+            ),
+            structured_output=True,
+        )
+        def import_local_path(
+            name: Annotated[str, Field(min_length=1, max_length=200, description="Project display name.")],
+            path: _LocalPath,
+            revision: Annotated[str, Field(min_length=1, max_length=200)] = "working-tree",
+            dirty: bool = True,
+            idempotency_key: Annotated[str | None, Field(min_length=1, max_length=200)] = None,
+        ) -> McpImportResponse:
+            try:
+                result = service.import_local(
+                    LocalImportRequest(
+                        name=name,
+                        path=path,
+                        revision=revision,
+                        dirty=dirty,
+                        idempotency_key=idempotency_key,
+                    ),
+                    via_mcp=True,
+                )
+                return _mcp_import_response(result)
+            except ServiceError as exc:
+                return _failure(McpImportResponse, exc)
+            except Exception:
+                return _unexpected_failure("import_local_path", McpImportResponse)
+
+        @server.tool(
+            name="get_import_status",
+            title="Get local import status",
+            description="Read one bounded persisted local import attempt without changing it.",
+            structured_output=True,
+        )
+        def get_import_status(attempt_id: _ProjectId) -> McpImportStatusResponse:
+            try:
+                result = service.get_import_status(attempt_id)
+                return McpImportStatusResponse(
+                    ok=True,
+                    source_path=result.source_path,
+                    project=result.project,
+                    attempt=result.attempt,
+                    latest_index=result.latest_index,
+                )
+            except ServiceError as exc:
+                return _failure(McpImportStatusResponse, exc)
+            except Exception:
+                return _unexpected_failure("get_import_status", McpImportStatusResponse)
+
+        @server.tool(
+            name="retry_local_import",
+            title="Retry a local import",
+            description="Retry one failed or interrupted local import attempt using its persisted bounded request.",
+            structured_output=True,
+        )
+        def retry_local_import(attempt_id: _ProjectId) -> McpImportResponse:
+            try:
+                result = service.retry_import(attempt_id, via_mcp=True)
+                return _mcp_import_response(result)
+            except ServiceError as exc:
+                return _failure(McpImportResponse, exc)
+            except Exception:
+                return _unexpected_failure("retry_local_import", McpImportResponse)
+
     return server
 
 
@@ -314,9 +395,19 @@ def _project_indexes_response(result: ProjectIndexListResponse, limit: int) -> M
 
 
 def _mcp_error(exc: ServiceError) -> McpError:
-    code = exc.code if exc.code in {"not_found", "invalid_input", "conflict", "budget_exceeded", "internal_error"} else "internal_error"
+    code = exc.code if exc.code in {"not_found", "invalid_input", "conflict", "budget_exceeded", "internal_error", "forbidden"} else "internal_error"
     message = exc.message if code == exc.code else "local MCP query failed"
     return McpError(code=code, message=message, retryable=code in _RETRYABLE_CODES)
+
+
+def _mcp_import_response(result: LocalImportResponse) -> McpImportResponse:
+    return McpImportResponse(
+        ok=True,
+        source_path=result.source_path,
+        project=result.project,
+        attempt=result.attempt,
+        index=result.index,
+    )
 
 
 def _failure(model: type[McpResponse], exc: ServiceError, **fields: object) -> McpResponse:

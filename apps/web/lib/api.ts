@@ -93,6 +93,46 @@ export type ProjectListResponse = {
   projects: ProjectRecord[];
 };
 
+export type ImportStatus =
+  | "queued"
+  | "acquiring"
+  | "indexing"
+  | "ready"
+  | "failed"
+  | "cancelled"
+  | "interrupted";
+
+export type ImportAttempt = {
+  schema_version: typeof SCHEMA_VERSION;
+  attempt_id: string;
+  project_id: string;
+  repository_id: string;
+  source_path: string;
+  status: ImportStatus;
+  phase: ImportStatus;
+  index_id: string | null;
+  error_code: string | null;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type LocalImportResponse = {
+  schema_version: typeof SCHEMA_VERSION;
+  source_path: string;
+  project: ProjectRecord;
+  attempt: ImportAttempt;
+  index: IndexResponse | null;
+};
+
+export type ImportAttemptResponse = {
+  schema_version: typeof SCHEMA_VERSION;
+  source_path: string;
+  project: ProjectRecord;
+  attempt: ImportAttempt;
+  latest_index: IndexResponse | null;
+};
+
 export type ProjectIndexesResponse = {
   schema_version: typeof SCHEMA_VERSION;
   project_id: string;
@@ -253,6 +293,12 @@ function isNullableString(value: unknown): value is string | null {
   return value === null || isString(value);
 }
 
+function isImportStatus(value: unknown): value is ImportStatus {
+  return ["queued", "acquiring", "indexing", "ready", "failed", "cancelled", "interrupted"].includes(
+    String(value),
+  );
+}
+
 export function isProjectRecord(value: unknown): value is ProjectRecord {
   return (
     isRecord(value) &&
@@ -273,6 +319,46 @@ export function isProjectListResponse(value: unknown): value is ProjectListRespo
     value.schema_version === SCHEMA_VERSION &&
     Array.isArray(value.projects) &&
     value.projects.every(isProjectRecord)
+  );
+}
+
+export function isImportAttempt(value: unknown): value is ImportAttempt {
+  return (
+    isRecord(value) &&
+    value.schema_version === SCHEMA_VERSION &&
+    isString(value.attempt_id) &&
+    isString(value.project_id) &&
+    isString(value.repository_id) &&
+    isString(value.source_path) &&
+    isImportStatus(value.status) &&
+    value.phase === value.status &&
+    isNullableString(value.index_id) &&
+    isNullableString(value.error_code) &&
+    isNullableString(value.error_message) &&
+    isString(value.created_at) &&
+    isString(value.updated_at)
+  );
+}
+
+export function isLocalImportResponse(value: unknown): value is LocalImportResponse {
+  return (
+    isRecord(value) &&
+    value.schema_version === SCHEMA_VERSION &&
+    isString(value.source_path) &&
+    isProjectRecord(value.project) &&
+    isImportAttempt(value.attempt) &&
+    (value.index === null || isIndexResponse(value.index))
+  );
+}
+
+export function isImportAttemptResponse(value: unknown): value is ImportAttemptResponse {
+  return (
+    isRecord(value) &&
+    value.schema_version === SCHEMA_VERSION &&
+    isString(value.source_path) &&
+    isProjectRecord(value.project) &&
+    isImportAttempt(value.attempt) &&
+    (value.latest_index === null || isIndexResponse(value.latest_index))
   );
 }
 
@@ -452,6 +538,54 @@ export function createProject(
         repository_id: repositoryId,
       }),
     },
+  );
+}
+
+export function importLocalPath(
+  name: string,
+  path: string,
+  revision = "working-tree",
+  dirty = true,
+  idempotencyKey?: string,
+  signal?: AbortSignal,
+): Promise<LocalImportResponse> {
+  return requestJson(
+    "/api/imports/local",
+    isLocalImportResponse,
+    {
+      method: "POST",
+      signal,
+      body: JSON.stringify({
+        schema_version: SCHEMA_VERSION,
+        name,
+        path,
+        revision,
+        dirty,
+        ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
+      }),
+    },
+  );
+}
+
+export function getImportStatus(
+  attemptId: string,
+  signal?: AbortSignal,
+): Promise<ImportAttemptResponse> {
+  return requestJson(
+    `/api/imports/${encodeURIComponent(attemptId)}`,
+    isImportAttemptResponse,
+    { signal },
+  );
+}
+
+export function retryLocalImport(
+  attemptId: string,
+  signal?: AbortSignal,
+): Promise<LocalImportResponse> {
+  return requestJson(
+    `/api/imports/${encodeURIComponent(attemptId)}/retry`,
+    isLocalImportResponse,
+    { method: "POST", signal },
   );
 }
 

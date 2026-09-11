@@ -12,11 +12,11 @@
 
 ## 接口与依赖
 
-契约版本当前为 `0.1.0`。Project、ProjectListResponse 和 ProjectIndexListResponse 与现有 Index/Graph 契约一起导出；HTTP 路由以 FastAPI response_model 为边界，前端在 [apps/web/lib/api.ts](../apps/web/lib/api.ts) 执行运行时形状校验。
+契约版本当前为 `0.1.0`。Project、ProjectListResponse、ProjectIndexListResponse、本地导入请求/attempt/状态响应和 A1 MCP 结构化结果与现有 Index/Graph 契约一起导出；HTTP 路由以 FastAPI response_model 为边界，前端在 [apps/web/lib/api.ts](../apps/web/lib/api.ts) 执行运行时形状校验。
 
 ## 数据与生命周期
 
-Schema 不保存项目或索引数据，只描述请求/响应形状。Project 的 latest/building 与 available index 关联必须满足声明旁的 Pydantic 校验；源码、图和证据仍由同一 `index_id` 绑定。
+Schema 不保存项目或索引数据，只描述请求/响应形状。Project 的 latest/building 与 available index 关联、ImportAttempt 的 phase/status 和 ready/failed 生命周期必须满足声明旁的 Pydantic 校验；源码、图和证据仍由同一 `index_id` 绑定。
 
 ## 使用与配置
 
@@ -31,7 +31,7 @@ pnpm contracts:check
 
 ## 错误与限制
 
-Schema 检查不能证明 HTTP 业务流程、项目隔离或浏览器切换正确；固定响应也不代表真实模型或 GitHub 导入已实现。
+Schema 检查不能证明 HTTP 业务流程、项目隔离、路径边界或浏览器切换正确；固定响应也不代表真实模型或 GitHub 导入已实现。
 
 ## 验证
 

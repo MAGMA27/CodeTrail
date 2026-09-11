@@ -101,6 +101,41 @@ class ProjectRecord:
     building_index_id: str | None
 
 
+@dataclass(frozen=True)
+class ManagedSourceRecord:
+    """A persisted local source registered outside the source directory."""
+
+    repository_id: str
+    project_id: str
+    name: str
+    source_path: str
+    normalized_source_path: str
+    storage_path: str
+    created_at: datetime
+
+
+@dataclass(frozen=True)
+class ImportAttemptRecord:
+    """A bounded, restart-aware local import lifecycle record."""
+
+    attempt_id: str
+    project_id: str
+    repository_id: str
+    source_path: str
+    normalized_source_path: str
+    name: str
+    revision: str
+    dirty: bool
+    idempotency_key: str | None
+    status: str
+    phase: str
+    index_id: str | None
+    error_code: str | None
+    error_message: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS index_snapshots (
     index_id TEXT PRIMARY KEY,
@@ -217,6 +252,262 @@ CREATE VIRTUAL TABLE IF NOT EXISTS symbol_fts USING fts5(
     tokenize='unicode61'
 );
 """
+
+
+_MANAGEMENT_SCHEMA = """
+CREATE TABLE IF NOT EXISTS managed_sources (
+    repository_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    source_path TEXT NOT NULL,
+    normalized_source_path TEXT NOT NULL UNIQUE,
+    storage_path TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS import_attempts (
+    attempt_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    repository_id TEXT NOT NULL,
+    source_path TEXT NOT NULL,
+    normalized_source_path TEXT NOT NULL,
+    name TEXT NOT NULL,
+    revision TEXT NOT NULL,
+    dirty INTEGER NOT NULL CHECK (dirty IN (0, 1)),
+    idempotency_key TEXT,
+    status TEXT NOT NULL CHECK (status IN ('queued', 'acquiring', 'indexing', 'ready', 'failed', 'cancelled', 'interrupted')),
+    phase TEXT NOT NULL CHECK (phase IN ('queued', 'acquiring', 'indexing', 'ready', 'failed', 'cancelled', 'interrupted')),
+    index_id TEXT,
+    error_code TEXT,
+    error_message TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+DROP INDEX IF EXISTS import_attempts_idempotency;
+
+CREATE UNIQUE INDEX IF NOT EXISTS import_attempts_idempotency
+    ON import_attempts(idempotency_key)
+    WHERE idempotency_key IS NOT NULL;
+
+DROP INDEX IF EXISTS import_attempts_active_source;
+
+CREATE UNIQUE INDEX IF NOT EXISTS import_attempts_active_source
+    ON import_attempts(normalized_source_path)
+    WHERE status IN ('queued', 'acquiring', 'indexing');
+
+CREATE INDEX IF NOT EXISTS import_attempts_project
+    ON import_attempts(project_id, created_at, attempt_id);
+"""
+
+
+class ManagementStore:
+    """Persist dynamic source registrations and import attempts in service data."""
+
+    def __init__(self, database_path: str | Path) -> None:
+        self.database_path = Path(database_path)
+        self.database_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with self._connect() as connection:
+                connection.executescript(_MANAGEMENT_SCHEMA)
+        except sqlite3.Error as exc:
+            raise StorageError(f"could not initialize management store: {exc}") from exc
+
+    def _connect(self) -> sqlite3.Connection:
+        connection = sqlite3.connect(
+            str(self.database_path),
+            isolation_level=None,
+            timeout=5.0,
+        )
+        connection.row_factory = sqlite3.Row
+        return connection
+
+    def list_sources(self) -> tuple[ManagedSourceRecord, ...]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM managed_sources ORDER BY created_at COLLATE BINARY, repository_id COLLATE BINARY"
+            ).fetchall()
+        return tuple(_managed_source_from_row(row) for row in rows)
+
+    def find_source(self, normalized_source_path: str) -> ManagedSourceRecord | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM managed_sources WHERE normalized_source_path = ?",
+                (normalized_source_path,),
+            ).fetchone()
+        return None if row is None else _managed_source_from_row(row)
+
+    def load_source(self, repository_id: str) -> ManagedSourceRecord:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM managed_sources WHERE repository_id = ?",
+                (repository_id,),
+            ).fetchone()
+        if row is None:
+            raise StorageNotFoundError(f"managed source {repository_id!r} was not found")
+        return _managed_source_from_row(row)
+
+    def register_source(
+        self,
+        *,
+        repository_id: str,
+        project_id: str,
+        name: str,
+        source_path: str,
+        normalized_source_path: str,
+        storage_path: str,
+        created_at: datetime,
+    ) -> ManagedSourceRecord:
+        connection = self._connect()
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                "INSERT INTO managed_sources "
+                "(repository_id, project_id, name, source_path, normalized_source_path, storage_path, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    repository_id,
+                    project_id,
+                    name,
+                    source_path,
+                    normalized_source_path,
+                    storage_path,
+                    _datetime_text(created_at),
+                ),
+            )
+            connection.execute("COMMIT")
+        except sqlite3.IntegrityError as exc:
+            try:
+                connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            existing = self.find_source(normalized_source_path)
+            if existing is not None:
+                return existing
+            raise StorageConflictError("managed source registration conflicts with existing data") from exc
+        except sqlite3.Error as exc:
+            try:
+                connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise StorageError(f"could not register managed source: {exc}") from exc
+        finally:
+            connection.close()
+        return self.load_source(repository_id)
+
+    def create_attempt(
+        self,
+        *,
+        attempt_id: str,
+        project_id: str,
+        repository_id: str,
+        source_path: str,
+        normalized_source_path: str,
+        name: str,
+        revision: str,
+        dirty: bool,
+        idempotency_key: str | None,
+        created_at: datetime,
+    ) -> ImportAttemptRecord:
+        timestamp = _datetime_text(created_at)
+        try:
+            with self._connect() as connection:
+                connection.execute(
+                    "INSERT INTO import_attempts "
+                    "(attempt_id, project_id, repository_id, source_path, normalized_source_path, name, revision, dirty, "
+                    "idempotency_key, status, phase, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 'queued', ?, ?)",
+                    (
+                        attempt_id,
+                        project_id,
+                        repository_id,
+                        source_path,
+                        normalized_source_path,
+                        name,
+                        revision,
+                        int(dirty),
+                        idempotency_key,
+                        timestamp,
+                        timestamp,
+                    ),
+                )
+        except sqlite3.IntegrityError as exc:
+            raise StorageConflictError("import attempt conflicts with existing data") from exc
+        except sqlite3.Error as exc:
+            raise StorageError(f"could not create import attempt: {exc}") from exc
+        return self.load_attempt(attempt_id)
+
+    def load_attempt(self, attempt_id: str) -> ImportAttemptRecord:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM import_attempts WHERE attempt_id = ?",
+                (attempt_id,),
+            ).fetchone()
+        if row is None:
+            raise StorageNotFoundError(f"import attempt {attempt_id!r} was not found")
+        return _import_attempt_from_row(row)
+
+    def find_attempt_by_idempotency(
+        self,
+        idempotency_key: str,
+    ) -> ImportAttemptRecord | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM import_attempts WHERE idempotency_key = ?",
+                (idempotency_key,),
+            ).fetchone()
+        return None if row is None else _import_attempt_from_row(row)
+
+    def find_active_attempt(self, normalized_source_path: str) -> ImportAttemptRecord | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM import_attempts WHERE normalized_source_path = ? "
+                "AND status IN ('queued', 'acquiring', 'indexing') "
+                "ORDER BY created_at COLLATE BINARY, attempt_id COLLATE BINARY LIMIT 1",
+                (normalized_source_path,),
+            ).fetchone()
+        return None if row is None else _import_attempt_from_row(row)
+
+    def update_attempt(
+        self,
+        attempt_id: str,
+        *,
+        status: str,
+        phase: str,
+        index_id: str | None = None,
+        error_code: str | None = None,
+        error_message: str | None = None,
+        updated_at: datetime | None = None,
+    ) -> ImportAttemptRecord:
+        timestamp = _datetime_text(updated_at or datetime.now(timezone.utc))
+        try:
+            with self._connect() as connection:
+                cursor = connection.execute(
+                    "UPDATE import_attempts SET status = ?, phase = ?, index_id = ?, error_code = ?, "
+                    "error_message = ?, updated_at = ? WHERE attempt_id = ?",
+                    (status, phase, index_id, error_code, error_message, timestamp, attempt_id),
+                )
+                if cursor.rowcount != 1:
+                    raise StorageNotFoundError(f"import attempt {attempt_id!r} was not found")
+        except StorageNotFoundError:
+            raise
+        except sqlite3.Error as exc:
+            raise StorageError(f"could not update import attempt: {exc}") from exc
+        return self.load_attempt(attempt_id)
+
+    def mark_active_attempts_interrupted(self) -> int:
+        timestamp = _datetime_text(datetime.now(timezone.utc))
+        try:
+            with self._connect() as connection:
+                cursor = connection.execute(
+                    "UPDATE import_attempts SET status = 'interrupted', phase = 'interrupted', "
+                    "error_code = 'interrupted', error_message = 'import was interrupted by a service restart', updated_at = ? "
+                    "WHERE status IN ('queued', 'acquiring', 'indexing')",
+                    (timestamp,),
+                )
+                return cursor.rowcount
+        except sqlite3.Error as exc:
+            raise StorageError(f"could not recover import attempts: {exc}") from exc
 
 
 class IndexStore:
@@ -1184,6 +1475,43 @@ def _source_lines(source_text: str) -> list[str]:
 
 def _datetime_text(value: datetime) -> str:
     return value.astimezone(timezone.utc).isoformat()
+
+
+def _datetime_value(value: str) -> datetime:
+    return datetime.fromisoformat(value).astimezone(timezone.utc)
+
+
+def _managed_source_from_row(row: sqlite3.Row) -> ManagedSourceRecord:
+    return ManagedSourceRecord(
+        repository_id=row["repository_id"],
+        project_id=row["project_id"],
+        name=row["name"],
+        source_path=row["source_path"],
+        normalized_source_path=row["normalized_source_path"],
+        storage_path=row["storage_path"],
+        created_at=_datetime_value(row["created_at"]),
+    )
+
+
+def _import_attempt_from_row(row: sqlite3.Row) -> ImportAttemptRecord:
+    return ImportAttemptRecord(
+        attempt_id=row["attempt_id"],
+        project_id=row["project_id"],
+        repository_id=row["repository_id"],
+        source_path=row["source_path"],
+        normalized_source_path=row["normalized_source_path"],
+        name=row["name"],
+        revision=row["revision"],
+        dirty=bool(row["dirty"]),
+        idempotency_key=row["idempotency_key"],
+        status=row["status"],
+        phase=row["phase"],
+        index_id=row["index_id"],
+        error_code=row["error_code"],
+        error_message=row["error_message"],
+        created_at=_datetime_value(row["created_at"]),
+        updated_at=_datetime_value(row["updated_at"]),
+    )
 
 
 def _model_size(model: object) -> int:
