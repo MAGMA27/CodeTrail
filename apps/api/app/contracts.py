@@ -914,7 +914,7 @@ class FeatureGenerationRequest(VersionedModel):
 
     mode: FeatureGenerationMode
     model: str | None = Field(default=None, min_length=1, max_length=200)
-    prompt_version: Identifier = "feature-summary-v1"
+    prompt_version: Identifier = "feature-summary-v2"
     source_scope: FeatureSourceScope = "entry_reachable"
     budget: FeatureGenerationBudget = Field(default_factory=FeatureGenerationBudget)
     idempotency_key: Identifier | None = None
@@ -1007,7 +1007,7 @@ class FeatureGenerationError(ContractModel):
 
 
 class FeatureGenerationUsage(ContractModel):
-    """Auditable bounded usage for retrieval and one model response."""
+    """Auditable bounded usage for retrieval and every model response."""
 
     tool_calls: NonNegativeInt = 0
     model_calls: NonNegativeInt = 0
@@ -1015,6 +1015,8 @@ class FeatureGenerationUsage(ContractModel):
     source_lines: NonNegativeInt = 0
     input_chars: NonNegativeInt = 0
     output_chars: NonNegativeInt = 0
+    model_input_chars: list[NonNegativeInt] = Field(default_factory=list, max_length=2)
+    model_output_chars: list[NonNegativeInt] = Field(default_factory=list, max_length=2)
     input_tokens: NonNegativeInt | None = None
     output_tokens: NonNegativeInt | None = None
     elapsed_ms: NonNegativeInt = 0
@@ -1023,6 +1025,14 @@ class FeatureGenerationUsage(ContractModel):
     def validate_repairs(self) -> FeatureGenerationUsage:
         if self.repair_calls > self.model_calls:
             raise ValueError("repair calls cannot exceed model calls")
+        if len(self.model_input_chars) != self.model_calls:
+            raise ValueError("model input usage must record every attempted model call")
+        if len(self.model_output_chars) > self.model_calls:
+            raise ValueError("model output usage cannot exceed model calls")
+        if sum(self.model_input_chars) != self.input_chars:
+            raise ValueError("cumulative input chars must match per-call model input usage")
+        if sum(self.model_output_chars) != self.output_chars:
+            raise ValueError("cumulative output chars must match per-call model output usage")
         return self
 
 

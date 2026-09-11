@@ -7,6 +7,7 @@ import http.server
 import json
 import shutil
 import threading
+import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -16,11 +17,16 @@ from app.config import MODEL_CONFIG_FILENAME
 from app.feature_generation import (
     DEFAULT_REAL_BASE_URL,
     DEFAULT_REAL_MODEL,
+    FEATURE_TASK_GOAL,
     FixtureFeatureAdapter,
+    MODEL_OUTPUT_CONTRACT,
+    MODEL_SYSTEM_PROMPT,
     ModelCall,
     OpenAICompatibleFeatureAdapter,
     resolve_model,
 )
+from app.contracts import FeatureGeneration, FeatureGenerationRequest
+from app.feature_generation import FeatureGenerationEngine
 from app.main import create_app
 
 
@@ -85,12 +91,44 @@ def _copy_fixture(tmp_path: Path, name: str = "timeout-demo") -> Path:
     return destination
 
 
-def _create_index(application) -> tuple[str, str]:
+def _write_named_repository(tmp_path: Path) -> Path:
+    package = tmp_path / "quiet-service" / "quiet_service"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "__main__.py").write_text(
+        "from .preferences import read_preferences\n"
+        "from .transport import open_transport\n\n"
+        "def launch() -> None:\n"
+        "    preferences = read_preferences()\n"
+        "    open_transport(preferences)\n\n"
+        "if __name__ == \"__main__\":\n"
+        "    launch()\n",
+        encoding="utf-8",
+    )
+    (package / "preferences.py").write_text(
+        "def read_preferences() -> dict[str, str]:\n"
+        "    return {\"region\": \"local\"}\n",
+        encoding="utf-8",
+    )
+    (package / "transport.py").write_text(
+        "def open_transport(preferences: dict[str, str]) -> str:\n"
+        "    return preferences[\"region\"]\n",
+        encoding="utf-8",
+    )
+    return package.parent
+
+
+def _create_index(
+    application,
+    *,
+    repository_id: str = "timeout-demo",
+    project_name: str = "Feature project",
+) -> tuple[str, str]:
     status, project = request(
         application,
         "POST",
         "/api/projects",
-        {"name": "Feature project", "repository_id": "timeout-demo"},
+        {"name": project_name, "repository_id": repository_id},
     )
     assert status == 200
     status, index = request(
@@ -137,10 +175,7 @@ def test_fixture_generation_uses_real_tools_persists_and_reuses_idempotency(tmp_
         and set(feature["symbol_ids"]).issubset(observed_symbols)
         for feature in generation["features"]
     )
-    assert any(
-        item["path"] == "timeout_demo/config.py" and "def load_settings" in item["excerpt"]
-        for item in generation["evidence"]
-    )
+    assert any(item["path"] == "timeout_demo/__main__.py" for item in generation["evidence"])
 
     status, reread = request(
         application,
@@ -167,6 +202,29 @@ def test_fixture_generation_uses_real_tools_persists_and_reuses_idempotency(tmp_
     )
     assert status == 200
     assert stable == generated
+
+
+def test_success_is_converted_to_failure_if_deadline_expires_before_save(tmp_path: Path) -> None:
+    application = create_app({"timeout-demo": _copy_fixture(tmp_path)})
+    project_id, index_id = _create_index(application)
+    status, generated = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/indexes/{index_id}/features",
+        {"schema_version": "0.1.0", "mode": "fixture", "idempotency_key": "late-save"},
+    )
+    assert status == 200
+    original = FeatureGeneration.model_validate(generated["generation"])
+    late = FeatureGenerationEngine(application.state.workspace_service).fail_if_deadline_exceeded(
+        original,
+        started=time.monotonic() - original.budget.max_seconds - 1,
+    )
+    assert late.status == "failed"
+    assert late.error is not None and late.error.kind == "budget_exceeded"
+    assert late.features == []
+    assert late.associations == []
+    assert late.evidence == original.evidence
+    assert late.usage == original.usage
 
 
 def test_real_mode_without_server_credentials_is_explicit_and_never_falls_back(
@@ -242,16 +300,34 @@ def test_invalid_persistent_model_config_is_rejected_at_startup(tmp_path: Path) 
 
 
 class _InvalidAdapter:
-    def generate(self, prompt: str, *, model: str, timeout_seconds: float, context) -> ModelCall:
-        del prompt, model, timeout_seconds, context
+    def generate(
+        self,
+        prompt: str,
+        *,
+        model: str,
+        timeout_seconds: float,
+        max_input_chars: int,
+        context,
+    ) -> ModelCall:
+        del prompt, model, timeout_seconds, max_input_chars, context
         return ModelCall(
             '{"schema_version":"0.1.0","output_id":"bad-output",'
             '"index_id":"other-index","outcome":"insufficient_evidence",'
             '"summary":"invalid"}'
         )
 
-    def repair(self, prompt: str, invalid_output: str, validation_error: str, *, model: str, timeout_seconds: float, context) -> ModelCall:
-        del prompt, invalid_output, validation_error, model, timeout_seconds, context
+    def repair(
+        self,
+        prompt: str,
+        invalid_output: str,
+        validation_error: str,
+        *,
+        model: str,
+        timeout_seconds: float,
+        max_input_chars: int,
+        context,
+    ) -> ModelCall:
+        del prompt, invalid_output, validation_error, model, timeout_seconds, max_input_chars, context
         return ModelCall(
             '{"schema_version":"0.1.0","output_id":"bad-output",'
             '"index_id":"other-index","outcome":"insufficient_evidence",'
@@ -284,7 +360,7 @@ def test_invalid_model_references_are_saved_as_failure_and_do_not_replace_previo
         {
             "schema_version": "0.1.0",
             "mode": "fixture",
-            "prompt_version": "feature-summary-v2",
+            "prompt_version": "feature-summary-v3",
             "idempotency_key": "bad-output",
         },
     )
@@ -334,7 +410,7 @@ def test_feature_cache_includes_budget_and_idempotency_scope_is_explicit(tmp_pat
         {
             "schema_version": "0.1.0",
             "mode": "fixture",
-            "prompt_version": "feature-summary-v2",
+            "prompt_version": "feature-summary-v3",
             "idempotency_key": "budget-success",
         },
     )
@@ -423,8 +499,359 @@ def test_configured_real_adapter_uses_openai_compatible_json_protocol(tmp_path: 
         assert requests[0]["headers"]["Authorization"] == "Bearer local-test-key"
         assert requests[0]["payload"]["model"] == "local-test-model"
         assert requests[0]["payload"]["max_tokens"] > 0
-        assert "json" in requests[0]["payload"]["messages"][0]["content"]
+        system_prompt = requests[0]["payload"]["messages"][0]["content"]
+        user_prompt = requests[0]["payload"]["messages"][1]["content"]
+        assert FEATURE_TASK_GOAL in system_prompt
+        assert MODEL_OUTPUT_CONTRACT in system_prompt
+        assert "FeatureModelOutput" in system_prompt
+        assert "json" in system_prompt.lower()
         assert requests[0]["payload"]["response_format"] == {"type": "json_object"}
+        assert generation["usage"]["model_input_chars"] == [len(system_prompt) + len(user_prompt)]
+        assert generation["usage"]["model_output_chars"] == [generation["usage"]["output_chars"]]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_repair_request_repeats_contract_and_records_each_model_call(tmp_path: Path) -> None:
+    requests: list[dict] = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self) -> None:  # noqa: N802 - stdlib handler name
+            length = int(self.headers.get("Content-Length", "0"))
+            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+            requests.append(payload)
+            prompt = payload["messages"][-1]["content"]
+            index_id = next(
+                line.split("=", 1)[1]
+                for line in prompt.splitlines()
+                if line.startswith("index_id=")
+            )
+            if len(requests) == 1:
+                content = json.dumps(
+                    {
+                        "schema_version": "0.1.0",
+                        "output_id": "invalid-output",
+                        "index_id": index_id,
+                        "outcome": "features_found",
+                        "summary": "This deliberately omits the required feature.",
+                        "features": [],
+                    }
+                )
+            else:
+                content = json.dumps(
+                    {
+                        "schema_version": "0.1.0",
+                        "output_id": "repaired-output",
+                        "index_id": index_id,
+                        "outcome": "insufficient_evidence",
+                        "summary": "The bounded context is insufficient after repair.",
+                    }
+                )
+            response = json.dumps(
+                {"choices": [{"message": {"content": content}}]}
+            ).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(response)))
+            self.end_headers()
+            self.wfile.write(response)
+
+        def log_message(self, format: str, *args: object) -> None:
+            del format, args
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        data_root = tmp_path / "repair-data"
+        data_root.mkdir()
+        (data_root / MODEL_CONFIG_FILENAME).write_text(
+            json.dumps(
+                {
+                    "provider": "deepseek",
+                    "api_key": "local-test-key",
+                    "base_url": f"http://127.0.0.1:{server.server_port}/v1",
+                    "model": "local-test-model",
+                }
+            ),
+            encoding="utf-8",
+        )
+        application = create_app(
+            {"timeout-demo": _copy_fixture(tmp_path)},
+            data_root=data_root,
+        )
+        project_id, index_id = _create_index(application)
+        status, generated = request(
+            application,
+            "POST",
+            f"/api/projects/{project_id}/indexes/{index_id}/features",
+            {
+                "schema_version": "0.1.0",
+                "mode": "real",
+                "budget": {"max_model_calls": 2},
+                "idempotency_key": "local-real-repair",
+            },
+        )
+        assert status == 200
+        generation = generated["generation"]
+        assert generation["status"] == "insufficient_evidence"
+        assert len(requests) == 2
+        assert all(item["messages"][0]["content"] == MODEL_SYSTEM_PROMPT for item in requests)
+        assert FEATURE_TASK_GOAL in requests[1]["messages"][1]["content"]
+        assert "Repair the JSON" in requests[1]["messages"][1]["content"]
+        assert generation["usage"]["model_calls"] == 2
+        assert generation["usage"]["repair_calls"] == 1
+        expected_inputs = [
+            len(item["messages"][0]["content"]) + len(item["messages"][1]["content"])
+            for item in requests
+        ]
+        assert generation["usage"]["model_input_chars"] == expected_inputs
+        assert generation["usage"]["input_chars"] == sum(expected_inputs)
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_repair_full_input_is_rejected_when_remaining_budget_is_too_small(tmp_path: Path) -> None:
+    state = {"repair_called": False}
+    invalid_output = json.dumps(
+        {
+            "schema_version": "0.1.0",
+            "output_id": "invalid-output",
+            "index_id": "wrong-index",
+            "outcome": "features_found",
+            "summary": "invalid output",
+            "features": [],
+            "padding": "x" * 35_000,
+        }
+    )
+
+    class Adapter:
+        def generate(
+            self,
+            prompt: str,
+            *,
+            model: str,
+            timeout_seconds: float,
+            max_input_chars: int,
+            context,
+        ) -> ModelCall:
+            del model, timeout_seconds, max_input_chars, context
+            return ModelCall(
+                raw_output=invalid_output,
+                input_chars=len(MODEL_SYSTEM_PROMPT) + len(prompt),
+            )
+
+        def repair(
+            self,
+            prompt: str,
+            invalid_output: str,
+            validation_error: str,
+            *,
+            model: str,
+            timeout_seconds: float,
+            max_input_chars: int,
+            context,
+        ) -> ModelCall:
+            del prompt, invalid_output, validation_error, model, timeout_seconds, max_input_chars, context
+            state["repair_called"] = True
+            raise AssertionError("repair must not be called after the full input budget is exhausted")
+
+    application = create_app(
+        {"timeout-demo": _copy_fixture(tmp_path)},
+        feature_adapter_factory=lambda _mode: Adapter(),
+    )
+    project_id, index_id = _create_index(application)
+    status, generated = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/indexes/{index_id}/features",
+        {
+            "schema_version": "0.1.0",
+            "mode": "real",
+            "budget": {
+                "max_model_calls": 2,
+                "max_input_chars": 40_000,
+                "max_output_chars": 50_000,
+            },
+            "idempotency_key": "repair-input-budget",
+        },
+    )
+    assert status == 200
+    generation = generated["generation"]
+    assert generation["status"] == "failed"
+    assert generation["error"]["kind"] == "budget_exceeded"
+    assert generation["usage"]["model_calls"] == 1
+    assert generation["usage"]["repair_calls"] == 0
+    assert len(generation["usage"]["model_input_chars"]) == 1
+    assert generation["usage"]["input_chars"] == generation["usage"]["model_input_chars"][0]
+    assert generation["usage"]["output_chars"] == len(invalid_output)
+    assert generation["evidence"]
+    assert state["repair_called"] is False
+
+
+def test_deadline_exhaustion_does_not_start_repair_or_save_success(tmp_path: Path) -> None:
+    state = {"repair_called": False}
+
+    class SlowAdapter:
+        def generate(
+            self,
+            prompt: str,
+            *,
+            model: str,
+            timeout_seconds: float,
+            max_input_chars: int,
+            context,
+        ) -> ModelCall:
+            del model, timeout_seconds, max_input_chars, context
+            time.sleep(1.2)
+            return ModelCall(
+                raw_output=json.dumps(
+                    {
+                        "schema_version": "0.1.0",
+                        "output_id": "late-output",
+                        "index_id": "wrong-index",
+                        "outcome": "insufficient_evidence",
+                        "summary": "late",
+                    }
+                ),
+                input_chars=len(MODEL_SYSTEM_PROMPT) + len(prompt),
+            )
+
+        def repair(
+            self,
+            prompt: str,
+            invalid_output: str,
+            validation_error: str,
+            *,
+            model: str,
+            timeout_seconds: float,
+            max_input_chars: int,
+            context,
+        ) -> ModelCall:
+            del prompt, invalid_output, validation_error, model, timeout_seconds, max_input_chars, context
+            state["repair_called"] = True
+            raise AssertionError("repair must not start after the deadline")
+
+    application = create_app(
+        {"timeout-demo": _copy_fixture(tmp_path)},
+        feature_adapter_factory=lambda _mode: SlowAdapter(),
+    )
+    project_id, index_id = _create_index(application)
+    status, generated = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/indexes/{index_id}/features",
+        {
+            "schema_version": "0.1.0",
+            "mode": "real",
+            "budget": {"max_seconds": 1, "max_model_calls": 2},
+            "idempotency_key": "deadline-no-repair",
+        },
+    )
+    assert status == 200
+    generation = generated["generation"]
+    assert generation["status"] == "failed"
+    assert generation["error"]["kind"] == "budget_exceeded"
+    assert generation["usage"]["model_calls"] == 1
+    assert generation["usage"]["repair_calls"] == 0
+    assert generation["evidence"]
+    assert state["repair_called"] is False
+
+
+def test_context_sorting_uses_entry_distance_for_non_demo_names(tmp_path: Path) -> None:
+    repository = _write_named_repository(tmp_path)
+    application = create_app({"quiet-service": repository})
+    project_id, index_id = _create_index(
+        application,
+        repository_id="quiet-service",
+        project_name="Quiet service",
+    )
+    context = FeatureGenerationEngine(application.state.workspace_service)._collect_context(
+        project_id,
+        index_id,
+        FeatureGenerationRequest(mode="fixture"),
+        started=time.monotonic(),
+    )
+    names = [symbol.qualified_name for symbol in context.observed_symbols.values()]
+    assert names
+    assert "quiet_service.__main__.launch" in names
+    assert all("timeout_demo" not in name for name in names)
+    assert names.index("quiet_service.__main__.launch") < names.index(
+        "quiet_service.preferences.read_preferences"
+    )
+
+
+def test_real_http_response_read_obeys_total_deadline(tmp_path: Path) -> None:
+    requests: list[dict] = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self) -> None:  # noqa: N802 - stdlib handler name
+            length = int(self.headers.get("Content-Length", "0"))
+            requests.append(json.loads(self.rfile.read(length).decode("utf-8")))
+            response = json.dumps(
+                {"choices": [{"message": {"content": "{\"broken\":true}"}}]}
+            ).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(response)))
+            self.end_headers()
+            try:
+                self.wfile.write(response[:1])
+                self.wfile.flush()
+                time.sleep(1.2)
+                self.wfile.write(response[1:])
+                self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+
+        def log_message(self, format: str, *args: object) -> None:
+            del format, args
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        data_root = tmp_path / "slow-data"
+        data_root.mkdir()
+        (data_root / MODEL_CONFIG_FILENAME).write_text(
+            json.dumps(
+                {
+                    "provider": "deepseek",
+                    "api_key": "local-test-key",
+                    "base_url": f"http://127.0.0.1:{server.server_port}/v1",
+                    "model": "local-test-model",
+                }
+            ),
+            encoding="utf-8",
+        )
+        application = create_app(
+            {"timeout-demo": _copy_fixture(tmp_path)},
+            data_root=data_root,
+        )
+        project_id, index_id = _create_index(application)
+        status, generated = request(
+            application,
+            "POST",
+            f"/api/projects/{project_id}/indexes/{index_id}/features",
+            {
+                "schema_version": "0.1.0",
+                "mode": "real",
+                "budget": {"max_seconds": 1, "max_model_calls": 2},
+                "idempotency_key": "slow-response-deadline",
+            },
+        )
+        assert status == 200
+        generation = generated["generation"]
+        assert generation["status"] == "failed"
+        assert generation["error"]["kind"] == "budget_exceeded"
+        assert generation["usage"]["model_calls"] == 1
+        assert generation["usage"]["repair_calls"] == 0
+        assert generation["evidence"]
+        assert len(requests) == 1
     finally:
         server.shutdown()
         server.server_close()

@@ -63,7 +63,7 @@ API 健康检查为 `GET /api/health`。`CODETRAIL_WEB_ORIGINS` 只控制浏览�
 
 设置 `CODETRAIL_MCP_LOCAL_IMPORT_ENABLED=1` 后，额外注册 `import_local_path`、`get_import_status` 和 `retry_local_import`；设置 `CODETRAIL_MCP_GITHUB_IMPORT_ENABLED=1` 后，额外注册 `import_github_repository`、`get_import_status` 和 `retry_github_import`；设置 `CODETRAIL_MCP_FEATURE_GENERATION_ENABLED=1` 后，额外注册 `generate_project_features` 和只读的 `get_feature_generation`。三个开关独立，GitHub MCP 开关还要求 `CODETRAIL_GITHUB_IMPORT_ENABLED=1`；未设置时 MCP 保持八项只读工具，默认只读工具不会触发模型。写工具只能使用服务端边界，不能通过参数扩大本地路径或网络权限。
 
-功能生成的 `fixture` 模式使用 `fixture-feature-v1`，不需要密钥；`real` 模式默认适配 DeepSeek，从服务数据目录的 `config.json` 读取服务端配置。未配置密钥时返回 `model_unavailable`，不会静默使用 fixture。请求预算由契约限制工具调用、模型调用、时间、源码行、输入/输出大小、特征数和修复次数。
+功能生成的 `fixture` 模式使用 `fixture-feature-v1`，不需要密钥；`real` 模式默认适配 DeepSeek，从服务数据目录的 `config.json` 读取服务端配置。未配置密钥时返回 `model_unavailable`，不会静默使用 fixture。请求预算由契约限制工具调用、模型调用、时间、源码行、输入/输出大小、特征数和修复次数；`feature-summary-v2` 的真实请求会发送当前 Pydantic `FeatureModelOutput` JSON Schema 与任务目标，修复请求复用同一契约。模型输入按完整消息正文字符数计算，超限时有界收缩完整证据块或明确拒绝，不切断证据文本；结果中的 `usage.model_input_chars`/`model_output_chars` 保留每次调用，`input_chars`/`output_chars` 为累计值。
 
 DeepSeek 配置文件默认路径为 `apps/api/.codetrail/config.json`；若配置了 `CODETRAIL_DATA_DIR`，则放在该目录下。先复制无密钥模板：
 
@@ -83,7 +83,7 @@ Copy-Item apps/api/config.example.json apps/api/.codetrail/config.json
 }
 ```
 
-`config.json` 已位于被 Git 忽略的服务数据目录，密钥只保存在运行 API/MCP 的服务端；不要把真实密钥写入 `config.example.json` 或提交到 Git。修改配置后重启 API/MCP 进程生效。`base_url` 使用 DeepSeek 根地址，不要写成 `/v1`，适配器会请求 `/chat/completions`。如需切换其他 OpenAI-compatible 供应商，可同时修改 `provider`、地址和模型名；请求仍固定使用 JSON 输出格式、受限的 `max_tokens` 和一次修复上限。
+`config.json` 已位于被 Git 忽略的服务数据目录，密钥只保存在运行 API/MCP 的服务端；不要把真实密钥写入 `config.example.json` 或提交到 Git。修改配置后重启 API/MCP 进程生效。`base_url` 使用 DeepSeek 根地址，不要写成 `/v1`，适配器会请求 `/chat/completions`。如需切换其他 OpenAI-compatible 供应商，可同时修改 `provider`、地址和模型名；请求仍固定使用 JSON 输出格式、受限的 `max_tokens` 和一次修复上限。每次外部调用前后及成功结果保存前都会检查总时间预算，网络响应按同一 deadline 读取；超时只保存带已有证据和用量的失败结果，不写成功结果。
 
 配置工作台引用地址（默认 `http://localhost:3000`）：
 

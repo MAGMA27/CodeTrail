@@ -8,6 +8,7 @@ import json
 import os
 import shutil
 import threading
+import time
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -816,11 +817,13 @@ class WorkspaceService:
                 cached = store.find_cached_feature_generation(project_id, index_id, cache_key)
                 if cached is not None:
                     return FeatureGenerationResponse(generation=cached[1])
-                generation = FeatureGenerationEngine(
+                generation_engine = FeatureGenerationEngine(
                     self,
                     adapter_factory=self.feature_adapter_factory,
                     model_config=self.registry.model_config,
-                ).generate(
+                )
+                generation_started = time.monotonic()
+                generation = generation_engine.generate(
                     project_id,
                     index_id,
                     index,
@@ -828,6 +831,11 @@ class WorkspaceService:
                     generation_id=new_generation_id(),
                     model=model,
                     cache_key=cache_key,
+                    started=generation_started,
+                )
+                generation = generation_engine.fail_if_deadline_exceeded(
+                    generation,
+                    started=generation_started,
                 )
                 store.save_feature_generation(
                     generation,

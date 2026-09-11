@@ -4783,7 +4783,7 @@
         },
         "FeatureGenerationUsage": {
           "additionalProperties": false,
-          "description": "Auditable bounded usage for retrieval and one model response.",
+          "description": "Auditable bounded usage for retrieval and every model response.",
           "properties": {
             "elapsed_ms": {
               "default": 0,
@@ -4815,6 +4815,24 @@
               "minimum": 0,
               "title": "Model Calls",
               "type": "integer"
+            },
+            "model_input_chars": {
+              "items": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "maxItems": 2,
+              "title": "Model Input Chars",
+              "type": "array"
+            },
+            "model_output_chars": {
+              "items": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "maxItems": 2,
+              "title": "Model Output Chars",
+              "type": "array"
             },
             "output_chars": {
               "default": 0,
@@ -5350,7 +5368,7 @@
           "title": "Model"
         },
         "prompt_version": {
-          "default": "feature-summary-v1",
+          "default": "feature-summary-v2",
           "maxLength": 200,
           "minLength": 1,
           "title": "Prompt Version",
@@ -5929,7 +5947,7 @@
         },
         "FeatureGenerationUsage": {
           "additionalProperties": false,
-          "description": "Auditable bounded usage for retrieval and one model response.",
+          "description": "Auditable bounded usage for retrieval and every model response.",
           "properties": {
             "elapsed_ms": {
               "default": 0,
@@ -5961,6 +5979,24 @@
               "minimum": 0,
               "title": "Model Calls",
               "type": "integer"
+            },
+            "model_input_chars": {
+              "items": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "maxItems": 2,
+              "title": "Model Input Chars",
+              "type": "array"
+            },
+            "model_output_chars": {
+              "items": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "maxItems": 2,
+              "title": "Model Output Chars",
+              "type": "array"
             },
             "output_chars": {
               "default": 0,
@@ -6081,7 +6117,7 @@
     },
     "FeatureGenerationUsage": {
       "additionalProperties": false,
-      "description": "Auditable bounded usage for retrieval and one model response.",
+      "description": "Auditable bounded usage for retrieval and every model response.",
       "properties": {
         "elapsed_ms": {
           "default": 0,
@@ -6113,6 +6149,24 @@
           "minimum": 0,
           "title": "Model Calls",
           "type": "integer"
+        },
+        "model_input_chars": {
+          "items": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "maxItems": 2,
+          "title": "Model Input Chars",
+          "type": "array"
+        },
+        "model_output_chars": {
+          "items": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "maxItems": 2,
+          "title": "Model Output Chars",
+          "type": "array"
         },
         "output_chars": {
           "default": 0,
@@ -12108,7 +12162,7 @@
         },
         "FeatureGenerationUsage": {
           "additionalProperties": false,
-          "description": "Auditable bounded usage for retrieval and one model response.",
+          "description": "Auditable bounded usage for retrieval and every model response.",
           "properties": {
             "elapsed_ms": {
               "default": 0,
@@ -12140,6 +12194,24 @@
               "minimum": 0,
               "title": "Model Calls",
               "type": "integer"
+            },
+            "model_input_chars": {
+              "items": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "maxItems": 2,
+              "title": "Model Input Chars",
+              "type": "array"
+            },
+            "model_output_chars": {
+              "items": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "maxItems": 2,
+              "title": "Model Output Chars",
+              "type": "array"
             },
             "output_chars": {
               "default": 0,

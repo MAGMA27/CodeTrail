@@ -308,6 +308,8 @@ export type FeatureGenerationUsage = {
   source_lines: number;
   input_chars: number;
   output_chars: number;
+  model_input_chars: number[];
+  model_output_chars: number[];
   input_tokens: number | null;
   output_tokens: number | null;
   elapsed_ms: number;
@@ -804,6 +806,21 @@ function isFeatureGeneration(value: unknown): value is FeatureGeneration {
     "elapsed_ms",
   ];
   if (!usageKeys.every((key) => isNonNegativeInteger((value.usage as Record<string, unknown>)[key]))) {
+    return false;
+  }
+  const usage = value.usage as FeatureGenerationUsage;
+  const modelInputChars = usage.model_input_chars;
+  const modelOutputChars = usage.model_output_chars;
+  if (
+    !Array.isArray(modelInputChars) ||
+    !modelInputChars.every(isNonNegativeInteger) ||
+    !Array.isArray(modelOutputChars) ||
+    !modelOutputChars.every(isNonNegativeInteger) ||
+    modelInputChars.length !== usage.model_calls ||
+    modelOutputChars.length > usage.model_calls ||
+    modelInputChars.reduce((total, chars) => total + chars, 0) !== usage.input_chars ||
+    modelOutputChars.reduce((total, chars) => total + chars, 0) !== usage.output_chars
+  ) {
     return false;
   }
   if (

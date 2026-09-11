@@ -327,7 +327,7 @@ def create_mcp_server(
             mode: FeatureGenerationMode,
             model: Annotated[str | None, Field(min_length=1, max_length=200, description="Server-configured model name; optional in fixture mode.")] = None,
             source_scope: FeatureSourceScope = "entry_reachable",
-            prompt_version: Annotated[str, Field(min_length=1, max_length=200)] = "feature-summary-v1",
+            prompt_version: Annotated[str, Field(min_length=1, max_length=200)] = "feature-summary-v2",
             idempotency_key: Annotated[str | None, Field(min_length=1, max_length=200)] = None,
             max_tool_calls: Annotated[int, Field(ge=1, le=12)] = 8,
             max_model_calls: Annotated[int, Field(ge=1, le=2)] = 1,
