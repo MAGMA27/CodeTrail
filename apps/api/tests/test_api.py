@@ -152,6 +152,32 @@ def test_http_index_query_and_snapshot_evidence_flow(tmp_path: Path) -> None:
     assert "load_settings" in source["evidence"]["excerpt"]
     assert source["evidence"]["index_id"] == index_id
 
+    status, dispatch_search = request(
+        application,
+        "GET",
+        f"/api/indexes/{index_id}/search?query=dispatch&limit=4",
+    )
+    assert status == 200
+    dispatch_match = next(
+        match
+        for match in dispatch_search["matches"]
+        if match["symbol"]["qualified_name"] == "timeout_demo.dispatch.dispatch"
+    )
+    dispatch_id = dispatch_match["symbol"]["symbol_id"]
+    status, dispatch_graph = request(
+        application,
+        "GET",
+        f"/api/indexes/{index_id}/neighbors?symbol_id={dispatch_id}&direction=callees&depth=2&limit=40&edge_kinds=calls",
+    )
+    assert status == 200
+    assert dispatch_graph["root"]["symbol_id"] == dispatch_id
+    assert any(item["reason"] == "dynamic_call_target" for item in dispatch_graph["unresolved"])
+    assert all(
+        item["symbol"]["qualified_name"]
+        not in {"timeout_demo.handlers.handle", "timeout_demo.other_handlers.handle"}
+        for item in dispatch_graph["neighbors"]
+    )
+
 
 def test_http_errors_are_stable_and_do_not_expose_repository_paths(tmp_path: Path) -> None:
     repository = copy_fixture(tmp_path)

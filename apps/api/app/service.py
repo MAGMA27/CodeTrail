@@ -229,7 +229,10 @@ class IndexService:
             )
             return NeighborsIndexResponse(
                 index_id=index_id,
+                root=result.root,
+                nodes=list(result.nodes),
                 neighbors=list(result.neighbors),
+                unresolved=list(result.unresolved),
                 truncated=result.truncated,
                 truncation_reason=result.truncation_reason,
             )

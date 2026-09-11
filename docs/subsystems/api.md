@@ -2,7 +2,7 @@
 
 ## 状态
 
-源码已有索引及查询端点；本轮文档建立不等于完成真实 HTTP 场景验收。Run/SSE 尚未实现。
+源码已有索引及查询端点，已通过真实本地 HTTP 与工作台流程验收。Run/SSE 尚未实现。
 
 ## 职责与范围
 
@@ -14,7 +14,7 @@
 
 ## 数据与生命周期
 
-请求使用 repository_id 和 index_id；阻塞索引进入 worker thread，操作独立管理数据库连接。
+请求使用 repository_id 和 index_id；阻塞索引进入 worker thread，操作独立管理数据库连接。邻接响应返回 root、受限 nodes、静态 neighbors 和对应 unresolved，供工作台绑定同一快照渲染。
 
 ## 错误与限制
 
@@ -22,7 +22,7 @@
 
 ## 验证
 
-apps/api/tests/test_api.py；端到端交付还需实际 HTTP 创建索引、搜索、邻接与证据读取。
+apps/api/tests/test_api.py；已实际 HTTP 创建索引、搜索、邻接与证据读取，并由工作台浏览器流程复核创建/打开、方向切换和错误恢复。
 
 ## 相关决策
 

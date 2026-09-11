@@ -8,5 +8,5 @@
 | 快照与关系 | [快照与关系](indexing.md) | apps/api/app/indexing.py, apps/api/app/relations.py |
 | 存储与查询 | [存储与查询](storage.md) | apps/api/app/storage.py |
 | API 与工具适配 | [API 与工具适配](api.md) | apps/api/app/main.py, apps/api/app/service.py, apps/api/app/__init__.py |
-| 工作台 | [工作台](workbench.md) | apps/web/app/ |
+| 工作台 | [工作台](workbench.md) | apps/web/app/, apps/web/lib/ |
 | 演示样本 | [演示样本](fixtures.md) | fixtures/ |

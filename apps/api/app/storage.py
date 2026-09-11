@@ -82,6 +82,7 @@ class NeighborQueryResult:
     root: Symbol
     nodes: tuple[Symbol, ...]
     neighbors: tuple[Neighbor, ...]
+    unresolved: tuple[UnresolvedReference, ...]
     truncated: bool
     truncation_reason: str | None
 
@@ -603,8 +604,51 @@ class IndexStore:
             root=root,
             nodes=tuple(nodes.values()),
             neighbors=tuple(neighbors),
+            unresolved=self._load_unresolved(index_id, tuple(nodes)),
             truncated=truncated,
             truncation_reason=truncation_reason,
+        )
+
+    def _load_unresolved(
+        self,
+        index_id: str,
+        symbol_ids: tuple[str, ...],
+    ) -> tuple[UnresolvedReference, ...]:
+        if not symbol_ids:
+            return ()
+        placeholders = ",".join("?" for _ in symbol_ids)
+        unresolved_rows = self._connection.execute(
+            "SELECT unresolved_id, source_symbol_id, path, expression, reason, start_line, end_line "
+            "FROM unresolved_references WHERE index_id = ? AND source_symbol_id IN ("
+            f"{placeholders}) ORDER BY path COLLATE BINARY, start_line, expression, unresolved_id",
+            (index_id, *symbol_ids),
+        ).fetchall()
+        if not unresolved_rows:
+            return ()
+        unresolved_ids = tuple(row["unresolved_id"] for row in unresolved_rows)
+        target_placeholders = ",".join("?" for _ in unresolved_ids)
+        target_rows = self._connection.execute(
+            "SELECT unresolved_id, target_symbol_id FROM unresolved_targets "
+            f"WHERE index_id = ? AND unresolved_id IN ({target_placeholders}) "
+            "ORDER BY unresolved_id, target_symbol_id",
+            (index_id, *unresolved_ids),
+        ).fetchall()
+        targets: dict[str, list[str]] = {}
+        for row in target_rows:
+            targets.setdefault(row["unresolved_id"], []).append(row["target_symbol_id"])
+        return tuple(
+            UnresolvedReference(
+                unresolved_id=row["unresolved_id"],
+                index_id=index_id,
+                source_symbol_id=row["source_symbol_id"],
+                path=row["path"],
+                expression=row["expression"],
+                reason=row["reason"],
+                possible_target_ids=targets.get(row["unresolved_id"], []),
+                start_line=row["start_line"],
+                end_line=row["end_line"],
+            )
+            for row in unresolved_rows
         )
 
     def _check_fts5(self) -> None:

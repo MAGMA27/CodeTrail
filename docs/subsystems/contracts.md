@@ -2,7 +2,7 @@
 
 ## 状态
 
-已有 Pydantic 契约和 Schema 导出；契约中存在 Run 定义不代表 Run 服务已实现。
+已有 Pydantic 契约和 Schema 导出；前端在 [api.ts](../../apps/web/lib/api.ts) 对公开索引/查询响应做运行时形状校验；契约中存在 Run 定义不代表 Run 服务已实现。
 
 ## 职责与范围
 

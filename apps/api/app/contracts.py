@@ -481,12 +481,35 @@ class SourceIndexResponse(VersionedModel):
 
 class NeighborsIndexResponse(VersionedModel):
     index_id: Identifier
+    root: Symbol
+    nodes: list[Symbol] = Field(default_factory=list)
     neighbors: list[Neighbor] = Field(default_factory=list)
+    unresolved: list[UnresolvedReference] = Field(default_factory=list)
     truncated: bool = False
     truncation_reason: str | None = Field(default=None, max_length=1_000)
 
     @model_validator(mode="after")
     def validate_truncation(self) -> NeighborsIndexResponse:
+        if self.root.index_id != self.index_id:
+            raise ValueError("neighbor root must use the response index_id")
+        node_ids = {node.symbol_id for node in self.nodes}
+        if self.root.symbol_id not in node_ids:
+            raise ValueError("neighbor nodes must include the root symbol")
+        if len(node_ids) != len(self.nodes):
+            raise ValueError("neighbor nodes must have unique symbol IDs")
+        for node in self.nodes:
+            if node.index_id != self.index_id:
+                raise ValueError("neighbor node belongs to a different index_id")
+        for neighbor in self.neighbors:
+            if neighbor.symbol.index_id != self.index_id or neighbor.edge.index_id != self.index_id:
+                raise ValueError("neighbor result belongs to a different index_id")
+            if neighbor.symbol.symbol_id not in node_ids:
+                raise ValueError("neighbor result must reference a returned node")
+            if neighbor.edge.source_id not in node_ids or neighbor.edge.target_id not in node_ids:
+                raise ValueError("neighbor edge must reference returned nodes")
+        for unresolved in self.unresolved:
+            if unresolved.index_id != self.index_id or unresolved.source_symbol_id not in node_ids:
+                raise ValueError("unresolved reference must use returned nodes")
         if self.truncated and not self.truncation_reason:
             raise ValueError("truncated neighbor results must explain the truncation")
         if not self.truncated and self.truncation_reason:
