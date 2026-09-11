@@ -11214,6 +11214,878 @@
       "title": "McpNeighborsResponse",
       "type": "object"
     },
+    "McpOverviewResponse": {
+      "$defs": {
+        "CodeEdge": {
+          "additionalProperties": false,
+          "properties": {
+            "edge_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Edge Id",
+              "type": "string"
+            },
+            "extraction_method": {
+              "enum": [
+                "ast",
+                "explicit_import",
+                "fixture"
+              ],
+              "title": "Extraction Method",
+              "type": "string"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "contains",
+                "imports",
+                "calls"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "source_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Source Id",
+              "type": "string"
+            },
+            "source_location": {
+              "$ref": "#/$defs/SourceLocation"
+            },
+            "target_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Target Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "edge_id",
+            "index_id",
+            "source_id",
+            "target_id",
+            "kind",
+            "extraction_method",
+            "source_location"
+          ],
+          "title": "CodeEdge",
+          "type": "object"
+        },
+        "Evidence": {
+          "additionalProperties": false,
+          "properties": {
+            "content_hash": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Content Hash",
+              "type": "string"
+            },
+            "end_line": {
+              "exclusiveMinimum": 0,
+              "title": "End Line",
+              "type": "integer"
+            },
+            "evidence_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Evidence Id",
+              "type": "string"
+            },
+            "excerpt": {
+              "maxLength": 50000,
+              "minLength": 1,
+              "title": "Excerpt",
+              "type": "string"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "source",
+                "stacktrace",
+                "metadata"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Start Line",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "start_line",
+            "end_line",
+            "evidence_id",
+            "index_id",
+            "path",
+            "excerpt",
+            "content_hash",
+            "kind"
+          ],
+          "title": "Evidence",
+          "type": "object"
+        },
+        "EvidenceReference": {
+          "additionalProperties": false,
+          "description": "A stable source citation that can reopen the same project snapshot.",
+          "properties": {
+            "content_hash": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Content Hash",
+              "type": "string"
+            },
+            "end_line": {
+              "exclusiveMinimum": 0,
+              "title": "End Line",
+              "type": "integer"
+            },
+            "evidence_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Evidence Id",
+              "type": "string"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "project_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Project Id",
+              "type": "string"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            },
+            "start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Start Line",
+              "type": "integer"
+            },
+            "url": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "title": "Url",
+              "type": "string"
+            }
+          },
+          "required": [
+            "project_id",
+            "index_id",
+            "path",
+            "start_line",
+            "end_line",
+            "content_hash",
+            "evidence_id",
+            "url"
+          ],
+          "title": "EvidenceReference",
+          "type": "object"
+        },
+        "IndexSnapshot": {
+          "additionalProperties": false,
+          "properties": {
+            "dirty": {
+              "title": "Dirty",
+              "type": "boolean"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "repository_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Repository Id",
+              "type": "string"
+            },
+            "revision": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Revision",
+              "type": "string"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            },
+            "snapshot_hash": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Snapshot Hash",
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "ready",
+                "building",
+                "failed"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "index_id",
+            "repository_id",
+            "revision",
+            "dirty",
+            "snapshot_hash",
+            "status"
+          ],
+          "title": "IndexSnapshot",
+          "type": "object"
+        },
+        "McpError": {
+          "additionalProperties": false,
+          "description": "Domain failure returned inside a read-only MCP tool result.",
+          "properties": {
+            "code": {
+              "enum": [
+                "not_found",
+                "invalid_input",
+                "conflict",
+                "budget_exceeded",
+                "internal_error",
+                "forbidden"
+              ],
+              "title": "Code",
+              "type": "string"
+            },
+            "message": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "title": "Message",
+              "type": "string"
+            },
+            "retryable": {
+              "default": false,
+              "title": "Retryable",
+              "type": "boolean"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "title": "McpError",
+          "type": "object"
+        },
+        "OverviewCoverage": {
+          "additionalProperties": false,
+          "description": "Counts that distinguish the visible bounded result from the snapshot.",
+          "properties": {
+            "entry_point_count": {
+              "minimum": 0,
+              "title": "Entry Point Count",
+              "type": "integer"
+            },
+            "reachable_modules": {
+              "minimum": 0,
+              "title": "Reachable Modules",
+              "type": "integer"
+            },
+            "total_modules": {
+              "minimum": 0,
+              "title": "Total Modules",
+              "type": "integer"
+            },
+            "unreachable_modules": {
+              "minimum": 0,
+              "title": "Unreachable Modules",
+              "type": "integer"
+            },
+            "unresolved_count": {
+              "minimum": 0,
+              "title": "Unresolved Count",
+              "type": "integer"
+            },
+            "visible_modules": {
+              "minimum": 0,
+              "title": "Visible Modules",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "total_modules",
+            "visible_modules",
+            "reachable_modules",
+            "unreachable_modules",
+            "entry_point_count",
+            "unresolved_count"
+          ],
+          "title": "OverviewCoverage",
+          "type": "object"
+        },
+        "OverviewEntryPoint": {
+          "additionalProperties": false,
+          "description": "One rule-supported Python entry candidate in an immutable snapshot.",
+          "properties": {
+            "direct_symbol_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "title": "Direct Symbol Ids",
+              "type": "array"
+            },
+            "end_line": {
+              "exclusiveMinimum": 0,
+              "title": "End Line",
+              "type": "integer"
+            },
+            "entry_point_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Entry Point Id",
+              "type": "string"
+            },
+            "evidence": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Evidence"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "evidence_error": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Evidence Error"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "python_main_module",
+                "python_main_guard"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "label": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Label",
+              "type": "string"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "rule_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Rule Id",
+              "type": "string"
+            },
+            "start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Start Line",
+              "type": "integer"
+            },
+            "symbol_id": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Symbol Id"
+            },
+            "unresolved_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "title": "Unresolved Ids",
+              "type": "array"
+            }
+          },
+          "required": [
+            "start_line",
+            "end_line",
+            "entry_point_id",
+            "index_id",
+            "path",
+            "kind",
+            "rule_id",
+            "label"
+          ],
+          "title": "OverviewEntryPoint",
+          "type": "object"
+        },
+        "OverviewModule": {
+          "additionalProperties": false,
+          "description": "A Python module classified by entry reachability, not by business meaning.",
+          "properties": {
+            "entry_point_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "title": "Entry Point Ids",
+              "type": "array"
+            },
+            "entry_reachable": {
+              "default": false,
+              "title": "Entry Reachable",
+              "type": "boolean"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "module_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Module Id",
+              "type": "string"
+            },
+            "symbol": {
+              "$ref": "#/$defs/Symbol"
+            }
+          },
+          "required": [
+            "module_id",
+            "index_id",
+            "symbol"
+          ],
+          "title": "OverviewModule",
+          "type": "object"
+        },
+        "OverviewPath": {
+          "additionalProperties": false,
+          "description": "One bounded static path from an entry module to a reached symbol.",
+          "properties": {
+            "depth": {
+              "minimum": 0,
+              "title": "Depth",
+              "type": "integer"
+            },
+            "edges": {
+              "items": {
+                "$ref": "#/$defs/CodeEdge"
+              },
+              "title": "Edges",
+              "type": "array"
+            },
+            "entry_point_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Entry Point Id",
+              "type": "string"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "path_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Path Id",
+              "type": "string"
+            },
+            "symbol_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "minItems": 1,
+              "title": "Symbol Ids",
+              "type": "array"
+            }
+          },
+          "required": [
+            "path_id",
+            "index_id",
+            "entry_point_id",
+            "symbol_ids",
+            "depth"
+          ],
+          "title": "OverviewPath",
+          "type": "object"
+        },
+        "ProjectOverview": {
+          "additionalProperties": false,
+          "description": "Deterministic, rule-only overview of one project index snapshot.",
+          "properties": {
+            "coverage": {
+              "$ref": "#/$defs/OverviewCoverage"
+            },
+            "entries": {
+              "items": {
+                "$ref": "#/$defs/OverviewEntryPoint"
+              },
+              "title": "Entries",
+              "type": "array"
+            },
+            "entry_status": {
+              "enum": [
+                "identified",
+                "not_identified",
+                "partial"
+              ],
+              "title": "Entry Status",
+              "type": "string"
+            },
+            "index": {
+              "$ref": "#/$defs/IndexSnapshot"
+            },
+            "modules": {
+              "items": {
+                "$ref": "#/$defs/OverviewModule"
+              },
+              "title": "Modules",
+              "type": "array"
+            },
+            "notes": {
+              "items": {
+                "type": "string"
+              },
+              "title": "Notes",
+              "type": "array"
+            },
+            "paths": {
+              "items": {
+                "$ref": "#/$defs/OverviewPath"
+              },
+              "title": "Paths",
+              "type": "array"
+            },
+            "project_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Project Id",
+              "type": "string"
+            },
+            "rules_version": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Rules Version",
+              "type": "string"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            },
+            "truncated": {
+              "default": false,
+              "title": "Truncated",
+              "type": "boolean"
+            },
+            "truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Truncation Reason"
+            },
+            "unresolved": {
+              "items": {
+                "$ref": "#/$defs/UnresolvedReference"
+              },
+              "title": "Unresolved",
+              "type": "array"
+            }
+          },
+          "required": [
+            "project_id",
+            "index",
+            "rules_version",
+            "entry_status",
+            "coverage"
+          ],
+          "title": "ProjectOverview",
+          "type": "object"
+        },
+        "SourceLocation": {
+          "additionalProperties": false,
+          "properties": {
+            "end_line": {
+              "exclusiveMinimum": 0,
+              "title": "End Line",
+              "type": "integer"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Start Line",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "start_line",
+            "end_line",
+            "path"
+          ],
+          "title": "SourceLocation",
+          "type": "object"
+        },
+        "Symbol": {
+          "additionalProperties": false,
+          "properties": {
+            "end_line": {
+              "exclusiveMinimum": 0,
+              "title": "End Line",
+              "type": "integer"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "module",
+                "file",
+                "class",
+                "function",
+                "test"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "qualified_name": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Qualified Name",
+              "type": "string"
+            },
+            "start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Start Line",
+              "type": "integer"
+            },
+            "symbol_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Symbol Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "start_line",
+            "end_line",
+            "symbol_id",
+            "index_id",
+            "path",
+            "qualified_name",
+            "kind"
+          ],
+          "title": "Symbol",
+          "type": "object"
+        },
+        "UnresolvedReference": {
+          "additionalProperties": false,
+          "properties": {
+            "end_line": {
+              "exclusiveMinimum": 0,
+              "title": "End Line",
+              "type": "integer"
+            },
+            "expression": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Expression",
+              "type": "string"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "possible_target_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "title": "Possible Target Ids",
+              "type": "array"
+            },
+            "reason": {
+              "maxLength": 1000,
+              "minLength": 1,
+              "title": "Reason",
+              "type": "string"
+            },
+            "source_symbol_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Source Symbol Id",
+              "type": "string"
+            },
+            "start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Start Line",
+              "type": "integer"
+            },
+            "unresolved_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Unresolved Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "start_line",
+            "end_line",
+            "unresolved_id",
+            "index_id",
+            "source_symbol_id",
+            "path",
+            "expression",
+            "reason"
+          ],
+          "title": "UnresolvedReference",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Read-only MCP response for one deterministic project overview.",
+      "properties": {
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/McpError"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "overview": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProjectOverview"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "references": {
+          "items": {
+            "$ref": "#/$defs/EvidenceReference"
+          },
+          "title": "References",
+          "type": "array"
+        },
+        "schema_version": {
+          "const": "0.1.0",
+          "default": "0.1.0",
+          "title": "Schema Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ok"
+      ],
+      "title": "McpOverviewResponse",
+      "type": "object"
+    },
     "McpProjectIndexesResponse": {
       "$defs": {
         "IndexSnapshot": {
@@ -12425,6 +13297,1204 @@
         "summary"
       ],
       "title": "ModelOutput",
+      "type": "object"
+    },
+    "OverviewCoverage": {
+      "additionalProperties": false,
+      "description": "Counts that distinguish the visible bounded result from the snapshot.",
+      "properties": {
+        "entry_point_count": {
+          "minimum": 0,
+          "title": "Entry Point Count",
+          "type": "integer"
+        },
+        "reachable_modules": {
+          "minimum": 0,
+          "title": "Reachable Modules",
+          "type": "integer"
+        },
+        "total_modules": {
+          "minimum": 0,
+          "title": "Total Modules",
+          "type": "integer"
+        },
+        "unreachable_modules": {
+          "minimum": 0,
+          "title": "Unreachable Modules",
+          "type": "integer"
+        },
+        "unresolved_count": {
+          "minimum": 0,
+          "title": "Unresolved Count",
+          "type": "integer"
+        },
+        "visible_modules": {
+          "minimum": 0,
+          "title": "Visible Modules",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "total_modules",
+        "visible_modules",
+        "reachable_modules",
+        "unreachable_modules",
+        "entry_point_count",
+        "unresolved_count"
+      ],
+      "title": "OverviewCoverage",
+      "type": "object"
+    },
+    "OverviewEntryPoint": {
+      "$defs": {
+        "Evidence": {
+          "additionalProperties": false,
+          "properties": {
+            "content_hash": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Content Hash",
+              "type": "string"
+            },
+            "end_line": {
+              "exclusiveMinimum": 0,
+              "title": "End Line",
+              "type": "integer"
+            },
+            "evidence_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Evidence Id",
+              "type": "string"
+            },
+            "excerpt": {
+              "maxLength": 50000,
+              "minLength": 1,
+              "title": "Excerpt",
+              "type": "string"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "source",
+                "stacktrace",
+                "metadata"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Start Line",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "start_line",
+            "end_line",
+            "evidence_id",
+            "index_id",
+            "path",
+            "excerpt",
+            "content_hash",
+            "kind"
+          ],
+          "title": "Evidence",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "One rule-supported Python entry candidate in an immutable snapshot.",
+      "properties": {
+        "direct_symbol_ids": {
+          "items": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Direct Symbol Ids",
+          "type": "array"
+        },
+        "end_line": {
+          "exclusiveMinimum": 0,
+          "title": "End Line",
+          "type": "integer"
+        },
+        "entry_point_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Entry Point Id",
+          "type": "string"
+        },
+        "evidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Evidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "evidence_error": {
+          "anyOf": [
+            {
+              "maxLength": 1000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Evidence Error"
+        },
+        "index_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Index Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "python_main_module",
+            "python_main_guard"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "label": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "path": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "rule_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Rule Id",
+          "type": "string"
+        },
+        "start_line": {
+          "exclusiveMinimum": 0,
+          "title": "Start Line",
+          "type": "integer"
+        },
+        "symbol_id": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Symbol Id"
+        },
+        "unresolved_ids": {
+          "items": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Unresolved Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "start_line",
+        "end_line",
+        "entry_point_id",
+        "index_id",
+        "path",
+        "kind",
+        "rule_id",
+        "label"
+      ],
+      "title": "OverviewEntryPoint",
+      "type": "object"
+    },
+    "OverviewModule": {
+      "$defs": {
+        "Symbol": {
+          "additionalProperties": false,
+          "properties": {
+            "end_line": {
+              "exclusiveMinimum": 0,
+              "title": "End Line",
+              "type": "integer"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "module",
+                "file",
+                "class",
+                "function",
+                "test"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "qualified_name": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Qualified Name",
+              "type": "string"
+            },
+            "start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Start Line",
+              "type": "integer"
+            },
+            "symbol_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Symbol Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "start_line",
+            "end_line",
+            "symbol_id",
+            "index_id",
+            "path",
+            "qualified_name",
+            "kind"
+          ],
+          "title": "Symbol",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "A Python module classified by entry reachability, not by business meaning.",
+      "properties": {
+        "entry_point_ids": {
+          "items": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Entry Point Ids",
+          "type": "array"
+        },
+        "entry_reachable": {
+          "default": false,
+          "title": "Entry Reachable",
+          "type": "boolean"
+        },
+        "index_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Index Id",
+          "type": "string"
+        },
+        "module_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Module Id",
+          "type": "string"
+        },
+        "symbol": {
+          "$ref": "#/$defs/Symbol"
+        }
+      },
+      "required": [
+        "module_id",
+        "index_id",
+        "symbol"
+      ],
+      "title": "OverviewModule",
+      "type": "object"
+    },
+    "OverviewPath": {
+      "$defs": {
+        "CodeEdge": {
+          "additionalProperties": false,
+          "properties": {
+            "edge_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Edge Id",
+              "type": "string"
+            },
+            "extraction_method": {
+              "enum": [
+                "ast",
+                "explicit_import",
+                "fixture"
+              ],
+              "title": "Extraction Method",
+              "type": "string"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "contains",
+                "imports",
+                "calls"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "source_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Source Id",
+              "type": "string"
+            },
+            "source_location": {
+              "$ref": "#/$defs/SourceLocation"
+            },
+            "target_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Target Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "edge_id",
+            "index_id",
+            "source_id",
+            "target_id",
+            "kind",
+            "extraction_method",
+            "source_location"
+          ],
+          "title": "CodeEdge",
+          "type": "object"
+        },
+        "SourceLocation": {
+          "additionalProperties": false,
+          "properties": {
+            "end_line": {
+              "exclusiveMinimum": 0,
+              "title": "End Line",
+              "type": "integer"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Start Line",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "start_line",
+            "end_line",
+            "path"
+          ],
+          "title": "SourceLocation",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "One bounded static path from an entry module to a reached symbol.",
+      "properties": {
+        "depth": {
+          "minimum": 0,
+          "title": "Depth",
+          "type": "integer"
+        },
+        "edges": {
+          "items": {
+            "$ref": "#/$defs/CodeEdge"
+          },
+          "title": "Edges",
+          "type": "array"
+        },
+        "entry_point_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Entry Point Id",
+          "type": "string"
+        },
+        "index_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Index Id",
+          "type": "string"
+        },
+        "path_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Path Id",
+          "type": "string"
+        },
+        "symbol_ids": {
+          "items": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Symbol Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "path_id",
+        "index_id",
+        "entry_point_id",
+        "symbol_ids",
+        "depth"
+      ],
+      "title": "OverviewPath",
+      "type": "object"
+    },
+    "ProjectOverview": {
+      "$defs": {
+        "CodeEdge": {
+          "additionalProperties": false,
+          "properties": {
+            "edge_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Edge Id",
+              "type": "string"
+            },
+            "extraction_method": {
+              "enum": [
+                "ast",
+                "explicit_import",
+                "fixture"
+              ],
+              "title": "Extraction Method",
+              "type": "string"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "contains",
+                "imports",
+                "calls"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "source_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Source Id",
+              "type": "string"
+            },
+            "source_location": {
+              "$ref": "#/$defs/SourceLocation"
+            },
+            "target_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Target Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "edge_id",
+            "index_id",
+            "source_id",
+            "target_id",
+            "kind",
+            "extraction_method",
+            "source_location"
+          ],
+          "title": "CodeEdge",
+          "type": "object"
+        },
+        "Evidence": {
+          "additionalProperties": false,
+          "properties": {
+            "content_hash": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Content Hash",
+              "type": "string"
+            },
+            "end_line": {
+              "exclusiveMinimum": 0,
+              "title": "End Line",
+              "type": "integer"
+            },
+            "evidence_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Evidence Id",
+              "type": "string"
+            },
+            "excerpt": {
+              "maxLength": 50000,
+              "minLength": 1,
+              "title": "Excerpt",
+              "type": "string"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "source",
+                "stacktrace",
+                "metadata"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Start Line",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "start_line",
+            "end_line",
+            "evidence_id",
+            "index_id",
+            "path",
+            "excerpt",
+            "content_hash",
+            "kind"
+          ],
+          "title": "Evidence",
+          "type": "object"
+        },
+        "IndexSnapshot": {
+          "additionalProperties": false,
+          "properties": {
+            "dirty": {
+              "title": "Dirty",
+              "type": "boolean"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "repository_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Repository Id",
+              "type": "string"
+            },
+            "revision": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Revision",
+              "type": "string"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            },
+            "snapshot_hash": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Snapshot Hash",
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "ready",
+                "building",
+                "failed"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "index_id",
+            "repository_id",
+            "revision",
+            "dirty",
+            "snapshot_hash",
+            "status"
+          ],
+          "title": "IndexSnapshot",
+          "type": "object"
+        },
+        "OverviewCoverage": {
+          "additionalProperties": false,
+          "description": "Counts that distinguish the visible bounded result from the snapshot.",
+          "properties": {
+            "entry_point_count": {
+              "minimum": 0,
+              "title": "Entry Point Count",
+              "type": "integer"
+            },
+            "reachable_modules": {
+              "minimum": 0,
+              "title": "Reachable Modules",
+              "type": "integer"
+            },
+            "total_modules": {
+              "minimum": 0,
+              "title": "Total Modules",
+              "type": "integer"
+            },
+            "unreachable_modules": {
+              "minimum": 0,
+              "title": "Unreachable Modules",
+              "type": "integer"
+            },
+            "unresolved_count": {
+              "minimum": 0,
+              "title": "Unresolved Count",
+              "type": "integer"
+            },
+            "visible_modules": {
+              "minimum": 0,
+              "title": "Visible Modules",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "total_modules",
+            "visible_modules",
+            "reachable_modules",
+            "unreachable_modules",
+            "entry_point_count",
+            "unresolved_count"
+          ],
+          "title": "OverviewCoverage",
+          "type": "object"
+        },
+        "OverviewEntryPoint": {
+          "additionalProperties": false,
+          "description": "One rule-supported Python entry candidate in an immutable snapshot.",
+          "properties": {
+            "direct_symbol_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "title": "Direct Symbol Ids",
+              "type": "array"
+            },
+            "end_line": {
+              "exclusiveMinimum": 0,
+              "title": "End Line",
+              "type": "integer"
+            },
+            "entry_point_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Entry Point Id",
+              "type": "string"
+            },
+            "evidence": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Evidence"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "evidence_error": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Evidence Error"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "python_main_module",
+                "python_main_guard"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "label": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Label",
+              "type": "string"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "rule_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Rule Id",
+              "type": "string"
+            },
+            "start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Start Line",
+              "type": "integer"
+            },
+            "symbol_id": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Symbol Id"
+            },
+            "unresolved_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "title": "Unresolved Ids",
+              "type": "array"
+            }
+          },
+          "required": [
+            "start_line",
+            "end_line",
+            "entry_point_id",
+            "index_id",
+            "path",
+            "kind",
+            "rule_id",
+            "label"
+          ],
+          "title": "OverviewEntryPoint",
+          "type": "object"
+        },
+        "OverviewModule": {
+          "additionalProperties": false,
+          "description": "A Python module classified by entry reachability, not by business meaning.",
+          "properties": {
+            "entry_point_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "title": "Entry Point Ids",
+              "type": "array"
+            },
+            "entry_reachable": {
+              "default": false,
+              "title": "Entry Reachable",
+              "type": "boolean"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "module_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Module Id",
+              "type": "string"
+            },
+            "symbol": {
+              "$ref": "#/$defs/Symbol"
+            }
+          },
+          "required": [
+            "module_id",
+            "index_id",
+            "symbol"
+          ],
+          "title": "OverviewModule",
+          "type": "object"
+        },
+        "OverviewPath": {
+          "additionalProperties": false,
+          "description": "One bounded static path from an entry module to a reached symbol.",
+          "properties": {
+            "depth": {
+              "minimum": 0,
+              "title": "Depth",
+              "type": "integer"
+            },
+            "edges": {
+              "items": {
+                "$ref": "#/$defs/CodeEdge"
+              },
+              "title": "Edges",
+              "type": "array"
+            },
+            "entry_point_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Entry Point Id",
+              "type": "string"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "path_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Path Id",
+              "type": "string"
+            },
+            "symbol_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "minItems": 1,
+              "title": "Symbol Ids",
+              "type": "array"
+            }
+          },
+          "required": [
+            "path_id",
+            "index_id",
+            "entry_point_id",
+            "symbol_ids",
+            "depth"
+          ],
+          "title": "OverviewPath",
+          "type": "object"
+        },
+        "SourceLocation": {
+          "additionalProperties": false,
+          "properties": {
+            "end_line": {
+              "exclusiveMinimum": 0,
+              "title": "End Line",
+              "type": "integer"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Start Line",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "start_line",
+            "end_line",
+            "path"
+          ],
+          "title": "SourceLocation",
+          "type": "object"
+        },
+        "Symbol": {
+          "additionalProperties": false,
+          "properties": {
+            "end_line": {
+              "exclusiveMinimum": 0,
+              "title": "End Line",
+              "type": "integer"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "module",
+                "file",
+                "class",
+                "function",
+                "test"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "qualified_name": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Qualified Name",
+              "type": "string"
+            },
+            "start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Start Line",
+              "type": "integer"
+            },
+            "symbol_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Symbol Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "start_line",
+            "end_line",
+            "symbol_id",
+            "index_id",
+            "path",
+            "qualified_name",
+            "kind"
+          ],
+          "title": "Symbol",
+          "type": "object"
+        },
+        "UnresolvedReference": {
+          "additionalProperties": false,
+          "properties": {
+            "end_line": {
+              "exclusiveMinimum": 0,
+              "title": "End Line",
+              "type": "integer"
+            },
+            "expression": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Expression",
+              "type": "string"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "possible_target_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "title": "Possible Target Ids",
+              "type": "array"
+            },
+            "reason": {
+              "maxLength": 1000,
+              "minLength": 1,
+              "title": "Reason",
+              "type": "string"
+            },
+            "source_symbol_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Source Symbol Id",
+              "type": "string"
+            },
+            "start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Start Line",
+              "type": "integer"
+            },
+            "unresolved_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Unresolved Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "start_line",
+            "end_line",
+            "unresolved_id",
+            "index_id",
+            "source_symbol_id",
+            "path",
+            "expression",
+            "reason"
+          ],
+          "title": "UnresolvedReference",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Deterministic, rule-only overview of one project index snapshot.",
+      "properties": {
+        "coverage": {
+          "$ref": "#/$defs/OverviewCoverage"
+        },
+        "entries": {
+          "items": {
+            "$ref": "#/$defs/OverviewEntryPoint"
+          },
+          "title": "Entries",
+          "type": "array"
+        },
+        "entry_status": {
+          "enum": [
+            "identified",
+            "not_identified",
+            "partial"
+          ],
+          "title": "Entry Status",
+          "type": "string"
+        },
+        "index": {
+          "$ref": "#/$defs/IndexSnapshot"
+        },
+        "modules": {
+          "items": {
+            "$ref": "#/$defs/OverviewModule"
+          },
+          "title": "Modules",
+          "type": "array"
+        },
+        "notes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Notes",
+          "type": "array"
+        },
+        "paths": {
+          "items": {
+            "$ref": "#/$defs/OverviewPath"
+          },
+          "title": "Paths",
+          "type": "array"
+        },
+        "project_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Project Id",
+          "type": "string"
+        },
+        "rules_version": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Rules Version",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "0.1.0",
+          "default": "0.1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "truncated": {
+          "default": false,
+          "title": "Truncated",
+          "type": "boolean"
+        },
+        "truncation_reason": {
+          "anyOf": [
+            {
+              "maxLength": 1000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Truncation Reason"
+        },
+        "unresolved": {
+          "items": {
+            "$ref": "#/$defs/UnresolvedReference"
+          },
+          "title": "Unresolved",
+          "type": "array"
+        }
+      },
+      "required": [
+        "project_id",
+        "index",
+        "rules_version",
+        "entry_status",
+        "coverage"
+      ],
+      "title": "ProjectOverview",
       "type": "object"
     },
     "ReadSourceParams": {

@@ -31,6 +31,7 @@ from .contracts import (
     LocalImportRequest,
     LocalImportResponse,
     NeighborsIndexResponse,
+    ProjectOverview,
     Project,
     ProjectIndexListResponse,
     ProjectListResponse,
@@ -47,6 +48,7 @@ from .contracts import (
 from .indexing import SnapshotBoundaryError, build_source_snapshot, extract_definitions
 from .github import GitHubArchive, GitHubClient, GitHubError, GitHubRepository, GitHubResolution, parse_github_repository_url
 from .relations import extract_relations
+from .overview import build_project_overview
 from .storage import (
     IndexStore,
     ImportAttemptRecord,
@@ -707,6 +709,41 @@ class WorkspaceService:
     ) -> SourceIndexResponse:
         self._require_project_index(project_id, index_id)
         return self.index_service.read_source(index_id, path, start_line, end_line)
+
+    def get_overview(
+        self,
+        project_id: str,
+        index_id: str,
+        *,
+        max_depth: int = 4,
+        max_paths: int = 40,
+        max_modules: int = 100,
+    ) -> ProjectOverview:
+        """Build a deterministic entry/module overview from one persisted snapshot."""
+
+        project = self._find_project(project_id)
+        self._require_project_index(project_id, index_id)
+        try:
+            with self.registry.store_for_repository(project.repository_id) as store:
+                relation = store.load_index(index_id)
+                return build_project_overview(
+                    project_id,
+                    relation,
+                    store.read_evidence,
+                    max_depth=max_depth,
+                    max_paths=max_paths,
+                    max_modules=max_modules,
+                )
+        except ServiceError:
+            raise
+        except ValueError as exc:
+            raise ServiceError("invalid_input", 400, "overview parameters are invalid") from exc
+        except StorageNotFoundError as exc:
+            raise ServiceError("not_found", 404, "requested index or source evidence was not found") from exc
+        except StorageInputError as exc:
+            raise ServiceError("invalid_input", 400, "overview parameters are invalid") from exc
+        except StorageError as exc:
+            raise ServiceError("internal_error", 500, "local index storage failed") from exc
 
     def import_local(
         self,

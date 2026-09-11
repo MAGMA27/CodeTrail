@@ -830,6 +830,32 @@ input[type="checkbox"] {
   align-items: center;
 }
 
+.view-toggle {
+  display: inline-flex;
+  border: 1px solid var(--line-strong);
+  background: rgba(5, 15, 13, 0.5);
+}
+
+.view-toggle button {
+  min-height: 30px;
+  padding: 6px 9px;
+  border: 0;
+  border-right: 1px solid var(--line);
+  background: transparent;
+  color: var(--quiet);
+  font-size: 9px;
+}
+
+.view-toggle button:last-child {
+  border-right: 0;
+}
+
+.view-toggle button:hover,
+.view-toggle button.is-active {
+  background: var(--amber-soft);
+  color: var(--amber);
+}
+
 .compact-select-label {
   display: inline-flex;
   align-items: center;
@@ -890,6 +916,189 @@ input[type="checkbox"] {
   overflow: hidden;
   border: 1px solid rgba(121, 200, 194, 0.12);
   background: rgba(5, 15, 13, 0.64);
+}
+
+.overview-stage {
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid rgba(121, 200, 194, 0.12);
+  background: rgba(5, 15, 13, 0.64);
+}
+
+.overview-content {
+  display: grid;
+  gap: 16px;
+  padding: 17px;
+}
+
+.overview-summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.overview-summary > div:first-child {
+  display: grid;
+  gap: 6px;
+}
+
+.overview-kicker {
+  color: var(--amber);
+  font-size: 8px;
+  letter-spacing: 0.13em;
+}
+
+.overview-summary strong {
+  color: var(--ink);
+  font-family: var(--display);
+  font-size: 20px;
+  font-weight: 500;
+}
+
+.overview-summary small,
+.overview-note,
+.overview-notes p {
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.65;
+}
+
+.overview-summary small,
+.overview-note,
+.overview-notes p {
+  margin: 0;
+}
+
+.overview-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(74px, auto));
+  align-content: start;
+  gap: 7px 14px;
+  color: var(--quiet);
+  font-size: 9px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.overview-metrics b {
+  color: var(--mint-bright);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.overview-section,
+.overview-notes {
+  display: grid;
+  gap: 8px;
+}
+
+.overview-entry-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 7px;
+  border-left: 2px solid transparent;
+  background: rgba(11, 25, 22, 0.62);
+}
+
+.overview-entry-row.is-selected {
+  border-left-color: var(--amber);
+  background: rgba(243, 166, 91, 0.08);
+}
+
+.overview-entry-button,
+.overview-module-button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) 16px;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  padding: 10px 9px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+}
+
+.overview-entry-button:hover,
+.overview-module-button:hover {
+  border-color: var(--line-strong);
+}
+
+.overview-entry-kind,
+.overview-reachability {
+  align-self: start;
+  padding: 4px 5px;
+  border: 1px solid rgba(243, 166, 91, 0.35);
+  color: var(--amber);
+  font-size: 8px;
+  letter-spacing: 0.08em;
+}
+
+.overview-reachability.is-reachable {
+  border-color: rgba(121, 200, 194, 0.35);
+  color: var(--mint-bright);
+}
+
+.overview-entry-copy {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.overview-entry-copy strong,
+.overview-entry-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overview-entry-copy strong {
+  color: var(--ink);
+  font-size: 10px;
+}
+
+.overview-entry-copy small {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.overview-link-button {
+  align-self: center;
+  min-height: 27px;
+  padding: 5px 7px;
+  border: 1px solid var(--line-strong);
+  background: transparent;
+  color: var(--mint-bright);
+  font-size: 9px;
+}
+
+.overview-link-button:hover:not(:disabled) {
+  border-color: var(--mint);
+  background: rgba(121, 200, 194, 0.1);
+}
+
+.overview-link-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.overview-module-list {
+  display: grid;
+  gap: 5px;
+  max-height: 300px;
+  overflow: auto;
+}
+
+.overview-module-button {
+  width: 100%;
+  background: rgba(11, 25, 22, 0.62);
+}
+
+.overview-notes {
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
 }
 
 .graph-stage .react-flow {

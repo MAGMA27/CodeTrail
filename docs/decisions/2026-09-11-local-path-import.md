@@ -20,7 +20,7 @@ HTTP 导入、状态和重试入口只接受 loopback 客户端；MCP 保留 A1 
 
 ## 验收与证据
 
-已验证：`apps/api/tests/test_api.py` 覆盖两个临时 Python 来源、源目录 manifest 不变、管理目录索引、项目/attempt 持久化、重开恢复、路径/链接/空源码边界、幂等/并发、失败重试和旧 latest 保留；`apps/api/tests/test_mcp.py` 覆盖 MCP 开关关闭时仅七项只读工具、开启后与 HTTP 共用项目和证据。`uv run pytest -q` 为 55 passed，契约检查为 18 passed，前端交互测试为 3 passed，类型检查、生产构建、编译检查和 docs:check/docs:check:local 通过；浏览器以 `CODETRAIL_WEB_ORIGINS` 配置的本地 API 完成路径导入并刷新恢复同一项目和索引。
+已验证：`apps/api/tests/test_api.py` 覆盖两个临时 Python 来源、源目录 manifest 不变、管理目录索引、项目/attempt 持久化、重开恢复、路径/链接/空源码边界、幂等/并发、失败重试和旧 latest 保留；`apps/api/tests/test_mcp.py` 覆盖 MCP 开关关闭时八项只读工具、开启后与 HTTP 共用项目和证据。`uv run pytest -q` 为 64 passed，契约检查为 18 passed，前端交互测试为 5 passed，类型检查、生产构建、编译检查和 docs:check/docs:check:local 通过；浏览器以 `CODETRAIL_WEB_ORIGINS` 配置的本地 API 完成路径导入并刷新恢复同一项目和索引。
 
 ## 后果
 

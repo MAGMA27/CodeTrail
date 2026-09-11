@@ -191,6 +191,64 @@ export type NeighborsResponse = {
   truncation_reason: string | null;
 };
 
+export type OverviewEntryPoint = {
+  start_line: number;
+  end_line: number;
+  entry_point_id: string;
+  index_id: string;
+  path: string;
+  kind: "python_main_module" | "python_main_guard";
+  rule_id: string;
+  label: string;
+  symbol_id: string | null;
+  evidence: Evidence | null;
+  evidence_error: string | null;
+  direct_symbol_ids: string[];
+  unresolved_ids: string[];
+};
+
+export type OverviewModule = {
+  module_id: string;
+  index_id: string;
+  symbol: SymbolRecord;
+  entry_point_ids: string[];
+  entry_reachable: boolean;
+};
+
+export type OverviewPath = {
+  path_id: string;
+  index_id: string;
+  entry_point_id: string;
+  symbol_ids: string[];
+  edges: CodeEdge[];
+  depth: number;
+};
+
+export type OverviewCoverage = {
+  total_modules: number;
+  visible_modules: number;
+  reachable_modules: number;
+  unreachable_modules: number;
+  entry_point_count: number;
+  unresolved_count: number;
+};
+
+export type ProjectOverview = {
+  schema_version: typeof SCHEMA_VERSION;
+  project_id: string;
+  index: IndexSnapshot;
+  rules_version: string;
+  entry_status: "identified" | "not_identified" | "partial";
+  entries: OverviewEntryPoint[];
+  modules: OverviewModule[];
+  paths: OverviewPath[];
+  unresolved: UnresolvedReference[];
+  coverage: OverviewCoverage;
+  notes: string[];
+  truncated: boolean;
+  truncation_reason: string | null;
+};
+
 export type SourceResponse = {
   schema_version: typeof SCHEMA_VERSION;
   index_id: string;
@@ -268,6 +326,19 @@ export function isSymbolRecord(value: unknown): value is SymbolRecord {
 
 function isSourceLocation(value: unknown): value is SourceLocation {
   return isRecord(value) && isString(value.path) && isLineRange(value);
+}
+
+function isEvidence(value: unknown): value is Evidence {
+  return (
+    isRecord(value) &&
+    isString(value.evidence_id) &&
+    isString(value.index_id) &&
+    isString(value.path) &&
+    isLineRange(value) &&
+    isString(value.excerpt) &&
+    isString(value.content_hash) &&
+    ["source", "stacktrace", "metadata"].includes(String(value.kind))
+  );
 }
 
 export function isCodeEdge(value: unknown): value is CodeEdge {
@@ -475,20 +546,93 @@ export function isNeighborsResponse(value: unknown): value is NeighborsResponse 
   );
 }
 
+function isOverviewEntryPoint(value: unknown): value is OverviewEntryPoint {
+  return (
+    isRecord(value) &&
+    isLineRange(value) &&
+    isString(value.entry_point_id) &&
+    isString(value.index_id) &&
+    isString(value.path) &&
+    ["python_main_module", "python_main_guard"].includes(String(value.kind)) &&
+    isString(value.rule_id) &&
+    isString(value.label) &&
+    (value.symbol_id === null || isString(value.symbol_id)) &&
+    (value.evidence === null || isEvidence(value.evidence)) &&
+    (value.evidence_error === null || isString(value.evidence_error)) &&
+    isStringArray(value.direct_symbol_ids) &&
+    isStringArray(value.unresolved_ids)
+  );
+}
+
+function isOverviewModule(value: unknown): value is OverviewModule {
+  return (
+    isRecord(value) &&
+    isString(value.module_id) &&
+    isString(value.index_id) &&
+    isSymbolRecord(value.symbol) &&
+    value.module_id === value.symbol.symbol_id &&
+    value.index_id === value.symbol.index_id &&
+    value.symbol.kind === "module" &&
+    isStringArray(value.entry_point_ids) &&
+    typeof value.entry_reachable === "boolean"
+  );
+}
+
+function isOverviewPath(value: unknown): value is OverviewPath {
+  return (
+    isRecord(value) &&
+    isString(value.path_id) &&
+    isString(value.index_id) &&
+    isString(value.entry_point_id) &&
+    isStringArray(value.symbol_ids) &&
+    Array.isArray(value.edges) &&
+    value.edges.every(isCodeEdge) &&
+    isNumber(value.depth) &&
+    value.depth === value.edges.length &&
+    value.symbol_ids.length === value.edges.length + 1
+  );
+}
+
+function isOverviewCoverage(value: unknown): value is OverviewCoverage {
+  return (
+    isRecord(value) &&
+    isNumber(value.total_modules) &&
+    isNumber(value.visible_modules) &&
+    isNumber(value.reachable_modules) &&
+    isNumber(value.unreachable_modules) &&
+    isNumber(value.entry_point_count) &&
+    isNumber(value.unresolved_count)
+  );
+}
+
+export function isProjectOverviewResponse(value: unknown): value is ProjectOverview {
+  return (
+    isRecord(value) &&
+    value.schema_version === SCHEMA_VERSION &&
+    isString(value.project_id) &&
+    isIndexSnapshot(value.index) &&
+    isString(value.rules_version) &&
+    ["identified", "not_identified", "partial"].includes(String(value.entry_status)) &&
+    Array.isArray(value.entries) &&
+    value.entries.every(isOverviewEntryPoint) &&
+    Array.isArray(value.modules) &&
+    value.modules.every(isOverviewModule) &&
+    Array.isArray(value.paths) &&
+    value.paths.every(isOverviewPath) &&
+    Array.isArray(value.unresolved) &&
+    value.unresolved.every(isUnresolvedReference) &&
+    isOverviewCoverage(value.coverage) &&
+    isStringArray(value.notes) &&
+    isTruncation(value)
+  );
+}
+
 export function isSourceResponse(value: unknown): value is SourceResponse {
   return (
     isRecord(value) &&
     value.schema_version === SCHEMA_VERSION &&
     isString(value.index_id) &&
-    isRecord(value.evidence) &&
-    isString(value.evidence.evidence_id) &&
-    isString(value.evidence.index_id) &&
-    isString(value.evidence.path) &&
-    isNumber(value.evidence.start_line) &&
-    isNumber(value.evidence.end_line) &&
-    isString(value.evidence.excerpt) &&
-    isString(value.evidence.content_hash) &&
-    isString(value.evidence.kind)
+    isEvidence(value.evidence)
   );
 }
 
@@ -853,6 +997,26 @@ export function readProjectSource(
   return requestJson(
     `/api/projects/${encodeURIComponent(projectId)}/indexes/${encodeURIComponent(indexId)}/source?${params.toString()}`,
     isSourceResponse,
+    { signal },
+  );
+}
+
+export function getProjectOverview(
+  projectId: string,
+  indexId: string,
+  maxDepth = 4,
+  maxPaths = 40,
+  maxModules = 100,
+  signal?: AbortSignal,
+): Promise<ProjectOverview> {
+  const params = new URLSearchParams({
+    max_depth: String(maxDepth),
+    max_paths: String(maxPaths),
+    max_modules: String(maxModules),
+  });
+  return requestJson(
+    `/api/projects/${encodeURIComponent(projectId)}/indexes/${encodeURIComponent(indexId)}/overview?${params.toString()}`,
+    isProjectOverviewResponse,
     { signal },
   );
 }

@@ -30,6 +30,7 @@ from .contracts import (
     Project,
     ProjectIndexListResponse,
     ProjectListResponse,
+    ProjectOverview,
     SearchIndexResponse,
     SourceIndexResponse,
 )
@@ -218,6 +219,27 @@ def create_app(
     )
     async def get_project_index(project_id: str, index_id: str) -> IndexResponse:
         return await run_in_threadpool(workspace_service.get_project_index, project_id, index_id)
+
+    @application.get(
+        "/api/projects/{project_id}/indexes/{index_id}/overview",
+        response_model=ProjectOverview,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def get_project_overview(
+        project_id: str,
+        index_id: str,
+        max_depth: int = Query(default=4, ge=1, le=8),
+        max_paths: int = Query(default=40, ge=1, le=40),
+        max_modules: int = Query(default=100, ge=1, le=200),
+    ) -> ProjectOverview:
+        return await run_in_threadpool(
+            workspace_service.get_overview,
+            project_id,
+            index_id,
+            max_depth=max_depth,
+            max_paths=max_paths,
+            max_modules=max_modules,
+        )
 
     @application.get(
         "/api/projects/{project_id}/indexes/{index_id}/search",

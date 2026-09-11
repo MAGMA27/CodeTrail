@@ -140,6 +140,12 @@ def test_real_stdio_client_matches_http_and_returns_evidence_link(tmp_path: Path
         "?path=timeout_demo%2Fconfig.py&start_line=12&end_line=14",
     )
     assert status == 200
+    status, http_overview = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/indexes/{index_id}/overview",
+    )
+    assert status == 200
 
     environment = {
         "CODETRAIL_REPOSITORIES": json.dumps({"timeout-demo": str(repository)}),
@@ -163,6 +169,7 @@ def test_real_stdio_client_matches_http_and_returns_evidence_link(tmp_path: Path
             http_search=http_search,
             http_neighbors=http_neighbors,
             http_source=http_source,
+            http_overview=http_overview,
         )
     )
 
@@ -337,6 +344,7 @@ def test_mcp_local_import_is_opt_in_and_shares_http_state(tmp_path: Path) -> Non
                 "search_code",
                 "read_source",
                 "get_neighbors",
+                "get_overview",
             } == disabled_names
             assert "import_local_path" not in disabled_names
 
@@ -387,6 +395,7 @@ def test_mcp_local_import_is_opt_in_and_shares_http_state(tmp_path: Path) -> Non
                 "search_code",
                 "read_source",
                 "get_neighbors",
+                "get_overview",
                 "get_import_status",
                 "import_github_repository",
                 "retry_github_import",
@@ -415,6 +424,7 @@ async def _exercise_stdio(
     http_search: dict,
     http_neighbors: dict,
     http_source: dict,
+    http_overview: dict,
 ) -> None:
     expected_tools = {
         "list_projects",
@@ -424,6 +434,7 @@ async def _exercise_stdio(
         "search_code",
         "read_source",
         "get_neighbors",
+        "get_overview",
     }
     async with Client(parameters, read_timeout_seconds=10) as client:
         tools = await client.list_tools()
@@ -520,6 +531,17 @@ async def _exercise_stdio(
         assert reference["url"].startswith("http://localhost:3000?")
         assert "project_id=" in reference["url"]
         assert "content_hash=" in reference["url"]
+
+        overview_result = await client.call_tool(
+            "get_overview",
+            {"project_id": project_id, "index_id": index_id},
+        )
+        assert overview_result.structured_content["ok"] is True
+        assert overview_result.structured_content["overview"] == http_overview
+        references = overview_result.structured_content["references"]
+        assert references
+        assert all(reference["project_id"] == project_id for reference in references)
+        assert all(reference["index_id"] == index_id for reference in references)
 
         wrong_project = await client.call_tool(
             "get_index",

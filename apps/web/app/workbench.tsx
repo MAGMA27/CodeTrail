@@ -21,6 +21,7 @@ import {
   createProjectIndex,
   getHealth,
   getProjectNeighbors,
+  getProjectOverview,
   importGitHubRepository,
   importLocalPath,
   listProjectIndexes,
@@ -42,6 +43,9 @@ import {
   type GitHubImportResponse,
   type LocalImportResponse,
   type NeighborDirection,
+  type OverviewEntryPoint,
+  type OverviewModule,
+  type ProjectOverview,
   type ProjectRecord,
   type SearchMatch,
   type SourceResponse,
@@ -59,6 +63,7 @@ import {
 
 type IndexUiStatus = "unindexed" | "creating" | "loading" | "ready" | "partial" | "error";
 type AsyncStatus = "idle" | "loading" | "success" | "empty" | "error";
+type WorkbenchView = "overview" | "graph";
 
 type SymbolNodeData = {
   symbol: SymbolRecord;
@@ -175,6 +180,22 @@ function queryStatusLabel(status: AsyncStatus): string {
   }[status];
 }
 
+function overviewStatusLabel(status: AsyncStatus, overview: ProjectOverview | null): string {
+  if (status === "loading") {
+    return "概览载入中";
+  }
+  if (status === "error") {
+    return "概览失败";
+  }
+  if (overview?.entry_status === "not_identified") {
+    return "未识别入口";
+  }
+  if (overview?.entry_status === "partial") {
+    return "结果已截断";
+  }
+  return overview ? "规则概览" : "等待索引";
+}
+
 function importStatusLabel(status: ImportStatus): string {
   return {
     queued: "排队中",
@@ -275,6 +296,11 @@ export default function Workbench() {
   const [graphStatus, setGraphStatus] = useState<AsyncStatus>("idle");
   const [graphError, setGraphError] = useState<string | null>(null);
   const [graph, setGraph] = useState<GraphState>(emptyGraphState);
+  const [viewMode, setViewMode] = useState<WorkbenchView>("overview");
+  const [overviewStatus, setOverviewStatus] = useState<AsyncStatus>("idle");
+  const [overview, setOverview] = useState<ProjectOverview | null>(null);
+  const [overviewError, setOverviewError] = useState<string | null>(null);
+  const [selectedOverviewEntryId, setSelectedOverviewEntryId] = useState<string | null>(null);
   const [direction, setDirection] = useState<NeighborDirection>("both");
   const [edgeKinds, setEdgeKinds] = useState<EdgeKind[]>(["calls", "imports"]);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
@@ -287,12 +313,14 @@ export default function Workbench() {
   const searchController = useRef<AbortController | null>(null);
   const graphController = useRef<AbortController | null>(null);
   const sourceController = useRef<AbortController | null>(null);
+  const overviewController = useRef<AbortController | null>(null);
   const indexRequestId = useRef(0);
   const projectRequestId = useRef(0);
   const importRequestId = useRef(0);
   const searchRequestId = useRef(0);
   const graphRequestId = useRef(0);
   const sourceRequestId = useRef(0);
+  const overviewRequestId = useRef(0);
   const knownGroupKeys = useRef<Set<string>>(new Set());
   const evidenceLink = useRef<EvidenceLink | null>(null);
   const evidenceLinkApplied = useRef(false);
@@ -371,6 +399,7 @@ export default function Workbench() {
       searchController.current?.abort();
       graphController.current?.abort();
       sourceController.current?.abort();
+      overviewController.current?.abort();
     };
   }, [checkHealth]);
 
@@ -378,9 +407,11 @@ export default function Workbench() {
     searchController.current?.abort();
     graphController.current?.abort();
     sourceController.current?.abort();
+    overviewController.current?.abort();
     searchRequestId.current += 1;
     graphRequestId.current += 1;
     sourceRequestId.current += 1;
+    overviewRequestId.current += 1;
     setSearchStatus("idle");
     setSearchResults([]);
     setSearchError(null);
@@ -392,6 +423,11 @@ export default function Workbench() {
     setGraphStatus("idle");
     setGraphError(null);
     setGraph(emptyGraphState);
+    setViewMode("overview");
+    setOverviewStatus("idle");
+    setOverview(null);
+    setOverviewError(null);
+    setSelectedOverviewEntryId(null);
     setExpandedGroups(new Set());
     knownGroupKeys.current.clear();
   }, []);
@@ -453,6 +489,31 @@ export default function Workbench() {
     },
     [],
   );
+
+  const loadOverview = useCallback(async (projectId: string, indexId: string) => {
+    overviewController.current?.abort();
+    const controller = new AbortController();
+    overviewController.current = controller;
+    const requestId = ++overviewRequestId.current;
+    setOverviewStatus("loading");
+    setOverviewError(null);
+    try {
+      const response = await getProjectOverview(projectId, indexId, 4, 40, 100, controller.signal);
+      if (!isLatestRequest(requestId, overviewRequestId.current)) {
+        return;
+      }
+      setOverview(response);
+      setSelectedOverviewEntryId(response.entries[0]?.entry_point_id ?? null);
+      setOverviewStatus("success");
+    } catch (error) {
+      if (isAbortError(error) || !isLatestRequest(requestId, overviewRequestId.current)) {
+        return;
+      }
+      setOverview(null);
+      setOverviewStatus("error");
+      setOverviewError(errorMessage(error));
+    }
+  }, []);
 
   const applyIndexResponse = useCallback(
     (response: IndexResponse) => {
@@ -562,6 +623,14 @@ export default function Workbench() {
     window.localStorage.setItem("codetrail.selectedProjectId", project.project_id);
     void loadSelectedProject(project.project_id);
   }, [clearExploration, loadSelectedProject, selectedProjectId]);
+
+  useEffect(() => {
+    const indexId = indexResponse?.index.index_id;
+    if (!selectedProjectId || !indexId) {
+      return;
+    }
+    void loadOverview(selectedProjectId, indexId);
+  }, [indexResponse?.index.index_id, loadOverview, selectedProjectId]);
 
   const createNewProject = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
@@ -972,6 +1041,62 @@ export default function Workbench() {
       }
     },
     [direction, edgeKinds, selectedProjectId],
+  );
+
+  const selectOverviewEntry = useCallback(
+    (entry: OverviewEntryPoint) => {
+      setSelectedOverviewEntryId(entry.entry_point_id);
+      if (!entry.evidence || !indexResponse || !selectedProjectId) {
+        setSelectedId(null);
+        setLinkedSymbol(null);
+        setSourceResponse(null);
+        setSourceStatus(entry.evidence_error ? "error" : "idle");
+        setSourceError(entry.evidence_error);
+        return;
+      }
+      const evidence = entry.evidence;
+      void loadLinkedEvidence(
+        {
+          projectId: selectedProjectId,
+          indexId: evidence.index_id,
+          path: evidence.path,
+          startLine: evidence.start_line,
+          endLine: evidence.end_line,
+          contentHash: evidence.content_hash,
+          evidenceId: evidence.evidence_id,
+        },
+        indexResponse,
+      );
+    },
+    [indexResponse, loadLinkedEvidence, selectedProjectId],
+  );
+
+  const openOverviewEntryGraph = useCallback(
+    (entry: OverviewEntryPoint) => {
+      if (!indexResponse || !overview || !entry.symbol_id) {
+        return;
+      }
+      const module = overview.modules.find((candidate) => candidate.module_id === entry.symbol_id);
+      if (!module) {
+        return;
+      }
+      setViewMode("graph");
+      selectSymbol(module.symbol);
+      void loadNeighborhood(indexResponse.index.index_id, module.symbol.symbol_id, true);
+    },
+    [indexResponse, loadNeighborhood, overview, selectSymbol],
+  );
+
+  const openOverviewModule = useCallback(
+    (module: OverviewModule) => {
+      if (!indexResponse) {
+        return;
+      }
+      setViewMode("graph");
+      selectSymbol(module.symbol);
+      void loadNeighborhood(indexResponse.index.index_id, module.symbol.symbol_id, true);
+    },
+    [indexResponse, loadNeighborhood, selectSymbol],
   );
 
   const runSearch = useCallback(
@@ -1504,72 +1629,136 @@ export default function Workbench() {
           <div className="search-footnote">搜索只返回当前 index_id 的符号与源码命中，不等于已确认影响。</div>
         </aside>
 
-        <section className="graph-panel panel-surface" aria-label="代码关系图">
+        <section className="graph-panel panel-surface" aria-label={viewMode === "overview" ? "项目概览" : "代码关系图"}>
           <div className="panel-heading graph-heading">
             <div>
               <p className="section-index">02 / TOPOLOGY</p>
-              <h2>关系图谱 <span>{graph.symbols.length}/40</span></h2>
+              <h2>{viewMode === "overview" ? "项目概览" : "关系图谱"} <span>{viewMode === "overview" ? `${overview?.coverage.visible_modules ?? 0} modules` : `${graph.symbols.length}/40`}</span></h2>
             </div>
             <div className="graph-actions">
-              <label className="compact-select-label">方向
-                <select value={direction} onChange={(event) => changeDirection(event.target.value as NeighborDirection)} disabled={!selectedId}>
-                  <option value="both">双向</option>
-                  <option value="callers">调用方</option>
-                  <option value="callees">被调用方</option>
-                </select>
-              </label>
-              <label className="filter-toggle"><input type="checkbox" checked={edgeKinds.includes("calls")} onChange={() => toggleEdgeKind("calls")} disabled={!selectedId} /><span>calls</span></label>
-              <label className="filter-toggle"><input type="checkbox" checked={edgeKinds.includes("imports")} onChange={() => toggleEdgeKind("imports")} disabled={!selectedId} /><span>imports</span></label>
-              <button type="button" className="focus-button" onClick={() => flowInstance?.fitView({ padding: 0.18, duration: 320 })} disabled={!flowModel.nodes.length}>聚焦</button>
+              <div className="view-toggle" role="tablist" aria-label="工作台视图">
+                <button type="button" role="tab" aria-selected={viewMode === "overview"} className={viewMode === "overview" ? "is-active" : ""} onClick={() => setViewMode("overview")}>项目概览</button>
+                <button type="button" role="tab" aria-selected={viewMode === "graph"} className={viewMode === "graph" ? "is-active" : ""} onClick={() => setViewMode("graph")}>代码关系</button>
+              </div>
+              {viewMode === "graph" ? (
+                <>
+                  <label className="compact-select-label">方向
+                    <select value={direction} onChange={(event) => changeDirection(event.target.value as NeighborDirection)} disabled={!selectedId}>
+                      <option value="both">双向</option>
+                      <option value="callers">调用方</option>
+                      <option value="callees">被调用方</option>
+                    </select>
+                  </label>
+                  <label className="filter-toggle"><input type="checkbox" checked={edgeKinds.includes("calls")} onChange={() => toggleEdgeKind("calls")} disabled={!selectedId} /><span>calls</span></label>
+                  <label className="filter-toggle"><input type="checkbox" checked={edgeKinds.includes("imports")} onChange={() => toggleEdgeKind("imports")} disabled={!selectedId} /><span>imports</span></label>
+                  <button type="button" className="focus-button" onClick={() => flowInstance?.fitView({ padding: 0.18, duration: 320 })} disabled={!flowModel.nodes.length}>聚焦</button>
+                </>
+              ) : null}
             </div>
           </div>
-          <div className="graph-status-row">
-            <span className="graph-status" data-state={graphStatus}>{graphStatus === "loading" ? "载入关系中" : graphStatus === "error" ? "关系请求失败" : graphStatus === "empty" ? "当前方向没有静态边" : graphStatus === "success" ? "当前为已加载局部图" : "选择搜索命中后载入关系"}</span>
-            {graph.truncated ? <span className="truncated-badge">已截断 · {graph.truncationReason}</span> : null}
-            {graphError ? <span className="inline-error">{graphError}</span> : null}
-          </div>
-          <div className="graph-stage">
-            {flowModel.nodes.length > 0 ? (
-              <ReactFlow<FlowNode, FlowEdge>
-                nodes={flowModel.nodes}
-                edges={flowModel.edges}
-                nodeTypes={nodeTypes}
-                onInit={setFlowInstance}
-                onNodeClick={(_event, node) => {
-                  if (node.type !== "symbol") {
-                    return;
-                  }
-                  const symbol = graph.symbols.find((candidate) => candidate.symbol_id === node.id);
-                  if (symbol) {
-                    selectSymbol(symbol);
-                  }
-                }}
-                fitView
-                fitViewOptions={{ padding: 0.18 }}
-                nodesConnectable={false}
-                nodesDraggable={false}
-                elementsSelectable
-                minZoom={0.25}
-                maxZoom={1.8}
-              >
-                <Background color="#2a413d" gap={24} size={1} />
-                <Controls showInteractive={false} position="bottom-left" />
-                <MiniMap
-                  pannable
-                  zoomable
-                  nodeColor={(node) => node.type === "group" ? "#426963" : node.id === selectedId ? "#f3a65b" : "#79c8c2"}
-                  maskColor="rgba(10, 20, 18, 0.72)"
-                  position="bottom-right"
-                />
-              </ReactFlow>
-            ) : (
-              <div className="graph-empty">
-                <div className="graph-crosshair" aria-hidden="true"><span /><span /></div>
-                <p>{indexResponse ? "搜索一个符号，关系会从它向外展开。" : "建立或打开索引后，这里会显示关系图。"}</p>
-                <small>图中只表示当前已加载的静态子图，不代表全仓架构。</small>
-              </div>
-            )}
-          </div>
+          {viewMode === "overview" ? (
+            <div className="graph-status-row">
+              <span className="graph-status" data-state={overviewStatus}>{overviewStatusLabel(overviewStatus, overview)}</span>
+              {overview?.truncated ? <span className="truncated-badge">已截断 · {overview.truncation_reason}</span> : null}
+              {overviewError ? <span className="inline-error">{overviewError}</span> : null}
+            </div>
+          ) : (
+            <div className="graph-status-row">
+              <span className="graph-status" data-state={graphStatus}>{graphStatus === "loading" ? "载入关系中" : graphStatus === "error" ? "关系请求失败" : graphStatus === "empty" ? "当前方向没有静态边" : graphStatus === "success" ? "当前为已加载局部图" : "选择搜索命中后载入关系"}</span>
+              {graph.truncated ? <span className="truncated-badge">已截断 · {graph.truncationReason}</span> : null}
+              {graphError ? <span className="inline-error">{graphError}</span> : null}
+            </div>
+          )}
+          {viewMode === "overview" ? (
+            <div className="overview-stage">
+              {overviewStatus === "loading" ? (
+                <div className="loading-note"><span className="loader" /> 正在从当前不可变快照生成概览…</div>
+              ) : overviewStatus === "error" ? (
+                <div className="graph-empty"><div className="graph-crosshair" aria-hidden="true"><span /><span /></div><p>项目概览请求失败。</p><small>{overviewError ?? "请重试或切换到其他索引。"}</small><button type="button" className="secondary-button" onClick={() => indexResponse && selectedProjectId && void loadOverview(selectedProjectId, indexResponse.index.index_id)}>重试</button></div>
+              ) : overview ? (
+                <div className="overview-content">
+                  <div className="overview-summary">
+                    <div><span className="overview-kicker">RULES / {overview.rules_version}</span><strong>{overview.entry_status === "not_identified" ? "没有命中当前入口规则" : `${overview.entries.length} 个入口候选`}</strong><small>只展示当前 index_id 的静态事实；未识别不等于项目没有入口。</small></div>
+                    <div className="overview-metrics"><span><b>{overview.coverage.reachable_modules}</b> reachable</span><span><b>{overview.coverage.unreachable_modules}</b> other modules</span><span><b>{overview.paths.length}</b> paths</span><span><b>{overview.unresolved.length}</b> unresolved</span></div>
+                  </div>
+                  <div className="overview-section">
+                    <div className="subsection-heading"><span>ENTRY CANDIDATES</span><em>{overview.entries.length}</em></div>
+                    {overview.entries.length > 0 ? overview.entries.map((entry) => (
+                      <div className={`overview-entry-row${selectedOverviewEntryId === entry.entry_point_id ? " is-selected" : ""}`} key={entry.entry_point_id}>
+                        <button type="button" className="overview-entry-button" onClick={() => selectOverviewEntry(entry)}>
+                          <span className="overview-entry-kind">{entry.kind === "python_main_module" ? "MODULE" : "GUARD"}</span>
+                          <span className="overview-entry-copy"><strong>{entry.label}</strong><small>{entry.path}:L{entry.start_line}–L{entry.end_line} · {entry.rule_id}</small></span>
+                          <span className="result-arrow">↗</span>
+                        </button>
+                        <button type="button" className="overview-link-button" onClick={() => openOverviewEntryGraph(entry)} disabled={!entry.symbol_id}>关系图</button>
+                      </div>
+                    )) : <p className="overview-note">{overview.notes[0] ?? "当前规则没有识别到入口。"}</p>}
+                  </div>
+                  <div className="overview-section">
+                    <div className="subsection-heading"><span>MODULE COVERAGE</span><em>{overview.modules.length}/{overview.coverage.total_modules}</em></div>
+                    <div className="overview-module-list">
+                      {overview.modules.map((module) => (
+                        <button type="button" className="overview-module-button" key={module.module_id} onClick={() => openOverviewModule(module)}>
+                          <span className={`overview-reachability${module.entry_reachable ? " is-reachable" : ""}`}>{module.entry_reachable ? "REACHABLE" : "OTHER"}</span>
+                          <span className="overview-entry-copy"><strong>{module.symbol.qualified_name}</strong><small>{module.symbol.path} · {module.entry_point_ids.length > 0 ? `${module.entry_point_ids.length} 个入口` : "未从入口路径到达"}</small></span>
+                          <span className="result-arrow">↗</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="overview-notes">
+                    <div className="subsection-heading"><span>BOUNDARIES</span><em>{overview.notes.length}</em></div>
+                    {overview.notes.map((note) => <p key={note}>{note}</p>)}
+                  </div>
+                </div>
+              ) : (
+                <div className="graph-empty"><div className="graph-crosshair" aria-hidden="true"><span /><span /></div><p>{indexResponse ? "等待项目概览。" : "建立或打开索引后，这里会显示项目概览。"}</p><small>概览绑定同一 project_id 与 index_id，不执行仓库代码。</small></div>
+              )}
+            </div>
+          ) : (
+            <div className="graph-stage">
+              {flowModel.nodes.length > 0 ? (
+                <ReactFlow<FlowNode, FlowEdge>
+                  nodes={flowModel.nodes}
+                  edges={flowModel.edges}
+                  nodeTypes={nodeTypes}
+                  onInit={setFlowInstance}
+                  onNodeClick={(_event, node) => {
+                    if (node.type !== "symbol") {
+                      return;
+                    }
+                    const symbol = graph.symbols.find((candidate) => candidate.symbol_id === node.id);
+                    if (symbol) {
+                      selectSymbol(symbol);
+                    }
+                  }}
+                  fitView
+                  fitViewOptions={{ padding: 0.18 }}
+                  nodesConnectable={false}
+                  nodesDraggable={false}
+                  elementsSelectable
+                  minZoom={0.25}
+                  maxZoom={1.8}
+                >
+                  <Background color="#2a413d" gap={24} size={1} />
+                  <Controls showInteractive={false} position="bottom-left" />
+                  <MiniMap
+                    pannable
+                    zoomable
+                    nodeColor={(node) => node.type === "group" ? "#426963" : node.id === selectedId ? "#f3a65b" : "#79c8c2"}
+                    maskColor="rgba(10, 20, 18, 0.72)"
+                    position="bottom-right"
+                  />
+                </ReactFlow>
+              ) : (
+                <div className="graph-empty">
+                  <div className="graph-crosshair" aria-hidden="true"><span /><span /></div>
+                  <p>{indexResponse ? "搜索一个符号，关系会从它向外展开。" : "建立或打开索引后，这里会显示关系图。"}</p>
+                  <small>图中只表示当前已加载的静态子图，不代表全仓架构。</small>
+                </div>
+              )}
+            </div>
+          )}
         </section>
 
         <aside className="inspector-panel panel-surface" aria-label="源码检查器">

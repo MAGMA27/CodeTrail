@@ -21,6 +21,7 @@ from .contracts import (
     McpImportStatusResponse,
     McpIndexResponse,
     McpNeighborsResponse,
+    McpOverviewResponse,
     McpProjectIndexesResponse,
     McpProjectListResponse,
     McpProjectResponse,
@@ -30,6 +31,7 @@ from .contracts import (
     LocalImportRequest,
     LocalImportResponse,
     ProjectIndexListResponse,
+    ProjectOverview,
 )
 from .service import IndexService, RepositoryRegistry, ServiceError, WorkspaceService
 
@@ -50,6 +52,9 @@ _Line = Annotated[int, Field(ge=1, description="One-based source line.")]
 _Limit = Annotated[int, Field(ge=1, le=40, description="Maximum number of returned items.")]
 _Depth = Annotated[int, Field(ge=1, le=2, description="Static graph traversal depth.")]
 _DiscoveryLimit = Annotated[int, Field(ge=1, le=_MAX_DISCOVERY_ITEMS, description="Maximum discovery items.")]
+_OverviewDepth = Annotated[int, Field(ge=1, le=8, description="Maximum static overview path depth.")]
+_OverviewPaths = Annotated[int, Field(ge=1, le=40, description="Maximum returned overview paths.")]
+_OverviewModules = Annotated[int, Field(ge=1, le=200, description="Maximum returned overview modules.")]
 McpResponse = TypeVar("McpResponse", bound=McpResultBase)
 
 
@@ -266,6 +271,37 @@ def create_mcp_server(
         except Exception:
             return _unexpected_failure("get_neighbors", McpNeighborsResponse)
 
+    @server.tool(
+        name="get_overview",
+        title="Get a project overview",
+        description=(
+            "Build a deterministic entry-point and module overview for one explicitly selected immutable index. "
+            "The first rule set covers Python __main__.py and top-level __name__ == __main__ guards; "
+            "unresolved calls remain unresolved and the result is bounded."
+        ),
+        structured_output=True,
+    )
+    def get_overview(
+        project_id: _ProjectId,
+        index_id: _IndexId,
+        max_depth: _OverviewDepth = 4,
+        max_paths: _OverviewPaths = 40,
+        max_modules: _OverviewModules = 100,
+    ) -> McpOverviewResponse:
+        try:
+            result = service.get_overview(
+                project_id,
+                index_id,
+                max_depth=max_depth,
+                max_paths=max_paths,
+                max_modules=max_modules,
+            )
+            return _mcp_overview_response(result, citation_url)
+        except ServiceError as exc:
+            return _failure(McpOverviewResponse, exc)
+        except Exception:
+            return _unexpected_failure("get_overview", McpOverviewResponse)
+
     if local_import_enabled:
 
         @server.tool(
@@ -477,6 +513,38 @@ def _mcp_github_import_response(result: GitHubImportResponse) -> McpImportRespon
         attempt=result.attempt,
         index=result.index,
     )
+
+
+def _mcp_overview_response(result: ProjectOverview, base_url: str) -> McpOverviewResponse:
+    references: list[EvidenceReference] = []
+    seen_evidence_ids: set[str] = set()
+    for entry in result.entries:
+        evidence = entry.evidence
+        if evidence is None or evidence.evidence_id in seen_evidence_ids:
+            continue
+        seen_evidence_ids.add(evidence.evidence_id)
+        references.append(
+            EvidenceReference(
+                project_id=result.project_id,
+                index_id=evidence.index_id,
+                path=evidence.path,
+                start_line=evidence.start_line,
+                end_line=evidence.end_line,
+                content_hash=evidence.content_hash,
+                evidence_id=evidence.evidence_id,
+                url=_citation_url(
+                    base_url,
+                    project_id=result.project_id,
+                    index_id=evidence.index_id,
+                    path=evidence.path,
+                    start_line=evidence.start_line,
+                    end_line=evidence.end_line,
+                    content_hash=evidence.content_hash,
+                    evidence_id=evidence.evidence_id,
+                ),
+            )
+        )
+    return McpOverviewResponse(ok=True, overview=result, references=references)
 
 
 def _failure(model: type[McpResponse], exc: ServiceError, **fields: object) -> McpResponse:

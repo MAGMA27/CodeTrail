@@ -711,6 +711,161 @@ class NeighborsIndexResponse(VersionedModel):
         return self
 
 
+OverviewEntryKind: TypeAlias = Literal["python_main_module", "python_main_guard"]
+OverviewEntryStatus: TypeAlias = Literal["identified", "not_identified", "partial"]
+
+
+class OverviewEntryPoint(LineRangeModel):
+    """One rule-supported Python entry candidate in an immutable snapshot."""
+
+    entry_point_id: Identifier
+    index_id: Identifier
+    path: RelativePath
+    kind: OverviewEntryKind
+    rule_id: Identifier
+    label: str = Field(min_length=1, max_length=500)
+    symbol_id: Identifier | None = None
+    evidence: Evidence | None = None
+    evidence_error: str | None = Field(default=None, max_length=1_000)
+    direct_symbol_ids: list[Identifier] = Field(default_factory=list)
+    unresolved_ids: list[Identifier] = Field(default_factory=list)
+
+    _normalize_path = field_validator("path")(_validate_relative_path)
+
+    @model_validator(mode="after")
+    def validate_evidence(self) -> OverviewEntryPoint:
+        if self.evidence is None and self.evidence_error is None:
+            raise ValueError("overview entry points must include evidence or an evidence error")
+        if self.evidence is not None:
+            if (
+                self.evidence.index_id != self.index_id
+                or self.evidence.path != self.path
+                or self.evidence.start_line < self.start_line
+                or self.evidence.end_line > self.end_line
+            ):
+                raise ValueError("overview entry evidence must belong to the entry range")
+        if len(set(self.direct_symbol_ids)) != len(self.direct_symbol_ids):
+            raise ValueError("overview entry direct symbols must be unique")
+        if len(set(self.unresolved_ids)) != len(self.unresolved_ids):
+            raise ValueError("overview entry unresolved IDs must be unique")
+        return self
+
+
+class OverviewModule(ContractModel):
+    """A Python module classified by entry reachability, not by business meaning."""
+
+    module_id: Identifier
+    index_id: Identifier
+    symbol: Symbol
+    entry_point_ids: list[Identifier] = Field(default_factory=list)
+    entry_reachable: bool = False
+
+    @model_validator(mode="after")
+    def validate_module_identity(self) -> OverviewModule:
+        if self.symbol.index_id != self.index_id or self.module_id != self.symbol.symbol_id:
+            raise ValueError("overview module must use its module symbol identity")
+        if self.symbol.kind != "module":
+            raise ValueError("overview modules must reference module symbols")
+        if len(set(self.entry_point_ids)) != len(self.entry_point_ids):
+            raise ValueError("overview module entry IDs must be unique")
+        return self
+
+
+class OverviewPath(ContractModel):
+    """One bounded static path from an entry module to a reached symbol."""
+
+    path_id: Identifier
+    index_id: Identifier
+    entry_point_id: Identifier
+    symbol_ids: list[Identifier] = Field(min_length=1)
+    edges: list[CodeEdge] = Field(default_factory=list)
+    depth: NonNegativeInt
+
+    @model_validator(mode="after")
+    def validate_path_edges(self) -> OverviewPath:
+        if self.depth != len(self.edges) or len(self.symbol_ids) != len(self.edges) + 1:
+            raise ValueError("overview path depth must match its edge and symbol counts")
+        for offset, edge in enumerate(self.edges):
+            if edge.index_id != self.index_id:
+                raise ValueError("overview path edge belongs to a different index_id")
+            if edge.source_id != self.symbol_ids[offset] or edge.target_id != self.symbol_ids[offset + 1]:
+                raise ValueError("overview path edges must form a consecutive symbol path")
+        return self
+
+
+class OverviewCoverage(ContractModel):
+    """Counts that distinguish the visible bounded result from the snapshot."""
+
+    total_modules: NonNegativeInt
+    visible_modules: NonNegativeInt
+    reachable_modules: NonNegativeInt
+    unreachable_modules: NonNegativeInt
+    entry_point_count: NonNegativeInt
+    unresolved_count: NonNegativeInt
+
+    @model_validator(mode="after")
+    def validate_counts(self) -> OverviewCoverage:
+        if self.visible_modules > self.total_modules:
+            raise ValueError("visible overview modules cannot exceed total modules")
+        if self.reachable_modules + self.unreachable_modules != self.total_modules:
+            raise ValueError("overview module reachability counts must cover all modules")
+        return self
+
+
+class ProjectOverview(VersionedModel):
+    """Deterministic, rule-only overview of one project index snapshot."""
+
+    project_id: Identifier
+    index: IndexSnapshot
+    rules_version: Identifier
+    entry_status: OverviewEntryStatus
+    entries: list[OverviewEntryPoint] = Field(default_factory=list)
+    modules: list[OverviewModule] = Field(default_factory=list)
+    paths: list[OverviewPath] = Field(default_factory=list)
+    unresolved: list[UnresolvedReference] = Field(default_factory=list)
+    coverage: OverviewCoverage
+    notes: list[str] = Field(default_factory=list)
+    truncated: bool = False
+    truncation_reason: str | None = Field(default=None, max_length=1_000)
+
+    @model_validator(mode="after")
+    def validate_overview_references(self) -> ProjectOverview:
+        if self.entry_status == "not_identified" and self.entries:
+            raise ValueError("an overview without identified entries cannot contain entry points")
+        if self.entry_status != "not_identified" and not self.entries:
+            raise ValueError("an identified overview must contain entry points")
+        if len({entry.entry_point_id for entry in self.entries}) != len(self.entries):
+            raise ValueError("overview entry IDs must be unique")
+        if len({module.module_id for module in self.modules}) != len(self.modules):
+            raise ValueError("overview module IDs must be unique")
+        if len({path.path_id for path in self.paths}) != len(self.paths):
+            raise ValueError("overview path IDs must be unique")
+        entry_ids = {entry.entry_point_id for entry in self.entries}
+        for entry in self.entries:
+            if entry.index_id != self.index.index_id:
+                raise ValueError("overview entry belongs to a different index_id")
+        for module in self.modules:
+            if module.index_id != self.index.index_id:
+                raise ValueError("overview module belongs to a different index_id")
+            if not set(module.entry_point_ids).issubset(entry_ids):
+                raise ValueError("overview module references an unknown entry point")
+        for path in self.paths:
+            if path.index_id != self.index.index_id or path.entry_point_id not in entry_ids:
+                raise ValueError("overview path has an invalid snapshot or entry reference")
+        for unresolved in self.unresolved:
+            if unresolved.index_id != self.index.index_id:
+                raise ValueError("overview unresolved reference belongs to a different index_id")
+        if self.truncated and not self.truncation_reason:
+            raise ValueError("truncated overviews must explain the truncation")
+        if not self.truncated and self.truncation_reason:
+            raise ValueError("non-truncated overviews cannot have a truncation reason")
+        if self.entry_status == "partial" and not self.truncated:
+            raise ValueError("partial overviews must be truncated")
+        if self.entry_status == "not_identified" and self.coverage.entry_point_count != 0:
+            raise ValueError("unidentified overviews cannot report entry points")
+        return self
+
+
 ApiErrorCode: TypeAlias = Literal[
     "not_found",
     "invalid_input",
@@ -828,6 +983,30 @@ class McpSourceResponse(McpResultBase):
 
 class McpNeighborsResponse(McpResultBase):
     result: NeighborsIndexResponse | None = None
+
+
+class McpOverviewResponse(McpResultBase):
+    """Read-only MCP response for one deterministic project overview."""
+
+    overview: ProjectOverview | None = None
+    references: list[EvidenceReference] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_overview_result(self) -> McpOverviewResponse:
+        if self.ok:
+            if self.overview is None:
+                raise ValueError("successful overview results require an overview")
+            evidence_ids = {
+                entry.evidence.evidence_id
+                for entry in self.overview.entries
+                if entry.evidence is not None
+            }
+            for reference in self.references:
+                if reference.index_id != self.overview.index.index_id or reference.evidence_id not in evidence_ids:
+                    raise ValueError("overview references must match returned entry evidence")
+        elif self.overview is not None or self.references:
+            raise ValueError("failed overview results cannot include overview data")
+        return self
 
 
 class McpImportResponse(McpResultBase):

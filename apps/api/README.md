@@ -2,7 +2,7 @@
 
 ## 职责与边界
 
-`apps/api` 提供本地 FastAPI 服务、静态仓库 allow-list、受限本地路径导入、公开 GitHub 固定 commit 导入、项目身份、索引构建及项目/索引查询。它不执行被分析仓库代码，不实现项目功能概览或 Issue Agent。
+`apps/api` 提供本地 FastAPI 服务、静态仓库 allow-list、受限本地路径导入、公开 GitHub 固定 commit 导入、项目身份、索引构建、项目/索引查询和规则驱动的项目概览骨架。它不执行被分析仓库代码，不实现模型功能识别或 Issue Agent。
 
 ## 入口与目录导航
 
@@ -11,6 +11,7 @@
 - [storage.py](app/storage.py)：静态仓库快照、服务管理目录中的动态来源注册/导入状态和 SQLite/FTS5 查询。
 - [github.py](app/github.py)：GitHub 官方 API 固定 commit、受限 archive 获取、重定向校验和安全解包。
 - [indexing.py](app/indexing.py) 与 [relations.py](app/relations.py)：Python 快照、符号和保守静态关系提取。
+- [overview.py](app/overview.py)：按 `python-entry-v1` 从固定快照生成入口、模块和有界静态路径概览。
 - [tests](tests/)：API、契约、索引、关系和存储测试。
 
 ## 接口与依赖
@@ -43,7 +44,7 @@ API 健康检查为 `GET /api/health`。`CODETRAIL_WEB_ORIGINS` 只控制浏览�
 
 ## 验证
 
-从 `apps/api` 执行 `uv run pytest -q` 和 `uv run python -m compileall -q app`。项目隔离、旧索引兼容关联、失败不覆盖最新索引、动态本地导入、幂等/并发、路径边界、重试和服务重启恢复由 `tests/test_api.py` 覆盖；GitHub 固定 commit、archive 安全、分支移动、清理和 HTTP 入口由 `tests/test_github.py` 覆盖；真实 HTTP/MCP 双进程导入由 `tests/test_mcp.py` 覆盖。
+从 `apps/api` 执行 `uv run pytest -q` 和 `uv run python -m compileall -q app`。项目隔离、旧索引兼容关联、失败不覆盖最新索引、动态本地导入、幂等/并发、路径边界、重试和服务重启恢复由 `tests/test_api.py` 覆盖；GitHub 固定 commit、archive 安全、分支移动、清理和 HTTP 入口由 `tests/test_github.py` 覆盖；O1 入口规则、静态路径、循环/动态 unresolved、预算和旧快照稳定性由 `tests/test_overview.py` 覆盖；真实 HTTP/MCP 双进程导入、概览和证据引用由 `tests/test_mcp.py` 覆盖。
 
 ## 关联文档
 
@@ -56,9 +57,9 @@ API 健康检查为 `GET /api/health`。`CODETRAIL_WEB_ORIGINS` 只控制浏览�
 
 `python -m app.mcp_server` 启动 MCP SDK `2.2.0` 的本地 stdio 服务。stdout 只承载 MCP 协议帧，日志写 stderr；服务复用 `WorkspaceService`，不直接访问 SQLite，不创建索引，不执行仓库代码。
 
-只读工具为 `list_projects`、`get_project`、`list_indexes`、`get_index`、`search_code`、`read_source` 和 `get_neighbors`。除项目发现外均要求显式 `project_id`，索引查询同时要求 `index_id`；错误以结构化 `code`、`message`、`retryable` 返回。`read_source` 额外返回包含 project/index、行范围、content hash、evidence_id 和工作台 URL 的引用。
+只读工具为 `list_projects`、`get_project`、`list_indexes`、`get_index`、`search_code`、`read_source`、`get_neighbors` 和 `get_overview`。除项目发现外均要求显式 `project_id`，索引查询同时要求 `index_id`；错误以结构化 `code`、`message`、`retryable` 返回。`read_source` 和 `get_overview` 额外返回包含 project/index、行范围、content hash、evidence_id 和工作台 URL 的引用。
 
-设置 `CODETRAIL_MCP_LOCAL_IMPORT_ENABLED=1` 后，额外注册 `import_local_path`、`get_import_status` 和 `retry_local_import`；设置 `CODETRAIL_MCP_GITHUB_IMPORT_ENABLED=1` 后，额外注册 `import_github_repository`、`get_import_status` 和 `retry_github_import`。两个开关独立，GitHub MCP 开关还要求 `CODETRAIL_GITHUB_IMPORT_ENABLED=1`；未设置时 MCP 保持七项只读工具。写工具只能使用服务端边界，不能通过参数扩大本地路径或网络权限。
+设置 `CODETRAIL_MCP_LOCAL_IMPORT_ENABLED=1` 后，额外注册 `import_local_path`、`get_import_status` 和 `retry_local_import`；设置 `CODETRAIL_MCP_GITHUB_IMPORT_ENABLED=1` 后，额外注册 `import_github_repository`、`get_import_status` 和 `retry_github_import`。两个开关独立，GitHub MCP 开关还要求 `CODETRAIL_GITHUB_IMPORT_ENABLED=1`；未设置时 MCP 保持八项只读工具。写工具只能使用服务端边界，不能通过参数扩大本地路径或网络权限。
 
 配置工作台引用地址（默认 `http://localhost:3000`）：
 
