@@ -20,6 +20,9 @@ from .contracts import (
     CreateIndexRequest,
     CreateProjectIndexRequest,
     CreateProjectRequest,
+    FeatureGeneration,
+    FeatureGenerationRequest,
+    FeatureGenerationResponse,
     GetNeighborsParams,
     GetNeighborsSuccess,
     ImportAttempt,
@@ -49,6 +52,13 @@ from .indexing import SnapshotBoundaryError, build_source_snapshot, extract_defi
 from .github import GitHubArchive, GitHubClient, GitHubError, GitHubRepository, GitHubResolution, parse_github_repository_url
 from .relations import extract_relations
 from .overview import build_project_overview
+from .feature_generation import (
+    FeatureGenerationEngine,
+    FeatureModelAdapter,
+    build_cache_key,
+    new_generation_id,
+    resolve_model,
+)
 from .storage import (
     IndexStore,
     ImportAttemptRecord,
@@ -98,6 +108,7 @@ class RepositoryRegistry:
         mcp_local_import_enabled: bool | None = None,
         github_import_enabled: bool | None = None,
         mcp_github_import_enabled: bool | None = None,
+        mcp_feature_generation_enabled: bool | None = None,
     ) -> None:
         normalized: dict[str, RepositorySpec] = {}
         for repository_id, repository_root in roots.items():
@@ -145,6 +156,11 @@ class RepositoryRegistry:
             if mcp_github_import_enabled is None
             else mcp_github_import_enabled
         )
+        self._mcp_feature_generation_enabled = (
+            _env_flag("CODETRAIL_MCP_FEATURE_GENERATION_ENABLED")
+            if mcp_feature_generation_enabled is None
+            else mcp_feature_generation_enabled
+        )
         self._lock = threading.RLock()
         self._runtime_source_roots: dict[str, Path] = {}
         self._specs = normalized
@@ -156,6 +172,7 @@ class RepositoryRegistry:
         *,
         github_import_enabled: bool | None = None,
         mcp_github_import_enabled: bool | None = None,
+        mcp_feature_generation_enabled: bool | None = None,
     ) -> RepositoryRegistry:
         raw = os.getenv("CODETRAIL_REPOSITORIES", "").strip()
         payload: dict[str, str] = {}
@@ -182,6 +199,7 @@ class RepositoryRegistry:
             allowed_import_roots=allowed,
             github_import_enabled=github_import_enabled,
             mcp_github_import_enabled=mcp_github_import_enabled,
+            mcp_feature_generation_enabled=mcp_feature_generation_enabled,
         )
 
     @property
@@ -209,6 +227,10 @@ class RepositoryRegistry:
     @property
     def mcp_github_import_enabled(self) -> bool:
         return self._mcp_github_import_enabled
+
+    @property
+    def mcp_feature_generation_enabled(self) -> bool:
+        return self._mcp_feature_generation_enabled
 
     @property
     def allowed_import_roots(self) -> tuple[Path, ...]:
@@ -585,10 +607,12 @@ class WorkspaceService:
         index_service: IndexService,
         *,
         github_client: GitHubClient | None = None,
+        feature_adapter_factory: Callable[[str], FeatureModelAdapter] | None = None,
     ) -> None:
         self.registry = registry
         self.index_service = index_service
         self.github_client = github_client or GitHubClient()
+        self.feature_adapter_factory = feature_adapter_factory
         self._recover_interrupted_builds()
 
     def create_project(self, request: CreateProjectRequest) -> Project:
@@ -744,6 +768,99 @@ class WorkspaceService:
             raise ServiceError("invalid_input", 400, "overview parameters are invalid") from exc
         except StorageError as exc:
             raise ServiceError("internal_error", 500, "local index storage failed") from exc
+
+    def generate_features(
+        self,
+        project_id: str,
+        index_id: str,
+        request: FeatureGenerationRequest,
+    ) -> FeatureGenerationResponse:
+        """Generate, validate, persist, and return one bounded semantic result."""
+
+        project = self._find_project(project_id)
+        self._require_project_index(project_id, index_id)
+        try:
+            with self.registry.store_for_repository(project.repository_id) as store:
+                relation = store.load_index(index_id)
+                index = relation.snapshot.index
+                model = resolve_model(request.mode, request.model)
+                cache_key = build_cache_key(
+                    index.index_id,
+                    index.snapshot_hash,
+                    request.mode,
+                    model,
+                    request.prompt_version,
+                    request.source_scope,
+                    request.budget,
+                )
+                if request.idempotency_key:
+                    existing = store.find_feature_generation_by_idempotency(
+                        project_id,
+                        request.idempotency_key,
+                    )
+                    if existing is not None:
+                        _, generation = existing
+                        if generation.index.index_id != index_id or generation.cache_key != cache_key:
+                            raise ServiceError(
+                                "conflict",
+                                409,
+                                "idempotency key is already bound to another feature request",
+                            )
+                        return FeatureGenerationResponse(generation=generation)
+                cached = store.find_cached_feature_generation(project_id, index_id, cache_key)
+                if cached is not None:
+                    return FeatureGenerationResponse(generation=cached[1])
+                generation = FeatureGenerationEngine(
+                    self,
+                    adapter_factory=self.feature_adapter_factory,
+                ).generate(
+                    project_id,
+                    index_id,
+                    index,
+                    request,
+                    generation_id=new_generation_id(),
+                    model=model,
+                    cache_key=cache_key,
+                )
+                store.save_feature_generation(
+                    generation,
+                    cache_key=cache_key,
+                    idempotency_key=request.idempotency_key,
+                )
+                return FeatureGenerationResponse(generation=generation)
+        except ServiceError:
+            raise
+        except StorageConflictError as exc:
+            raise ServiceError("conflict", 409, "feature generation conflicts with an existing request") from exc
+        except StorageNotFoundError as exc:
+            raise ServiceError("not_found", 404, "requested project, index, or feature generation was not found") from exc
+        except StorageInputError as exc:
+            raise ServiceError("invalid_input", 400, "feature generation parameters are invalid") from exc
+        except StorageError as exc:
+            raise ServiceError("internal_error", 500, "local index storage failed") from exc
+
+    def get_feature_generation(
+        self,
+        project_id: str,
+        index_id: str,
+        generation_id: str,
+    ) -> FeatureGenerationResponse:
+        """Read a saved feature result without invoking retrieval or a model."""
+
+        project = self._find_project(project_id)
+        self._require_project_index(project_id, index_id)
+        try:
+            with self.registry.store_for_repository(project.repository_id) as store:
+                generation = store.load_feature_generation(generation_id)
+        except ServiceError:
+            raise
+        except StorageNotFoundError as exc:
+            raise ServiceError("not_found", 404, "feature generation was not found") from exc
+        except StorageError as exc:
+            raise ServiceError("internal_error", 500, "local index storage failed") from exc
+        if generation.project_id != project_id or generation.index.index_id != index_id:
+            raise ServiceError("not_found", 404, "feature generation does not belong to the selected snapshot")
+        return FeatureGenerationResponse(generation=generation)
 
     def import_local(
         self,

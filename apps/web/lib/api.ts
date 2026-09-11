@@ -249,6 +249,105 @@ export type ProjectOverview = {
   truncation_reason: string | null;
 };
 
+export type FeatureGenerationMode = "fixture" | "real";
+export type FeatureSourceScope = "entry_reachable" | "visible_modules";
+export type FeatureGenerationStatus = "succeeded" | "partial" | "insufficient_evidence" | "failed";
+
+export type FeatureGenerationBudget = {
+  max_tool_calls: number;
+  max_model_calls: number;
+  max_seconds: number;
+  max_source_lines: number;
+  max_total_source_lines: number;
+  max_input_chars: number;
+  max_features: number;
+  max_output_chars: number;
+};
+
+export type FeatureGenerationRequest = {
+  mode: FeatureGenerationMode;
+  model?: string;
+  prompt_version?: string;
+  source_scope?: FeatureSourceScope;
+  budget?: Partial<FeatureGenerationBudget>;
+  idempotency_key?: string;
+};
+
+export type Feature = {
+  feature_id: string;
+  index_id: string;
+  name: string;
+  description: string;
+  entry_point_ids: string[];
+  module_ids: string[];
+  symbol_ids: string[];
+  evidence_ids: string[];
+  limitations: string[];
+};
+
+export type FeatureAssociation = {
+  association_id: string;
+  index_id: string;
+  feature_id: string;
+  relation: "triggered_by" | "implemented_by" | "related_to";
+  target_kind: "entry_point" | "module" | "symbol";
+  target_id: string;
+  evidence_ids: string[];
+};
+
+export type FeatureGenerationError = {
+  kind: string;
+  message: string;
+  retryable: boolean;
+};
+
+export type FeatureGenerationUsage = {
+  tool_calls: number;
+  model_calls: number;
+  repair_calls: number;
+  source_lines: number;
+  input_chars: number;
+  output_chars: number;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  elapsed_ms: number;
+};
+
+export type FeatureGeneration = {
+  schema_version: typeof SCHEMA_VERSION;
+  generation_id: string;
+  project_id: string;
+  index: IndexSnapshot;
+  mode: FeatureGenerationMode;
+  model: string | null;
+  prompt_version: string;
+  rules_version: string;
+  source_scope: FeatureSourceScope;
+  status: FeatureGenerationStatus;
+  summary: string;
+  features: Feature[];
+  associations: FeatureAssociation[];
+  evidence: Evidence[];
+  observed_entry_point_ids: string[];
+  observed_module_ids: string[];
+  observed_symbol_ids: string[];
+  source_paths: string[];
+  omitted_module_ids: string[];
+  limitations: string[];
+  usage: FeatureGenerationUsage;
+  budget: FeatureGenerationBudget;
+  cache_key: string;
+  created_at: string;
+  error: FeatureGenerationError | null;
+  truncated: boolean;
+  truncation_reason: string | null;
+};
+
+export type FeatureGenerationResponse = {
+  schema_version: typeof SCHEMA_VERSION;
+  generation: FeatureGeneration;
+};
+
 export type SourceResponse = {
   schema_version: typeof SCHEMA_VERSION;
   index_id: string;
@@ -625,6 +724,134 @@ export function isProjectOverviewResponse(value: unknown): value is ProjectOverv
     isStringArray(value.notes) &&
     isTruncation(value)
   );
+}
+
+function isFeature(value: unknown, indexId: string): value is Feature {
+  return (
+    isRecord(value) &&
+    isString(value.feature_id) &&
+    value.index_id === indexId &&
+    isString(value.name) &&
+    isString(value.description) &&
+    isStringArray(value.entry_point_ids) &&
+    isStringArray(value.module_ids) &&
+    isStringArray(value.symbol_ids) &&
+    isStringArray(value.evidence_ids) &&
+    isStringArray(value.limitations)
+  );
+}
+
+function isFeatureAssociation(value: unknown, indexId: string): value is FeatureAssociation {
+  return (
+    isRecord(value) &&
+    isString(value.association_id) &&
+    value.index_id === indexId &&
+    isString(value.feature_id) &&
+    ["triggered_by", "implemented_by", "related_to"].includes(String(value.relation)) &&
+    ["entry_point", "module", "symbol"].includes(String(value.target_kind)) &&
+    isString(value.target_id) &&
+    isStringArray(value.evidence_ids)
+  );
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return isNumber(value) && Number.isInteger(value) && value >= 0;
+}
+
+function isFeatureGeneration(value: unknown): value is FeatureGeneration {
+  if (!isRecord(value) || !isIndexSnapshot(value.index)) {
+    return false;
+  }
+  const indexId = value.index.index_id;
+  if (
+    value.schema_version !== SCHEMA_VERSION ||
+    !isString(value.generation_id) ||
+    !isString(value.project_id) ||
+    !["fixture", "real"].includes(String(value.mode)) ||
+    !isNullableString(value.model) ||
+    !isString(value.prompt_version) ||
+    !isString(value.rules_version) ||
+    !["entry_reachable", "visible_modules"].includes(String(value.source_scope)) ||
+    !["succeeded", "partial", "insufficient_evidence", "failed"].includes(String(value.status)) ||
+    !isString(value.summary) ||
+    !Array.isArray(value.features) ||
+    !value.features.every((item) => isFeature(item, indexId)) ||
+    !Array.isArray(value.associations) ||
+    !value.associations.every((item) => isFeatureAssociation(item, indexId)) ||
+    !Array.isArray(value.evidence) ||
+    !value.evidence.every((item) => isEvidence(item) && item.index_id === indexId) ||
+    !isStringArray(value.observed_entry_point_ids) ||
+    !isStringArray(value.observed_module_ids) ||
+    !isStringArray(value.observed_symbol_ids) ||
+    !isStringArray(value.source_paths) ||
+    !isStringArray(value.omitted_module_ids) ||
+    !isStringArray(value.limitations) ||
+    !isRecord(value.usage) ||
+    !isRecord(value.budget) ||
+    !isString(value.cache_key) ||
+    !isString(value.created_at) ||
+    !isTruncation(value)
+  ) {
+    return false;
+  }
+  const usageKeys = [
+    "tool_calls",
+    "model_calls",
+    "repair_calls",
+    "source_lines",
+    "input_chars",
+    "output_chars",
+    "elapsed_ms",
+  ];
+  if (!usageKeys.every((key) => isNonNegativeInteger((value.usage as Record<string, unknown>)[key]))) {
+    return false;
+  }
+  if (
+    !isNullableNumber((value.usage as Record<string, unknown>).input_tokens) ||
+    !isNullableNumber((value.usage as Record<string, unknown>).output_tokens) ||
+    !isNonNegativeInteger((value.budget as Record<string, unknown>).max_tool_calls) ||
+    !isNonNegativeInteger((value.budget as Record<string, unknown>).max_model_calls) ||
+    !isNonNegativeInteger((value.budget as Record<string, unknown>).max_seconds) ||
+    !isNonNegativeInteger((value.budget as Record<string, unknown>).max_source_lines) ||
+    !isNonNegativeInteger((value.budget as Record<string, unknown>).max_total_source_lines) ||
+    !isNonNegativeInteger((value.budget as Record<string, unknown>).max_input_chars) ||
+    !isNonNegativeInteger((value.budget as Record<string, unknown>).max_features) ||
+    !isNonNegativeInteger((value.budget as Record<string, unknown>).max_output_chars) ||
+    (value.error !== null &&
+      (!isRecord(value.error) ||
+        !isString(value.error.kind) ||
+        !isString(value.error.message) ||
+        typeof value.error.retryable !== "boolean"))
+  ) {
+    return false;
+  }
+  const evidenceIds = new Set(value.evidence.map((item) => item.evidence_id));
+  const featureIds = new Set(value.features.map((item) => item.feature_id));
+  if (evidenceIds.size !== value.evidence.length || featureIds.size !== value.features.length) {
+    return false;
+  }
+  if (
+    value.features.some(
+      (feature) =>
+        feature.evidence_ids.some((evidenceId) => !evidenceIds.has(evidenceId)) ||
+        feature.index_id !== indexId,
+    )
+  ) {
+    return false;
+  }
+  return value.associations.every(
+    (association) =>
+      featureIds.has(association.feature_id) &&
+      association.evidence_ids.every((evidenceId) => evidenceIds.has(evidenceId)),
+  );
+}
+
+function isNullableNumber(value: unknown): value is number | null {
+  return value === null || (isNumber(value) && Number.isInteger(value) && value >= 0);
+}
+
+export function isFeatureGenerationResponse(value: unknown): value is FeatureGenerationResponse {
+  return isRecord(value) && value.schema_version === SCHEMA_VERSION && isFeatureGeneration(value.generation);
 }
 
 export function isSourceResponse(value: unknown): value is SourceResponse {
@@ -1017,6 +1244,39 @@ export function getProjectOverview(
   return requestJson(
     `/api/projects/${encodeURIComponent(projectId)}/indexes/${encodeURIComponent(indexId)}/overview?${params.toString()}`,
     isProjectOverviewResponse,
+    { signal },
+  );
+}
+
+export function generateProjectFeatures(
+  projectId: string,
+  indexId: string,
+  request: FeatureGenerationRequest,
+  signal?: AbortSignal,
+): Promise<FeatureGenerationResponse> {
+  return requestJson(
+    `/api/projects/${encodeURIComponent(projectId)}/indexes/${encodeURIComponent(indexId)}/features`,
+    isFeatureGenerationResponse,
+    {
+      method: "POST",
+      signal,
+      body: JSON.stringify({
+        schema_version: SCHEMA_VERSION,
+        ...request,
+      }),
+    },
+  );
+}
+
+export function getProjectFeatureGeneration(
+  projectId: string,
+  indexId: string,
+  generationId: string,
+  signal?: AbortSignal,
+): Promise<FeatureGenerationResponse> {
+  return requestJson(
+    `/api/projects/${encodeURIComponent(projectId)}/indexes/${encodeURIComponent(indexId)}/features/${encodeURIComponent(generationId)}`,
+    isFeatureGenerationResponse,
     { signal },
   );
 }

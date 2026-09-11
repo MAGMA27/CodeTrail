@@ -412,6 +412,84 @@ def test_mcp_local_import_is_opt_in_and_shares_http_state(tmp_path: Path) -> Non
     } <= {project["project_id"] for project in projects["projects"]}
 
 
+def test_mcp_feature_generation_is_separately_opt_in_and_returns_citations(tmp_path: Path) -> None:
+    repository = copy_fixture(tmp_path)
+    application = create_app({"timeout-demo": repository})
+    status, project = request(
+        application,
+        "POST",
+        "/api/projects",
+        {"name": "MCP feature fixture", "repository_id": "timeout-demo"},
+    )
+    assert status == 200
+    project_id = project["project_id"]
+    status, created = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/indexes",
+        {"revision": "mcp-feature-v1", "dirty": False},
+    )
+    assert status == 200
+    index_id = created["index"]["index_id"]
+
+    parameters = StdioServerParameters(
+        command=sys.executable,
+        args=["-m", "app.mcp_server"],
+        env={
+            "CODETRAIL_REPOSITORIES": json.dumps({"timeout-demo": str(repository)}),
+            "CODETRAIL_MCP_FEATURE_GENERATION_ENABLED": "1",
+            "CODETRAIL_WORKBENCH_URL": "http://localhost:3000",
+        },
+        cwd=API_ROOT,
+    )
+
+    async def exercise() -> None:
+        async with Client(parameters, read_timeout_seconds=15) as client:
+            tool_names = {tool.name for tool in (await client.list_tools()).tools}
+            assert {
+                "list_projects",
+                "get_project",
+                "list_indexes",
+                "get_index",
+                "search_code",
+                "read_source",
+                "get_neighbors",
+                "get_overview",
+                "generate_project_features",
+                "get_feature_generation",
+            } == tool_names
+            generated = await client.call_tool(
+                "generate_project_features",
+                {
+                    "project_id": project_id,
+                    "index_id": index_id,
+                    "mode": "fixture",
+                    "idempotency_key": "mcp-feature-one",
+                },
+            )
+            structured = generated.structured_content
+            assert structured["ok"] is True
+            generation = structured["generation"]
+            assert generation["status"] in {"succeeded", "partial"}
+            assert generation["features"]
+            assert {reference["evidence_id"] for reference in structured["references"]} == {
+                evidence["evidence_id"] for evidence in generation["evidence"]
+            }
+            assert all(reference["url"].startswith("http://localhost:3000?") for reference in structured["references"])
+
+            reread = await client.call_tool(
+                "get_feature_generation",
+                {
+                    "project_id": project_id,
+                    "index_id": index_id,
+                    "generation_id": generation["generation_id"],
+                },
+            )
+            assert reread.structured_content["generation"] == generation
+
+    asyncio.run(exercise())
+
+
 async def _exercise_stdio(
     parameters: StdioServerParameters,
     *,

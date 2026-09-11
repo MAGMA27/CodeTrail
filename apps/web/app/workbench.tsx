@@ -19,9 +19,11 @@ import {
   ApiRequestError,
   createProject,
   createProjectIndex,
+  generateProjectFeatures,
   getHealth,
   getProjectNeighbors,
   getProjectOverview,
+  getProjectFeatureGeneration,
   importGitHubRepository,
   importLocalPath,
   listProjectIndexes,
@@ -36,6 +38,9 @@ import {
   type CodeEdge,
   type EdgeKind,
   type Evidence,
+  type FeatureGeneration,
+  type FeatureGenerationMode,
+  type FeatureSourceScope,
   type HealthResponse,
   type ImportStatus,
   type IndexResponse,
@@ -215,6 +220,42 @@ function evidenceLines(evidence: Evidence): Array<{ number: number; text: string
   }));
 }
 
+function newFeatureIdempotencyKey(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `workbench-${crypto.randomUUID()}`;
+  }
+  return `workbench-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function featureAsyncStatus(generation: FeatureGeneration): AsyncStatus {
+  if (generation.status === "failed") {
+    return "error";
+  }
+  if (generation.status === "insufficient_evidence") {
+    return "empty";
+  }
+  return "success";
+}
+
+function featureStatusLabel(status: AsyncStatus, generation: FeatureGeneration | null): string {
+  if (status === "loading") {
+    return "生成功能中";
+  }
+  if (status === "error") {
+    return "生成功能失败";
+  }
+  if (generation?.status === "insufficient_evidence") {
+    return "证据不足";
+  }
+  if (generation?.status === "partial") {
+    return "部分完成";
+  }
+  if (generation?.status === "succeeded") {
+    return "已生成";
+  }
+  return "等待生成";
+}
+
 type EvidenceLink = {
   projectId: string;
   indexId: string;
@@ -301,6 +342,11 @@ export default function Workbench() {
   const [overview, setOverview] = useState<ProjectOverview | null>(null);
   const [overviewError, setOverviewError] = useState<string | null>(null);
   const [selectedOverviewEntryId, setSelectedOverviewEntryId] = useState<string | null>(null);
+  const [featureStatus, setFeatureStatus] = useState<AsyncStatus>("idle");
+  const [featureGeneration, setFeatureGeneration] = useState<FeatureGeneration | null>(null);
+  const [featureError, setFeatureError] = useState<string | null>(null);
+  const [featureMode, setFeatureMode] = useState<FeatureGenerationMode>("fixture");
+  const [featureSourceScope, setFeatureSourceScope] = useState<FeatureSourceScope>("entry_reachable");
   const [direction, setDirection] = useState<NeighborDirection>("both");
   const [edgeKinds, setEdgeKinds] = useState<EdgeKind[]>(["calls", "imports"]);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
@@ -314,6 +360,7 @@ export default function Workbench() {
   const graphController = useRef<AbortController | null>(null);
   const sourceController = useRef<AbortController | null>(null);
   const overviewController = useRef<AbortController | null>(null);
+  const featureController = useRef<AbortController | null>(null);
   const indexRequestId = useRef(0);
   const projectRequestId = useRef(0);
   const importRequestId = useRef(0);
@@ -321,6 +368,8 @@ export default function Workbench() {
   const graphRequestId = useRef(0);
   const sourceRequestId = useRef(0);
   const overviewRequestId = useRef(0);
+  const featureRequestId = useRef(0);
+  const featureIdempotencyKey = useRef<string | null>(null);
   const knownGroupKeys = useRef<Set<string>>(new Set());
   const evidenceLink = useRef<EvidenceLink | null>(null);
   const evidenceLinkApplied = useRef(false);
@@ -400,6 +449,7 @@ export default function Workbench() {
       graphController.current?.abort();
       sourceController.current?.abort();
       overviewController.current?.abort();
+      featureController.current?.abort();
     };
   }, [checkHealth]);
 
@@ -408,6 +458,7 @@ export default function Workbench() {
     graphController.current?.abort();
     sourceController.current?.abort();
     overviewController.current?.abort();
+    featureController.current?.abort();
     searchRequestId.current += 1;
     graphRequestId.current += 1;
     sourceRequestId.current += 1;
@@ -428,6 +479,11 @@ export default function Workbench() {
     setOverview(null);
     setOverviewError(null);
     setSelectedOverviewEntryId(null);
+    featureRequestId.current += 1;
+    featureIdempotencyKey.current = null;
+    setFeatureStatus("idle");
+    setFeatureGeneration(null);
+    setFeatureError(null);
     setExpandedGroups(new Set());
     knownGroupKeys.current.clear();
   }, []);
@@ -514,6 +570,137 @@ export default function Workbench() {
       setOverviewError(errorMessage(error));
     }
   }, []);
+
+  const applyFeatureGenerationResponse = useCallback((generation: FeatureGeneration) => {
+    setFeatureGeneration(generation);
+    setFeatureStatus(featureAsyncStatus(generation));
+    setFeatureError(generation.status === "failed" ? generation.error?.message ?? "功能生成失败。" : null);
+  }, []);
+
+  const runFeatureGeneration = useCallback(
+    async (retryFailed = false) => {
+      if (!indexResponse || !selectedProjectId) {
+        setFeatureError("请先创建项目并打开一个索引。");
+        setFeatureStatus("error");
+        return;
+      }
+      if (featureStatus === "loading") {
+        return;
+      }
+      const key = retryFailed && featureGeneration?.status === "failed"
+        ? newFeatureIdempotencyKey()
+        : featureIdempotencyKey.current ?? newFeatureIdempotencyKey();
+      featureIdempotencyKey.current = key;
+      featureController.current?.abort();
+      const controller = new AbortController();
+      featureController.current = controller;
+      const requestId = ++featureRequestId.current;
+      const currentIndexId = indexResponse.index.index_id;
+      setFeatureStatus("loading");
+      setFeatureError(null);
+      try {
+        const response = await generateProjectFeatures(
+          selectedProjectId,
+          currentIndexId,
+          {
+            mode: featureMode,
+            source_scope: featureSourceScope,
+            idempotency_key: key,
+          },
+          controller.signal,
+        );
+        if (
+          !isLatestRequest(requestId, featureRequestId.current) ||
+          selectedProjectId !== response.generation.project_id ||
+          currentIndexId !== response.generation.index.index_id
+        ) {
+          return;
+        }
+        applyFeatureGenerationResponse(response.generation);
+      } catch (error) {
+        if (isAbortError(error) || !isLatestRequest(requestId, featureRequestId.current)) {
+          return;
+        }
+        setFeatureStatus("error");
+        setFeatureError(errorMessage(error));
+      }
+    },
+    [
+      applyFeatureGenerationResponse,
+      featureGeneration?.status,
+      featureMode,
+      featureSourceScope,
+      featureStatus,
+      indexResponse,
+      selectedProjectId,
+    ],
+  );
+
+  const loadSavedFeatureGeneration = useCallback(async () => {
+    if (!indexResponse || !selectedProjectId || !featureGeneration) {
+      return;
+    }
+    featureController.current?.abort();
+    const controller = new AbortController();
+    featureController.current = controller;
+    const requestId = ++featureRequestId.current;
+    const currentIndexId = indexResponse.index.index_id;
+    setFeatureStatus("loading");
+    setFeatureError(null);
+    try {
+      const response = await getProjectFeatureGeneration(
+        selectedProjectId,
+        currentIndexId,
+        featureGeneration.generation_id,
+        controller.signal,
+      );
+      if (
+        !isLatestRequest(requestId, featureRequestId.current) ||
+        response.generation.project_id !== selectedProjectId ||
+        response.generation.index.index_id !== currentIndexId
+      ) {
+        return;
+      }
+      applyFeatureGenerationResponse(response.generation);
+    } catch (error) {
+      if (isAbortError(error) || !isLatestRequest(requestId, featureRequestId.current)) {
+        return;
+      }
+      setFeatureStatus("error");
+      setFeatureError(errorMessage(error));
+    }
+  }, [applyFeatureGenerationResponse, featureGeneration, indexResponse, selectedProjectId]);
+
+  const resetFeatureRequest = useCallback((change: () => void) => {
+    featureController.current?.abort();
+    featureRequestId.current += 1;
+    featureIdempotencyKey.current = null;
+    setFeatureGeneration(null);
+    setFeatureStatus("idle");
+    setFeatureError(null);
+    change();
+  }, []);
+
+  const selectFeatureEvidence = useCallback(
+    (evidence: Evidence) => {
+      if (!indexResponse || !selectedProjectId) {
+        return;
+      }
+      void loadLinkedEvidence(
+        {
+          projectId: selectedProjectId,
+          indexId: evidence.index_id,
+          path: evidence.path,
+          startLine: evidence.start_line,
+          endLine: evidence.end_line,
+          contentHash: evidence.content_hash,
+          evidenceId: evidence.evidence_id,
+        },
+        indexResponse,
+      );
+    },
+    [indexResponse, loadLinkedEvidence, selectedProjectId],
+  );
 
   const applyIndexResponse = useCallback(
     (response: IndexResponse) => {
@@ -1681,6 +1868,129 @@ export default function Workbench() {
                     <div><span className="overview-kicker">RULES / {overview.rules_version}</span><strong>{overview.entry_status === "not_identified" ? "没有命中当前入口规则" : `${overview.entries.length} 个入口候选`}</strong><small>只展示当前 index_id 的静态事实；未识别不等于项目没有入口。</small></div>
                     <div className="overview-metrics"><span><b>{overview.coverage.reachable_modules}</b> reachable</span><span><b>{overview.coverage.unreachable_modules}</b> other modules</span><span><b>{overview.paths.length}</b> paths</span><span><b>{overview.unresolved.length}</b> unresolved</span></div>
                   </div>
+                  <section className="feature-generation-section" aria-label="主要功能语义识别">
+                    <div className="subsection-heading"><span>O2 / FEATURE SEMANTICS</span><em>{featureGeneration?.features.length ?? "—"}</em></div>
+                    <div className="feature-generation-intro">
+                      <p>根据当前不可变快照中实际返回的入口、模块、符号和源码证据，生成有边界的主要功能描述。</p>
+                      <small>生成是显式操作；fixture 不需要密钥，real 使用 API 服务端配置并可能产生模型费用。</small>
+                    </div>
+                    <div className="feature-generation-controls">
+                      <label className="feature-control">模式
+                        <select
+                          value={featureMode}
+                          onChange={(event) => resetFeatureRequest(() => setFeatureMode(event.target.value as FeatureGenerationMode))}
+                          disabled={featureStatus === "loading"}
+                        >
+                          <option value="fixture">fixture / 离线</option>
+                          <option value="real">real / 服务端模型</option>
+                        </select>
+                      </label>
+                      <label className="feature-control">源码范围
+                        <select
+                          value={featureSourceScope}
+                          onChange={(event) => resetFeatureRequest(() => setFeatureSourceScope(event.target.value as FeatureSourceScope))}
+                          disabled={featureStatus === "loading"}
+                        >
+                          <option value="entry_reachable">入口可达模块</option>
+                          <option value="visible_modules">当前可见模块</option>
+                        </select>
+                      </label>
+                      <div className="feature-generation-actions">
+                        <button
+                          type="button"
+                          className="primary-button"
+                          onClick={() => void runFeatureGeneration()}
+                          disabled={!indexResponse || featureStatus === "loading"}
+                        >
+                          {featureStatus === "loading" ? "生成中…" : "识别主要功能"}
+                        </button>
+                        {featureGeneration ? (
+                          <button type="button" className="secondary-button" onClick={() => void loadSavedFeatureGeneration()} disabled={featureStatus === "loading"}>
+                            重读已保存结果
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                    <div className="feature-scope-note">
+                      <span className="graph-status" data-state={featureStatus}>{featureStatusLabel(featureStatus, featureGeneration)}</span>
+                      <span>{featureSourceScope === "entry_reachable" ? "只查询入口可达模块；未查询模块不会被当作不存在。" : "在当前可见模块内查询，但仍受工具、源码、输入和输出预算限制。"}</span>
+                    </div>
+                    {featureStatus === "loading" ? <div className="loading-note"><span className="loader" /> 正在收集有界证据并生成语义摘要…</div> : null}
+                    {featureError && !featureGeneration ? (
+                      <div className="feature-error" role="alert">
+                        <span>{featureError}</span>
+                        <button type="button" className="text-button" onClick={() => void runFeatureGeneration()}>重试</button>
+                      </div>
+                    ) : null}
+                    {featureGeneration ? (
+                      <div className="feature-generation-result">
+                        <div className="feature-generation-meta">
+                          <span className="feature-status-badge" data-state={featureGeneration.status}>{featureGeneration.status}</span>
+                          {featureGeneration.mode === "fixture" ? <span className="fixture-badge">FIXTURE / OFFLINE</span> : <span className="real-badge">REAL / SERVER CONFIG</span>}
+                          <code title={featureGeneration.model ?? "未配置模型"}>{featureGeneration.model ?? "未配置模型"}</code>
+                          <small>{featureGeneration.source_paths.length} 个源码文件 · {featureGeneration.usage.tool_calls} 次工具 · {featureGeneration.usage.model_calls} 次模型 · {featureGeneration.usage.elapsed_ms} ms</small>
+                        </div>
+                        <p className="feature-generation-summary">{featureGeneration.summary}</p>
+                        {featureGeneration.error ? (
+                          <div className="feature-error" role="alert">
+                            <span>{featureGeneration.error.message}</span>
+                            <button type="button" className="text-button" onClick={() => void runFeatureGeneration(true)}>重试</button>
+                          </div>
+                        ) : null}
+                        {featureGeneration.truncated ? <p className="feature-warning">上下文已截断：{featureGeneration.truncation_reason}</p> : null}
+                        {featureGeneration.omitted_module_ids.length > 0 ? <p className="feature-warning">未查询模块 {featureGeneration.omitted_module_ids.length} 个；它们未被当作没有功能。</p> : null}
+                        {featureGeneration.features.length > 0 ? (
+                          <div className="feature-list">
+                            {featureGeneration.features.map((feature) => (
+                              <article className="feature-card" key={feature.feature_id}>
+                                <div className="feature-card-heading">
+                                  <strong>{feature.name}</strong>
+                                  <span>{feature.symbol_ids.length} symbols · {feature.evidence_ids.length} evidence</span>
+                                </div>
+                                <p>{feature.description}</p>
+                                <div className="feature-ref-row">
+                                  <span>入口 {feature.entry_point_ids.length}</span>
+                                  <span>模块 {feature.module_ids.length}</span>
+                                  <span>静态符号 {feature.symbol_ids.length}</span>
+                                </div>
+                                <div className="feature-evidence-list">
+                                  {feature.evidence_ids.map((evidenceId) => {
+                                    const evidence = featureGeneration.evidence.find((item) => item.evidence_id === evidenceId);
+                                    return evidence ? (
+                                      <button type="button" className="feature-evidence-button" key={evidenceId} onClick={() => selectFeatureEvidence(evidence)}>
+                                        {evidence.path}:L{evidence.start_line}–L{evidence.end_line}
+                                      </button>
+                                    ) : <span className="feature-missing-evidence" key={evidenceId}>缺少证据 {evidenceId}</span>;
+                                  })}
+                                </div>
+                                {feature.limitations.length > 0 ? <small className="feature-card-limitations">{feature.limitations.join(" · ")}</small> : null}
+                              </article>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="feature-empty">{featureGeneration.status === "insufficient_evidence" ? "当前快照没有收集到足够的入口或源码证据，未生成功能结论。" : "本次没有返回可展示的功能。"}</p>
+                        )}
+                        {featureGeneration.associations.length > 0 ? (
+                          <details className="feature-associations">
+                            <summary>查看 {featureGeneration.associations.length} 条功能关联（与静态 CodeEdge 分开）</summary>
+                            {featureGeneration.associations.map((association) => (
+                              <div className="feature-association" key={association.association_id}>
+                                <code>{association.relation}</code>
+                                <span>{association.target_kind}:{association.target_id}</span>
+                                <small>{association.evidence_ids.length} 条证据</small>
+                              </div>
+                            ))}
+                          </details>
+                        ) : null}
+                        {featureGeneration.limitations.length > 0 ? (
+                          <div className="feature-limitations">
+                            <span>边界与限制</span>
+                            {featureGeneration.limitations.map((limitation) => <p key={limitation}>{limitation}</p>)}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </section>
                   <div className="overview-section">
                     <div className="subsection-heading"><span>ENTRY CANDIDATES</span><em>{overview.entries.length}</em></div>
                     {overview.entries.length > 0 ? overview.entries.map((entry) => (

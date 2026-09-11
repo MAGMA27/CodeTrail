@@ -866,6 +866,274 @@ class ProjectOverview(VersionedModel):
         return self
 
 
+FeatureGenerationMode: TypeAlias = Literal["fixture", "real"]
+FeatureSourceScope: TypeAlias = Literal["entry_reachable", "visible_modules"]
+FeatureGenerationStatus: TypeAlias = Literal[
+    "succeeded",
+    "partial",
+    "insufficient_evidence",
+    "failed",
+]
+FeatureGenerationErrorKind: TypeAlias = Literal[
+    "budget_exceeded",
+    "retrieval_failed",
+    "model_unavailable",
+    "model_failed",
+    "invalid_model_output",
+    "internal_error",
+]
+FeatureAssociationRelation: TypeAlias = Literal[
+    "triggered_by",
+    "implemented_by",
+    "related_to",
+]
+FeatureAssociationTargetKind: TypeAlias = Literal["entry_point", "module", "symbol"]
+
+
+class FeatureGenerationBudget(ContractModel):
+    """Server-enforced limits for one explicit feature generation."""
+
+    max_tool_calls: PositiveInt = Field(default=8, le=12)
+    max_model_calls: PositiveInt = Field(default=1, le=2)
+    max_seconds: PositiveInt = Field(default=20, le=120)
+    max_source_lines: PositiveInt = Field(default=120, le=200)
+    max_total_source_lines: PositiveInt = Field(default=800, le=2_000)
+    max_input_chars: PositiveInt = Field(default=60_000, le=100_000)
+    max_features: PositiveInt = Field(default=8, le=20)
+    max_output_chars: PositiveInt = Field(default=20_000, le=50_000)
+
+    @model_validator(mode="after")
+    def validate_generation_budget(self) -> FeatureGenerationBudget:
+        if self.max_total_source_lines < self.max_source_lines:
+            raise ValueError("total source line budget must cover one source read")
+        return self
+
+
+class FeatureGenerationRequest(VersionedModel):
+    """Explicit request for one bounded semantic feature generation."""
+
+    mode: FeatureGenerationMode
+    model: str | None = Field(default=None, min_length=1, max_length=200)
+    prompt_version: Identifier = "feature-summary-v1"
+    source_scope: FeatureSourceScope = "entry_reachable"
+    budget: FeatureGenerationBudget = Field(default_factory=FeatureGenerationBudget)
+    idempotency_key: Identifier | None = None
+
+
+class Feature(ContractModel):
+    """A semantic feature supported by observed snapshot symbols and evidence."""
+
+    feature_id: Identifier
+    index_id: Identifier
+    name: str = Field(min_length=1, max_length=300)
+    description: str = Field(min_length=1, max_length=5_000)
+    entry_point_ids: list[Identifier] = Field(default_factory=list, max_length=20)
+    module_ids: list[Identifier] = Field(default_factory=list, max_length=100)
+    symbol_ids: list[Identifier] = Field(default_factory=list, max_length=100)
+    evidence_ids: list[Identifier] = Field(default_factory=list, max_length=100)
+    limitations: list[str] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="after")
+    def validate_feature_lists(self) -> Feature:
+        for values, label in (
+            (self.entry_point_ids, "entry point"),
+            (self.module_ids, "module"),
+            (self.symbol_ids, "symbol"),
+            (self.evidence_ids, "evidence"),
+        ):
+            if len(set(values)) != len(values):
+                raise ValueError(f"feature {label} IDs must be unique")
+        return self
+
+
+class FeatureAssociation(ContractModel):
+    """A semantic feature mapping kept separate from static CodeEdge data."""
+
+    association_id: Identifier
+    index_id: Identifier
+    feature_id: Identifier
+    relation: FeatureAssociationRelation
+    target_kind: FeatureAssociationTargetKind
+    target_id: Identifier
+    evidence_ids: list[Identifier] = Field(min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def validate_association_evidence(self) -> FeatureAssociation:
+        if len(set(self.evidence_ids)) != len(self.evidence_ids):
+            raise ValueError("feature association evidence IDs must be unique")
+        return self
+
+
+class FeatureModelOutput(VersionedModel):
+    """Untrusted structured adapter output before context reference validation."""
+
+    output_id: Identifier
+    index_id: Identifier
+    outcome: Literal["features_found", "insufficient_evidence"]
+    summary: str = Field(min_length=1, max_length=5_000)
+    features: list[Feature] = Field(default_factory=list, max_length=20)
+    associations: list[FeatureAssociation] = Field(default_factory=list, max_length=200)
+    evidence_ids: list[Identifier] = Field(default_factory=list, max_length=200)
+    observed_symbol_ids: list[Identifier] = Field(default_factory=list, max_length=200)
+    limitations: list[str] = Field(default_factory=list, max_length=30)
+
+    @model_validator(mode="after")
+    def validate_model_output(self) -> FeatureModelOutput:
+        if self.outcome == "features_found" and not self.features:
+            raise ValueError("features_found output must include at least one feature")
+        if self.outcome == "insufficient_evidence" and self.features:
+            raise ValueError("insufficient_evidence output cannot include features")
+        if len(set(self.evidence_ids)) != len(self.evidence_ids):
+            raise ValueError("model output evidence IDs must be unique")
+        if len(set(self.observed_symbol_ids)) != len(self.observed_symbol_ids):
+            raise ValueError("model output symbol IDs must be unique")
+        feature_ids = {feature.feature_id for feature in self.features}
+        if len(feature_ids) != len(self.features):
+            raise ValueError("model output feature IDs must be unique")
+        if any(not feature.evidence_ids for feature in self.features):
+            raise ValueError("every model output feature must cite evidence")
+        association_ids = {item.association_id for item in self.associations}
+        if len(association_ids) != len(self.associations):
+            raise ValueError("model output association IDs must be unique")
+        if not {item.feature_id for item in self.associations}.issubset(feature_ids):
+            raise ValueError("feature association references an unknown feature")
+        return self
+
+
+class FeatureGenerationError(ContractModel):
+    kind: FeatureGenerationErrorKind
+    message: str = Field(min_length=1, max_length=2_000)
+    retryable: bool = False
+
+
+class FeatureGenerationUsage(ContractModel):
+    """Auditable bounded usage for retrieval and one model response."""
+
+    tool_calls: NonNegativeInt = 0
+    model_calls: NonNegativeInt = 0
+    repair_calls: NonNegativeInt = 0
+    source_lines: NonNegativeInt = 0
+    input_chars: NonNegativeInt = 0
+    output_chars: NonNegativeInt = 0
+    input_tokens: NonNegativeInt | None = None
+    output_tokens: NonNegativeInt | None = None
+    elapsed_ms: NonNegativeInt = 0
+
+    @model_validator(mode="after")
+    def validate_repairs(self) -> FeatureGenerationUsage:
+        if self.repair_calls > self.model_calls:
+            raise ValueError("repair calls cannot exceed model calls")
+        return self
+
+
+class FeatureGeneration(VersionedModel):
+    """Persisted semantic feature result for one immutable project snapshot."""
+
+    generation_id: Identifier
+    project_id: Identifier
+    index: IndexSnapshot
+    mode: FeatureGenerationMode
+    model: str | None = Field(default=None, max_length=200)
+    prompt_version: Identifier
+    rules_version: Identifier
+    source_scope: FeatureSourceScope
+    status: FeatureGenerationStatus
+    summary: str = Field(min_length=1, max_length=5_000)
+    features: list[Feature] = Field(default_factory=list, max_length=20)
+    associations: list[FeatureAssociation] = Field(default_factory=list, max_length=200)
+    evidence: list[Evidence] = Field(default_factory=list, max_length=200)
+    observed_entry_point_ids: list[Identifier] = Field(default_factory=list, max_length=20)
+    observed_module_ids: list[Identifier] = Field(default_factory=list, max_length=200)
+    observed_symbol_ids: list[Identifier] = Field(default_factory=list, max_length=200)
+    source_paths: list[RelativePath] = Field(default_factory=list, max_length=200)
+    omitted_module_ids: list[Identifier] = Field(default_factory=list, max_length=200)
+    limitations: list[str] = Field(default_factory=list, max_length=30)
+    usage: FeatureGenerationUsage
+    budget: FeatureGenerationBudget
+    cache_key: Sha256
+    created_at: datetime
+    error: FeatureGenerationError | None = None
+    truncated: bool = False
+    truncation_reason: str | None = Field(default=None, max_length=1_000)
+
+    _normalize_paths = field_validator("source_paths")(
+        lambda paths: [_validate_relative_path(path) for path in paths]
+    )
+
+    @model_validator(mode="after")
+    def validate_generation_result(self) -> FeatureGeneration:
+        if self.index.status != "ready":
+            raise ValueError("feature generations must use a ready index")
+        evidence_ids = {item.evidence_id for item in self.evidence}
+        if len(evidence_ids) != len(self.evidence):
+            raise ValueError("feature generation evidence IDs must be unique")
+        for item in self.evidence:
+            if item.index_id != self.index.index_id:
+                raise ValueError("feature generation evidence must use the result index")
+        feature_ids = {item.feature_id for item in self.features}
+        if len(feature_ids) != len(self.features):
+            raise ValueError("feature generation feature IDs must be unique")
+        for feature in self.features:
+            if feature.index_id != self.index.index_id:
+                raise ValueError("feature must use the generation index")
+            if not feature.evidence_ids:
+                raise ValueError("every persisted feature must cite evidence")
+            if not set(feature.evidence_ids).issubset(evidence_ids):
+                raise ValueError("feature references evidence absent from the generation")
+        association_ids = {item.association_id for item in self.associations}
+        if len(association_ids) != len(self.associations):
+            raise ValueError("feature generation association IDs must be unique")
+        for association in self.associations:
+            if association.index_id != self.index.index_id:
+                raise ValueError("feature association must use the generation index")
+            if association.feature_id not in feature_ids:
+                raise ValueError("feature association references an unknown feature")
+            if not set(association.evidence_ids).issubset(evidence_ids):
+                raise ValueError("feature association references evidence absent from the generation")
+        if len(set(self.observed_entry_point_ids)) != len(self.observed_entry_point_ids):
+            raise ValueError("observed entry point IDs must be unique")
+        if len(set(self.observed_module_ids)) != len(self.observed_module_ids):
+            raise ValueError("observed module IDs must be unique")
+        if len(set(self.observed_symbol_ids)) != len(self.observed_symbol_ids):
+            raise ValueError("observed symbol IDs must be unique")
+        if len(set(self.omitted_module_ids)) != len(self.omitted_module_ids):
+            raise ValueError("omitted module IDs must be unique")
+        if self.status == "failed":
+            if self.error is None:
+                raise ValueError("failed feature generations must include an error")
+            if self.features or self.associations:
+                raise ValueError("failed feature generations cannot expose successful features")
+        elif self.error is not None:
+            raise ValueError("successful feature generations cannot include an error")
+        if self.status == "insufficient_evidence" and self.features:
+            raise ValueError("insufficient evidence generations cannot include features")
+        if self.status == "succeeded" and not self.features:
+            raise ValueError("succeeded feature generations must include features")
+        if self.status == "partial" and not self.features:
+            raise ValueError("partial feature generations must include partial features")
+        if self.truncated and not self.truncation_reason:
+            raise ValueError("truncated feature generations must explain the truncation")
+        if not self.truncated and self.truncation_reason:
+            raise ValueError("non-truncated feature generations cannot have a truncation reason")
+        if self.status == "partial" and not self.truncated:
+            raise ValueError("partial feature generations must be truncated")
+        if self.usage.tool_calls > self.budget.max_tool_calls:
+            raise ValueError("feature generation tool usage exceeds its budget")
+        if self.usage.model_calls > self.budget.max_model_calls:
+            raise ValueError("feature generation model usage exceeds its budget")
+        if self.usage.source_lines > self.budget.max_total_source_lines:
+            raise ValueError("feature generation source usage exceeds its budget")
+        if self.usage.input_chars > self.budget.max_input_chars:
+            raise ValueError("feature generation input exceeds its budget")
+        if self.usage.output_chars > self.budget.max_output_chars:
+            raise ValueError("feature generation output exceeds its budget")
+        return self
+
+
+class FeatureGenerationResponse(VersionedModel):
+    generation: FeatureGeneration
+
+
 ApiErrorCode: TypeAlias = Literal[
     "not_found",
     "invalid_input",
@@ -1006,6 +1274,26 @@ class McpOverviewResponse(McpResultBase):
                     raise ValueError("overview references must match returned entry evidence")
         elif self.overview is not None or self.references:
             raise ValueError("failed overview results cannot include overview data")
+        return self
+
+
+class McpFeatureGenerationResponse(McpResultBase):
+    """Structured MCP response for an explicitly enabled feature generation."""
+
+    generation: FeatureGeneration | None = None
+    references: list[EvidenceReference] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_generation_result(self) -> McpFeatureGenerationResponse:
+        if self.ok and self.generation is None:
+            raise ValueError("successful feature generation results require a generation")
+        if self.ok and self.generation is not None:
+            evidence_ids = {item.evidence_id for item in self.generation.evidence}
+            for reference in self.references:
+                if reference.index_id != self.generation.index.index_id or reference.evidence_id not in evidence_ids:
+                    raise ValueError("feature generation references must match returned evidence")
+        if not self.ok and (self.generation is not None or self.references):
+            raise ValueError("failed feature generation results cannot include generation data")
         return self
 
 

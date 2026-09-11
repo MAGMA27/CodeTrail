@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { isProjectOverviewResponse, SCHEMA_VERSION } from "./api.ts";
+import { isFeatureGenerationResponse, isProjectOverviewResponse, SCHEMA_VERSION } from "./api.ts";
 
 const indexId = "index-overview-test";
 const moduleId = "symbol-module";
@@ -118,4 +118,108 @@ test("project overview validator rejects broken path or evidence shape", () => {
   };
   brokenEvidence.entries[0].evidence.content_hash = 42;
   assert.equal(isProjectOverviewResponse(brokenEvidence), false);
+});
+
+function featureGeneration() {
+  const evidence = {
+    evidence_id: "evidence-feature",
+    index_id: indexId,
+    path: "pkg/__main__.py",
+    start_line: 1,
+    end_line: 2,
+    excerpt: "def main():\n    return 1",
+    content_hash: "content-hash",
+    kind: "source",
+  };
+  return {
+    schema_version: SCHEMA_VERSION,
+    generation: {
+      schema_version: SCHEMA_VERSION,
+      generation_id: "feature-generation-1",
+      project_id: "project-overview-test",
+      index: overview().index,
+      mode: "fixture",
+      model: "fixture-feature-v1",
+      prompt_version: "feature-summary-v1",
+      rules_version: "python-entry-v1",
+      source_scope: "entry_reachable",
+      status: "succeeded",
+      summary: "One bounded feature.",
+      features: [
+        {
+          feature_id: "feature-1",
+          index_id: indexId,
+          name: "Main flow",
+          description: "A feature supported by one observed source range.",
+          entry_point_ids: [entryId],
+          module_ids: [moduleId],
+          symbol_ids: [functionId],
+          evidence_ids: [evidence.evidence_id],
+          limitations: ["Static evidence only."],
+        },
+      ],
+      associations: [
+        {
+          association_id: "association-1",
+          index_id: indexId,
+          feature_id: "feature-1",
+          relation: "implemented_by",
+          target_kind: "symbol",
+          target_id: functionId,
+          evidence_ids: [evidence.evidence_id],
+        },
+      ],
+      evidence: [evidence],
+      observed_entry_point_ids: [entryId],
+      observed_module_ids: [moduleId],
+      observed_symbol_ids: [functionId],
+      source_paths: [evidence.path],
+      omitted_module_ids: [],
+      limitations: ["Only queried symbols are included."],
+      usage: {
+        tool_calls: 3,
+        model_calls: 1,
+        repair_calls: 0,
+        source_lines: 2,
+        input_chars: 300,
+        output_chars: 500,
+        input_tokens: null,
+        output_tokens: null,
+        elapsed_ms: 10,
+      },
+      budget: {
+        max_tool_calls: 8,
+        max_model_calls: 1,
+        max_seconds: 20,
+        max_source_lines: 120,
+        max_total_source_lines: 800,
+        max_input_chars: 60_000,
+        max_features: 8,
+        max_output_chars: 20_000,
+      },
+      cache_key: "a".repeat(64),
+      created_at: "2026-09-11T00:00:00Z",
+      error: null,
+      truncated: false,
+      truncation_reason: null,
+    },
+  };
+}
+
+test("feature generation validator accepts snapshot-linked fixture output", () => {
+  assert.equal(isFeatureGenerationResponse(featureGeneration()), true);
+});
+
+test("feature generation validator rejects broken evidence or association references", () => {
+  const brokenEvidence = structuredClone(featureGeneration()) as unknown as {
+    generation: { features: Array<{ evidence_ids: string[] }> };
+  };
+  brokenEvidence.generation.features[0].evidence_ids = ["evidence-missing"];
+  assert.equal(isFeatureGenerationResponse(brokenEvidence), false);
+
+  const brokenAssociation = structuredClone(featureGeneration()) as unknown as {
+    generation: { associations: Array<{ feature_id: string }> };
+  };
+  brokenAssociation.generation.associations[0].feature_id = "feature-missing";
+  assert.equal(isFeatureGenerationResponse(brokenAssociation), false);
 });

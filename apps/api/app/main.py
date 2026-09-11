@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Literal
+from typing import Callable, Literal
 
 from fastapi import FastAPI, Query, Request
 from fastapi.concurrency import run_in_threadpool
@@ -20,6 +20,8 @@ from .contracts import (
     CreateProjectIndexRequest,
     CreateProjectRequest,
     EdgeKind,
+    FeatureGenerationRequest,
+    FeatureGenerationResponse,
     GitHubImportRequest,
     GitHubImportResponse,
     ImportAttemptResponse,
@@ -35,6 +37,7 @@ from .contracts import (
     SourceIndexResponse,
 )
 from .github import GitHubClient
+from .feature_generation import FeatureModelAdapter
 from .service import IndexService, RepositoryRegistry, ServiceError, WorkspaceService, is_loopback_host
 from .storage import StorageError
 
@@ -74,7 +77,9 @@ def create_app(
     allowed_import_roots: tuple[str | Path, ...] | list[str | Path] | None = None,
     github_import_enabled: bool | None = None,
     mcp_github_import_enabled: bool | None = None,
+    mcp_feature_generation_enabled: bool | None = None,
     github_client: GitHubClient | None = None,
+    feature_adapter_factory: Callable[[str], FeatureModelAdapter] | None = None,
 ) -> FastAPI:
     """Create an API with a server-owned repository allow-list."""
 
@@ -82,6 +87,7 @@ def create_app(
         RepositoryRegistry.from_environment(
             github_import_enabled=github_import_enabled,
             mcp_github_import_enabled=mcp_github_import_enabled,
+            mcp_feature_generation_enabled=mcp_feature_generation_enabled,
         )
         if repository_roots is None
         else RepositoryRegistry(
@@ -90,10 +96,16 @@ def create_app(
             allowed_import_roots=allowed_import_roots,
             github_import_enabled=github_import_enabled,
             mcp_github_import_enabled=mcp_github_import_enabled,
+            mcp_feature_generation_enabled=mcp_feature_generation_enabled,
         )
     )
     index_service = IndexService(registry)
-    workspace_service = WorkspaceService(registry, index_service, github_client=github_client)
+    workspace_service = WorkspaceService(
+        registry,
+        index_service,
+        github_client=github_client,
+        feature_adapter_factory=feature_adapter_factory,
+    )
     application = FastAPI(title="CodeTrail API", version="0.1.0")
     application.state.index_service = index_service
     application.state.registry = registry
@@ -239,6 +251,40 @@ def create_app(
             max_depth=max_depth,
             max_paths=max_paths,
             max_modules=max_modules,
+        )
+
+    @application.post(
+        "/api/projects/{project_id}/indexes/{index_id}/features",
+        response_model=FeatureGenerationResponse,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def generate_project_features(
+        project_id: str,
+        index_id: str,
+        request: FeatureGenerationRequest,
+    ) -> FeatureGenerationResponse:
+        return await run_in_threadpool(
+            workspace_service.generate_features,
+            project_id,
+            index_id,
+            request,
+        )
+
+    @application.get(
+        "/api/projects/{project_id}/indexes/{index_id}/features/{generation_id}",
+        response_model=FeatureGenerationResponse,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def get_project_features(
+        project_id: str,
+        index_id: str,
+        generation_id: str,
+    ) -> FeatureGenerationResponse:
+        return await run_in_threadpool(
+            workspace_service.get_feature_generation,
+            project_id,
+            index_id,
+            generation_id,
         )
 
     @application.get(

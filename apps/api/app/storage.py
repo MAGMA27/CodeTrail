@@ -19,6 +19,7 @@ from pydantic import ValidationError
 from .contracts import (
     CodeEdge,
     Evidence,
+    FeatureGeneration,
     GetNeighborsParams,
     GraphSnapshot,
     IndexSnapshot,
@@ -270,6 +271,29 @@ CREATE VIRTUAL TABLE IF NOT EXISTS symbol_fts USING fts5(
     source_text,
     tokenize='unicode61'
 );
+
+CREATE TABLE IF NOT EXISTS feature_generations (
+    generation_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    index_id TEXT NOT NULL,
+    cache_key TEXT NOT NULL,
+    idempotency_key TEXT,
+    mode TEXT NOT NULL CHECK (mode IN ('fixture', 'real')),
+    model TEXT,
+    prompt_version TEXT NOT NULL,
+    rules_version TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('succeeded', 'partial', 'insufficient_evidence', 'failed')),
+    created_at TEXT NOT NULL,
+    result_json TEXT NOT NULL,
+    FOREIGN KEY (index_id) REFERENCES index_snapshots(index_id) ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS feature_generations_idempotency
+    ON feature_generations(project_id, idempotency_key)
+    WHERE idempotency_key IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS feature_generations_cache
+    ON feature_generations(project_id, index_id, cache_key, status, created_at);
 """
 
 
@@ -1095,6 +1119,96 @@ class IndexStore:
             truncated=bool(index_row["truncated"]),
             truncation_reason=index_row["truncation_reason"],
         )
+
+    def save_feature_generation(
+        self,
+        generation: FeatureGeneration,
+        *,
+        cache_key: str,
+        idempotency_key: str | None = None,
+    ) -> FeatureGeneration:
+        """Persist one validated feature result without replacing another result."""
+
+        self._require_index(generation.index.index_id)
+        if generation.cache_key != cache_key:
+            raise StorageInputError("feature generation cache key does not match the persisted result")
+        serialized = json.dumps(
+            generation.model_dump(mode="json"),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        try:
+            self._connection.execute(
+                "INSERT INTO feature_generations "
+                "(generation_id, project_id, index_id, cache_key, idempotency_key, mode, model, "
+                "prompt_version, rules_version, status, created_at, result_json) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    generation.generation_id,
+                    generation.project_id,
+                    generation.index.index_id,
+                    cache_key,
+                    idempotency_key,
+                    generation.mode,
+                    generation.model,
+                    generation.prompt_version,
+                    generation.rules_version,
+                    generation.status,
+                    _datetime_text(generation.created_at),
+                    serialized,
+                ),
+            )
+        except sqlite3.IntegrityError as exc:
+            raise StorageConflictError("feature generation conflicts with existing data") from exc
+        except sqlite3.Error as exc:
+            raise StorageError(f"could not save feature generation: {exc}") from exc
+        return generation
+
+    def load_feature_generation(self, generation_id: str) -> FeatureGeneration:
+        """Read one persisted generation without re-running retrieval or a model."""
+
+        row = self._connection.execute(
+            "SELECT result_json FROM feature_generations WHERE generation_id = ?",
+            (generation_id,),
+        ).fetchone()
+        if row is None:
+            raise StorageNotFoundError(f"feature generation {generation_id!r} was not found")
+        try:
+            return FeatureGeneration.model_validate(json.loads(row["result_json"]))
+        except (json.JSONDecodeError, ValidationError) as exc:
+            raise StorageError("persisted feature generation is invalid") from exc
+
+    def find_feature_generation_by_idempotency(
+        self,
+        project_id: str,
+        idempotency_key: str,
+    ) -> tuple[str, FeatureGeneration] | None:
+        row = self._connection.execute(
+            "SELECT generation_id FROM feature_generations "
+            "WHERE project_id = ? AND idempotency_key = ?",
+            (project_id, idempotency_key),
+        ).fetchone()
+        if row is None:
+            return None
+        return row["generation_id"], self.load_feature_generation(row["generation_id"])
+
+    def find_cached_feature_generation(
+        self,
+        project_id: str,
+        index_id: str,
+        cache_key: str,
+    ) -> tuple[str, FeatureGeneration] | None:
+        row = self._connection.execute(
+            "SELECT generation_id FROM feature_generations "
+            "WHERE project_id = ? AND index_id = ? AND cache_key = ? "
+            "AND status IN ('succeeded', 'partial', 'insufficient_evidence') "
+            "ORDER BY created_at DESC, generation_id DESC LIMIT 1",
+            (project_id, index_id, cache_key),
+        ).fetchone()
+        if row is None:
+            return None
+        return row["generation_id"], self.load_feature_generation(row["generation_id"])
 
     def search_symbols(
         self,

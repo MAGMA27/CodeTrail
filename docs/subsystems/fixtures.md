@@ -2,7 +2,7 @@
 
 ## 状态
 
-已有 timeout-demo、场景和固定响应；fixture 通过不代表真实模型效果。
+已有 timeout-demo、场景和固定响应；O2 的 `fixture-feature-v1` 会从真实索引查询返回的入口、搜索、邻接和源码 evidence 确定性生成主要功能结果；fixture 通过不代表真实模型效果。
 
 ## 职责与范围
 
@@ -14,15 +14,15 @@
 
 ## 数据与生命周期
 
-样本 manifest 与响应绑定；修改样本时同步 hash、位置和相关固定数据。
+样本 manifest 与响应绑定；O2 功能生成直接读取当前不可变索引，不另存一份模型报告；修改样本时同步 hash、位置和相关固定数据。
 
 ## 错误与限制
 
-工具失败场景定义不等于运行时失败注入已实现；开发案例不充当独立评测。
+工具失败场景定义不等于运行时失败注入已实现；功能 fixture 只用于离线契约、证据和生命周期验证，不能代替真实模型语义质量或独立评测。
 
 ## 验证
 
-pnpm contracts:check 校验响应；样本变更另核对 manifest 和复现命令。
+pnpm contracts:check 校验响应；`apps/api/tests/test_features.py` 校验 fixture 经过实际 `search_code`、`get_neighbors`、`read_source` 工具上下文后生成、保存、读取和证据钻取；样本变更另核对 manifest 和复现命令。
 
 ## 相关决策
 

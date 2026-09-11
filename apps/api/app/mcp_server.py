@@ -13,10 +13,16 @@ from pydantic import Field
 
 from .contracts import (
     EvidenceReference,
+    FeatureGenerationBudget,
+    FeatureGenerationRequest,
+    FeatureGenerationResponse,
+    FeatureGenerationMode,
+    FeatureSourceScope,
     GitHubImportRequest,
     GitHubImportResponse,
     Identifier,
     McpError,
+    McpFeatureGenerationResponse,
     McpImportResponse,
     McpImportStatusResponse,
     McpIndexResponse,
@@ -69,16 +75,17 @@ def create_mcp_server(
     citation_url = _normalize_workbench_url(workbench_url or os.getenv(_WORKBENCH_URL_ENV))
     local_import_enabled = service.registry.mcp_local_import_enabled
     github_import_enabled = service.registry.mcp_github_import_enabled
+    feature_generation_enabled = service.registry.mcp_feature_generation_enabled
     server_description = (
         "Discover CodeTrail projects and query one explicitly selected immutable index. "
         "All default tools are read-only. Explicitly enabled local and GitHub import/status/retry tools are bounded."
-        if local_import_enabled or github_import_enabled
+        if local_import_enabled or github_import_enabled or feature_generation_enabled
         else "Discover CodeTrail projects and query one explicitly selected immutable index. "
         "All tools are read-only and never execute repository code."
     )
     server = MCPServer(
         name="codetrail",
-        title="CodeTrail workspace" if local_import_enabled or github_import_enabled else "CodeTrail read-only workspace",
+        title="CodeTrail workspace" if local_import_enabled or github_import_enabled or feature_generation_enabled else "CodeTrail read-only workspace",
         description=server_description,
         version="0.1.0",
         log_level="WARNING",
@@ -301,6 +308,85 @@ def create_mcp_server(
             return _failure(McpOverviewResponse, exc)
         except Exception:
             return _unexpected_failure("get_overview", McpOverviewResponse)
+
+    if feature_generation_enabled:
+
+        @server.tool(
+            name="generate_project_features",
+            title="Generate project features",
+            description=(
+                "Explicitly generate evidence-linked semantic features for one selected immutable index. "
+                "This tool is disabled by default because real mode can call a configured model and incur cost; "
+                "fixture mode is deterministic and bounded."
+            ),
+            structured_output=True,
+        )
+        def generate_project_features(
+            project_id: _ProjectId,
+            index_id: _IndexId,
+            mode: FeatureGenerationMode,
+            model: Annotated[str | None, Field(min_length=1, max_length=200, description="Server-configured model name; optional in fixture mode.")] = None,
+            source_scope: FeatureSourceScope = "entry_reachable",
+            prompt_version: Annotated[str, Field(min_length=1, max_length=200)] = "feature-summary-v1",
+            idempotency_key: Annotated[str | None, Field(min_length=1, max_length=200)] = None,
+            max_tool_calls: Annotated[int, Field(ge=1, le=12)] = 8,
+            max_model_calls: Annotated[int, Field(ge=1, le=2)] = 1,
+            max_seconds: Annotated[int, Field(ge=1, le=120)] = 20,
+            max_source_lines: Annotated[int, Field(ge=1, le=200)] = 120,
+            max_total_source_lines: Annotated[int, Field(ge=1, le=2_000)] = 800,
+            max_input_chars: Annotated[int, Field(ge=1, le=100_000)] = 60_000,
+            max_features: Annotated[int, Field(ge=1, le=20)] = 8,
+            max_output_chars: Annotated[int, Field(ge=1, le=50_000)] = 20_000,
+        ) -> McpFeatureGenerationResponse:
+            try:
+                result = service.generate_features(
+                    project_id,
+                    index_id,
+                    FeatureGenerationRequest(
+                        mode=mode,
+                        model=model,
+                        source_scope=source_scope,
+                        prompt_version=prompt_version,
+                        idempotency_key=idempotency_key,
+                        budget=FeatureGenerationBudget(
+                            max_tool_calls=max_tool_calls,
+                            max_model_calls=max_model_calls,
+                            max_seconds=max_seconds,
+                            max_source_lines=max_source_lines,
+                            max_total_source_lines=max_total_source_lines,
+                            max_input_chars=max_input_chars,
+                            max_features=max_features,
+                            max_output_chars=max_output_chars,
+                        ),
+                    ),
+                )
+                return _mcp_feature_generation_response(result, citation_url)
+            except ServiceError as exc:
+                return _failure(McpFeatureGenerationResponse, exc)
+            except Exception:
+                return _unexpected_failure("generate_project_features", McpFeatureGenerationResponse)
+
+        @server.tool(
+            name="get_feature_generation",
+            title="Read saved project features",
+            description=(
+                "Read a previously saved feature generation for the explicit project/index pair. "
+                "This is read-only and never calls a model."
+            ),
+            structured_output=True,
+        )
+        def get_feature_generation(
+            project_id: _ProjectId,
+            index_id: _IndexId,
+            generation_id: _IndexId,
+        ) -> McpFeatureGenerationResponse:
+            try:
+                result = service.get_feature_generation(project_id, index_id, generation_id)
+                return _mcp_feature_generation_response(result, citation_url)
+            except ServiceError as exc:
+                return _failure(McpFeatureGenerationResponse, exc)
+            except Exception:
+                return _unexpected_failure("get_feature_generation", McpFeatureGenerationResponse)
 
     if local_import_enabled:
 
@@ -545,6 +631,36 @@ def _mcp_overview_response(result: ProjectOverview, base_url: str) -> McpOvervie
             )
         )
     return McpOverviewResponse(ok=True, overview=result, references=references)
+
+
+def _mcp_feature_generation_response(
+    result: FeatureGenerationResponse,
+    base_url: str,
+) -> McpFeatureGenerationResponse:
+    generation = result.generation
+    references = [
+        EvidenceReference(
+            project_id=generation.project_id,
+            index_id=evidence.index_id,
+            path=evidence.path,
+            start_line=evidence.start_line,
+            end_line=evidence.end_line,
+            content_hash=evidence.content_hash,
+            evidence_id=evidence.evidence_id,
+            url=_citation_url(
+                base_url,
+                project_id=generation.project_id,
+                index_id=evidence.index_id,
+                path=evidence.path,
+                start_line=evidence.start_line,
+                end_line=evidence.end_line,
+                content_hash=evidence.content_hash,
+                evidence_id=evidence.evidence_id,
+            ),
+        )
+        for evidence in generation.evidence
+    ]
+    return McpFeatureGenerationResponse(ok=True, generation=generation, references=references)
 
 
 def _failure(model: type[McpResponse], exc: ServiceError, **fields: object) -> McpResponse:
