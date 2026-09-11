@@ -12,7 +12,7 @@ O1 只能从固定 Python 快照识别入口、模块和静态路径，不能说
 
 生成先读取 O1，再通过现有搜索、邻接和快照源码查询收集有界上下文。模型只允许引用本次同一快照返回的符号和 evidence；服务端校验跨项目、跨快照、未知符号和未知证据，非法输出转为 `invalid_model_output` 失败。上下文不完整时仍披露未检索范围和截断，不把未观察到的功能写成不存在。
 
-首版提供不依赖凭据的确定性 fixture 适配器，以及服务端配置的 OpenAI-compatible JSON HTTP 适配器；默认供应商为 DeepSeek，地址为 `https://api.deepseek.com`，默认模型为 `deepseek-flash`，适配器向 `/chat/completions` 发起 Bearer 鉴权请求。真实模式没有配置时明确返回 `model_unavailable`，不静默回退 fixture；请求要求 JSON 输出，`max_tokens` 由输出字符预算换算并限制上界，结构化 JSON 解析失败最多修复一次，修复调用计入模型预算。HTTP 生成入口默认可用，MCP 的生成工具仅在 `CODETRAIL_MCP_FEATURE_GENERATION_ENABLED=1` 时注册；结果读取与生成分离，默认只读工具不触发模型。服务端仍可覆盖地址和模型名以使用其他兼容供应商。
+首版提供不依赖凭据的确定性 fixture 适配器，以及服务端配置的 OpenAI-compatible JSON HTTP 适配器；默认供应商为 DeepSeek，持久化配置文件位于服务数据目录的 `config.json`，地址为 `https://api.deepseek.com`，默认模型为 `deepseek-flash`，适配器向 `/chat/completions` 发起 Bearer 鉴权请求。缺少配置文件或密钥时明确返回 `model_unavailable`，不静默回退 fixture；配置文件使用 Pydantic 校验，非法 JSON、未知字段和非法字段在服务启动时拒绝，修改配置需重启 API/MCP 进程生效。请求要求 JSON 输出，`max_tokens` 由输出字符预算换算并限制上界，结构化 JSON 解析失败最多修复一次，修复调用计入模型预算。HTTP 生成入口默认可用，MCP 的生成工具仅在 `CODETRAIL_MCP_FEATURE_GENERATION_ENABLED=1` 时注册；结果读取与生成分离，默认只读工具不触发模型。服务端仍可编辑配置文件中的供应商、地址和模型名以使用其他兼容供应商。
 
 生成成功、证据不足或部分结果可按缓存键读取；同一幂等键复用原结果，同一快照/模式/模型/提示词/源码范围已有成功结果时不重复调用模型。失败记录单独保留，不覆盖已有成功结果。O2 不实现 Run、SSE、Issue 分析或完整历史版本浏览，后者留给 O3。
 
@@ -24,7 +24,7 @@ O1 只能从固定 Python 快照识别入口、模块和静态路径，不能说
 
 已验证：离线 fixture 通过真实索引的 `search_code`、`get_neighbors` 和 `read_source` 结果组装上下文，覆盖成功、证据不足、非法引用、预算/截断、重复提交、缓存键隔离、模型不可用和失败保留旧成功结果。HTTP 与启用后的 MCP 生成/读取结果复用同一应用服务和契约；默认 MCP 仍只有八项只读工具。前端已验证显式选择模式/源码范围、生成状态、fixture 标识、功能映射、证据钻取、失败重试和已保存结果读取。
 
-真实模型适配器使用服务端环境变量和受限请求；已用本地 OpenAI-compatible HTTP 服务验证请求路径、鉴权、模型、JSON response format、`max_tokens` 和 usage 解析，并验证 DeepSeek 默认地址/模型配置及无凭据时返回 `model_unavailable` 且不回退 fixture。真实 DeepSeek 供应商效果、用量和人工语义核查保持 `UNVERIFIED`，不能用 fixture 代替。
+真实模型适配器使用服务数据目录中的持久化配置和受限请求；已用本地 OpenAI-compatible HTTP 服务验证请求路径、鉴权、模型、JSON response format、`max_tokens` 和 usage 解析，并验证 DeepSeek 默认地址/模型配置、持久化配置读取及无凭据时返回 `model_unavailable` 且不回退 fixture。真实 DeepSeek 供应商效果、用量和人工语义核查保持 `UNVERIFIED`，不能用 fixture 代替。
 
 ## 后果
 

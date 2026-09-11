@@ -10,7 +10,7 @@
 
 ## 接口与依赖
 
-[apps/api README](../../apps/api/README.md) 记录服务入口；[main.py](../../apps/api/app/main.py) 定义 HTTP 路由，[service.py](../../apps/api/app/service.py) 拥有项目归属、查询和生成功能，[overview.py](../../apps/api/app/overview.py) 生成固定快照概览，[feature_generation.py](../../apps/api/app/feature_generation.py) 收集有界上下文并适配 fixture/真实模型，[mcp_server.py](../../apps/api/app/mcp_server.py) 负责 MCP stdio 注册、结构化结果和错误/引用映射。
+[apps/api README](../../apps/api/README.md) 记录服务入口；[main.py](../../apps/api/app/main.py) 定义 HTTP 路由，[service.py](../../apps/api/app/service.py) 拥有项目归属、查询和生成功能，[overview.py](../../apps/api/app/overview.py) 生成固定快照概览，[feature_generation.py](../../apps/api/app/feature_generation.py) 收集有界上下文并适配 fixture/真实模型，[config.py](../../apps/api/app/config.py) 从服务数据目录读取持久化模型配置，[mcp_server.py](../../apps/api/app/mcp_server.py) 负责 MCP stdio 注册、结构化结果和错误/引用映射。
 
 ## 数据与生命周期
 
@@ -20,15 +20,15 @@ Project 请求使用 project_id，静态来源复用服务端 allow-list 的 rep
 
 `get_overview` 与 HTTP `GET /api/projects/{project_id}/indexes/{index_id}/overview` 复用 `WorkspaceService`。它不新增概览持久化表，只从指定不可变快照按 `python-entry-v1` 识别 `__main__.py` 和顶层 main guard，沿已有 `calls`/`imports` 静态边生成受深度、路径、模块和时间预算限制的入口路径；动态调用保持 unresolved。无入口返回 `not_identified`，不把目录或名为 `main` 的函数当成入口。
 
-O2 的 `POST /api/projects/{project_id}/indexes/{index_id}/features` 复用同一 `WorkspaceService`，先读取 O1，再在预算内调用 `search_code`、`get_neighbors` 和 `read_source` 收集同一快照上下文；模型只能引用实际返回的 symbol/evidence。`fixture` 使用确定性 `fixture-feature-v1`，`real` 默认使用 DeepSeek 的 OpenAI-compatible JSON HTTP 适配器（`https://api.deepseek.com` + `/chat/completions`），也可由服务端环境变量覆盖为其他兼容供应商；请求包含 JSON 输出格式和受预算约束的 `max_tokens`。结构化输出最多修复一次，预算、提示词版本、规则版本、用量、截断和未查询模块均持久化。`GET .../features/{generation_id}` 只读取结果，HTTP 默认可用；MCP 的 `generate_project_features`/`get_feature_generation` 仅在 `CODETRAIL_MCP_FEATURE_GENERATION_ENABLED=1` 时注册，默认八项只读工具不会触发模型。
+O2 的 `POST /api/projects/{project_id}/indexes/{index_id}/features` 复用同一 `WorkspaceService`，先读取 O1，再在预算内调用 `search_code`、`get_neighbors` 和 `read_source` 收集同一快照上下文；模型只能引用实际返回的 symbol/evidence。`fixture` 使用确定性 `fixture-feature-v1`，`real` 默认使用服务数据目录 `config.json` 中的 DeepSeek 配置，通过 OpenAI-compatible JSON HTTP 适配器请求 `https://api.deepseek.com` + `/chat/completions`；也可修改配置文件切换到其他兼容供应商。请求包含 JSON 输出格式和受预算约束的 `max_tokens`。结构化输出最多修复一次，预算、提示词版本、规则版本、用量、截断和未查询模块均持久化。`GET .../features/{generation_id}` 只读取结果，HTTP 默认可用；MCP 的 `generate_project_features`/`get_feature_generation` 仅在 `CODETRAIL_MCP_FEATURE_GENERATION_ENABLED=1` 时注册，默认八项只读工具不会触发模型。
 
 ## 错误与限制
 
-静态仓库使用服务端 allow-list；本地导入使用 `CODETRAIL_ALLOWED_IMPORT_ROOTS` 和服务管理目录，拒绝相对路径、越界、符号链接/junction 逃逸和管理目录重叠。GitHub 只接受官方 HTTPS 仓库 URL，先固定 commit，再受限获取官方 archive 并拒绝解包链接/遍历/特殊文件；HTTP 写入口只接受 loopback 客户端。项目作用域拒绝未知项目或不属于项目的 index_id，参数、预算、上游限流和内部失败有错误映射，不泄露宿主路径。旧 `/api/indexes/*` 仍保留为无项目上下文的兼容入口，MCP 不调用该兼容入口。MCP 写工具默认未注册，GitHub 网络下载不由本地 MCP 开关隐式授权。功能生成区分 `model_unavailable`、模型失败、非法模型输出、证据不足、预算超限和部分截断；real 未配置密钥不回退 fixture，失败记录不覆盖既有成功缓存，非法引用不能保存。
+静态仓库使用服务端 allow-list；本地导入使用 `CODETRAIL_ALLOWED_IMPORT_ROOTS` 和服务管理目录，拒绝相对路径、越界、符号链接/junction 逃逸和管理目录重叠。GitHub 只接受官方 HTTPS 仓库 URL，先固定 commit，再受限获取官方 archive 并拒绝解包链接/遍历/特殊文件；HTTP 写入口只接受 loopback 客户端。项目作用域拒绝未知项目或不属于项目的 index_id，参数、预算、上游限流和内部失败有错误映射，不泄露宿主路径。旧 `/api/indexes/*` 仍保留为无项目上下文的兼容入口，MCP 不调用该兼容入口。MCP 写工具默认未注册，GitHub 网络下载不由本地 MCP 开关隐式授权。持久化模型配置只读服务数据目录，缺失密钥、无效 JSON、未知字段和非法地址均不会泄露配置内容；功能生成区分 `model_unavailable`、模型失败、非法模型输出、证据不足、预算超限和部分截断；real 未配置密钥不回退 fixture，失败记录不覆盖既有成功缓存，非法引用不能保存。
 
 ## 验证
 
-apps/api/tests/test_api.py、apps/api/tests/test_github.py、apps/api/tests/test_overview.py、apps/api/tests/test_features.py、apps/api/tests/test_mcp.py；已验证本地导入、GitHub URL/固定 commit/官方重定向/限流/超时/恶意 archive/解包预算、同 commit 幂等、分支移动、清理失败重试、路径边界、重启中断和管理目录隔离，以及 O1 的入口规则、无入口/动态调用/预算/旧快照稳定性、O2 的真实工具上下文/fixture、模型协议、证据校验、预算、缓存/幂等、失败保留和 MCP 可选开关，并由工作台浏览器流程复核概览、fixture 功能证据钻取和 real 未配置失败。真实供应商语义质量仍未验证。
+apps/api/tests/test_api.py、apps/api/tests/test_github.py、apps/api/tests/test_overview.py、apps/api/tests/test_features.py、apps/api/tests/test_mcp.py；已验证本地导入、GitHub URL/固定 commit/官方重定向/限流/超时/恶意 archive/解包预算、同 commit 幂等、分支移动、清理失败重试、路径边界、重启中断和管理目录隔离，以及 O1 的入口规则、无入口/动态调用/预算/旧快照稳定性、O2 的真实工具上下文/fixture、模型协议、持久化配置读取/校验、证据校验、预算、缓存/幂等、失败保留和 MCP 可选开关，并由工作台浏览器流程复核概览、fixture 功能证据钻取和 real 未配置失败。真实供应商语义质量仍未验证。
 
 ## 相关决策
 

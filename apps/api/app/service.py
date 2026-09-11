@@ -48,6 +48,7 @@ from .contracts import (
     ToolRequest,
     ToolResult,
 )
+from .config import ModelProviderConfig, load_model_config
 from .indexing import SnapshotBoundaryError, build_source_snapshot, extract_definitions
 from .github import GitHubArchive, GitHubClient, GitHubError, GitHubRepository, GitHubResolution, parse_github_repository_url
 from .relations import extract_relations
@@ -135,6 +136,7 @@ class RepositoryRegistry:
             )
         configured_data_root = data_root or os.getenv("CODETRAIL_DATA_DIR") or (Path.cwd() / ".codetrail")
         self._data_root = _prepare_data_root(configured_data_root)
+        self._model_config = load_model_config(self._data_root)
         self._management_store = ManagementStore(self._data_root / "registry.sqlite3")
         self._allowed_import_roots = self._prepare_allowed_import_roots(
             allowed_import_roots
@@ -211,6 +213,10 @@ class RepositoryRegistry:
     @property
     def data_root(self) -> Path:
         return self._data_root
+
+    @property
+    def model_config(self) -> ModelProviderConfig:
+        return self._model_config
 
     @property
     def management_store(self) -> ManagementStore:
@@ -783,7 +789,7 @@ class WorkspaceService:
             with self.registry.store_for_repository(project.repository_id) as store:
                 relation = store.load_index(index_id)
                 index = relation.snapshot.index
-                model = resolve_model(request.mode, request.model)
+                model = resolve_model(request.mode, request.model, model_config=self.registry.model_config)
                 cache_key = build_cache_key(
                     index.index_id,
                     index.snapshot_hash,
@@ -813,6 +819,7 @@ class WorkspaceService:
                 generation = FeatureGenerationEngine(
                     self,
                     adapter_factory=self.feature_adapter_factory,
+                    model_config=self.registry.model_config,
                 ).generate(
                     project_id,
                     index_id,

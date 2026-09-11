@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import time
 import urllib.error
 import urllib.request
@@ -17,6 +16,11 @@ from uuid import uuid4
 
 from pydantic import ValidationError
 
+from .config import (
+    DEFAULT_MODEL_BASE_URL,
+    DEFAULT_MODEL_NAME,
+    ModelProviderConfig,
+)
 from .contracts import (
     Evidence,
     Feature,
@@ -39,8 +43,8 @@ from .overview import RULES_VERSION
 
 PROMPT_VERSION = "feature-summary-v1"
 FIXTURE_MODEL = "fixture-feature-v1"
-DEFAULT_REAL_MODEL = "deepseek-flash"
-DEFAULT_REAL_BASE_URL = "https://api.deepseek.com"
+DEFAULT_REAL_MODEL = DEFAULT_MODEL_NAME
+DEFAULT_REAL_BASE_URL = DEFAULT_MODEL_BASE_URL
 MIN_MODEL_OUTPUT_TOKENS = 256
 MAX_MODEL_OUTPUT_TOKENS = 8_192
 CHARS_PER_MODEL_TOKEN = 4
@@ -262,10 +266,8 @@ class OpenAICompatibleFeatureAdapter:
         self.base_url = base_url.rstrip("/")
 
     @classmethod
-    def from_environment(cls) -> OpenAICompatibleFeatureAdapter:
-        api_key = os.getenv("CODETRAIL_MODEL_API_KEY", "")
-        base_url = os.getenv("CODETRAIL_MODEL_BASE_URL", DEFAULT_REAL_BASE_URL).strip() or DEFAULT_REAL_BASE_URL
-        return cls(api_key=api_key, base_url=base_url)
+    def from_config(cls, config: ModelProviderConfig) -> OpenAICompatibleFeatureAdapter:
+        return cls(api_key=config.api_key, base_url=config.base_url)
 
     def generate(self, prompt: str, *, model: str, timeout_seconds: float, context: FeatureContext) -> ModelCall:
         return self._request(
@@ -374,9 +376,13 @@ class FeatureGenerationEngine:
         query_port: FeatureQueryPort,
         *,
         adapter_factory: Callable[[str], FeatureModelAdapter] | None = None,
+        model_config: ModelProviderConfig | None = None,
     ) -> None:
         self.query_port = query_port
-        self.adapter_factory = adapter_factory or _default_adapter
+        if adapter_factory is not None:
+            self.adapter_factory = adapter_factory
+        else:
+            self.adapter_factory = lambda mode: default_feature_adapter(mode, model_config=model_config)
 
     def generate(
         self,
@@ -799,18 +805,28 @@ class _CollectorState:
         return True
 
 
-def _default_adapter(mode: str) -> FeatureModelAdapter:
+def default_feature_adapter(
+    mode: str,
+    *,
+    model_config: ModelProviderConfig | None = None,
+) -> FeatureModelAdapter:
     if mode == "fixture":
         return FixtureFeatureAdapter()
     if mode == "real":
-        return OpenAICompatibleFeatureAdapter.from_environment()
+        config = model_config if model_config is not None else ModelProviderConfig()
+        return OpenAICompatibleFeatureAdapter.from_config(config)
     raise FeatureGenerationErrorBase("internal_error", "未知的功能生成模式")
 
 
-def resolve_model(mode: str, requested_model: str | None) -> str:
+def resolve_model(
+    mode: str,
+    requested_model: str | None,
+    *,
+    model_config: ModelProviderConfig | None = None,
+) -> str:
     if mode == "fixture":
         return requested_model or FIXTURE_MODEL
-    return requested_model or os.getenv("CODETRAIL_MODEL_NAME", "").strip() or DEFAULT_REAL_MODEL
+    return requested_model or (model_config.model if model_config is not None else DEFAULT_REAL_MODEL)
 
 
 def _model_output_tokens(context: FeatureContext) -> int:

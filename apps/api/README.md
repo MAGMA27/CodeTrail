@@ -12,6 +12,7 @@
 - [github.py](app/github.py)：GitHub 官方 API 固定 commit、受限 archive 获取、重定向校验和安全解包。
 - [indexing.py](app/indexing.py) 与 [relations.py](app/relations.py)：Python 快照、符号和保守静态关系提取。
 - [overview.py](app/overview.py)：按 `python-entry-v1` 从固定快照生成入口、模块和有界静态路径概览。
+- [config.py](app/config.py)：从服务数据目录读取并校验持久化模型供应商配置。
 - [feature_generation.py](app/feature_generation.py)：收集有界快照上下文，调用确定性 fixture 或服务端配置的 DeepSeek/OpenAI-compatible 模型，并校验带证据的功能结果。
 - [tests](tests/)：API、契约、索引、关系和存储测试。
 
@@ -21,7 +22,7 @@
 
 ## 数据与生命周期
 
-静态仓库由 `CODETRAIL_REPOSITORIES` JSON 对象提供；本地导入允许根目录由 `CODETRAIL_ALLOWED_IMPORT_ROOTS` JSON 数组提供，动态注册和 `ImportAttempt` 写入 `CODETRAIL_DATA_DIR`（默认 API 工作目录 `.codetrail`）。GitHub 导入由 `CODETRAIL_GITHUB_IMPORT_ENABLED=1` 开启，服务端可选读取 `CODETRAIL_GITHUB_TOKEN`；远端身份、requested ref、resolved commit、content hash 和 cleanup 状态写入管理库，archive 临时目录位于管理目录并在完成后清理。新项目的索引库位于管理目录，不在来源目录写入 `.codetrail`。Project 持有稳定 ID、名称、来源 repository_id、创建时间和索引关联；索引源码及证据仍绑定不可变 `index_id`。导入状态为 `queued/acquiring/indexing/ready/failed/interrupted`，失败和重启中断不替换原有可用索引。
+静态仓库由 `CODETRAIL_REPOSITORIES` JSON 对象提供；本地导入允许根目录由 `CODETRAIL_ALLOWED_IMPORT_ROOTS` JSON 数组提供，动态注册和 `ImportAttempt` 写入 `CODETRAIL_DATA_DIR`（默认 API 工作目录 `.codetrail`）。模型供应商配置从同一服务数据目录的持久化 `config.json` 加载，缺少该文件时使用无密钥的 DeepSeek 默认值。GitHub 导入由 `CODETRAIL_GITHUB_IMPORT_ENABLED=1` 开启，服务端可选读取 `CODETRAIL_GITHUB_TOKEN`；远端身份、requested ref、resolved commit、content hash 和 cleanup 状态写入管理库，archive 临时目录位于管理目录并在完成后清理。新项目的索引库位于管理目录，不在来源目录写入 `.codetrail`。Project 持有稳定 ID、名称、来源 repository_id、创建时间和索引关联；索引源码及证据仍绑定不可变 `index_id`。导入状态为 `queued/acquiring/indexing/ready/failed/interrupted`，失败和重启中断不替换原有可用索引。
 
 ## 使用与配置
 
@@ -62,17 +63,27 @@ API 健康检查为 `GET /api/health`。`CODETRAIL_WEB_ORIGINS` 只控制浏览�
 
 设置 `CODETRAIL_MCP_LOCAL_IMPORT_ENABLED=1` 后，额外注册 `import_local_path`、`get_import_status` 和 `retry_local_import`；设置 `CODETRAIL_MCP_GITHUB_IMPORT_ENABLED=1` 后，额外注册 `import_github_repository`、`get_import_status` 和 `retry_github_import`；设置 `CODETRAIL_MCP_FEATURE_GENERATION_ENABLED=1` 后，额外注册 `generate_project_features` 和只读的 `get_feature_generation`。三个开关独立，GitHub MCP 开关还要求 `CODETRAIL_GITHUB_IMPORT_ENABLED=1`；未设置时 MCP 保持八项只读工具，默认只读工具不会触发模型。写工具只能使用服务端边界，不能通过参数扩大本地路径或网络权限。
 
-功能生成的 `fixture` 模式使用 `fixture-feature-v1`，不需要密钥；`real` 模式默认适配 DeepSeek，从服务端读取 `CODETRAIL_MODEL_API_KEY`，可选覆盖 `CODETRAIL_MODEL_BASE_URL` 和 `CODETRAIL_MODEL_NAME`。未配置密钥时返回 `model_unavailable`，不会静默使用 fixture。请求预算由契约限制工具调用、模型调用、时间、源码行、输入/输出大小、特征数和修复次数。
+功能生成的 `fixture` 模式使用 `fixture-feature-v1`，不需要密钥；`real` 模式默认适配 DeepSeek，从服务数据目录的 `config.json` 读取服务端配置。未配置密钥时返回 `model_unavailable`，不会静默使用 fixture。请求预算由契约限制工具调用、模型调用、时间、源码行、输入/输出大小、特征数和修复次数。
 
-DeepSeek 的填写格式（PowerShell）如下，密钥只配置在运行 API 的服务端，不要提交到 Git：
+DeepSeek 配置文件默认路径为 `apps/api/.codetrail/config.json`；若配置了 `CODETRAIL_DATA_DIR`，则放在该目录下。先复制无密钥模板：
 
 ```powershell
-$env:CODETRAIL_MODEL_API_KEY = 'sk-你的 DeepSeek API Key'
-$env:CODETRAIL_MODEL_BASE_URL = 'https://api.deepseek.com'
-$env:CODETRAIL_MODEL_NAME = 'deepseek-flash'
+New-Item -ItemType Directory -Force apps/api/.codetrail
+Copy-Item apps/api/config.example.json apps/api/.codetrail/config.json
 ```
 
-其中 `CODETRAIL_MODEL_NAME` 省略时默认使用 `deepseek-flash`；`CODETRAIL_MODEL_BASE_URL` 使用 DeepSeek 根地址，不要写成 `/v1`，适配器会请求 `/chat/completions`。如需切换其他 OpenAI-compatible 供应商，可同时覆盖地址和模型名；请求仍固定使用 JSON 输出格式、受限的 `max_tokens` 和一次修复上限。
+然后编辑 `config.json`：
+
+```json
+{
+  "provider": "deepseek",
+  "api_key": "sk-你的 DeepSeek API Key",
+  "base_url": "https://api.deepseek.com",
+  "model": "deepseek-flash"
+}
+```
+
+`config.json` 已位于被 Git 忽略的服务数据目录，密钥只保存在运行 API/MCP 的服务端；不要把真实密钥写入 `config.example.json` 或提交到 Git。修改配置后重启 API/MCP 进程生效。`base_url` 使用 DeepSeek 根地址，不要写成 `/v1`，适配器会请求 `/chat/completions`。如需切换其他 OpenAI-compatible 供应商，可同时修改 `provider`、地址和模型名；请求仍固定使用 JSON 输出格式、受限的 `max_tokens` 和一次修复上限。
 
 配置工作台引用地址（默认 `http://localhost:3000`）：
 

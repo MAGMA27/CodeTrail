@@ -5,13 +5,14 @@ from __future__ import annotations
 import asyncio
 import http.server
 import json
-import threading
 import shutil
+import threading
 from pathlib import Path
 from urllib.parse import urlsplit
 
 import pytest
 
+from app.config import MODEL_CONFIG_FILENAME
 from app.feature_generation import (
     DEFAULT_REAL_BASE_URL,
     DEFAULT_REAL_MODEL,
@@ -172,9 +173,13 @@ def test_real_mode_without_server_credentials_is_explicit_and_never_falls_back(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("CODETRAIL_MODEL_API_KEY", raising=False)
-    monkeypatch.delenv("CODETRAIL_MODEL_BASE_URL", raising=False)
-    application = create_app({"timeout-demo": _copy_fixture(tmp_path)})
+    monkeypatch.setenv("CODETRAIL_MODEL_API_KEY", "env-value-must-be-ignored")
+    monkeypatch.setenv("CODETRAIL_MODEL_BASE_URL", "https://env-value-must-be-ignored.example")
+    monkeypatch.setenv("CODETRAIL_MODEL_NAME", "env-model-must-be-ignored")
+    application = create_app(
+        {"timeout-demo": _copy_fixture(tmp_path)},
+        data_root=tmp_path / "service-data",
+    )
     project_id, index_id = _create_index(application)
     status, generated = request(
         application,
@@ -188,19 +193,52 @@ def test_real_mode_without_server_credentials_is_explicit_and_never_falls_back(
     assert generation["error"]["kind"] == "model_unavailable"
     assert generation["features"] == []
     assert generation["mode"] == "real"
+    assert generation["model"] == "deepseek-flash"
 
 
-def test_deepseek_is_the_default_real_model_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("CODETRAIL_MODEL_NAME", raising=False)
-    monkeypatch.delenv("CODETRAIL_MODEL_BASE_URL", raising=False)
-    monkeypatch.setenv("CODETRAIL_MODEL_API_KEY", "sk-local-test")
+def test_persistent_deepseek_config_is_loaded_from_service_data_root(tmp_path: Path) -> None:
+    data_root = tmp_path / "service-data"
+    data_root.mkdir()
+    (data_root / MODEL_CONFIG_FILENAME).write_text(
+        json.dumps(
+            {
+                "provider": "deepseek",
+                "api_key": "sk-persisted-test",
+                "base_url": "https://api.deepseek.com",
+                "model": "deepseek-flash",
+            }
+        ),
+        encoding="utf-8",
+    )
+    application = create_app(
+        {"timeout-demo": _copy_fixture(tmp_path)},
+        data_root=data_root,
+    )
 
-    adapter = OpenAICompatibleFeatureAdapter.from_environment()
+    config = application.state.registry.model_config
+    adapter = OpenAICompatibleFeatureAdapter.from_config(config)
 
-    assert DEFAULT_REAL_BASE_URL == "https://api.deepseek.com"
-    assert DEFAULT_REAL_MODEL == "deepseek-flash"
+    assert config.provider == "deepseek"
+    assert config.api_key == "sk-persisted-test"
+    assert config.base_url == DEFAULT_REAL_BASE_URL
+    assert config.model == DEFAULT_REAL_MODEL
     assert adapter.base_url == DEFAULT_REAL_BASE_URL
-    assert resolve_model("real", None) == DEFAULT_REAL_MODEL
+    assert resolve_model("real", None, model_config=config) == DEFAULT_REAL_MODEL
+
+
+def test_invalid_persistent_model_config_is_rejected_at_startup(tmp_path: Path) -> None:
+    data_root = tmp_path / "service-data"
+    data_root.mkdir()
+    (data_root / MODEL_CONFIG_FILENAME).write_text(
+        json.dumps({"api_key": "test-key", "unexpected": True}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="persistent model config"):
+        create_app(
+            {"timeout-demo": _copy_fixture(tmp_path)},
+            data_root=data_root,
+        )
 
 
 class _InvalidAdapter:
@@ -346,13 +384,22 @@ def test_configured_real_adapter_uses_openai_compatible_json_protocol(tmp_path: 
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
-        adapter = OpenAICompatibleFeatureAdapter(
-            api_key="local-test-key",
-            base_url=f"http://127.0.0.1:{server.server_port}/v1",
+        data_root = tmp_path / "protocol-data"
+        data_root.mkdir()
+        (data_root / MODEL_CONFIG_FILENAME).write_text(
+            json.dumps(
+                {
+                    "provider": "deepseek",
+                    "api_key": "local-test-key",
+                    "base_url": f"http://127.0.0.1:{server.server_port}/v1",
+                    "model": "local-test-model",
+                }
+            ),
+            encoding="utf-8",
         )
         application = create_app(
             {"timeout-demo": _copy_fixture(tmp_path)},
-            feature_adapter_factory=lambda _mode: adapter,
+            data_root=data_root,
         )
         project_id, index_id = _create_index(application)
         status, generated = request(
@@ -362,7 +409,6 @@ def test_configured_real_adapter_uses_openai_compatible_json_protocol(tmp_path: 
             {
                 "schema_version": "0.1.0",
                 "mode": "real",
-                "model": "local-test-model",
                 "idempotency_key": "local-real-one",
             },
         )

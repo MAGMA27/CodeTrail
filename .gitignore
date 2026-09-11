@@ -18,6 +18,7 @@ __pycache__/
 .env.*
 !.env.example
 .codetrail/
+.codetrail*/
 
 # Project planning docs are maintained outside Git
 /memory-bank/
