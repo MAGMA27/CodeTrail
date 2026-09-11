@@ -1,5 +1,15 @@
 # CodeTrail 开发指南
 
+## 开发流程与 skill 调用
+
+项目专用 skill 位于 `.codex/skills/`。任务开始时按下列规则读取对应 SKILL.md；即使客户端未自动发现该目录，也通过本文件的相对路径加载。共同规范见 [开发与文档规范](docs/development.md)，当前子系统见 [子系统索引](docs/subsystems/README.md)。
+
+- 新增能力或改变接口、依赖、状态、持久化及行为前，读取 [.codex/skills/codetrail-design-change/SKILL.md](.codex/skills/codetrail-design-change/SKILL.md)。明确范围与验收后继续已授权实施。
+- 实现影响当前事实后，读取 [.codex/skills/codetrail-sync-subsystem/SKILL.md](.codex/skills/codetrail-sync-subsystem/SKILL.md)。同步相关文档、生成物和决策；无事实变化说明依据即可。
+- 行为变更宣告完成前或用户要求审查时，读取 [.codex/skills/codetrail-review-subsystem/SKILL.md](.codex/skills/codetrail-review-subsystem/SKILL.md)。只读审查不自动修改实现。
+- 审查发现设计、实现或文档问题时回到对应阶段，只复查受影响部分。纯机械修改执行相关轻量检查；只读问答不启动修改流程。
+- 文档与 skill 改动执行 `pnpm docs:check`；契约改动执行 `pnpm contracts:check`；`pnpm doc-sync` 聚合两者。修改本地 memory-bank 后额外执行 `pnpm docs:check:local`。检查命令与能力边界见共同规范。
+
 CodeTrail 是 Issue 驱动的代码影响分析工作台，以模块/符号关系图展示候选位置、关联路径和排查证据。目标是快速完成可演示、可评测的 Agent 求职项目。
 
 任务开始时先阅读 memory-bank/README.md 文档索引和 progress.md，再按任务阅读 project-design-doc.md、architecture.md、implementation-plan.md 及相关调研。用户最新明确需求优先；重要决策变化须同步相关文档，阶段完成后更新 progress.md，不得将计划描述成已实现。新增或重命名文档时同步索引。

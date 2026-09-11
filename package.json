@@ -6,6 +6,11 @@
     "node": ">=20.9.0"
   },
   "scripts": {
+    "docs:check": "node .codex/scripts/check-docs.mjs",
+    "docs:check:local": "node .codex/scripts/check-docs.mjs --local",
+    "docs:test": "node --test .codex/scripts/check-docs.test.mjs",
+    "contracts:check": "uv run --directory apps/api pytest tests/test_contracts.py -q",
+    "doc-sync": "pnpm docs:check && pnpm contracts:check",
     "web:dev": "pnpm --dir apps/web dev",
     "web:build": "pnpm --dir apps/web build",
     "web:start": "pnpm --dir apps/web start",
