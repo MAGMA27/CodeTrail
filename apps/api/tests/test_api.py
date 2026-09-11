@@ -716,3 +716,200 @@ def test_index_capacity_is_bounded(tmp_path: Path) -> None:
         assert error.value.status_code == 429
     finally:
         service._index_slots.release()
+
+
+def test_http_sessions_are_isolated_snapshot_fixed_idempotent_and_reopenable(tmp_path: Path) -> None:
+    repository_one = copy_fixture_named(tmp_path, "repo-one")
+    repository_two = copy_fixture_named(tmp_path, "repo-two")
+    data_root = tmp_path / "service-data"
+    roots = {"repo-one": repository_one, "repo-two": repository_two}
+    application = create_app(roots, data_root=data_root)
+
+    projects: dict[str, dict] = {}
+    indexes: dict[str, dict] = {}
+    for repository_id in roots:
+        status, project = request(
+            application,
+            "POST",
+            "/api/projects",
+            {"name": repository_id, "repository_id": repository_id},
+        )
+        assert status == 200
+        projects[repository_id] = project
+        status, index = request(
+            application,
+            "POST",
+            f"/api/projects/{project['project_id']}/indexes",
+            {"revision": "session-v1", "dirty": False},
+        )
+        assert status == 200
+        indexes[repository_id] = index
+
+    project_one_id = projects["repo-one"]["project_id"]
+    project_two_id = projects["repo-two"]["project_id"]
+    first_index_id = indexes["repo-one"]["index"]["index_id"]
+    status, first = request(
+        application,
+        "POST",
+        f"/api/projects/{project_one_id}/sessions",
+        {"topic": "first session", "idempotency_key": "session-one"},
+    )
+    assert status == 200
+    first_session = first["session"]
+    assert first_session["project_id"] == project_one_id
+    assert first_session["index"]["index_id"] == first_index_id
+
+    status, repeated = request(
+        application,
+        "POST",
+        f"/api/projects/{project_one_id}/sessions",
+        {"topic": "first session", "idempotency_key": "session-one"},
+    )
+    assert status == 200
+    assert repeated == first
+
+    status, conflict = request(
+        application,
+        "POST",
+        f"/api/projects/{project_one_id}/sessions",
+        {"topic": "changed topic", "idempotency_key": "session-one"},
+    )
+    assert status == 409
+    assert conflict["code"] == "conflict"
+
+    status, second = request(
+        application,
+        "POST",
+        f"/api/projects/{project_one_id}/sessions",
+        {"topic": "second session", "idempotency_key": "session-two"},
+    )
+    assert status == 200
+    second_session = second["session"]
+    assert second_session["session_id"] != first_session["session_id"]
+
+    first_message_path = f"/api/projects/{project_one_id}/sessions/{first_session['session_id']}/messages"
+    status, message = request(
+        application,
+        "POST",
+        first_message_path,
+        {"source": "human", "content": "keep this message", "idempotency_key": "message-one"},
+    )
+    assert status == 200
+    assert message["message"]["sequence"] == 1
+    status, repeated_message = request(
+        application,
+        "POST",
+        first_message_path,
+        {"source": "human", "content": "keep this message", "idempotency_key": "message-one"},
+    )
+    assert status == 200
+    assert repeated_message == message
+    status, message_conflict = request(
+        application,
+        "POST",
+        first_message_path,
+        {"source": "human", "content": "different", "idempotency_key": "message-one"},
+    )
+    assert status == 409
+    assert message_conflict["code"] == "conflict"
+
+    def append_parallel(number: int) -> tuple[int, dict]:
+        return request(
+            application,
+            "POST",
+            first_message_path,
+            {
+                "source": "agent",
+                "content": f"parallel message {number}",
+                "idempotency_key": f"parallel-{number}",
+            },
+        )
+
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        parallel_results = list(executor.map(append_parallel, range(6)))
+    assert all(status == 200 for status, _ in parallel_results)
+    assert sorted(result["message"]["sequence"] for _, result in parallel_results) == list(range(2, 8))
+
+    status, first_page = request(
+        application,
+        "GET",
+        f"/api/projects/{project_one_id}/sessions?limit=1",
+    )
+    assert status == 200
+    assert first_page["has_more"] is True
+    status, second_page = request(
+        application,
+        "GET",
+        f"/api/projects/{project_one_id}/sessions?limit=1&cursor={first_page['next_cursor']}",
+    )
+    assert status == 200
+    assert {item["session_id"] for item in first_page["sessions"] + second_page["sessions"]} == {
+        first_session["session_id"],
+        second_session["session_id"],
+    }
+
+    status, message_page = request(application, "GET", f"{first_message_path}?limit=2")
+    assert status == 200
+    assert [item["sequence"] for item in message_page["messages"]] == [1, 2]
+    assert message_page["has_more"] is True
+    status, next_message_page = request(
+        application,
+        "GET",
+        f"{first_message_path}?limit=2&cursor={message_page['next_cursor']}",
+    )
+    assert status == 200
+    assert [item["sequence"] for item in next_message_page["messages"]] == [3, 4]
+
+    status, isolated = request(
+        application,
+        "GET",
+        f"/api/projects/{project_one_id}/sessions/{second_session['session_id']}/messages",
+    )
+    assert status == 200
+    assert isolated["messages"] == []
+    status, cross_project = request(
+        application,
+        "GET",
+        f"/api/projects/{project_two_id}/sessions/{first_session['session_id']}",
+    )
+    assert status == 404
+    status, cross_project_write = request(
+        application,
+        "POST",
+        f"/api/projects/{project_two_id}/sessions/{first_session['session_id']}/messages",
+        {"source": "agent", "content": "cross project"},
+    )
+    assert status == 404
+
+    config_path = repository_one / "timeout_demo" / "config.py"
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8").replace("DEFAULT_TIMEOUT = 30", "DEFAULT_TIMEOUT = 31"),
+        encoding="utf-8",
+    )
+    status, new_index = request(
+        application,
+        "POST",
+        f"/api/projects/{project_one_id}/indexes",
+        {"revision": "session-v2", "dirty": False},
+    )
+    assert status == 200
+    assert new_index["index"]["index_id"] != first_index_id
+    status, fixed_session = request(
+        application,
+        "GET",
+        f"/api/projects/{project_one_id}/sessions/{first_session['session_id']}",
+    )
+    assert status == 200
+    assert fixed_session["session"]["index"]["index_id"] == first_index_id
+
+    reopened = create_app(roots, data_root=data_root)
+    status, reopened_session = request(
+        reopened,
+        "GET",
+        f"/api/projects/{project_one_id}/sessions/{first_session['session_id']}",
+    )
+    assert status == 200
+    assert reopened_session == fixed_session
+    status, reopened_messages = request(reopened, "GET", first_message_path)
+    assert status == 200
+    assert [item["sequence"] for item in reopened_messages["messages"]] == list(range(1, 8))

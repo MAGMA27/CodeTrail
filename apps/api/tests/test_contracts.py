@@ -89,6 +89,26 @@ def test_schema_artifact_is_reproducible() -> None:
     assert SCHEMA_PATH.read_text(encoding="utf-8") == expected
 
 
+def test_schema_artifact_includes_session_contracts() -> None:
+    models = build_schema_document()["models"]
+
+    assert {
+        "AppendSessionMessageRequest",
+        "CreateSessionRequest",
+        "Session",
+        "SessionMessage",
+        "SessionMessageResponse",
+        "SessionMessagesResponse",
+        "SessionListResponse",
+        "SessionReference",
+        "SessionResponse",
+        "McpSessionListResponse",
+        "McpSessionMessageResponse",
+        "McpSessionMessagesResponse",
+        "McpSessionResponse",
+    } <= models.keys()
+
+
 def test_cross_snapshot_reference_is_rejected() -> None:
     payload = raw_bundle("success-timeout-missing")
     payload["report"]["index_id"] = "index-other"

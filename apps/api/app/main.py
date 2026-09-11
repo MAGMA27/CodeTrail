@@ -19,6 +19,8 @@ from .contracts import (
     CreateIndexRequest,
     CreateProjectIndexRequest,
     CreateProjectRequest,
+    AppendSessionMessageRequest,
+    CreateSessionRequest,
     EdgeKind,
     FeatureGraphResponse,
     FeatureGenerationRequest,
@@ -36,6 +38,10 @@ from .contracts import (
     ProjectListResponse,
     ProjectOverview,
     SearchIndexResponse,
+    SessionListResponse,
+    SessionMessageResponse,
+    SessionMessagesResponse,
+    SessionResponse,
     SourceIndexResponse,
 )
 from .github import GitHubClient
@@ -80,6 +86,7 @@ def create_app(
     github_import_enabled: bool | None = None,
     mcp_github_import_enabled: bool | None = None,
     mcp_feature_generation_enabled: bool | None = None,
+    mcp_session_write_enabled: bool | None = None,
     github_client: GitHubClient | None = None,
     feature_adapter_factory: Callable[[str], FeatureModelAdapter] | None = None,
 ) -> FastAPI:
@@ -90,6 +97,7 @@ def create_app(
             github_import_enabled=github_import_enabled,
             mcp_github_import_enabled=mcp_github_import_enabled,
             mcp_feature_generation_enabled=mcp_feature_generation_enabled,
+            mcp_session_write_enabled=mcp_session_write_enabled,
         )
         if repository_roots is None
         else RepositoryRegistry(
@@ -99,6 +107,7 @@ def create_app(
             github_import_enabled=github_import_enabled,
             mcp_github_import_enabled=mcp_github_import_enabled,
             mcp_feature_generation_enabled=mcp_feature_generation_enabled,
+            mcp_session_write_enabled=mcp_session_write_enabled,
         )
     )
     index_service = IndexService(registry)
@@ -206,6 +215,76 @@ def create_app(
     )
     async def list_projects() -> ProjectListResponse:
         return await run_in_threadpool(workspace_service.list_projects)
+
+    @application.post(
+        "/api/projects/{project_id}/sessions",
+        response_model=SessionResponse,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def create_session(project_id: str, request: CreateSessionRequest) -> SessionResponse:
+        return await run_in_threadpool(workspace_service.create_session, project_id, request)
+
+    @application.get(
+        "/api/projects/{project_id}/sessions",
+        response_model=SessionListResponse,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def list_sessions(
+        project_id: str,
+        limit: int = Query(default=40, ge=1, le=40),
+        cursor: str | None = Query(default=None, max_length=500),
+    ) -> SessionListResponse:
+        return await run_in_threadpool(
+            workspace_service.list_sessions,
+            project_id,
+            limit=limit,
+            cursor=cursor,
+        )
+
+    @application.get(
+        "/api/projects/{project_id}/sessions/{session_id}",
+        response_model=SessionResponse,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def get_session(project_id: str, session_id: str) -> SessionResponse:
+        return await run_in_threadpool(workspace_service.get_session, project_id, session_id)
+
+    @application.get(
+        "/api/projects/{project_id}/sessions/{session_id}/messages",
+        response_model=SessionMessagesResponse,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def list_session_messages(
+        project_id: str,
+        session_id: str,
+        limit: int = Query(default=100, ge=1, le=100),
+        cursor: str | None = Query(default=None, max_length=500),
+    ) -> SessionMessagesResponse:
+        return await run_in_threadpool(
+            workspace_service.list_session_messages,
+            project_id,
+            session_id,
+            limit=limit,
+            cursor=cursor,
+        )
+
+    @application.post(
+        "/api/projects/{project_id}/sessions/{session_id}/messages",
+        response_model=SessionMessageResponse,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def append_session_message(
+        project_id: str,
+        session_id: str,
+        request: AppendSessionMessageRequest,
+    ) -> SessionMessageResponse:
+        message = await run_in_threadpool(
+            workspace_service.append_session_message,
+            project_id,
+            session_id,
+            request,
+        )
+        return SessionMessageResponse(message=message)
 
     @application.get(
         "/api/projects/{project_id}/indexes",

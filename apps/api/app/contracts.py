@@ -195,6 +195,119 @@ class ProjectIndexListResponse(VersionedModel):
         return self
 
 
+SessionMessageSource: TypeAlias = Literal["human", "agent"]
+
+
+class CreateSessionRequest(VersionedModel):
+    """Create one investigation session fixed to a ready project snapshot."""
+
+    topic: str = Field(min_length=1, max_length=500)
+    index_id: Identifier | None = None
+    feature_generation_id: Identifier | None = None
+    idempotency_key: Identifier | None = None
+
+
+class AppendSessionMessageRequest(VersionedModel):
+    """Append one visible human or external-agent message to a session."""
+
+    source: SessionMessageSource
+    content: str = Field(min_length=1, max_length=20_000)
+    idempotency_key: Identifier | None = None
+
+
+class Session(VersionedModel):
+    """A project-scoped investigation with one immutable index binding."""
+
+    session_id: Identifier
+    project_id: Identifier
+    index: IndexSnapshot
+    feature_generation_id: Identifier | None = None
+    topic: str = Field(min_length=1, max_length=500)
+    created_at: datetime
+    updated_at: datetime
+    message_count: NonNegativeInt = 0
+
+    @model_validator(mode="after")
+    def validate_session_binding(self) -> Session:
+        if self.index.status != "ready":
+            raise ValueError("sessions must use a ready index")
+        if self.updated_at < self.created_at:
+            raise ValueError("session updated_at cannot be earlier than created_at")
+        return self
+
+
+class SessionMessage(VersionedModel):
+    """One append-only visible message with a server-assigned sequence."""
+
+    message_id: Identifier
+    session_id: Identifier
+    sequence: PositiveInt
+    source: SessionMessageSource
+    content: str = Field(min_length=1, max_length=20_000)
+    created_at: datetime
+
+
+class SessionResponse(VersionedModel):
+    session: Session
+
+
+class SessionMessageResponse(VersionedModel):
+    message: SessionMessage
+
+
+class SessionListResponse(VersionedModel):
+    """Stable newest-activity-first session navigation for one project."""
+
+    project_id: Identifier
+    sessions: list[Session] = Field(default_factory=list, max_length=40)
+    next_cursor: str | None = Field(default=None, max_length=500)
+    has_more: bool = False
+
+    @model_validator(mode="after")
+    def validate_session_scope(self) -> SessionListResponse:
+        session_ids = {session.session_id for session in self.sessions}
+        if len(session_ids) != len(self.sessions):
+            raise ValueError("session list must contain unique session IDs")
+        if any(session.project_id != self.project_id for session in self.sessions):
+            raise ValueError("session list crossed the project boundary")
+        if self.has_more and not self.next_cursor:
+            raise ValueError("paginated session lists must include a next cursor")
+        if not self.has_more and self.next_cursor is not None:
+            raise ValueError("complete session lists cannot include a next cursor")
+        return self
+
+
+class SessionMessagesResponse(VersionedModel):
+    """One ascending, bounded page of append-only messages."""
+
+    project_id: Identifier
+    session_id: Identifier
+    messages: list[SessionMessage] = Field(default_factory=list, max_length=100)
+    next_cursor: str | None = Field(default=None, max_length=500)
+    has_more: bool = False
+
+    @model_validator(mode="after")
+    def validate_message_scope(self) -> SessionMessagesResponse:
+        sequences = [message.sequence for message in self.messages]
+        if any(message.session_id != self.session_id for message in self.messages):
+            raise ValueError("session messages crossed the session boundary")
+        if len(set(sequences)) != len(sequences) or sequences != sorted(sequences):
+            raise ValueError("session messages must be unique and ascending")
+        if self.has_more and not self.next_cursor:
+            raise ValueError("paginated session messages must include a next cursor")
+        if not self.has_more and self.next_cursor is not None:
+            raise ValueError("complete session messages cannot include a next cursor")
+        return self
+
+
+class SessionReference(VersionedModel):
+    """A trusted workbench URL for an explicit project/session pair."""
+
+    project_id: Identifier
+    session_id: Identifier
+    url: str = Field(min_length=1, max_length=4_000)
+
+
 ImportStatus: TypeAlias = Literal[
     "queued",
     "acquiring",
@@ -1536,6 +1649,89 @@ class McpFeatureGraphResponse(McpResultBase):
                 raise ValueError("feature graph references must match the graph index")
         if not self.ok and (self.graph is not None or self.references):
             raise ValueError("failed feature graph results cannot include graph data")
+        return self
+
+
+class McpSessionListResponse(McpResultBase):
+    """Read-only MCP envelope for one project's session navigation."""
+
+    result: SessionListResponse | None = None
+    references: list[SessionReference] = Field(default_factory=list, max_length=40)
+
+    @model_validator(mode="after")
+    def validate_session_list_result(self) -> McpSessionListResponse:
+        if self.ok and self.result is None:
+            raise ValueError("successful session lists require a result")
+        if self.ok and self.result is not None:
+            session_ids = {session.session_id for session in self.result.sessions}
+            if any(
+                reference.project_id != self.result.project_id
+                or reference.session_id not in session_ids
+                for reference in self.references
+            ):
+                raise ValueError("session references must match the returned project sessions")
+        if not self.ok and (self.result is not None or self.references):
+            raise ValueError("failed session lists cannot include session data")
+        return self
+
+
+class McpSessionResponse(McpResultBase):
+    """MCP envelope for one session read or explicitly enabled creation."""
+
+    session: Session | None = None
+    reference: SessionReference | None = None
+
+    @model_validator(mode="after")
+    def validate_session_result(self) -> McpSessionResponse:
+        if self.ok:
+            if self.session is None or self.reference is None:
+                raise ValueError("successful session results require a session and reference")
+            if (
+                self.reference.project_id != self.session.project_id
+                or self.reference.session_id != self.session.session_id
+            ):
+                raise ValueError("session reference must match the returned session")
+        elif self.session is not None or self.reference is not None:
+            raise ValueError("failed session results cannot include session data")
+        return self
+
+
+class McpSessionMessagesResponse(McpResultBase):
+    """Read-only MCP envelope for one bounded session-message page."""
+
+    result: SessionMessagesResponse | None = None
+    reference: SessionReference | None = None
+
+    @model_validator(mode="after")
+    def validate_session_messages_result(self) -> McpSessionMessagesResponse:
+        if self.ok:
+            if self.result is None or self.reference is None:
+                raise ValueError("successful session message results require a result and reference")
+            if (
+                self.reference.project_id != self.result.project_id
+                or self.reference.session_id != self.result.session_id
+            ):
+                raise ValueError("session message reference must match the returned session")
+        elif self.result is not None or self.reference is not None:
+            raise ValueError("failed session message results cannot include message data")
+        return self
+
+
+class McpSessionMessageResponse(McpResultBase):
+    """MCP envelope for one explicitly appended session message."""
+
+    message: SessionMessage | None = None
+    reference: SessionReference | None = None
+
+    @model_validator(mode="after")
+    def validate_session_message_result(self) -> McpSessionMessageResponse:
+        if self.ok:
+            if self.message is None or self.reference is None:
+                raise ValueError("successful session message results require a message and reference")
+            if self.reference.session_id != self.message.session_id:
+                raise ValueError("session message reference must match the returned message")
+        elif self.message is not None or self.reference is not None:
+            raise ValueError("failed session message results cannot include message data")
         return self
 
 

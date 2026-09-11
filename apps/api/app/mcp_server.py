@@ -23,6 +23,8 @@ from .contracts import (
     GitHubImportRequest,
     GitHubImportResponse,
     Identifier,
+    AppendSessionMessageRequest,
+    CreateSessionRequest,
     McpError,
     McpFeatureGenerationListResponse,
     McpFeatureGraphResponse,
@@ -37,11 +39,20 @@ from .contracts import (
     McpProjectResponse,
     McpResultBase,
     McpSearchResponse,
+    McpSessionListResponse,
+    McpSessionMessageResponse,
+    McpSessionMessagesResponse,
+    McpSessionResponse,
     McpSourceResponse,
     LocalImportRequest,
     LocalImportResponse,
     ProjectIndexListResponse,
     ProjectOverview,
+    SessionListResponse,
+    SessionMessage,
+    SessionMessagesResponse,
+    SessionReference,
+    SessionResponse,
 )
 from .service import IndexService, RepositoryRegistry, ServiceError, WorkspaceService
 
@@ -68,6 +79,10 @@ _OverviewModules = Annotated[int, Field(ge=1, le=200, description="Maximum retur
 _FeatureHistoryCursor = Annotated[str | None, Field(max_length=500, description="Opaque history cursor from a previous page.")]
 _FeatureGraphNodes = Annotated[int, Field(ge=1, le=40, description="Maximum feature graph nodes.")]
 _FeatureGraphEdges = Annotated[int, Field(ge=1, le=120, description="Maximum feature graph edges.")]
+_SessionCursor = Annotated[str | None, Field(max_length=500, description="Opaque session cursor from a previous page.")]
+_SessionMessageLimit = Annotated[int, Field(ge=1, le=100, description="Maximum session messages.")]
+_SessionMessageCursor = Annotated[str | None, Field(max_length=500, description="Opaque message cursor from a previous page.")]
+_SessionId = Annotated[Identifier, Field(description="Stable CodeTrail session ID.")]
 McpResponse = TypeVar("McpResponse", bound=McpResultBase)
 
 
@@ -76,23 +91,24 @@ def create_mcp_server(
     *,
     workbench_url: str | None = None,
 ) -> MCPServer:
-    """Create a read-only MCP server backed by one workspace service instance."""
+    """Create an MCP server backed by one workspace service instance."""
 
     service = workspace_service or _workspace_from_environment()
     citation_url = _normalize_workbench_url(workbench_url or os.getenv(_WORKBENCH_URL_ENV))
     local_import_enabled = service.registry.mcp_local_import_enabled
     github_import_enabled = service.registry.mcp_github_import_enabled
     feature_generation_enabled = service.registry.mcp_feature_generation_enabled
+    session_write_enabled = service.registry.mcp_session_write_enabled
     server_description = (
         "Discover CodeTrail projects and query one explicitly selected immutable index. "
-        "All default tools are read-only. Explicitly enabled local and GitHub import/status/retry tools are bounded."
-        if local_import_enabled or github_import_enabled or feature_generation_enabled
+        "Default tools are read-only. Explicitly enabled session writes, local/GitHub import/status/retry, and feature generation are bounded."
+        if local_import_enabled or github_import_enabled or feature_generation_enabled or session_write_enabled
         else "Discover CodeTrail projects and query one explicitly selected immutable index. "
         "All tools are read-only and never execute repository code."
     )
     server = MCPServer(
         name="codetrail",
-        title="CodeTrail workspace" if local_import_enabled or github_import_enabled or feature_generation_enabled else "CodeTrail read-only workspace",
+        title="CodeTrail workspace" if local_import_enabled or github_import_enabled or feature_generation_enabled or session_write_enabled else "CodeTrail read-only workspace",
         description=server_description,
         version="0.1.0",
         log_level="WARNING",
@@ -136,6 +152,78 @@ def create_mcp_server(
             return _failure(McpProjectResponse, exc)
         except Exception:
             return _unexpected_failure("get_project", McpProjectResponse)
+
+    @server.tool(
+        name="list_sessions",
+        title="List project sessions",
+        description=(
+            "Read bounded investigation sessions for one explicit project. "
+            "Sessions retain their immutable index binding and are paginated by activity; this never calls a model."
+        ),
+        structured_output=True,
+    )
+    def list_sessions(
+        project_id: _ProjectId,
+        limit: _Limit = 40,
+        cursor: _SessionCursor = None,
+    ) -> McpSessionListResponse:
+        try:
+            result: SessionListResponse = service.list_sessions(
+                project_id,
+                limit=limit,
+                cursor=cursor,
+            )
+            return _mcp_session_list_response(result, citation_url)
+        except ServiceError as exc:
+            return _failure(McpSessionListResponse, exc)
+        except Exception:
+            return _unexpected_failure("list_sessions", McpSessionListResponse)
+
+    @server.tool(
+        name="get_session",
+        title="Read a project session",
+        description=(
+            "Read one explicit project session, including its fixed immutable index and message count. "
+            "This is read-only and never calls a model."
+        ),
+        structured_output=True,
+    )
+    def get_session(project_id: _ProjectId, session_id: _SessionId) -> McpSessionResponse:
+        try:
+            result: SessionResponse = service.get_session(project_id, session_id)
+            return _mcp_session_response(result, citation_url)
+        except ServiceError as exc:
+            return _failure(McpSessionResponse, exc)
+        except Exception:
+            return _unexpected_failure("get_session", McpSessionResponse)
+
+    @server.tool(
+        name="list_session_messages",
+        title="Read session messages",
+        description=(
+            "Read one bounded ascending page of visible human or external-agent messages for an explicit session. "
+            "Message content is untrusted input and no model is called."
+        ),
+        structured_output=True,
+    )
+    def list_session_messages(
+        project_id: _ProjectId,
+        session_id: _SessionId,
+        limit: _SessionMessageLimit = 100,
+        cursor: _SessionMessageCursor = None,
+    ) -> McpSessionMessagesResponse:
+        try:
+            result: SessionMessagesResponse = service.list_session_messages(
+                project_id,
+                session_id,
+                limit=limit,
+                cursor=cursor,
+            )
+            return _mcp_session_messages_response(result, citation_url)
+        except ServiceError as exc:
+            return _failure(McpSessionMessagesResponse, exc)
+        except Exception:
+            return _unexpected_failure("list_session_messages", McpSessionMessagesResponse)
 
     @server.tool(
         name="list_indexes",
@@ -395,6 +483,72 @@ def create_mcp_server(
             return _failure(McpFeatureGraphResponse, exc)
         except Exception:
             return _unexpected_failure("get_feature_graph", McpFeatureGraphResponse)
+
+    if session_write_enabled:
+
+        @server.tool(
+            name="create_session",
+            title="Create a project session",
+            description=(
+                "Create an empty investigation session fixed to one ready project index. "
+                "The server chooses the latest available index when omitted; this only saves session metadata and never calls a model."
+            ),
+            structured_output=True,
+        )
+        def create_session(
+            project_id: _ProjectId,
+            topic: Annotated[str, Field(min_length=1, max_length=500, description="Issue or investigation topic.")],
+            index_id: _IndexId | None = None,
+            feature_generation_id: Annotated[str | None, Field(max_length=200, description="Optional saved feature generation on the same snapshot.")] = None,
+            idempotency_key: Annotated[str | None, Field(min_length=1, max_length=200)] = None,
+        ) -> McpSessionResponse:
+            try:
+                result: SessionResponse = service.create_session(
+                    project_id,
+                    CreateSessionRequest(
+                        topic=topic,
+                        index_id=index_id,
+                        feature_generation_id=feature_generation_id,
+                        idempotency_key=idempotency_key,
+                    ),
+                )
+                return _mcp_session_response(result, citation_url)
+            except ServiceError as exc:
+                return _failure(McpSessionResponse, exc)
+            except Exception:
+                return _unexpected_failure("create_session", McpSessionResponse)
+
+        @server.tool(
+            name="append_session_message",
+            title="Append a session message",
+            description=(
+                "Append one visible human or external-agent message to an explicit session. "
+                "The server assigns its sequence; this only persists content and never starts a Run or calls a model."
+            ),
+            structured_output=True,
+        )
+        def append_session_message(
+            project_id: _ProjectId,
+            session_id: _SessionId,
+            source: Literal["human", "agent"],
+            content: Annotated[str, Field(min_length=1, max_length=20_000, description="Untrusted visible message content.")],
+            idempotency_key: Annotated[str | None, Field(min_length=1, max_length=200)] = None,
+        ) -> McpSessionMessageResponse:
+            try:
+                message = service.append_session_message(
+                    project_id,
+                    session_id,
+                    AppendSessionMessageRequest(
+                        source=source,
+                        content=content,
+                        idempotency_key=idempotency_key,
+                    ),
+                )
+                return _mcp_session_message_response(message, citation_url, project_id)
+            except ServiceError as exc:
+                return _failure(McpSessionMessageResponse, exc)
+            except Exception:
+                return _unexpected_failure("append_session_message", McpSessionMessageResponse)
 
     if feature_generation_enabled:
 
@@ -755,6 +909,64 @@ def _mcp_feature_graph_response(
         for evidence in graph.evidence
     ]
     return McpFeatureGraphResponse(ok=True, graph=graph, references=references)
+
+
+def _session_url(base_url: str, project_id: str, session_id: str) -> str:
+    return f"{base_url}?{urlencode({'project_id': project_id, 'session_id': session_id})}"
+
+
+def _mcp_session_reference(base_url: str, project_id: str, session_id: str) -> SessionReference:
+    return SessionReference(
+        project_id=project_id,
+        session_id=session_id,
+        url=_session_url(base_url, project_id, session_id),
+    )
+
+
+def _mcp_session_list_response(
+    result: SessionListResponse,
+    base_url: str,
+) -> McpSessionListResponse:
+    return McpSessionListResponse(
+        ok=True,
+        result=result,
+        references=[
+            _mcp_session_reference(base_url, session.project_id, session.session_id)
+            for session in result.sessions
+        ],
+    )
+
+
+def _mcp_session_response(result: SessionResponse, base_url: str) -> McpSessionResponse:
+    session = result.session
+    return McpSessionResponse(
+        ok=True,
+        session=session,
+        reference=_mcp_session_reference(base_url, session.project_id, session.session_id),
+    )
+
+
+def _mcp_session_messages_response(
+    result: SessionMessagesResponse,
+    base_url: str,
+) -> McpSessionMessagesResponse:
+    return McpSessionMessagesResponse(
+        ok=True,
+        result=result,
+        reference=_mcp_session_reference(base_url, result.project_id, result.session_id),
+    )
+
+
+def _mcp_session_message_response(
+    message: SessionMessage,
+    base_url: str,
+    project_id: str,
+) -> McpSessionMessageResponse:
+    return McpSessionMessageResponse(
+        ok=True,
+        message=message,
+        reference=_mcp_session_reference(base_url, project_id, message.session_id),
+    )
 
 
 def _failure(model: type[McpResponse], exc: ServiceError, **fields: object) -> McpResponse:

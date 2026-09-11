@@ -339,6 +339,9 @@ def test_mcp_local_import_is_opt_in_and_shares_http_state(tmp_path: Path) -> Non
             assert {
                 "list_projects",
                 "get_project",
+                "list_sessions",
+                "get_session",
+                "list_session_messages",
                 "list_indexes",
                 "get_index",
                 "search_code",
@@ -393,6 +396,9 @@ def test_mcp_local_import_is_opt_in_and_shares_http_state(tmp_path: Path) -> Non
             assert {
                 "list_projects",
                 "get_project",
+                "list_sessions",
+                "get_session",
+                "list_session_messages",
                 "list_indexes",
                 "get_index",
                 "search_code",
@@ -455,6 +461,9 @@ def test_mcp_feature_generation_is_separately_opt_in_and_returns_citations(tmp_p
             assert {
                 "list_projects",
                 "get_project",
+                "list_sessions",
+                "get_session",
+                "list_session_messages",
                 "list_indexes",
                 "get_index",
                 "search_code",
@@ -539,6 +548,108 @@ def test_mcp_feature_generation_is_separately_opt_in_and_returns_citations(tmp_p
     assert graph_result["graph"] == http_graph["graph"]
 
 
+def test_mcp_session_read_matches_http_and_writes_are_opt_in(tmp_path: Path) -> None:
+    repository = copy_fixture(tmp_path)
+    data_root = tmp_path / "service-data"
+    application = create_app({"timeout-demo": repository}, data_root=data_root)
+    status, project = request(
+        application,
+        "POST",
+        "/api/projects",
+        {"name": "MCP session", "repository_id": "timeout-demo"},
+    )
+    assert status == 200
+    project_id = project["project_id"]
+    status, index = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/indexes",
+        {"revision": "mcp-session-v1", "dirty": False},
+    )
+    assert status == 200
+    status, created = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/sessions",
+        {"topic": "HTTP session", "idempotency_key": "http-session"},
+    )
+    assert status == 200
+    session_id = created["session"]["session_id"]
+    status, http_sessions = request(application, "GET", f"/api/projects/{project_id}/sessions")
+    assert status == 200
+    status, http_messages = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/sessions/{session_id}/messages",
+    )
+    assert status == 200
+
+    parameters = StdioServerParameters(
+        command=sys.executable,
+        args=["-m", "app.mcp_server"],
+        env={
+            "CODETRAIL_REPOSITORIES": json.dumps({"timeout-demo": str(repository)}),
+            "CODETRAIL_DATA_DIR": str(data_root),
+            "CODETRAIL_MCP_SESSION_WRITE_ENABLED": "1",
+            "CODETRAIL_WORKBENCH_URL": "http://localhost:3000",
+        },
+        cwd=API_ROOT,
+    )
+
+    async def exercise() -> tuple[dict, dict, dict]:
+        async with Client(parameters, read_timeout_seconds=10) as client:
+            tool_names = {tool.name for tool in (await client.list_tools()).tools}
+            assert {"list_sessions", "get_session", "list_session_messages", "create_session", "append_session_message"} <= tool_names
+            sessions_result = await client.call_tool("list_sessions", {"project_id": project_id})
+            assert sessions_result.structured_content["result"] == http_sessions
+            assert sessions_result.structured_content["references"][0]["project_id"] == project_id
+            assert sessions_result.structured_content["references"][0]["session_id"] == session_id
+
+            session_result = await client.call_tool(
+                "get_session",
+                {"project_id": project_id, "session_id": session_id},
+            )
+            assert session_result.structured_content["session"] == created["session"]
+            assert session_result.structured_content["reference"]["session_id"] == session_id
+
+            messages_result = await client.call_tool(
+                "list_session_messages",
+                {"project_id": project_id, "session_id": session_id},
+            )
+            assert messages_result.structured_content["result"] == http_messages
+
+            created_by_agent = await client.call_tool(
+                "create_session",
+                {"project_id": project_id, "topic": "Agent session", "idempotency_key": "agent-session"},
+            )
+            agent_session_id = created_by_agent.structured_content["session"]["session_id"]
+            appended = await client.call_tool(
+                "append_session_message",
+                {
+                    "project_id": project_id,
+                    "session_id": agent_session_id,
+                    "source": "agent",
+                    "content": "saved through MCP",
+                    "idempotency_key": "agent-message",
+                },
+            )
+            return created_by_agent.structured_content, appended.structured_content, {
+                "agent_session_id": agent_session_id,
+            }
+
+    agent_session, agent_message, ids = asyncio.run(exercise())
+    assert agent_session["ok"] is True
+    assert agent_session["reference"]["url"].startswith("http://localhost:3000?")
+    assert agent_message["ok"] is True
+    status, http_agent_messages = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/sessions/{ids['agent_session_id']}/messages",
+    )
+    assert status == 200
+    assert http_agent_messages["messages"] == [agent_message["message"]]
+
+
 async def _exercise_stdio(
     parameters: StdioServerParameters,
     *,
@@ -556,6 +667,9 @@ async def _exercise_stdio(
     expected_tools = {
         "list_projects",
         "get_project",
+        "list_sessions",
+        "get_session",
+        "list_session_messages",
         "list_indexes",
         "get_index",
         "search_code",

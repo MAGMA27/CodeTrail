@@ -29,6 +29,8 @@ from .contracts import (
     ReadSourceParams,
     SearchCodeParams,
     SearchMatch,
+    Session,
+    SessionMessage,
     SourceLocation,
     Symbol,
     UnresolvedReference,
@@ -112,6 +114,40 @@ class FeatureGenerationPage:
     """One stable page of saved feature generations."""
 
     generations: tuple[FeatureGeneration, ...]
+    next_cursor: str | None
+    has_more: bool
+
+
+@dataclass(frozen=True)
+class SessionRecord:
+    """Stored session metadata kept separate from its immutable index payload."""
+
+    session_id: str
+    project_id: str
+    index_id: str
+    feature_generation_id: str | None
+    topic: str
+    created_at: datetime
+    updated_at: datetime
+    message_count: int
+    idempotency_key: str | None
+    request_fingerprint: str
+
+
+@dataclass(frozen=True)
+class SessionPage:
+    """One stable page of project sessions."""
+
+    sessions: tuple[SessionRecord, ...]
+    next_cursor: str | None
+    has_more: bool
+
+
+@dataclass(frozen=True)
+class SessionMessagePage:
+    """One ascending page of append-only session messages."""
+
+    messages: tuple[SessionMessage, ...]
     next_cursor: str | None
     has_more: bool
 
@@ -305,6 +341,48 @@ CREATE UNIQUE INDEX IF NOT EXISTS feature_generations_idempotency
 
 CREATE INDEX IF NOT EXISTS feature_generations_cache
     ON feature_generations(project_id, index_id, cache_key, status, created_at);
+
+CREATE TABLE IF NOT EXISTS sessions (
+    session_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    index_id TEXT NOT NULL,
+    feature_generation_id TEXT,
+    topic TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    message_count INTEGER NOT NULL DEFAULT 0 CHECK (message_count >= 0),
+    idempotency_key TEXT,
+    request_fingerprint TEXT NOT NULL,
+    FOREIGN KEY (project_id, index_id) REFERENCES project_indexes(project_id, index_id) ON DELETE CASCADE,
+    FOREIGN KEY (feature_generation_id) REFERENCES feature_generations(generation_id) ON DELETE RESTRICT
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS sessions_idempotency
+    ON sessions(project_id, idempotency_key)
+    WHERE idempotency_key IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS sessions_project_activity
+    ON sessions(project_id, updated_at, session_id);
+
+CREATE TABLE IF NOT EXISTS session_messages (
+    message_id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    sequence INTEGER NOT NULL CHECK (sequence > 0),
+    source TEXT NOT NULL CHECK (source IN ('human', 'agent')),
+    content TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    idempotency_key TEXT,
+    request_fingerprint TEXT NOT NULL,
+    FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE,
+    UNIQUE (session_id, sequence)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS session_messages_idempotency
+    ON session_messages(session_id, idempotency_key)
+    WHERE idempotency_key IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS session_messages_order
+    ON session_messages(session_id, sequence);
 """
 
 
@@ -1131,6 +1209,11 @@ class IndexStore:
             truncation_reason=index_row["truncation_reason"],
         )
 
+    def load_index_snapshot(self, index_id: str) -> IndexSnapshot:
+        """Read only index metadata without loading source, symbols, or relations."""
+
+        return _index_from_row(self._require_index(index_id))
+
     def save_feature_generation(
         self,
         generation: FeatureGeneration,
@@ -1285,6 +1368,262 @@ class IndexStore:
             next_cursor=next_cursor,
             has_more=has_more,
         )
+
+    def create_session(
+        self,
+        session: Session,
+        *,
+        idempotency_key: str | None,
+        request_fingerprint: str,
+    ) -> SessionRecord:
+        """Persist one empty session after its project/index scope was validated."""
+
+        if session.message_count != 0:
+            raise StorageInputError("new sessions must start without messages")
+        self._require_index(session.index.index_id)
+        try:
+            self._connection.execute("BEGIN IMMEDIATE")
+            self._connection.execute(
+                "INSERT INTO sessions "
+                "(session_id, project_id, index_id, feature_generation_id, topic, created_at, updated_at, "
+                "message_count, idempotency_key, request_fingerprint) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    session.session_id,
+                    session.project_id,
+                    session.index.index_id,
+                    session.feature_generation_id,
+                    session.topic,
+                    _datetime_text(session.created_at),
+                    _datetime_text(session.updated_at),
+                    session.message_count,
+                    idempotency_key,
+                    request_fingerprint,
+                ),
+            )
+            self._connection.execute("COMMIT")
+        except StorageError:
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise
+        except sqlite3.IntegrityError as exc:
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise StorageConflictError("session conflicts with existing data") from exc
+        except sqlite3.Error as exc:
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise StorageError(f"could not create session: {exc}") from exc
+        return self.load_session(session.session_id)
+
+    def load_session(self, session_id: str) -> SessionRecord:
+        """Read one session metadata record without loading its messages."""
+
+        row = self._connection.execute(
+            "SELECT session_id, project_id, index_id, feature_generation_id, topic, created_at, updated_at, "
+            "message_count, idempotency_key, request_fingerprint FROM sessions WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+        if row is None:
+            raise StorageNotFoundError(f"session {session_id!r} was not found")
+        return _session_from_row(row)
+
+    def find_session_by_idempotency(
+        self,
+        project_id: str,
+        idempotency_key: str,
+    ) -> SessionRecord | None:
+        row = self._connection.execute(
+            "SELECT session_id, project_id, index_id, feature_generation_id, topic, created_at, updated_at, "
+            "message_count, idempotency_key, request_fingerprint FROM sessions "
+            "WHERE project_id = ? AND idempotency_key = ?",
+            (project_id, idempotency_key),
+        ).fetchone()
+        return None if row is None else _session_from_row(row)
+
+    def list_sessions(
+        self,
+        project_id: str,
+        *,
+        limit: int = 40,
+        cursor: str | None = None,
+    ) -> SessionPage:
+        """List sessions by latest activity with a project-bound opaque cursor."""
+
+        self.load_project(project_id)
+        if limit < 1 or limit > 40:
+            raise StorageInputError("session list limit is outside the allowed range")
+        cursor_values = _decode_session_cursor(cursor, project_id=project_id)
+        where = ["project_id = ?"]
+        parameters: list[object] = [project_id]
+        if cursor_values is not None:
+            updated_at, session_id = cursor_values
+            where.append("(updated_at < ? OR (updated_at = ? AND session_id < ?))")
+            parameters.extend([updated_at, updated_at, session_id])
+        rows = self._connection.execute(
+            "SELECT session_id, project_id, index_id, feature_generation_id, topic, created_at, updated_at, "
+            "message_count, idempotency_key, request_fingerprint FROM sessions "
+            f"WHERE {' AND '.join(where)} "
+            "ORDER BY updated_at DESC, session_id DESC LIMIT ?",
+            (*parameters, limit + 1),
+        ).fetchall()
+        has_more = len(rows) > limit
+        page_rows = rows[:limit]
+        records = tuple(_session_from_row(row) for row in page_rows)
+        next_cursor = (
+            _encode_session_cursor(
+                records[-1].updated_at,
+                records[-1].session_id,
+                project_id=project_id,
+            )
+            if has_more and records
+            else None
+        )
+        return SessionPage(sessions=records, next_cursor=next_cursor, has_more=has_more)
+
+    def append_session_message(
+        self,
+        session_id: str,
+        *,
+        message_id: str,
+        source: str,
+        content: str,
+        idempotency_key: str | None,
+        request_fingerprint: str,
+        created_at: datetime,
+    ) -> SessionMessage:
+        """Append one message while atomically assigning the next session sequence."""
+
+        try:
+            self._connection.execute("BEGIN IMMEDIATE")
+            session_row = self._connection.execute(
+                "SELECT session_id FROM sessions WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            if session_row is None:
+                raise StorageNotFoundError(f"session {session_id!r} was not found")
+            if idempotency_key is not None:
+                existing_row = self._connection.execute(
+                    "SELECT message_id, session_id, sequence, source, content, created_at, request_fingerprint "
+                    "FROM session_messages WHERE session_id = ? AND idempotency_key = ?",
+                    (session_id, idempotency_key),
+                ).fetchone()
+                if existing_row is not None:
+                    if existing_row["request_fingerprint"] != request_fingerprint:
+                        raise StorageConflictError(
+                            "message idempotency key is already bound to different content"
+                        )
+                    self._connection.execute("COMMIT")
+                    return _session_message_from_row(existing_row)
+            sequence_row = self._connection.execute(
+                "SELECT COALESCE(MAX(sequence), 0) + 1 AS next_sequence "
+                "FROM session_messages WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            sequence = int(sequence_row["next_sequence"])
+            timestamp = _datetime_text(created_at)
+            self._connection.execute(
+                "INSERT INTO session_messages "
+                "(message_id, session_id, sequence, source, content, created_at, idempotency_key, request_fingerprint) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    message_id,
+                    session_id,
+                    sequence,
+                    source,
+                    content,
+                    timestamp,
+                    idempotency_key,
+                    request_fingerprint,
+                ),
+            )
+            self._connection.execute(
+                "UPDATE sessions SET message_count = message_count + 1, updated_at = ? "
+                "WHERE session_id = ?",
+                (timestamp, session_id),
+            )
+            self._connection.execute("COMMIT")
+            return SessionMessage(
+                message_id=message_id,
+                session_id=session_id,
+                sequence=sequence,
+                source=source,  # type: ignore[arg-type]
+                content=content,
+                created_at=created_at,
+            )
+        except StorageError:
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise
+        except sqlite3.IntegrityError as exc:
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise StorageConflictError("session message conflicts with existing data") from exc
+        except sqlite3.Error as exc:
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise StorageError(f"could not append session message: {exc}") from exc
+
+    def list_session_messages(
+        self,
+        project_id: str,
+        session_id: str,
+        *,
+        limit: int = 100,
+        cursor: str | None = None,
+    ) -> SessionMessagePage:
+        """Read messages in server sequence order with a project/session cursor."""
+
+        self.load_project(project_id)
+        session_row = self._connection.execute(
+            "SELECT session_id FROM sessions WHERE session_id = ? AND project_id = ?",
+            (session_id, project_id),
+        ).fetchone()
+        if session_row is None:
+            raise StorageNotFoundError(f"session {session_id!r} was not found")
+        if limit < 1 or limit > 100:
+            raise StorageInputError("session message limit is outside the allowed range")
+        cursor_sequence = _decode_session_message_cursor(
+            cursor,
+            project_id=project_id,
+            session_id=session_id,
+        )
+        parameters: list[object] = [session_id]
+        where = ["session_id = ?"]
+        if cursor_sequence is not None:
+            where.append("sequence > ?")
+            parameters.append(cursor_sequence)
+        rows = self._connection.execute(
+            "SELECT message_id, session_id, sequence, source, content, created_at "
+            f"FROM session_messages WHERE {' AND '.join(where)} "
+            "ORDER BY sequence ASC LIMIT ?",
+            (*parameters, limit + 1),
+        ).fetchall()
+        has_more = len(rows) > limit
+        page_rows = rows[:limit]
+        messages = tuple(_session_message_from_row(row) for row in page_rows)
+        next_cursor = (
+            _encode_session_message_cursor(
+                messages[-1].sequence,
+                project_id=project_id,
+                session_id=session_id,
+            )
+            if has_more and messages
+            else None
+        )
+        return SessionMessagePage(messages=messages, next_cursor=next_cursor, has_more=has_more)
 
     def search_symbols(
         self,
@@ -1927,6 +2266,134 @@ def _decode_feature_generation_cursor(
     ):
         raise StorageInputError("feature generation history cursor does not match the requested scope")
     return created_at, generation_id
+
+
+def _encode_session_cursor(
+    updated_at: datetime,
+    session_id: str,
+    *,
+    project_id: str,
+) -> str:
+    payload = json.dumps(
+        {
+            "kind": "sessions",
+            "updated_at": _datetime_text(updated_at),
+            "session_id": session_id,
+            "project_id": project_id,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return base64.urlsafe_b64encode(payload).decode("ascii")
+
+
+def _decode_session_cursor(
+    cursor: str | None,
+    *,
+    project_id: str,
+) -> tuple[str, str] | None:
+    if cursor is None:
+        return None
+    if not cursor or len(cursor) > 500:
+        raise StorageInputError("session cursor is invalid")
+    try:
+        decoded = base64.urlsafe_b64decode(cursor.encode("ascii"))
+        payload = json.loads(decoded.decode("utf-8"))
+        kind = payload["kind"]
+        updated_at = payload["updated_at"]
+        session_id = payload["session_id"]
+        cursor_project_id = payload["project_id"]
+        _datetime_value(updated_at)
+    except (ValueError, KeyError, TypeError, UnicodeError, binascii.Error, json.JSONDecodeError) as exc:
+        raise StorageInputError("session cursor is invalid") from exc
+    if (
+        kind != "sessions"
+        or not isinstance(updated_at, str)
+        or not isinstance(session_id, str)
+        or not session_id
+        or len(session_id) > 200
+        or cursor_project_id != project_id
+    ):
+        raise StorageInputError("session cursor does not match the requested project")
+    return updated_at, session_id
+
+
+def _encode_session_message_cursor(
+    sequence: int,
+    *,
+    project_id: str,
+    session_id: str,
+) -> str:
+    payload = json.dumps(
+        {
+            "kind": "session_messages",
+            "sequence": sequence,
+            "project_id": project_id,
+            "session_id": session_id,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return base64.urlsafe_b64encode(payload).decode("ascii")
+
+
+def _decode_session_message_cursor(
+    cursor: str | None,
+    *,
+    project_id: str,
+    session_id: str,
+) -> int | None:
+    if cursor is None:
+        return None
+    if not cursor or len(cursor) > 500:
+        raise StorageInputError("session message cursor is invalid")
+    try:
+        decoded = base64.urlsafe_b64decode(cursor.encode("ascii"))
+        payload = json.loads(decoded.decode("utf-8"))
+        kind = payload["kind"]
+        sequence = payload["sequence"]
+        cursor_project_id = payload["project_id"]
+        cursor_session_id = payload["session_id"]
+    except (ValueError, KeyError, TypeError, UnicodeError, binascii.Error, json.JSONDecodeError) as exc:
+        raise StorageInputError("session message cursor is invalid") from exc
+    if (
+        kind != "session_messages"
+        or not isinstance(sequence, int)
+        or isinstance(sequence, bool)
+        or sequence < 1
+        or cursor_project_id != project_id
+        or cursor_session_id != session_id
+    ):
+        raise StorageInputError("session message cursor does not match the requested session")
+    return sequence
+
+
+def _session_from_row(row: sqlite3.Row) -> SessionRecord:
+    return SessionRecord(
+        session_id=row["session_id"],
+        project_id=row["project_id"],
+        index_id=row["index_id"],
+        feature_generation_id=row["feature_generation_id"],
+        topic=row["topic"],
+        created_at=_datetime_value(row["created_at"]),
+        updated_at=_datetime_value(row["updated_at"]),
+        message_count=int(row["message_count"]),
+        idempotency_key=row["idempotency_key"],
+        request_fingerprint=row["request_fingerprint"],
+    )
+
+
+def _session_message_from_row(row: sqlite3.Row) -> SessionMessage:
+    return SessionMessage(
+        message_id=row["message_id"],
+        session_id=row["session_id"],
+        sequence=int(row["sequence"]),
+        source=row["source"],  # type: ignore[arg-type]
+        content=row["content"],
+        created_at=_datetime_value(row["created_at"]),
+    )
 
 
 def _managed_source_from_row(row: sqlite3.Row) -> ManagedSourceRecord:

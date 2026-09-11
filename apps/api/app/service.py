@@ -21,6 +21,8 @@ from .contracts import (
     CreateIndexRequest,
     CreateProjectIndexRequest,
     CreateProjectRequest,
+    CreateSessionRequest,
+    AppendSessionMessageRequest,
     FeatureGeneration,
     FeatureGenerationListResponse,
     FeatureGenerationRequest,
@@ -35,6 +37,7 @@ from .contracts import (
     GitHubImportResponse,
     IndexIssue,
     IndexResponse,
+    IndexSnapshot,
     LocalImportRequest,
     LocalImportResponse,
     NeighborsIndexResponse,
@@ -47,6 +50,11 @@ from .contracts import (
     SearchCodeParams,
     SearchCodeSuccess,
     SearchIndexResponse,
+    Session,
+    SessionListResponse,
+    SessionMessage,
+    SessionMessagesResponse,
+    SessionResponse,
     SourceIndexResponse,
     ToolError,
     ToolRequest,
@@ -75,6 +83,7 @@ from .storage import (
     StorageError,
     StorageInputError,
     StorageNotFoundError,
+    SessionRecord,
 )
 
 
@@ -115,6 +124,7 @@ class RepositoryRegistry:
         github_import_enabled: bool | None = None,
         mcp_github_import_enabled: bool | None = None,
         mcp_feature_generation_enabled: bool | None = None,
+        mcp_session_write_enabled: bool | None = None,
     ) -> None:
         normalized: dict[str, RepositorySpec] = {}
         for repository_id, repository_root in roots.items():
@@ -168,6 +178,11 @@ class RepositoryRegistry:
             if mcp_feature_generation_enabled is None
             else mcp_feature_generation_enabled
         )
+        self._mcp_session_write_enabled = (
+            _env_flag("CODETRAIL_MCP_SESSION_WRITE_ENABLED")
+            if mcp_session_write_enabled is None
+            else mcp_session_write_enabled
+        )
         self._lock = threading.RLock()
         self._runtime_source_roots: dict[str, Path] = {}
         self._specs = normalized
@@ -180,6 +195,7 @@ class RepositoryRegistry:
         github_import_enabled: bool | None = None,
         mcp_github_import_enabled: bool | None = None,
         mcp_feature_generation_enabled: bool | None = None,
+        mcp_session_write_enabled: bool | None = None,
     ) -> RepositoryRegistry:
         raw = os.getenv("CODETRAIL_REPOSITORIES", "").strip()
         payload: dict[str, str] = {}
@@ -207,6 +223,7 @@ class RepositoryRegistry:
             github_import_enabled=github_import_enabled,
             mcp_github_import_enabled=mcp_github_import_enabled,
             mcp_feature_generation_enabled=mcp_feature_generation_enabled,
+            mcp_session_write_enabled=mcp_session_write_enabled,
         )
 
     @property
@@ -242,6 +259,10 @@ class RepositoryRegistry:
     @property
     def mcp_feature_generation_enabled(self) -> bool:
         return self._mcp_feature_generation_enabled
+
+    @property
+    def mcp_session_write_enabled(self) -> bool:
+        return self._mcp_session_write_enabled
 
     @property
     def allowed_import_roots(self) -> tuple[Path, ...]:
@@ -672,6 +693,203 @@ class WorkspaceService:
             latest_index_id=current.latest_index_id,
             building_index_id=current.building_index_id,
         )
+
+    def create_session(self, project_id: str, request: CreateSessionRequest) -> SessionResponse:
+        """Create one empty session fixed to an available immutable project index."""
+
+        project = self._find_project(project_id)
+        try:
+            with self.registry.store_for_repository(project.repository_id) as store:
+                index_id = request.index_id or project.latest_index_id
+                if index_id is None:
+                    raise ServiceError("conflict", 409, "project has no available index")
+                if not store.project_has_index(project_id, index_id):
+                    raise ServiceError("not_found", 404, "index does not belong to the project")
+                index = store.load_index_snapshot(index_id)
+                if index.status != "ready":
+                    raise ServiceError("conflict", 409, "session requires a ready project index")
+                if request.feature_generation_id is not None:
+                    generation = store.load_feature_generation(request.feature_generation_id)
+                    if generation.project_id != project_id or generation.index.index_id != index_id:
+                        raise StorageNotFoundError("feature generation is outside the session snapshot")
+                fingerprint = _session_creation_fingerprint(
+                    project_id,
+                    index_id,
+                    request.feature_generation_id,
+                    request.topic,
+                )
+                record: SessionRecord | None = None
+                if request.idempotency_key is not None:
+                    existing = store.find_session_by_idempotency(project_id, request.idempotency_key)
+                    if existing is not None:
+                        if existing.request_fingerprint != fingerprint:
+                            raise ServiceError(
+                                "conflict",
+                                409,
+                                "session idempotency key is already bound to a different request",
+                            )
+                        record = existing
+                if record is None:
+                    now = datetime.now(timezone.utc)
+                    session = Session(
+                        session_id=_new_session_id(),
+                        project_id=project_id,
+                        index=index,
+                        feature_generation_id=request.feature_generation_id,
+                        topic=request.topic,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                    try:
+                        record = store.create_session(
+                            session,
+                            idempotency_key=request.idempotency_key,
+                            request_fingerprint=fingerprint,
+                        )
+                    except StorageConflictError:
+                        if request.idempotency_key is None:
+                            raise
+                        existing = store.find_session_by_idempotency(project_id, request.idempotency_key)
+                        if existing is None or existing.request_fingerprint != fingerprint:
+                            raise
+                        record = existing
+        except ServiceError:
+            raise
+        except StorageConflictError as exc:
+            raise ServiceError("conflict", 409, "session conflicts with an existing request") from exc
+        except StorageNotFoundError as exc:
+            raise ServiceError("not_found", 404, "requested project, index, or feature generation was not found") from exc
+        except StorageInputError as exc:
+            raise ServiceError("invalid_input", 400, "session parameters are invalid") from exc
+        except StorageError as exc:
+            raise ServiceError("internal_error", 500, "local session storage failed") from exc
+        assert record is not None
+        return SessionResponse(session=_session_response(record, index))
+
+    def list_sessions(
+        self,
+        project_id: str,
+        *,
+        limit: int = 40,
+        cursor: str | None = None,
+    ) -> SessionListResponse:
+        """Read bounded project sessions without changing the current index selection."""
+
+        project = self._find_project(project_id)
+        try:
+            with self.registry.store_for_repository(project.repository_id) as store:
+                page = store.list_sessions(project_id, limit=limit, cursor=cursor)
+                index_cache: dict[str, IndexSnapshot] = {}
+                sessions: list[Session] = []
+                for record in page.sessions:
+                    index = index_cache.get(record.index_id)
+                    if index is None:
+                        index = store.load_index_snapshot(record.index_id)
+                        index_cache[record.index_id] = index
+                    sessions.append(_session_response(record, index))
+        except ServiceError:
+            raise
+        except StorageNotFoundError as exc:
+            raise ServiceError("not_found", 404, "requested project, session, or index was not found") from exc
+        except StorageInputError as exc:
+            raise ServiceError("invalid_input", 400, "session list parameters are invalid") from exc
+        except StorageError as exc:
+            raise ServiceError("internal_error", 500, "local session storage failed") from exc
+        return SessionListResponse(
+            project_id=project_id,
+            sessions=sessions,
+            next_cursor=page.next_cursor,
+            has_more=page.has_more,
+        )
+
+    def get_session(self, project_id: str, session_id: str) -> SessionResponse:
+        """Read one session and its fixed snapshot metadata."""
+
+        project = self._find_project(project_id)
+        try:
+            with self.registry.store_for_repository(project.repository_id) as store:
+                record = store.load_session(session_id)
+                if record.project_id != project_id:
+                    raise StorageNotFoundError("session is outside the requested project")
+                index = store.load_index_snapshot(record.index_id)
+                session = _session_response(record, index)
+        except ServiceError:
+            raise
+        except StorageNotFoundError as exc:
+            raise ServiceError("not_found", 404, "session was not found") from exc
+        except StorageError as exc:
+            raise ServiceError("internal_error", 500, "local session storage failed") from exc
+        return SessionResponse(session=session)
+
+    def list_session_messages(
+        self,
+        project_id: str,
+        session_id: str,
+        *,
+        limit: int = 100,
+        cursor: str | None = None,
+    ) -> SessionMessagesResponse:
+        """Read one session's append-only messages in server sequence order."""
+
+        project = self._find_project(project_id)
+        try:
+            with self.registry.store_for_repository(project.repository_id) as store:
+                page = store.list_session_messages(
+                    project_id,
+                    session_id,
+                    limit=limit,
+                    cursor=cursor,
+                )
+        except ServiceError:
+            raise
+        except StorageNotFoundError as exc:
+            raise ServiceError("not_found", 404, "session was not found") from exc
+        except StorageInputError as exc:
+            raise ServiceError("invalid_input", 400, "session message parameters are invalid") from exc
+        except StorageError as exc:
+            raise ServiceError("internal_error", 500, "local session storage failed") from exc
+        return SessionMessagesResponse(
+            project_id=project_id,
+            session_id=session_id,
+            messages=list(page.messages),
+            next_cursor=page.next_cursor,
+            has_more=page.has_more,
+        )
+
+    def append_session_message(
+        self,
+        project_id: str,
+        session_id: str,
+        request: AppendSessionMessageRequest,
+    ) -> SessionMessage:
+        """Append one visible message without starting a Run or invoking a model."""
+
+        project = self._find_project(project_id)
+        fingerprint = _session_message_fingerprint(project_id, session_id, request.source, request.content)
+        try:
+            with self.registry.store_for_repository(project.repository_id) as store:
+                record = store.load_session(session_id)
+                if record.project_id != project_id:
+                    raise StorageNotFoundError("session is outside the requested project")
+                return store.append_session_message(
+                    session_id,
+                    message_id=_new_session_message_id(),
+                    source=request.source,
+                    content=request.content,
+                    idempotency_key=request.idempotency_key,
+                    request_fingerprint=fingerprint,
+                    created_at=datetime.now(timezone.utc),
+                )
+        except ServiceError:
+            raise
+        except StorageConflictError as exc:
+            raise ServiceError("conflict", 409, "session message conflicts with an existing request") from exc
+        except StorageNotFoundError as exc:
+            raise ServiceError("not_found", 404, "session was not found") from exc
+        except StorageInputError as exc:
+            raise ServiceError("invalid_input", 400, "session message parameters are invalid") from exc
+        except StorageError as exc:
+            raise ServiceError("internal_error", 500, "local session storage failed") from exc
 
     def create_project_index(
         self,
@@ -1739,6 +1957,14 @@ def _new_project_id() -> str:
     return f"project-{uuid4().hex}"
 
 
+def _new_session_id() -> str:
+    return f"session-{uuid4().hex}"
+
+
+def _new_session_message_id() -> str:
+    return f"message-{uuid4().hex}"
+
+
 def _legacy_project_id(repository_id: str) -> str:
     import hashlib
 
@@ -1756,6 +1982,48 @@ def _project_response(record: ProjectRecord) -> Project:
         latest_index_id=record.latest_index_id,
         building_index_id=record.building_index_id,
     )
+
+
+def _session_response(record: SessionRecord, index: IndexSnapshot) -> Session:
+    return Session(
+        session_id=record.session_id,
+        project_id=record.project_id,
+        index=index,
+        feature_generation_id=record.feature_generation_id,
+        topic=record.topic,
+        created_at=record.created_at,
+        updated_at=record.updated_at,
+        message_count=record.message_count,
+    )
+
+
+def _session_creation_fingerprint(
+    project_id: str,
+    index_id: str,
+    feature_generation_id: str | None,
+    topic: str,
+) -> str:
+    return _session_fingerprint(
+        "create",
+        project_id,
+        index_id,
+        feature_generation_id,
+        topic,
+    )
+
+
+def _session_message_fingerprint(
+    project_id: str,
+    session_id: str,
+    source: str,
+    content: str,
+) -> str:
+    return _session_fingerprint("append", project_id, session_id, source, content)
+
+
+def _session_fingerprint(*parts: str | None) -> str:
+    payload = json.dumps(parts, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _index_response(relation) -> IndexResponse:

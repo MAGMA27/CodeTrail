@@ -6,6 +6,9 @@ import {
   isFeatureGenerationResponse,
   isFeatureGraphResponse,
   isProjectOverviewResponse,
+  isSessionListResponse,
+  isSessionMessagesResponse,
+  isSessionResponse,
   SCHEMA_VERSION,
 } from "./api.ts";
 
@@ -366,4 +369,62 @@ test("feature history and graph validators keep saved snapshot references explic
   const broken = structuredClone(graph) as typeof graph;
   broken.edges[0].origin = "static";
   assert.equal(isFeatureGraphResponse({ schema_version: SCHEMA_VERSION, graph: broken }), false);
+});
+
+function sessionPayload() {
+  const index = overview().index;
+  const session = {
+    schema_version: SCHEMA_VERSION,
+    session_id: "session-one",
+    project_id: "project-overview-test",
+    index,
+    feature_generation_id: null,
+    topic: "Why does the timeout path fail?",
+    created_at: "2026-09-12T00:00:00Z",
+    updated_at: "2026-09-12T00:00:00Z",
+    message_count: 1,
+  };
+  const message = {
+    schema_version: SCHEMA_VERSION,
+    message_id: "message-one",
+    session_id: session.session_id,
+    sequence: 1,
+    source: "human",
+    content: "Trace the timeout configuration.",
+    created_at: "2026-09-12T00:01:00Z",
+  };
+  return {
+    session,
+    message,
+    list: {
+      schema_version: SCHEMA_VERSION,
+      project_id: session.project_id,
+      sessions: [session],
+      next_cursor: null,
+      has_more: false,
+    },
+    messages: {
+      schema_version: SCHEMA_VERSION,
+      project_id: session.project_id,
+      session_id: session.session_id,
+      messages: [message],
+      next_cursor: null,
+      has_more: false,
+    },
+  };
+}
+
+test("session validators keep project, snapshot, and sequence boundaries explicit", () => {
+  const payload = sessionPayload();
+  assert.equal(isSessionResponse({ schema_version: SCHEMA_VERSION, session: payload.session }), true);
+  assert.equal(isSessionListResponse(payload.list), true);
+  assert.equal(isSessionMessagesResponse(payload.messages), true);
+
+  const crossProject = structuredClone(payload.list);
+  crossProject.sessions[0].project_id = "project-other";
+  assert.equal(isSessionListResponse(crossProject), false);
+
+  const reverseSequence = structuredClone(payload.messages);
+  reverseSequence.messages.push({ ...payload.message, message_id: "message-two", sequence: 0 });
+  assert.equal(isSessionMessagesResponse(reverseSequence), false);
 });

@@ -27,8 +27,13 @@ import {
   getProjectFeatureGeneration,
   importGitHubRepository,
   importLocalPath,
+  appendProjectSessionMessage,
+  createProjectSession,
+  getProjectSession,
   listProjectIndexes,
   listProjectFeatureGenerations,
+  listProjectSessionMessages,
+  listProjectSessions,
   listProjects,
   isHealthResponse,
   openProjectIndex,
@@ -60,6 +65,9 @@ import {
   type ProjectOverview,
   type ProjectRecord,
   type SearchMatch,
+  type Session,
+  type SessionMessage,
+  type SessionMessageSource,
   type SourceResponse,
   type SymbolRecord,
 } from "../lib/api";
@@ -75,7 +83,7 @@ import {
 
 type IndexUiStatus = "unindexed" | "creating" | "loading" | "ready" | "partial" | "error";
 type AsyncStatus = "idle" | "loading" | "success" | "empty" | "error";
-type WorkbenchView = "overview" | "feature_graph" | "graph";
+type WorkbenchView = "overview" | "feature_graph" | "graph" | "session";
 
 type SymbolNodeData = {
   symbol: SymbolRecord;
@@ -272,6 +280,13 @@ function newFeatureIdempotencyKey(): string {
   return `workbench-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
+function newSessionIdempotencyKey(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `session-${crypto.randomUUID()}`;
+  }
+  return `session-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 function featureAsyncStatus(generation: FeatureGeneration): AsyncStatus {
   if (generation.status === "failed") {
     return "error";
@@ -319,6 +334,10 @@ function featureSelectionStorageKey(projectId: string, indexId: string): string 
   return `codetrail.selectedFeatureGenerationId:${projectId}:${indexId}`;
 }
 
+function sessionSelectionStorageKey(projectId: string): string {
+  return `codetrail.selectedSessionId:${projectId}`;
+}
+
 type EvidenceLink = {
   projectId: string;
   indexId: string;
@@ -333,8 +352,8 @@ function readEvidenceLink(): { link: EvidenceLink | null; error: string | null }
   const params = new URLSearchParams(window.location.search);
   const keys = ["project_id", "index_id", "path", "start_line", "end_line", "content_hash", "evidence_id"];
   const values = Object.fromEntries(keys.map((key) => [key, params.get(key)]));
-  const hasAnyValue = Object.values(values).some((value) => value !== null);
-  if (!hasAnyValue) {
+  const hasEvidenceValue = keys.slice(1).some((key) => params.get(key) !== null);
+  if (!hasEvidenceValue) {
     return { link: null, error: null };
   }
   if (Object.values(values).some((value) => !value)) {
@@ -357,6 +376,27 @@ function readEvidenceLink(): { link: EvidenceLink | null; error: string | null }
     },
     error: null,
   };
+}
+
+type SessionLink = {
+  projectId: string;
+  sessionId: string;
+};
+
+function readSessionLink(): { link: SessionLink | null; error: string | null } {
+  const params = new URLSearchParams(window.location.search);
+  const projectId = params.get("project_id");
+  const sessionId = params.get("session_id");
+  if (projectId === null && sessionId === null) {
+    return { link: null, error: null };
+  }
+  if (sessionId === null) {
+    return { link: null, error: null };
+  }
+  if (!projectId || !sessionId) {
+    return { link: null, error: "工作台会话引用缺少必要的项目或会话参数。" };
+  }
+  return { link: { projectId, sessionId }, error: null };
 }
 
 export default function Workbench() {
@@ -419,6 +459,21 @@ export default function Workbench() {
   const [featureGraphError, setFeatureGraphError] = useState<string | null>(null);
   const [featureMode, setFeatureMode] = useState<FeatureGenerationMode>("fixture");
   const [featureSourceScope, setFeatureSourceScope] = useState<FeatureSourceScope>("entry_reachable");
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [sessionCursor, setSessionCursor] = useState<string | null>(null);
+  const [sessionHasMore, setSessionHasMore] = useState(false);
+  const [sessionStatus, setSessionStatus] = useState<AsyncStatus>("idle");
+  const [sessionError, setSessionError] = useState<string | null>(null);
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const [sessionMessages, setSessionMessages] = useState<SessionMessage[]>([]);
+  const [sessionMessagesCursor, setSessionMessagesCursor] = useState<string | null>(null);
+  const [sessionMessagesHasMore, setSessionMessagesHasMore] = useState(false);
+  const [sessionMessagesStatus, setSessionMessagesStatus] = useState<AsyncStatus>("idle");
+  const [sessionMessagesError, setSessionMessagesError] = useState<string | null>(null);
+  const [sessionTopic, setSessionTopic] = useState("");
+  const [sessionDraft, setSessionDraft] = useState("");
+  const [sessionWriteStatus, setSessionWriteStatus] = useState<AsyncStatus>("idle");
+  const [sessionWriteError, setSessionWriteError] = useState<string | null>(null);
   const [direction, setDirection] = useState<NeighborDirection>("both");
   const [edgeKinds, setEdgeKinds] = useState<EdgeKind[]>(["calls", "imports"]);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
@@ -436,6 +491,10 @@ export default function Workbench() {
   const featureController = useRef<AbortController | null>(null);
   const featureHistoryController = useRef<AbortController | null>(null);
   const featureGraphController = useRef<AbortController | null>(null);
+  const sessionController = useRef<AbortController | null>(null);
+  const sessionOpenController = useRef<AbortController | null>(null);
+  const sessionMessagesController = useRef<AbortController | null>(null);
+  const sessionWriteController = useRef<AbortController | null>(null);
   const indexRequestId = useRef(0);
   const projectRequestId = useRef(0);
   const importRequestId = useRef(0);
@@ -446,10 +505,23 @@ export default function Workbench() {
   const featureRequestId = useRef(0);
   const featureHistoryRequestId = useRef(0);
   const featureGraphRequestId = useRef(0);
+  const sessionRequestId = useRef(0);
+  const sessionOpenRequestId = useRef(0);
+  const sessionMessagesRequestId = useRef(0);
+  const sessionWriteRequestId = useRef(0);
   const featureIdempotencyKey = useRef<string | null>(null);
+  const sessionCreateRequest = useRef<{ projectId: string; topic: string; key: string } | null>(null);
+  const sessionMessageRequest = useRef<{
+    projectId: string;
+    sessionId: string;
+    content: string;
+    key: string;
+  } | null>(null);
   const knownGroupKeys = useRef<Set<string>>(new Set());
   const evidenceLink = useRef<EvidenceLink | null>(null);
   const evidenceLinkApplied = useRef(false);
+  const sessionLink = useRef<SessionLink | null>(null);
+  const sessionLinkApplied = useRef(false);
 
   const checkHealth = useCallback(async () => {
     healthController.current?.abort();
@@ -488,20 +560,28 @@ export default function Workbench() {
       }
       setProjects(response.projects);
       setProjectStatus(response.projects.length > 0 ? "success" : "empty");
-      const parsedLink = readEvidenceLink();
-      evidenceLink.current = parsedLink.link;
+      const parsedEvidenceLink = readEvidenceLink();
+      const parsedSessionLink = readSessionLink();
+      evidenceLink.current = parsedEvidenceLink.link;
       evidenceLinkApplied.current = false;
-      if (parsedLink.error) {
+      sessionLink.current = parsedSessionLink.link;
+      sessionLinkApplied.current = false;
+      const linkError = parsedEvidenceLink.error ?? parsedSessionLink.error;
+      if (parsedEvidenceLink.link && parsedSessionLink.link) {
         setProjectStatus("error");
-        setProjectError(parsedLink.error);
+        setProjectError("工作台链接同时包含源码证据和会话引用，已拒绝打开。请只保留一种引用。");
+      } else if (linkError) {
+        setProjectStatus("error");
+        setProjectError(linkError);
       }
       const savedProjectId = window.localStorage.getItem("codetrail.selectedProjectId");
-      const nextProject = parsedLink.error
+      const requestedProjectId = parsedEvidenceLink.link?.projectId ?? parsedSessionLink.link?.projectId;
+      const nextProject = linkError || (parsedEvidenceLink.link && parsedSessionLink.link)
         ? null
-        : parsedLink.link
-          ? response.projects.find((project) => project.project_id === parsedLink.link?.projectId) ?? null
+        : requestedProjectId
+          ? response.projects.find((project) => project.project_id === requestedProjectId) ?? null
           : response.projects.find((project) => project.project_id === savedProjectId) ?? response.projects[0] ?? null;
-      if (parsedLink.link && !nextProject) {
+      if (requestedProjectId && !nextProject) {
         setProjectStatus("error");
         setProjectError("引用的 project_id 不存在，已拒绝打开。");
       }
@@ -529,6 +609,10 @@ export default function Workbench() {
       featureController.current?.abort();
       featureHistoryController.current?.abort();
       featureGraphController.current?.abort();
+      sessionController.current?.abort();
+      sessionOpenController.current?.abort();
+      sessionMessagesController.current?.abort();
+      sessionWriteController.current?.abort();
     };
   }, [checkHealth]);
 
@@ -891,6 +975,319 @@ export default function Workbench() {
     change();
   }, []);
 
+  const resetSessions = useCallback(() => {
+    sessionController.current?.abort();
+    sessionOpenController.current?.abort();
+    sessionMessagesController.current?.abort();
+    sessionWriteController.current?.abort();
+    sessionRequestId.current += 1;
+    sessionOpenRequestId.current += 1;
+    sessionMessagesRequestId.current += 1;
+    sessionWriteRequestId.current += 1;
+    sessionCreateRequest.current = null;
+    sessionMessageRequest.current = null;
+    setSessions([]);
+    setSessionCursor(null);
+    setSessionHasMore(false);
+    setSessionStatus("idle");
+    setSessionError(null);
+    setSelectedSessionId(null);
+    setSessionMessages([]);
+    setSessionMessagesCursor(null);
+    setSessionMessagesHasMore(false);
+    setSessionMessagesStatus("idle");
+    setSessionMessagesError(null);
+    setSessionTopic("");
+    setSessionDraft("");
+    setSessionWriteStatus("idle");
+    setSessionWriteError(null);
+  }, []);
+
+  const loadSessionMessages = useCallback(
+    async (projectId: string, sessionId: string, cursor: string | null = null, append = false) => {
+      sessionMessagesController.current?.abort();
+      const controller = new AbortController();
+      sessionMessagesController.current = controller;
+      const requestId = ++sessionMessagesRequestId.current;
+      setSessionMessagesStatus("loading");
+      setSessionMessagesError(null);
+      try {
+        const response = await listProjectSessionMessages(
+          projectId,
+          sessionId,
+          100,
+          cursor ?? undefined,
+          controller.signal,
+        );
+        if (
+          !isLatestRequest(requestId, sessionMessagesRequestId.current) ||
+          response.project_id !== projectId ||
+          response.session_id !== sessionId
+        ) {
+          return;
+        }
+        setSessionMessages((previous) => {
+          if (!append) {
+            return response.messages;
+          }
+          const known = new Set(previous.map((message) => message.message_id));
+          return [...previous, ...response.messages.filter((message) => !known.has(message.message_id))];
+        });
+        setSessionMessagesCursor(response.next_cursor);
+        setSessionMessagesHasMore(response.has_more);
+        setSessionMessagesStatus(response.messages.length === 0 && !append ? "empty" : "success");
+      } catch (error) {
+        if (isAbortError(error) || !isLatestRequest(requestId, sessionMessagesRequestId.current)) {
+          return;
+        }
+        setSessionMessagesStatus("error");
+        setSessionMessagesError(errorMessage(error));
+      }
+    },
+    [],
+  );
+
+  const openSession = useCallback(
+    async (projectId: string, sessionId: string, knownSession?: Session) => {
+      let session = knownSession;
+      const requestId = ++sessionOpenRequestId.current;
+      try {
+        if (!session) {
+          sessionOpenController.current?.abort();
+          const controller = new AbortController();
+          sessionOpenController.current = controller;
+          const response = await getProjectSession(projectId, sessionId, controller.signal);
+          if (!isLatestRequest(requestId, sessionOpenRequestId.current)) {
+            return;
+          }
+          session = response.session;
+        }
+        if (!session || session.project_id !== projectId || session.session_id !== sessionId) {
+          throw new Error("返回的会话不属于请求的项目，已拒绝打开。");
+        }
+        setSessions((previous) => [
+          session!,
+          ...previous.filter((candidate) => candidate.session_id !== sessionId),
+        ]);
+        setSelectedSessionId(sessionId);
+        setViewMode("session");
+        setSessionDraft("");
+        setSessionWriteStatus("idle");
+        setSessionWriteError(null);
+        sessionMessageRequest.current = null;
+        window.localStorage.setItem(sessionSelectionStorageKey(projectId), sessionId);
+        const url = new URL(window.location.href);
+        url.search = "";
+        url.searchParams.set("project_id", projectId);
+        url.searchParams.set("session_id", sessionId);
+        window.history.replaceState(null, "", `${url.pathname}?${url.searchParams.toString()}${url.hash}`);
+        if (sessionLink.current?.projectId === projectId && sessionLink.current.sessionId === sessionId) {
+          sessionLinkApplied.current = true;
+        }
+        setSessionMessages([]);
+        setSessionMessagesCursor(null);
+        setSessionMessagesHasMore(false);
+        void loadSessionMessages(projectId, sessionId);
+      } catch (error) {
+        if (isAbortError(error) || !isLatestRequest(requestId, sessionOpenRequestId.current)) {
+          return;
+        }
+        setSessionStatus("error");
+        setSessionError(errorMessage(error));
+      }
+    },
+    [loadSessionMessages],
+  );
+
+  const selectSession = useCallback(
+    (sessionId: string) => {
+      if (!selectedProjectId) {
+        return;
+      }
+      const session = sessions.find((candidate) => candidate.session_id === sessionId);
+      void openSession(selectedProjectId, sessionId, session);
+    },
+    [openSession, selectedProjectId, sessions],
+  );
+
+  const loadSessions = useCallback(
+    async (projectId: string, cursor: string | null = null, append = false) => {
+      sessionController.current?.abort();
+      const controller = new AbortController();
+      sessionController.current = controller;
+      const requestId = ++sessionRequestId.current;
+      setSessionStatus("loading");
+      setSessionError(null);
+      try {
+        const response = await listProjectSessions(
+          projectId,
+          40,
+          cursor ?? undefined,
+          controller.signal,
+        );
+        if (!isLatestRequest(requestId, sessionRequestId.current) || response.project_id !== projectId) {
+          return;
+        }
+        setSessions((previous) => {
+          if (!append) {
+            return response.sessions;
+          }
+          const known = new Set(previous.map((session) => session.session_id));
+          return [...previous, ...response.sessions.filter((session) => !known.has(session.session_id))];
+        });
+        setSessionCursor(response.next_cursor);
+        setSessionHasMore(response.has_more);
+        setSessionStatus(response.sessions.length === 0 && !append ? "empty" : "success");
+        if (!append) {
+          const requested = !sessionLinkApplied.current && sessionLink.current?.projectId === projectId
+            ? sessionLink.current.sessionId
+            : null;
+          const saved = window.localStorage.getItem(sessionSelectionStorageKey(projectId));
+          const candidateId = requested ?? saved;
+          const candidate = candidateId
+            ? response.sessions.find((session) => session.session_id === candidateId)
+            : undefined;
+          if (candidate) {
+            void openSession(projectId, candidate.session_id, candidate);
+          } else if (requested) {
+            void openSession(projectId, requested);
+          }
+        }
+      } catch (error) {
+        if (isAbortError(error) || !isLatestRequest(requestId, sessionRequestId.current)) {
+          return;
+        }
+        setSessionStatus("error");
+        setSessionError(errorMessage(error));
+      }
+    },
+    [openSession],
+  );
+
+  const createSession = useCallback(
+    async (event: React.FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      if (!selectedProjectId) {
+        setSessionError("请先选择一个项目。");
+        return;
+      }
+      const topic = sessionTopic.trim();
+      if (!topic) {
+        setSessionError("请输入本次 Issue 或排查主题。");
+        return;
+      }
+      const previous = sessionCreateRequest.current;
+      const key = previous?.projectId === selectedProjectId && previous.topic === topic
+        ? previous.key
+        : newSessionIdempotencyKey();
+      sessionCreateRequest.current = { projectId: selectedProjectId, topic, key };
+      sessionWriteController.current?.abort();
+      const controller = new AbortController();
+      sessionWriteController.current = controller;
+      const requestId = ++sessionWriteRequestId.current;
+      setSessionWriteStatus("loading");
+      setSessionWriteError(null);
+      try {
+        const response = await createProjectSession(
+          selectedProjectId,
+          { topic, idempotencyKey: key },
+          controller.signal,
+        );
+        if (
+          !isLatestRequest(requestId, sessionWriteRequestId.current) ||
+          response.session.project_id !== selectedProjectId
+        ) {
+          return;
+        }
+        setSessions((previousSessions) => [
+          response.session,
+          ...previousSessions.filter((session) => session.session_id !== response.session.session_id),
+        ]);
+        setSessionStatus("success");
+        setSessionTopic("");
+        setSessionWriteStatus("success");
+        setSessionWriteError(null);
+        sessionCreateRequest.current = null;
+        await openSession(selectedProjectId, response.session.session_id, response.session);
+      } catch (error) {
+        if (isAbortError(error) || !isLatestRequest(requestId, sessionWriteRequestId.current)) {
+          return;
+        }
+        setSessionWriteStatus("error");
+        setSessionWriteError(errorMessage(error));
+      }
+    },
+    [openSession, selectedProjectId, sessionTopic],
+  );
+
+  const sendSessionMessage = useCallback(
+    async (event?: React.FormEvent<HTMLFormElement>) => {
+      event?.preventDefault();
+      if (!selectedProjectId || !selectedSessionId) {
+        setSessionWriteError("请先选择一个会话。");
+        return;
+      }
+      const content = sessionDraft.trim();
+      if (!content) {
+        setSessionWriteError("请输入要保存的消息。");
+        return;
+      }
+      const previous = sessionMessageRequest.current;
+      const key = previous?.projectId === selectedProjectId &&
+        previous.sessionId === selectedSessionId &&
+        previous.content === content
+        ? previous.key
+        : newSessionIdempotencyKey();
+      sessionMessageRequest.current = {
+        projectId: selectedProjectId,
+        sessionId: selectedSessionId,
+        content,
+        key,
+      };
+      sessionWriteController.current?.abort();
+      const controller = new AbortController();
+      sessionWriteController.current = controller;
+      const requestId = ++sessionWriteRequestId.current;
+      setSessionWriteStatus("loading");
+      setSessionWriteError(null);
+      try {
+        const message = await appendProjectSessionMessage(
+          selectedProjectId,
+          selectedSessionId,
+          "human" satisfies SessionMessageSource,
+          content,
+          key,
+          controller.signal,
+        );
+        if (
+          !isLatestRequest(requestId, sessionWriteRequestId.current) ||
+          message.session_id !== selectedSessionId
+        ) {
+          return;
+        }
+        setSessionMessages((previousMessages) => previousMessages.some(
+          (candidate) => candidate.message_id === message.message_id,
+        ) ? previousMessages : [...previousMessages, message]);
+        setSessions((previousSessions) => previousSessions.map((session) => (
+          session.session_id === selectedSessionId
+            ? { ...session, message_count: Math.max(session.message_count, message.sequence), updated_at: message.created_at }
+            : session
+        )));
+        setSessionDraft("");
+        setSessionWriteStatus("success");
+        setSessionWriteError(null);
+        sessionMessageRequest.current = null;
+      } catch (error) {
+        if (isAbortError(error) || !isLatestRequest(requestId, sessionWriteRequestId.current)) {
+          return;
+        }
+        setSessionWriteStatus("error");
+        setSessionWriteError(errorMessage(error));
+      }
+    },
+    [selectedProjectId, selectedSessionId, sessionDraft],
+  );
+
   const selectFeatureEvidence = useCallback(
     (evidence: Evidence) => {
       if (!indexResponse || !selectedProjectId) {
@@ -1003,6 +1400,7 @@ export default function Workbench() {
     if (!selectedProjectId) {
       indexController.current?.abort();
       indexRequestId.current += 1;
+      resetSessions();
       setProjectIndexes([]);
       setIndexResponse(null);
       setIndexIdInput("");
@@ -1018,8 +1416,10 @@ export default function Workbench() {
     setProjectName(project.name);
     setRepositoryId(project.repository_id);
     window.localStorage.setItem("codetrail.selectedProjectId", project.project_id);
+    resetSessions();
+    void loadSessions(project.project_id);
     void loadSelectedProject(project.project_id);
-  }, [clearExploration, loadSelectedProject, selectedProjectId]);
+  }, [clearExploration, loadSelectedProject, loadSessions, resetSessions, selectedProjectId]);
 
   useEffect(() => {
     const indexId = indexResponse?.index.index_id;
@@ -1900,6 +2300,67 @@ export default function Workbench() {
               <div className="project-empty"><span>∅</span><p>还没有项目，先创建一个服务端仓库项目。</p></div>
             )}
           </div>
+          <div className="session-rail" aria-label="当前项目会话">
+            <div className="session-rail-heading">
+              <div>
+                <span className="section-index">ISSUE SESSION</span>
+                <strong>继续排查</strong>
+              </div>
+              <span className="graph-status" data-state={sessionStatus}>
+                {sessionStatus === "loading" ? "载入中" : sessionStatus === "error" ? "失败" : `${sessions.length} 个会话`}
+              </span>
+            </div>
+            <form className="session-create-form" onSubmit={(event) => void createSession(event)}>
+              <label htmlFor="session-topic">新会话主题</label>
+              <div className="session-create-row">
+                <input
+                  id="session-topic"
+                  value={sessionTopic}
+                  onChange={(event) => {
+                    setSessionTopic(event.target.value);
+                    setSessionError(null);
+                  }}
+                  placeholder="例如：timeout 配置为什么会失败？"
+                  maxLength={500}
+                />
+                <button type="submit" className="primary-button" disabled={!selectedProjectId || sessionWriteStatus === "loading"}>
+                  {sessionWriteStatus === "loading" ? "保存中…" : "新建会话"}
+                </button>
+              </div>
+            </form>
+            {sessionError ? <p className="inline-error" role="alert">{sessionError}</p> : null}
+            {sessions.length > 0 ? (
+              <div className="session-list" aria-live="polite">
+                {sessions.map((session) => (
+                  <button
+                    type="button"
+                    className={`session-card${selectedSessionId === session.session_id ? " is-selected" : ""}`}
+                    key={session.session_id}
+                    onClick={() => selectSession(session.session_id)}
+                    aria-pressed={selectedSessionId === session.session_id}
+                  >
+                    <span className="session-card-copy">
+                      <strong>{session.topic}</strong>
+                      <small>{session.message_count} 条消息 · {session.index.revision} · {session.index.snapshot_hash.slice(0, 10)}</small>
+                    </span>
+                    <span className="session-card-time">{formatFeatureCreatedAt(session.updated_at)}</span>
+                  </button>
+                ))}
+              </div>
+            ) : sessionStatus === "empty" ? (
+              <p className="session-empty">当前项目还没有会话；创建后会固定到当前可用快照。</p>
+            ) : null}
+            {sessionHasMore ? (
+              <button
+                type="button"
+                className="text-button session-more"
+                onClick={() => selectedProjectId && void loadSessions(selectedProjectId, sessionCursor, true)}
+                disabled={sessionStatus === "loading"}
+              >
+                加载更多会话
+              </button>
+            ) : null}
+          </div>
           <div className="project-forms">
             <form className="project-create-form" onSubmit={(event) => void createNewProject(event)}>
               <label htmlFor="project-name">新项目名称</label>
@@ -2132,17 +2593,18 @@ export default function Workbench() {
           <div className="search-footnote">搜索只返回当前 index_id 的符号与源码命中，不等于已确认影响。</div>
         </aside>
 
-        <section className="graph-panel panel-surface" aria-label={viewMode === "overview" ? "项目知识页" : viewMode === "feature_graph" ? "功能关系图" : "代码关系图"}>
+        <section className="graph-panel panel-surface" aria-label={viewMode === "overview" ? "项目知识页" : viewMode === "feature_graph" ? "功能关系图" : viewMode === "session" ? "Issue 会话" : "代码关系图"}>
           <div className="panel-heading graph-heading">
             <div>
               <p className="section-index">02 / TOPOLOGY</p>
-              <h2>{viewMode === "overview" ? "项目知识页" : viewMode === "feature_graph" ? "功能关系图" : "关系图谱"} <span>{viewMode === "overview" ? `${overview?.coverage.visible_modules ?? 0} modules` : viewMode === "feature_graph" ? `${featureGraph?.nodes.length ?? 0}/40` : `${graph.symbols.length}/40`}</span></h2>
+              <h2>{viewMode === "overview" ? "项目知识页" : viewMode === "feature_graph" ? "功能关系图" : viewMode === "session" ? "Issue Session" : "关系图谱"} <span>{viewMode === "overview" ? `${overview?.coverage.visible_modules ?? 0} modules` : viewMode === "feature_graph" ? `${featureGraph?.nodes.length ?? 0}/40` : viewMode === "session" ? `${sessionMessages.length} messages` : `${graph.symbols.length}/40`}</span></h2>
             </div>
             <div className="graph-actions">
               <div className="view-toggle" role="tablist" aria-label="工作台视图">
                 <button type="button" role="tab" aria-selected={viewMode === "overview"} className={viewMode === "overview" ? "is-active" : ""} onClick={() => setViewMode("overview")}>知识页</button>
                 <button type="button" role="tab" aria-selected={viewMode === "feature_graph"} className={viewMode === "feature_graph" ? "is-active" : ""} onClick={() => setViewMode("feature_graph")} disabled={!featureGeneration}>功能图</button>
                 <button type="button" role="tab" aria-selected={viewMode === "graph"} className={viewMode === "graph" ? "is-active" : ""} onClick={() => setViewMode("graph")}>代码关系</button>
+                <button type="button" role="tab" aria-selected={viewMode === "session"} className={viewMode === "session" ? "is-active" : ""} onClick={() => selectedSessionId && setViewMode("session")} disabled={!selectedSessionId}>会话</button>
               </div>
               {viewMode === "feature_graph" ? (
                 <button type="button" className="focus-button" onClick={() => featureFlowInstance?.fitView({ padding: 0.18, duration: 320 })} disabled={!featureFlowModel.nodes.length}>聚焦</button>
@@ -2159,6 +2621,8 @@ export default function Workbench() {
                   <label className="filter-toggle"><input type="checkbox" checked={edgeKinds.includes("imports")} onChange={() => toggleEdgeKind("imports")} disabled={!selectedId} /><span>imports</span></label>
                   <button type="button" className="focus-button" onClick={() => flowInstance?.fitView({ padding: 0.18, duration: 320 })} disabled={!flowModel.nodes.length}>聚焦</button>
                 </>
+              ) : viewMode === "session" ? (
+                <button type="button" className="focus-button" onClick={() => setViewMode("overview")}>返回知识页</button>
               ) : null}
             </div>
           </div>
@@ -2173,6 +2637,14 @@ export default function Workbench() {
               <span className="graph-status" data-state={featureGraphStatus}>{featureGraphStatus === "loading" ? "功能图载入中" : featureGraphStatus === "error" ? "功能图请求失败" : featureGraphStatus === "empty" ? "当前版本没有可展开节点" : featureGraphStatus === "success" ? "语义 / 静态关系已分开" : "选择一个已保存版本载入功能图"}</span>
               {featureGraph?.truncated ? <span className="truncated-badge">已截断 · {featureGraph.truncation_reason}</span> : null}
               {featureGraphError ? <span className="inline-error">{featureGraphError}</span> : null}
+            </div>
+          ) : viewMode === "session" ? (
+            <div className="graph-status-row">
+              <span className="graph-status" data-state={sessionMessagesStatus}>
+                {sessionMessagesStatus === "loading" ? "消息载入中" : sessionMessagesStatus === "error" ? "消息载入失败" : sessionMessagesStatus === "empty" ? "暂无消息" : "仅保存消息"}
+              </span>
+              <span className="session-boundary-note">不启动 Run，不调用模型；消息会作为不可信输入保存。</span>
+              {sessionMessagesError ? <span className="inline-error">{sessionMessagesError}</span> : null}
             </div>
           ) : (
             <div className="graph-status-row">
@@ -2427,6 +2899,63 @@ export default function Workbench() {
               ) : (
                 <div className="graph-empty"><div className="graph-crosshair" aria-hidden="true"><span /><span /></div><p>选择一个已保存功能版本。</p><small>功能图只读取保存的功能结果和同一 index_id 的静态关系，不会再次调用模型。</small></div>
               )}
+            </div>
+          ) : viewMode === "session" ? (
+            <div className="session-stage">
+              {selectedSessionId ? (
+                <>
+                  {sessions.find((session) => session.session_id === selectedSessionId) ? (
+                    <div className="session-stage-heading">
+                      <div>
+                        <span className="overview-kicker">SESSION / FIXED SNAPSHOT</span>
+                        <h3>{sessions.find((session) => session.session_id === selectedSessionId)?.topic}</h3>
+                      </div>
+                      <div className="session-stage-meta">
+                        <code>{sessions.find((session) => session.session_id === selectedSessionId)?.index.revision}</code>
+                        <small>{sessions.find((session) => session.session_id === selectedSessionId)?.index.snapshot_hash.slice(0, 12)}</small>
+                      </div>
+                    </div>
+                  ) : null}
+                  {sessionMessagesStatus === "loading" && sessionMessages.length === 0 ? (
+                    <div className="loading-note"><span className="loader" /> 正在读取这个会话的消息…</div>
+                  ) : sessionMessagesStatus === "error" && sessionMessages.length === 0 ? (
+                    <div className="graph-empty"><div className="graph-crosshair" aria-hidden="true"><span /><span /></div><p>会话消息请求失败。</p><small>{sessionMessagesError ?? "请重试。"}</small><button type="button" className="secondary-button" onClick={() => selectedProjectId && void loadSessionMessages(selectedProjectId, selectedSessionId)}>重试</button></div>
+                  ) : (
+                    <div className="session-message-list" aria-live="polite">
+                      {sessionMessages.length > 0 ? sessionMessages.map((message) => (
+                        <article className={`session-message session-message-${message.source}`} key={message.message_id}>
+                          <div className="session-message-heading"><strong>{message.source === "human" ? "人" : "Agent"}</strong><span>#{message.sequence} · {formatFeatureCreatedAt(message.created_at)}</span></div>
+                          <p>{message.content}</p>
+                        </article>
+                      )) : <p className="session-empty">还没有消息。先写下问题或下一步，当前版本只会保存它。</p>}
+                    </div>
+                  )}
+                  {sessionMessagesHasMore ? <button type="button" className="secondary-button session-messages-more" onClick={() => selectedProjectId && void loadSessionMessages(selectedProjectId, selectedSessionId, sessionMessagesCursor, true)} disabled={sessionMessagesStatus === "loading"}>加载更多消息</button> : null}
+                  <form className="session-message-form" onSubmit={(event) => void sendSessionMessage(event)}>
+                    <label htmlFor="session-message">追加消息</label>
+                    <textarea
+                      id="session-message"
+                      value={sessionDraft}
+                      onChange={(event) => {
+                        setSessionDraft(event.target.value);
+                        setSessionWriteError(null);
+                        const pending = sessionMessageRequest.current;
+                        if (pending && pending.content !== event.target.value.trim()) {
+                          sessionMessageRequest.current = null;
+                        }
+                      }}
+                      placeholder="输入要交给下一步人或 Agent 的问题、约束或补充…"
+                      maxLength={20_000}
+                      rows={5}
+                    />
+                    <div className="session-message-actions">
+                      <small>保存后不会生成回复，也不会产生模型费用。</small>
+                      <button type="submit" className="primary-button" disabled={sessionWriteStatus === "loading" || !selectedSessionId}>{sessionWriteStatus === "loading" ? "保存中…" : "保存消息"}</button>
+                    </div>
+                    {sessionWriteError ? <p className="inline-error" role="alert">{sessionWriteError}<button type="button" className="text-button" onClick={() => void sendSessionMessage()}>重试</button></p> : null}
+                  </form>
+                </>
+              ) : <div className="graph-empty"><div className="graph-crosshair" aria-hidden="true"><span /><span /></div><p>从左侧选择一个会话。</p><small>每个会话只属于一个项目，并固定到创建时的不可变快照。</small></div>}
             </div>
           ) : (
             <div className="graph-stage">

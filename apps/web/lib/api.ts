@@ -161,6 +161,59 @@ export type ProjectIndexesResponse = {
   building_index_id: string | null;
 };
 
+export type SessionMessageSource = "human" | "agent";
+
+export type Session = {
+  schema_version: typeof SCHEMA_VERSION;
+  session_id: string;
+  project_id: string;
+  index: IndexSnapshot;
+  feature_generation_id: string | null;
+  topic: string;
+  created_at: string;
+  updated_at: string;
+  message_count: number;
+};
+
+export type SessionMessage = {
+  schema_version: typeof SCHEMA_VERSION;
+  message_id: string;
+  session_id: string;
+  sequence: number;
+  source: SessionMessageSource;
+  content: string;
+  created_at: string;
+};
+
+export type SessionResponse = {
+  schema_version: typeof SCHEMA_VERSION;
+  session: Session;
+};
+
+export type SessionListResponse = {
+  schema_version: typeof SCHEMA_VERSION;
+  project_id: string;
+  sessions: Session[];
+  next_cursor: string | null;
+  has_more: boolean;
+};
+
+export type SessionMessagesResponse = {
+  schema_version: typeof SCHEMA_VERSION;
+  project_id: string;
+  session_id: string;
+  messages: SessionMessage[];
+  next_cursor: string | null;
+  has_more: boolean;
+};
+
+export type CreateSessionInput = {
+  topic: string;
+  indexId?: string;
+  featureGenerationId?: string;
+  idempotencyKey?: string;
+};
+
 export type SearchMatch = {
   rank: number;
   symbol: SymbolRecord;
@@ -482,6 +535,10 @@ function isNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
+function isPositiveInteger(value: unknown): value is number {
+  return isNumber(value) && Number.isInteger(value) && value > 0;
+}
+
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every(isString);
 }
@@ -671,6 +728,80 @@ export function isProjectIndexesResponse(value: unknown): value is ProjectIndexe
     value.indexes.every(isIndexSnapshot) &&
     isNullableString(value.latest_index_id) &&
     isNullableString(value.building_index_id)
+  );
+}
+
+export function isSession(value: unknown): value is Session {
+  return (
+    isRecord(value) &&
+    value.schema_version === SCHEMA_VERSION &&
+    isString(value.session_id) &&
+    isString(value.project_id) &&
+    isIndexSnapshot(value.index) &&
+    value.index.status === "ready" &&
+    isNullableString(value.feature_generation_id) &&
+    isString(value.topic) &&
+    isString(value.created_at) &&
+    isString(value.updated_at) &&
+    isNonNegativeInteger(value.message_count)
+  );
+}
+
+export function isSessionMessage(value: unknown): value is SessionMessage {
+  return (
+    isRecord(value) &&
+    value.schema_version === SCHEMA_VERSION &&
+    isString(value.message_id) &&
+    isString(value.session_id) &&
+    isPositiveInteger(value.sequence) &&
+    ["human", "agent"].includes(String(value.source)) &&
+    isString(value.content) &&
+    isString(value.created_at)
+  );
+}
+
+export function isSessionResponse(value: unknown): value is SessionResponse {
+  return isRecord(value) && value.schema_version === SCHEMA_VERSION && isSession(value.session);
+}
+
+export function isSessionListResponse(value: unknown): value is SessionListResponse {
+  if (
+    !isRecord(value) ||
+    value.schema_version !== SCHEMA_VERSION ||
+    !isString(value.project_id) ||
+    !Array.isArray(value.sessions) ||
+    !value.sessions.every(isSession) ||
+    !isNullableString(value.next_cursor) ||
+    typeof value.has_more !== "boolean" ||
+    value.has_more !== (value.next_cursor !== null)
+  ) {
+    return false;
+  }
+  const sessionIds = new Set(value.sessions.map((session) => session.session_id));
+  return sessionIds.size === value.sessions.length && value.sessions.every(
+    (session) => session.project_id === value.project_id,
+  );
+}
+
+export function isSessionMessagesResponse(value: unknown): value is SessionMessagesResponse {
+  if (
+    !isRecord(value) ||
+    value.schema_version !== SCHEMA_VERSION ||
+    !isString(value.project_id) ||
+    !isString(value.session_id) ||
+    !Array.isArray(value.messages) ||
+    !value.messages.every(isSessionMessage) ||
+    !isNullableString(value.next_cursor) ||
+    typeof value.has_more !== "boolean" ||
+    value.has_more !== (value.next_cursor !== null)
+  ) {
+    return false;
+  }
+  const sequences = value.messages.map((message) => message.sequence);
+  return (
+    new Set(value.messages.map((message) => message.message_id)).size === value.messages.length &&
+    value.messages.every((message) => message.session_id === value.session_id) &&
+    sequences.every((sequence, index) => index === 0 || sequence > sequences[index - 1])
   );
 }
 
@@ -1416,6 +1547,101 @@ export function listProjectIndexes(
     isProjectIndexesResponse,
     { signal },
   );
+}
+
+export function listProjectSessions(
+  projectId: string,
+  limit = 40,
+  cursor?: string,
+  signal?: AbortSignal,
+): Promise<SessionListResponse> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (cursor) {
+    params.set("cursor", cursor);
+  }
+  return requestJson(
+    `/api/projects/${encodeURIComponent(projectId)}/sessions?${params.toString()}`,
+    isSessionListResponse,
+    { signal },
+  );
+}
+
+export function getProjectSession(
+  projectId: string,
+  sessionId: string,
+  signal?: AbortSignal,
+): Promise<SessionResponse> {
+  return requestJson(
+    `/api/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}`,
+    isSessionResponse,
+    { signal },
+  );
+}
+
+export function listProjectSessionMessages(
+  projectId: string,
+  sessionId: string,
+  limit = 100,
+  cursor?: string,
+  signal?: AbortSignal,
+): Promise<SessionMessagesResponse> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (cursor) {
+    params.set("cursor", cursor);
+  }
+  return requestJson(
+    `/api/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/messages?${params.toString()}`,
+    isSessionMessagesResponse,
+    { signal },
+  );
+}
+
+export function createProjectSession(
+  projectId: string,
+  input: CreateSessionInput,
+  signal?: AbortSignal,
+): Promise<SessionResponse> {
+  return requestJson(
+    `/api/projects/${encodeURIComponent(projectId)}/sessions`,
+    isSessionResponse,
+    {
+      method: "POST",
+      signal,
+      body: JSON.stringify({
+        schema_version: SCHEMA_VERSION,
+        topic: input.topic,
+        ...(input.indexId ? { index_id: input.indexId } : {}),
+        ...(input.featureGenerationId ? { feature_generation_id: input.featureGenerationId } : {}),
+        ...(input.idempotencyKey ? { idempotency_key: input.idempotencyKey } : {}),
+      }),
+    },
+  );
+}
+
+export function appendProjectSessionMessage(
+  projectId: string,
+  sessionId: string,
+  source: SessionMessageSource,
+  content: string,
+  idempotencyKey?: string,
+  signal?: AbortSignal,
+): Promise<SessionMessage> {
+  return requestJson(
+    `/api/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/messages`,
+    (value): value is { schema_version: typeof SCHEMA_VERSION; message: SessionMessage } => (
+      isRecord(value) && value.schema_version === SCHEMA_VERSION && isSessionMessage(value.message)
+    ),
+    {
+      method: "POST",
+      signal,
+      body: JSON.stringify({
+        schema_version: SCHEMA_VERSION,
+        source,
+        content,
+        ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
+      }),
+    },
+  ).then((response) => response.message);
 }
 
 export function createProjectIndex(
