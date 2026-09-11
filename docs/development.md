@@ -12,7 +12,9 @@
 | --- | --- |
 | 常驻开发约束与 skill 路由 | [AGENTS.md](../AGENTS.md) |
 | 文档格式与验证规则 | 本文 |
-| 子系统当前行为与限制 | [子系统索引](subsystems/README.md) 指向的页面 |
+| 目录当前职责、使用与限制 | 最近的源码目录 README；尚未迁移的事实暂由现有子系统页面拥有 |
+| 跨目录协作和子系统导航 | [子系统索引](subsystems/README.md) 指向的页面，链接局部 README |
+| 方法、类型与事件的精确语义 | 声明旁的 docstring/JSDoc |
 | Python 数据契约 | [contracts.py](../apps/api/app/contracts.py) |
 | HTTP 路由与响应声明 | [main.py](../apps/api/app/main.py) 及运行时 OpenAPI |
 | 导出 Schema | [生成器](../apps/api/app/export_schema.py) 产生的 JSON，禁止手改 |
@@ -22,6 +24,16 @@
 同一事实只在一处详细维护，其他位置链接。当前文档写当前行为；历史理由写决策，计划明确标为未实现。记录验证必须带实际范围，不把过去运行结果当作当前证据。
 
 ## 统一格式
+
+### 就近文档
+
+处理子系统时沿源码目录向上读取 README.md 与适用 AGENTS.md。以独立职责选择位置：apps/api、apps/web、contracts、fixtures 可以拥有 README；将来形成独立目录的索引、Agent 或 Run 子系统在其目录维护 README。不因文档要求重组源码，不给每个文件创建 README。平铺模块由共享目录 README 导航，模块 docstring 描述自身语义。
+
+在已授权开发或文档维护范围内，受影响的独立职责目录缺少 README 时自动创建，采用 [就近 README 框架](templates/local-readme.md)，写清实际实现与限制。已有文档保留有价值的内容，将缺少的框架内容补入；非平凡更新时逐步统一栏目，无需为了格式重写无关内容。只读设计与审查报告缺口，不自动修改文件。仅修改工作流规则不要求全仓迁移。
+
+局部 README 拥有目录级事实，集中子系统文档负责跨目录说明与链接。迁移详细说明后将原文改成导航链接，同步父级 README 与子系统索引，保留现有有效链接。不要同时复制接口字段、行为和限制；精确接口契约在源码声明，生成 Schema 仍由生成器拥有。
+
+AGENTS.md 仅记录该目录额外的开发规则、所需阅读和检查命令。没有额外规则就不创建；不复制根级规则或 README。新 README 的栏目均需有具体内容，不适用时解释原因，不留下模板占位说明。
 
 子系统页面使用 [模板](templates/subsystem.md)，栏目保留且内容非空，不适用时解释原因。一个子系统可以对应多个文件，不强制按目录拆包。索引 owners 是根目录相对路径前缀或文件，覆盖 apps/api/app、apps/web/app、contracts、fixtures 下受检源码；新增独立子系统才增加页面。
 
