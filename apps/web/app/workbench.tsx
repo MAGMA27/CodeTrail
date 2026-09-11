@@ -21,6 +21,7 @@ import {
   createProjectIndex,
   getHealth,
   getProjectNeighbors,
+  importGitHubRepository,
   importLocalPath,
   listProjectIndexes,
   listProjects,
@@ -28,6 +29,8 @@ import {
   openProjectIndex,
   readProjectSource,
   retryLocalImport,
+  retryGitHubImport,
+  retryImportCleanup,
   searchProjectIndex,
   type CodeEdge,
   type EdgeKind,
@@ -36,6 +39,7 @@ import {
   type ImportStatus,
   type IndexResponse,
   type ImportAttempt,
+  type GitHubImportResponse,
   type LocalImportResponse,
   type NeighborDirection,
   type ProjectRecord,
@@ -244,6 +248,12 @@ export default function Workbench() {
   const [importStatus, setImportStatus] = useState<ImportStatus | null>(null);
   const [importAttempt, setImportAttempt] = useState<ImportAttempt | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
+  const [githubImportName, setGithubImportName] = useState("GitHub Python project");
+  const [githubUrl, setGithubUrl] = useState("");
+  const [githubRef, setGithubRef] = useState("");
+  const [githubImportStatus, setGithubImportStatus] = useState<ImportStatus | null>(null);
+  const [githubImportAttempt, setGithubImportAttempt] = useState<ImportAttempt | null>(null);
+  const [githubImportError, setGithubImportError] = useState<string | null>(null);
   const [projectIndexes, setProjectIndexes] = useState<IndexResponse["index"][]>([]);
   const [repositoryId, setRepositoryId] = useState("timeout-demo");
   const [revision, setRevision] = useState("fixture-v1");
@@ -603,6 +613,27 @@ export default function Workbench() {
     setProjectStatus("success");
   }, []);
 
+  const applyGitHubImportResponse = useCallback((response: GitHubImportResponse) => {
+    setGithubImportAttempt(response.attempt);
+    setGithubImportStatus(response.attempt.status);
+    setGithubImportError(
+      response.attempt.status === "ready"
+        ? response.cleanup_status === "failed"
+          ? response.cleanup_error ?? "索引已完成，但临时目录清理失败。"
+          : null
+        : response.attempt.error_message ?? "GitHub 导入未完成。",
+    );
+    setProjects((previous) => [
+      ...previous.filter((project) => project.project_id !== response.project.project_id),
+      response.project,
+    ]);
+    setSelectedProjectId(response.project.project_id);
+    setProjectStatus("success");
+    if (response.index) {
+      applyIndexResponse(response.index);
+    }
+  }, [applyIndexResponse]);
+
   const importLocalProject = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault();
@@ -668,6 +699,94 @@ export default function Workbench() {
       setImportError(errorMessage(error));
     }
   }, [applyImportResponse, importAttempt]);
+
+  const importGitHubProject = useCallback(
+    async (event: React.FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      const name = githubImportName.trim();
+      const url = githubUrl.trim();
+      const ref = githubRef.trim();
+      if (!name || !url) {
+        setGithubImportError("请输入项目名称和标准 GitHub HTTPS 仓库地址。" );
+        setGithubImportStatus("failed");
+        return;
+      }
+      importController.current?.abort();
+      const controller = new AbortController();
+      importController.current = controller;
+      const requestId = ++importRequestId.current;
+      setGithubImportStatus("queued");
+      setGithubImportAttempt(null);
+      setGithubImportError(null);
+      try {
+        const response = await importGitHubRepository(
+          name,
+          url,
+          ref || undefined,
+          undefined,
+          controller.signal,
+        );
+        if (!isLatestRequest(requestId, importRequestId.current)) {
+          return;
+        }
+        applyGitHubImportResponse(response);
+      } catch (error) {
+        if (isAbortError(error) || !isLatestRequest(requestId, importRequestId.current)) {
+          return;
+        }
+        setGithubImportStatus("failed");
+        setGithubImportError(errorMessage(error));
+      }
+    }, [applyGitHubImportResponse, githubImportName, githubRef, githubUrl],
+  );
+
+  const retryGitHubProjectImport = useCallback(async () => {
+    if (!githubImportAttempt) {
+      return;
+    }
+    importController.current?.abort();
+    const controller = new AbortController();
+    importController.current = controller;
+    const requestId = ++importRequestId.current;
+    setGithubImportStatus("queued");
+    setGithubImportError(null);
+    try {
+      const response = await retryGitHubImport(githubImportAttempt.attempt_id, controller.signal);
+      if (!isLatestRequest(requestId, importRequestId.current)) {
+        return;
+      }
+      applyGitHubImportResponse(response);
+    } catch (error) {
+      if (isAbortError(error) || !isLatestRequest(requestId, importRequestId.current)) {
+        return;
+      }
+      setGithubImportStatus("failed");
+      setGithubImportError(errorMessage(error));
+    }
+  }, [applyGitHubImportResponse, githubImportAttempt]);
+
+  const retryGitHubCleanup = useCallback(async () => {
+    if (!githubImportAttempt) {
+      return;
+    }
+    importController.current?.abort();
+    const controller = new AbortController();
+    importController.current = controller;
+    const requestId = ++importRequestId.current;
+    setGithubImportError(null);
+    try {
+      const response = await retryImportCleanup(githubImportAttempt.attempt_id, controller.signal);
+      if (!isLatestRequest(requestId, importRequestId.current)) {
+        return;
+      }
+      applyGitHubImportResponse(response);
+    } catch (error) {
+      if (isAbortError(error) || !isLatestRequest(requestId, importRequestId.current)) {
+        return;
+      }
+      setGithubImportError(errorMessage(error));
+    }
+  }, [applyGitHubImportResponse, githubImportAttempt]);
 
   const createNewIndex = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
@@ -1208,6 +1327,56 @@ export default function Workbench() {
                 </div>
               ) : null}
             </form>
+            <form className="project-create-form project-import-form" onSubmit={(event) => void importGitHubProject(event)}>
+              <label htmlFor="github-import-name">导入 GitHub 仓库 / 项目名称</label>
+              <input
+                id="github-import-name"
+                value={githubImportName}
+                onChange={(event) => setGithubImportName(event.target.value)}
+                placeholder="GitHub Python project"
+                spellCheck={false}
+              />
+              <label htmlFor="github-url">公开 GitHub HTTPS 地址</label>
+              <input
+                id="github-url"
+                value={githubUrl}
+                onChange={(event) => setGithubUrl(event.target.value)}
+                placeholder="https://github.com/owner/repository"
+                spellCheck={false}
+                inputMode="url"
+              />
+              <label htmlFor="github-ref">分支 / tag / commit（可选）</label>
+              <input
+                id="github-ref"
+                value={githubRef}
+                onChange={(event) => setGithubRef(event.target.value)}
+                placeholder="留空使用默认分支"
+                spellCheck={false}
+              />
+              <small className="form-help">只获取 GitHub 官方 archive，并固定到解析出的 commit；仅索引 Python 文件。</small>
+              <button type="submit" className="primary-button" disabled={githubImportStatus === "queued" || githubImportStatus === "acquiring" || githubImportStatus === "indexing"}>
+                {githubImportStatus === "acquiring" ? "获取中…" : githubImportStatus === "indexing" ? "建立中…" : "导入 GitHub 仓库"}
+              </button>
+              {githubImportAttempt ? (
+                <div className="import-status" data-state={githubImportAttempt.status}>
+                  <span>{importStatusLabel(githubImportAttempt.status)}</span>
+                  <code>{githubImportAttempt.resolved_commit?.slice(0, 12) ?? githubImportAttempt.attempt_id}</code>
+                  {githubImportAttempt.status === "failed" || githubImportAttempt.status === "interrupted" ? (
+                    <button type="button" className="text-button" onClick={() => void retryGitHubProjectImport()}>
+                      重试
+                    </button>
+                  ) : null}
+                  {githubImportAttempt.cleanup_status === "failed" ? (
+                    <button type="button" className="text-button" onClick={() => void retryGitHubCleanup()}>
+                      清理临时目录
+                    </button>
+                  ) : null}
+                  {githubImportAttempt.status === "ready" ? (
+                    <small>commit {githubImportAttempt.resolved_commit?.slice(0, 12)} · snapshot {githubImportAttempt.content_hash?.slice(0, 12)}{githubImportAttempt.cleanup_status === "failed" ? " · 清理待重试" : ""}</small>
+                  ) : null}
+                </div>
+              ) : null}
+            </form>
           </div>
         </div>
       </section>
@@ -1256,9 +1425,9 @@ export default function Workbench() {
         </button>
       </section>
 
-      {indexError || connectionError || projectError || importError ? (
+      {indexError || connectionError || projectError || importError || githubImportError ? (
         <div className="global-alert" role="alert">
-          <span>{indexError ?? projectError ?? importError ?? connectionError}</span>
+          <span>{indexError ?? projectError ?? importError ?? githubImportError ?? connectionError}</span>
           {connectionState === "error" ? (
             <button type="button" onClick={() => void checkHealth()}>
               重新检查

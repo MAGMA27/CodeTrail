@@ -6,6 +6,7 @@ import hashlib
 import ipaddress
 import json
 import os
+import shutil
 import threading
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
@@ -23,6 +24,8 @@ from .contracts import (
     GetNeighborsSuccess,
     ImportAttempt,
     ImportAttemptResponse,
+    GitHubImportRequest,
+    GitHubImportResponse,
     IndexIssue,
     IndexResponse,
     LocalImportRequest,
@@ -42,6 +45,7 @@ from .contracts import (
     ToolResult,
 )
 from .indexing import SnapshotBoundaryError, build_source_snapshot, extract_definitions
+from .github import GitHubArchive, GitHubClient, GitHubError, GitHubRepository, GitHubResolution, parse_github_repository_url
 from .relations import extract_relations
 from .storage import (
     IndexStore,
@@ -76,6 +80,8 @@ class RepositorySpec:
     normalized_source_path: str
     managed: bool
     project_id: str | None = None
+    source_kind: str = "local"
+    source_url: str | None = None
 
 
 class RepositoryRegistry:
@@ -88,6 +94,8 @@ class RepositoryRegistry:
         data_root: str | Path | None = None,
         allowed_import_roots: tuple[str | Path, ...] | list[str | Path] | None = None,
         mcp_local_import_enabled: bool | None = None,
+        github_import_enabled: bool | None = None,
+        mcp_github_import_enabled: bool | None = None,
     ) -> None:
         normalized: dict[str, RepositorySpec] = {}
         for repository_id, repository_root in roots.items():
@@ -110,6 +118,7 @@ class RepositoryRegistry:
                 storage_root=resolved,
                 normalized_source_path=_normalized_path_key(resolved),
                 managed=False,
+                source_kind="local",
             )
         configured_data_root = data_root or os.getenv("CODETRAIL_DATA_DIR") or (Path.cwd() / ".codetrail")
         self._data_root = _prepare_data_root(configured_data_root)
@@ -124,12 +133,28 @@ class RepositoryRegistry:
             if mcp_local_import_enabled is None
             else mcp_local_import_enabled
         )
+        self._github_import_enabled = (
+            _env_flag("CODETRAIL_GITHUB_IMPORT_ENABLED")
+            if github_import_enabled is None
+            else github_import_enabled
+        )
+        self._mcp_github_import_enabled = (
+            _env_flag("CODETRAIL_MCP_GITHUB_IMPORT_ENABLED")
+            if mcp_github_import_enabled is None
+            else mcp_github_import_enabled
+        )
         self._lock = threading.RLock()
+        self._runtime_source_roots: dict[str, Path] = {}
         self._specs = normalized
         self.refresh_managed_sources()
 
     @classmethod
-    def from_environment(cls) -> RepositoryRegistry:
+    def from_environment(
+        cls,
+        *,
+        github_import_enabled: bool | None = None,
+        mcp_github_import_enabled: bool | None = None,
+    ) -> RepositoryRegistry:
         raw = os.getenv("CODETRAIL_REPOSITORIES", "").strip()
         payload: dict[str, str] = {}
         if raw:
@@ -150,7 +175,12 @@ class RepositoryRegistry:
             if not isinstance(allowed_payload, list) or not all(isinstance(item, str) for item in allowed_payload):
                 raise ValueError("CODETRAIL_ALLOWED_IMPORT_ROOTS must be a JSON array of paths")
             allowed = allowed_payload
-        return cls(payload, allowed_import_roots=allowed)
+        return cls(
+            payload,
+            allowed_import_roots=allowed,
+            github_import_enabled=github_import_enabled,
+            mcp_github_import_enabled=mcp_github_import_enabled,
+        )
 
     @property
     def repository_ids(self) -> tuple[str, ...]:
@@ -169,6 +199,14 @@ class RepositoryRegistry:
     @property
     def mcp_local_import_enabled(self) -> bool:
         return self._mcp_local_import_enabled
+
+    @property
+    def github_import_enabled(self) -> bool:
+        return self._github_import_enabled
+
+    @property
+    def mcp_github_import_enabled(self) -> bool:
+        return self._mcp_github_import_enabled
 
     @property
     def allowed_import_roots(self) -> tuple[Path, ...]:
@@ -191,6 +229,8 @@ class RepositoryRegistry:
                     normalized_source_path=record.normalized_source_path,
                     managed=True,
                     project_id=record.project_id,
+                    source_kind=record.source_kind,
+                    source_url=record.source_url,
                 )
 
     def spec_for(self, repository_id: str) -> RepositorySpec:
@@ -202,10 +242,39 @@ class RepositoryRegistry:
         return spec
 
     def root_for(self, repository_id: str) -> Path:
-        return self.spec_for(repository_id).source_root
+        return self.source_root_for(repository_id)
 
     def source_root_for(self, repository_id: str) -> Path:
-        return self.spec_for(repository_id).source_root
+        spec = self.spec_for(repository_id)
+        with self._lock:
+            return self._runtime_source_roots.get(repository_id, spec.source_root)
+
+    def bind_runtime_source(self, repository_id: str, source_root: Path) -> None:
+        root = source_root.resolve(strict=False)
+        if not _path_is_within(root, self.github_temp_root):
+            raise ServiceError("internal_error", 500, "managed GitHub temp path is invalid")
+        with self._lock:
+            self._runtime_source_roots[repository_id] = root
+
+    def unbind_runtime_source(self, repository_id: str) -> None:
+        with self._lock:
+            self._runtime_source_roots.pop(repository_id, None)
+
+    @property
+    def github_temp_root(self) -> Path:
+        root = (self._data_root / "github-imports").resolve(strict=False)
+        if not _path_is_within(root, self._data_root):
+            raise ServiceError("internal_error", 500, "managed GitHub temp root is invalid")
+        root.mkdir(parents=True, exist_ok=True)
+        return root
+
+    def github_temp_path(self, attempt_id: str) -> Path:
+        if not attempt_id or any(char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_" for char in attempt_id):
+            raise ServiceError("internal_error", 500, "managed GitHub temp path identifier is invalid")
+        path = (self.github_temp_root / attempt_id).resolve(strict=False)
+        if not _path_is_within(path, self.github_temp_root):
+            raise ServiceError("internal_error", 500, "managed GitHub temp path is invalid")
+        return path
 
     def storage_root_for(self, repository_id: str) -> Path:
         return self.spec_for(repository_id).storage_root
@@ -508,9 +577,16 @@ class IndexService:
 class WorkspaceService:
     """Own project identity, index associations, and project-scoped queries."""
 
-    def __init__(self, registry: RepositoryRegistry, index_service: IndexService) -> None:
+    def __init__(
+        self,
+        registry: RepositoryRegistry,
+        index_service: IndexService,
+        *,
+        github_client: GitHubClient | None = None,
+    ) -> None:
         self.registry = registry
         self.index_service = index_service
+        self.github_client = github_client or GitHubClient()
         self._recover_interrupted_builds()
 
     def create_project(self, request: CreateProjectRequest) -> Project:
@@ -566,6 +642,16 @@ class WorkspaceService:
         request: CreateProjectIndexRequest,
     ) -> IndexResponse:
         project = self._find_project(project_id)
+        spec = self.registry.spec_for(project.repository_id)
+        if (
+            spec.source_kind == "github"
+            and not self.registry.source_root_for(project.repository_id).is_dir()
+        ):
+            raise ServiceError(
+                "conflict",
+                409,
+                "GitHub sources are immutable; import the repository again to create a new fixed-commit index",
+            )
         pending_id = f"pending-{uuid4().hex}"
         with self.registry.store_for_repository(project.repository_id) as store:
             store.set_project_building(project.project_id, pending_id)
@@ -671,6 +757,137 @@ class WorkspaceService:
             request,
         )
 
+    def import_github(
+        self,
+        request: GitHubImportRequest,
+        *,
+        via_mcp: bool = False,
+    ) -> GitHubImportResponse:
+        """Resolve, fetch, safely unpack, index, and clean one GitHub commit."""
+
+        self._require_github_import(via_mcp=via_mcp)
+        try:
+            repository = parse_github_repository_url(request.url)
+        except GitHubError as exc:
+            raise ServiceError(exc.code, exc.status_code, exc.message) from exc
+
+        existing_by_key = (
+            self.registry.management_store.find_attempt_by_idempotency(request.idempotency_key)
+            if request.idempotency_key is not None
+            else None
+        )
+        if existing_by_key is not None:
+            if not _same_github_request(existing_by_key, repository, request):
+                raise ServiceError("conflict", 409, "idempotency key conflicts with a different import request")
+            return self._github_import_response(existing_by_key)
+
+        resolution = self._resolve_github(repository, request)
+        normalized_path = resolution.repository.identity
+        spec = self.registry.repository_for_source(normalized_path)
+        if spec is None:
+            project_id = _new_project_id()
+            repository_id = _managed_repository_id(normalized_path)
+            record = self.registry.management_store.register_source(
+                repository_id=repository_id,
+                project_id=project_id,
+                name=request.name,
+                source_path=resolution.repository.canonical_url,
+                normalized_source_path=normalized_path,
+                storage_path=str(self.registry.managed_storage_path(project_id)),
+                created_at=datetime.now(timezone.utc),
+                source_kind="github",
+                source_url=resolution.repository.canonical_url,
+                requested_ref=resolution.requested_ref,
+                resolved_commit=resolution.resolved_commit,
+            )
+            self.registry.refresh_managed_sources()
+            self._ensure_managed_project(record)
+            spec = self.registry.spec_for(record.repository_id)
+        elif spec.source_kind != "github":
+            raise ServiceError("conflict", 409, "the normalized GitHub identity conflicts with a local source")
+        else:
+            record = self.registry.management_store.load_source(spec.repository_id)
+            self._ensure_managed_project(record)
+
+        project = self._load_project_from_spec(spec)
+        same_commit = self.registry.management_store.find_attempt_by_commit(
+            normalized_path,
+            resolution.resolved_commit,
+        )
+        if same_commit is not None:
+            return self._github_import_response(same_commit)
+        active = self.registry.management_store.find_active_attempt(normalized_path)
+        if active is not None:
+            return self._github_import_response(active)
+
+        try:
+            attempt = self.registry.management_store.create_attempt(
+                attempt_id=f"import-{uuid4().hex}",
+                project_id=project.project_id,
+                repository_id=spec.repository_id,
+                source_path=resolution.repository.canonical_url,
+                normalized_source_path=normalized_path,
+                name=project.name,
+                revision=resolution.resolved_commit,
+                dirty=False,
+                idempotency_key=request.idempotency_key,
+                created_at=datetime.now(timezone.utc),
+                source_kind="github",
+                source_url=resolution.repository.canonical_url,
+                requested_ref=resolution.requested_ref,
+                resolved_commit=resolution.resolved_commit,
+            )
+        except StorageConflictError:
+            if request.idempotency_key is not None:
+                existing = self.registry.management_store.find_attempt_by_idempotency(request.idempotency_key)
+                if existing is not None and _same_github_request(existing, repository, request):
+                    return self._github_import_response(existing)
+            active = self.registry.management_store.find_active_attempt(normalized_path)
+            if active is not None:
+                return self._github_import_response(active)
+            raise ServiceError("conflict", 409, "an equivalent GitHub import is already running")
+
+        self.registry.management_store.update_source(
+            spec.repository_id,
+            source_url=resolution.repository.canonical_url,
+            requested_ref=resolution.requested_ref,
+            resolved_commit=resolution.resolved_commit,
+            content_hash=None,
+            cleanup_status="not_required",
+            cleanup_error=None,
+            temporary_path=None,
+        )
+        return self._run_github_import_attempt(attempt.attempt_id)
+
+    def retry_github_import(
+        self,
+        attempt_id: str,
+        *,
+        via_mcp: bool = False,
+    ) -> GitHubImportResponse:
+        self._require_github_import(via_mcp=via_mcp)
+        attempt = self.registry.management_store.load_attempt(attempt_id)
+        if attempt.source_kind != "github":
+            raise ServiceError("conflict", 409, "the import attempt is not a GitHub import")
+        if attempt.status not in {"failed", "interrupted", "cancelled"}:
+            raise ServiceError("conflict", 409, "only failed or interrupted imports can be retried")
+        self.registry.management_store.update_attempt(
+            attempt_id,
+            status="queued",
+            phase="queued",
+            index_id=None,
+            error_code=None,
+            error_message=None,
+        )
+        self.registry.management_store.update_attempt_metadata(
+            attempt_id,
+            content_hash=None,
+            cleanup_status="not_required",
+            cleanup_error=None,
+            temporary_path=None,
+        )
+        return self._run_github_import_attempt(attempt_id)
+
     def get_import_status(self, attempt_id: str) -> ImportAttemptResponse:
         attempt = self.registry.management_store.load_attempt(attempt_id)
         project = self._find_project(attempt.project_id)
@@ -685,6 +902,34 @@ class WorkspaceService:
             attempt=_import_attempt_response(attempt),
             latest_index=latest_index,
         )
+
+    def retry_import_cleanup(self, attempt_id: str) -> GitHubImportResponse:
+        attempt = self.registry.management_store.load_attempt(attempt_id)
+        if attempt.source_kind != "github":
+            raise ServiceError("conflict", 409, "only GitHub import temp directories support cleanup retry")
+        if attempt.cleanup_status != "failed":
+            raise ServiceError("conflict", 409, "GitHub import cleanup does not need a retry")
+        cleanup_error = self._cleanup_github_temp(attempt.temporary_path, attempt.attempt_id)
+        if cleanup_error is None:
+            updated = self.registry.management_store.update_attempt_metadata(
+                attempt_id,
+                cleanup_status="succeeded",
+                cleanup_error=None,
+                temporary_path=None,
+            )
+            self.registry.management_store.update_source(
+                attempt.repository_id,
+                cleanup_status="succeeded",
+                cleanup_error=None,
+                temporary_path=None,
+            )
+            return self._github_import_response(updated)
+        updated = self.registry.management_store.update_attempt_metadata(
+            attempt_id,
+            cleanup_status="failed",
+            cleanup_error=cleanup_error,
+        )
+        return self._github_import_response(updated)
 
     def retry_import(self, attempt_id: str, *, via_mcp: bool = False) -> LocalImportResponse:
         if via_mcp and not self.registry.mcp_local_import_enabled:
@@ -810,6 +1055,178 @@ class WorkspaceService:
             )
             return self._local_import_response(failed)
 
+    def _require_github_import(self, *, via_mcp: bool) -> None:
+        if not self.registry.github_import_enabled:
+            raise ServiceError("forbidden", 403, "GitHub import is disabled")
+        if via_mcp and not self.registry.mcp_github_import_enabled:
+            raise ServiceError("forbidden", 403, "GitHub MCP import is disabled")
+
+    def _resolve_github(
+        self,
+        repository: GitHubRepository,
+        request: GitHubImportRequest,
+    ) -> GitHubResolution:
+        try:
+            return self.github_client.resolve(repository.canonical_url, request.ref)
+        except GitHubError as exc:
+            raise ServiceError(exc.code, exc.status_code, exc.message) from exc
+        except Exception as exc:
+            raise ServiceError("internal_error", 503, "GitHub could not resolve the requested repository ref") from exc
+
+    def _run_github_import_attempt(self, attempt_id: str) -> GitHubImportResponse:
+        attempt = self.registry.management_store.load_attempt(attempt_id)
+        if attempt.source_kind != "github" or not attempt.source_url or not attempt.resolved_commit:
+            raise ServiceError("internal_error", 500, "GitHub import metadata is incomplete")
+        temp_root = self.registry.github_temp_path(attempt.attempt_id)
+        source_root = temp_root / "source"
+        temp_created = False
+        try:
+            self.registry.management_store.update_attempt(
+                attempt_id,
+                status="acquiring",
+                phase="acquiring",
+            )
+            self._prepare_github_temp(temp_root, attempt.attempt_id)
+            temp_created = True
+            self.registry.management_store.update_attempt_metadata(
+                attempt_id,
+                cleanup_status="pending",
+                cleanup_error=None,
+                temporary_path=str(temp_root),
+            )
+            self.registry.management_store.update_source(
+                attempt.repository_id,
+                cleanup_status="pending",
+                cleanup_error=None,
+                temporary_path=str(temp_root),
+            )
+            repository = parse_github_repository_url(attempt.source_url)
+            resolution = GitHubResolution(
+                repository=repository,
+                requested_ref=attempt.requested_ref,
+                resolved_commit=attempt.resolved_commit,
+            )
+            self.github_client.download_and_extract(resolution, source_root)
+            self.registry.bind_runtime_source(attempt.repository_id, source_root)
+            self.registry.management_store.update_attempt(
+                attempt_id,
+                status="indexing",
+                phase="indexing",
+            )
+            index_response = self.create_project_index(
+                attempt.project_id,
+                CreateProjectIndexRequest(revision=attempt.resolved_commit, dirty=False),
+            )
+            content_hash = index_response.index.snapshot_hash
+            self.registry.management_store.update_attempt_metadata(
+                attempt_id,
+                content_hash=content_hash,
+            )
+            self.registry.management_store.update_source(
+                attempt.repository_id,
+                resolved_commit=attempt.resolved_commit,
+                content_hash=content_hash,
+            )
+            completed = self.registry.management_store.update_attempt(
+                attempt_id,
+                status="ready",
+                phase="ready",
+                index_id=index_response.index.index_id,
+                error_code=None,
+                error_message=None,
+            )
+        except GitHubError as exc:
+            failed = self.registry.management_store.update_attempt(
+                attempt_id,
+                status="failed",
+                phase="failed",
+                index_id=None,
+                error_code=exc.code,
+                error_message=exc.message,
+            )
+            completed = failed
+        except ServiceError as exc:
+            failed = self.registry.management_store.update_attempt(
+                attempt_id,
+                status="failed",
+                phase="failed",
+                index_id=None,
+                error_code=exc.code,
+                error_message=exc.message,
+            )
+            completed = failed
+        except Exception:
+            failed = self.registry.management_store.update_attempt(
+                attempt_id,
+                status="failed",
+                phase="failed",
+                index_id=None,
+                error_code="internal_error",
+                error_message="GitHub import failed",
+            )
+            completed = failed
+        finally:
+            self.registry.unbind_runtime_source(attempt.repository_id)
+            if temp_created:
+                cleanup_error = self._cleanup_github_temp(str(temp_root), attempt.attempt_id)
+                if cleanup_error is None:
+                    completed = self.registry.management_store.update_attempt_metadata(
+                        attempt_id,
+                        cleanup_status="succeeded",
+                        cleanup_error=None,
+                        temporary_path=None,
+                    )
+                    self.registry.management_store.update_source(
+                        attempt.repository_id,
+                        cleanup_status="succeeded",
+                        cleanup_error=None,
+                        temporary_path=None,
+                    )
+                else:
+                    completed = self.registry.management_store.update_attempt_metadata(
+                        attempt_id,
+                        cleanup_status="failed",
+                        cleanup_error=cleanup_error,
+                        temporary_path=str(temp_root),
+                    )
+                    self.registry.management_store.update_source(
+                        attempt.repository_id,
+                        cleanup_status="failed",
+                        cleanup_error=cleanup_error,
+                        temporary_path=str(temp_root),
+                    )
+        return self._github_import_response(completed)
+
+    def _prepare_github_temp(self, temp_root: Path, attempt_id: str) -> None:
+        if temp_root.exists():
+            cleanup_error = self._cleanup_github_temp(str(temp_root), attempt_id)
+            if cleanup_error is not None:
+                raise ServiceError("conflict", 409, cleanup_error)
+        temp_root.mkdir(parents=True, exist_ok=False)
+        marker = temp_root / ".codetrail-owner"
+        try:
+            marker.write_text(attempt_id, encoding="utf-8", newline="\n")
+        except OSError as exc:
+            raise ServiceError("internal_error", 500, "GitHub temp directory could not be prepared") from exc
+
+    def _cleanup_github_temp(self, raw_path: str | None, attempt_id: str) -> str | None:
+        if raw_path is None:
+            return None
+        candidate = Path(raw_path).resolve(strict=False)
+        root = self.registry.github_temp_root
+        if candidate == root or not _path_is_within(candidate, root):
+            return "GitHub temp directory is outside the managed temp root"
+        if not candidate.exists():
+            return None
+        marker = candidate / ".codetrail-owner"
+        try:
+            if not marker.is_file() or marker.read_text(encoding="utf-8") != attempt_id:
+                return "GitHub temp directory ownership marker does not match the import attempt"
+            shutil.rmtree(candidate)
+        except OSError as exc:
+            return f"GitHub temp directory cleanup failed: {exc}"
+        return None
+
     def _local_import_response(self, attempt: ImportAttemptRecord) -> LocalImportResponse:
         project = self._find_project(attempt.project_id)
         index = None
@@ -817,6 +1234,24 @@ class WorkspaceService:
             index = self.get_project_index(project.project_id, attempt.index_id)
         return LocalImportResponse(
             source_path=attempt.source_path,
+            project=_project_response(project),
+            attempt=_import_attempt_response(attempt),
+            index=index,
+        )
+
+    def _github_import_response(self, attempt: ImportAttemptRecord) -> GitHubImportResponse:
+        project = self._find_project(attempt.project_id)
+        index = None
+        if attempt.status == "ready" and attempt.index_id is not None:
+            index = self.get_project_index(project.project_id, attempt.index_id)
+        source_url = attempt.source_url or attempt.source_path
+        return GitHubImportResponse(
+            source_url=source_url,
+            requested_ref=attempt.requested_ref,
+            resolved_commit=attempt.resolved_commit,
+            content_hash=attempt.content_hash,
+            cleanup_status=attempt.cleanup_status,  # type: ignore[arg-type]
+            cleanup_error=attempt.cleanup_error,
             project=_project_response(project),
             attempt=_import_attempt_response(attempt),
             index=index,
@@ -932,6 +1367,20 @@ def _same_import_request(
     )
 
 
+def _same_github_request(
+    attempt: ImportAttemptRecord,
+    repository: GitHubRepository,
+    request: GitHubImportRequest,
+) -> bool:
+    return (
+        attempt.source_kind == "github"
+        and attempt.normalized_source_path == repository.identity
+        and attempt.source_url == repository.canonical_url
+        and attempt.name == request.name
+        and attempt.requested_ref == request.ref
+    )
+
+
 def _import_attempt_response(record: ImportAttemptRecord) -> ImportAttempt:
     return ImportAttempt(
         attempt_id=record.attempt_id,
@@ -943,6 +1392,13 @@ def _import_attempt_response(record: ImportAttemptRecord) -> ImportAttempt:
         index_id=record.index_id,
         error_code=record.error_code,
         error_message=record.error_message,
+        source_kind=record.source_kind,  # type: ignore[arg-type]
+        source_url=record.source_url,
+        requested_ref=record.requested_ref,
+        resolved_commit=record.resolved_commit,
+        content_hash=record.content_hash,
+        cleanup_status=record.cleanup_status,  # type: ignore[arg-type]
+        cleanup_error=record.cleanup_error,
         created_at=record.created_at,
         updated_at=record.updated_at,
     )

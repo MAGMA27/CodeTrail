@@ -13,6 +13,8 @@ from pydantic import Field
 
 from .contracts import (
     EvidenceReference,
+    GitHubImportRequest,
+    GitHubImportResponse,
     Identifier,
     McpError,
     McpImportResponse,
@@ -61,16 +63,17 @@ def create_mcp_server(
     service = workspace_service or _workspace_from_environment()
     citation_url = _normalize_workbench_url(workbench_url or os.getenv(_WORKBENCH_URL_ENV))
     local_import_enabled = service.registry.mcp_local_import_enabled
+    github_import_enabled = service.registry.mcp_github_import_enabled
     server_description = (
         "Discover CodeTrail projects and query one explicitly selected immutable index. "
-        "All default tools are read-only. Local import/status/retry tools are enabled by explicit local configuration."
-        if local_import_enabled
+        "All default tools are read-only. Explicitly enabled local and GitHub import/status/retry tools are bounded."
+        if local_import_enabled or github_import_enabled
         else "Discover CodeTrail projects and query one explicitly selected immutable index. "
         "All tools are read-only and never execute repository code."
     )
     server = MCPServer(
         name="codetrail",
-        title="CodeTrail workspace" if local_import_enabled else "CodeTrail read-only workspace",
+        title="CodeTrail workspace" if local_import_enabled or github_import_enabled else "CodeTrail read-only workspace",
         description=server_description,
         version="0.1.0",
         log_level="WARNING",
@@ -299,9 +302,26 @@ def create_mcp_server(
                 return _unexpected_failure("import_local_path", McpImportResponse)
 
         @server.tool(
+            name="retry_local_import",
+            title="Retry a local import",
+            description="Retry one failed or interrupted local import attempt using its persisted bounded request.",
+            structured_output=True,
+        )
+        def retry_local_import(attempt_id: _ProjectId) -> McpImportResponse:
+            try:
+                result = service.retry_import(attempt_id, via_mcp=True)
+                return _mcp_import_response(result)
+            except ServiceError as exc:
+                return _failure(McpImportResponse, exc)
+            except Exception:
+                return _unexpected_failure("retry_local_import", McpImportResponse)
+
+    if local_import_enabled or github_import_enabled:
+
+        @server.tool(
             name="get_import_status",
-            title="Get local import status",
-            description="Read one bounded persisted local import attempt without changing it.",
+            title="Get import status",
+            description="Read one bounded persisted local or GitHub import attempt without changing it.",
             structured_output=True,
         )
         def get_import_status(attempt_id: _ProjectId) -> McpImportStatusResponse:
@@ -319,20 +339,53 @@ def create_mcp_server(
             except Exception:
                 return _unexpected_failure("get_import_status", McpImportStatusResponse)
 
+    if github_import_enabled:
+
         @server.tool(
-            name="retry_local_import",
-            title="Retry a local import",
-            description="Retry one failed or interrupted local import attempt using its persisted bounded request.",
+            name="import_github_repository",
+            title="Import a public GitHub repository",
+            description=(
+                "Resolve a public GitHub HTTPS repository ref to one commit, download only the official bounded archive, "
+                "index supported Python files, and return persisted source identity and cleanup status."
+            ),
             structured_output=True,
         )
-        def retry_local_import(attempt_id: _ProjectId) -> McpImportResponse:
+        def import_github_repository(
+            name: Annotated[str, Field(min_length=1, max_length=200, description="Project display name.")],
+            url: Annotated[str, Field(min_length=1, max_length=4_000, description="Official GitHub HTTPS repository URL.")],
+            ref: Annotated[str | None, Field(min_length=1, max_length=200, description="Optional branch, tag, or commit ref.")] = None,
+            idempotency_key: Annotated[str | None, Field(min_length=1, max_length=200)] = None,
+        ) -> McpImportResponse:
             try:
-                result = service.retry_import(attempt_id, via_mcp=True)
-                return _mcp_import_response(result)
+                result = service.import_github(
+                    GitHubImportRequest(
+                        name=name,
+                        url=url,
+                        ref=ref,
+                        idempotency_key=idempotency_key,
+                    ),
+                    via_mcp=True,
+                )
+                return _mcp_github_import_response(result)
             except ServiceError as exc:
                 return _failure(McpImportResponse, exc)
             except Exception:
-                return _unexpected_failure("retry_local_import", McpImportResponse)
+                return _unexpected_failure("import_github_repository", McpImportResponse)
+
+        @server.tool(
+            name="retry_github_import",
+            title="Retry a GitHub import",
+            description="Retry one failed or interrupted fixed-commit GitHub import using its persisted request.",
+            structured_output=True,
+        )
+        def retry_github_import(attempt_id: _ProjectId) -> McpImportResponse:
+            try:
+                result = service.retry_github_import(attempt_id, via_mcp=True)
+                return _mcp_github_import_response(result)
+            except ServiceError as exc:
+                return _failure(McpImportResponse, exc)
+            except Exception:
+                return _unexpected_failure("retry_github_import", McpImportResponse)
 
     return server
 
@@ -404,6 +457,22 @@ def _mcp_import_response(result: LocalImportResponse) -> McpImportResponse:
     return McpImportResponse(
         ok=True,
         source_path=result.source_path,
+        project=result.project,
+        attempt=result.attempt,
+        index=result.index,
+    )
+
+
+def _mcp_github_import_response(result: GitHubImportResponse) -> McpImportResponse:
+    return McpImportResponse(
+        ok=True,
+        source_path=result.source_url,
+        source_url=result.source_url,
+        requested_ref=result.requested_ref,
+        resolved_commit=result.resolved_commit,
+        content_hash=result.content_hash,
+        cleanup_status=result.cleanup_status,
+        cleanup_error=result.cleanup_error,
         project=result.project,
         attempt=result.attempt,
         index=result.index,

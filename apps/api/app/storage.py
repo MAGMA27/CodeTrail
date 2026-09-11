@@ -34,6 +34,9 @@ from .indexing import DefinitionIndex, SnapshotFile, SnapshotIssue, SourceSnapsh
 from .relations import RelationIndex
 
 
+_UNSET = object()
+
+
 class StorageError(RuntimeError):
     """Base error for local index storage and query failures."""
 
@@ -103,7 +106,7 @@ class ProjectRecord:
 
 @dataclass(frozen=True)
 class ManagedSourceRecord:
-    """A persisted local source registered outside the source directory."""
+    """A persisted source registration, local or remote."""
 
     repository_id: str
     project_id: str
@@ -112,11 +115,19 @@ class ManagedSourceRecord:
     normalized_source_path: str
     storage_path: str
     created_at: datetime
+    source_kind: str = "local"
+    source_url: str | None = None
+    requested_ref: str | None = None
+    resolved_commit: str | None = None
+    content_hash: str | None = None
+    cleanup_status: str = "not_required"
+    cleanup_error: str | None = None
+    temporary_path: str | None = None
 
 
 @dataclass(frozen=True)
 class ImportAttemptRecord:
-    """A bounded, restart-aware local import lifecycle record."""
+    """A bounded, restart-aware import lifecycle record."""
 
     attempt_id: str
     project_id: str
@@ -134,6 +145,14 @@ class ImportAttemptRecord:
     error_message: str | None
     created_at: datetime
     updated_at: datetime
+    source_kind: str = "local"
+    source_url: str | None = None
+    requested_ref: str | None = None
+    resolved_commit: str | None = None
+    content_hash: str | None = None
+    cleanup_status: str = "not_required"
+    cleanup_error: str | None = None
+    temporary_path: str | None = None
 
 
 _SCHEMA = """
@@ -262,7 +281,15 @@ CREATE TABLE IF NOT EXISTS managed_sources (
     source_path TEXT NOT NULL,
     normalized_source_path TEXT NOT NULL UNIQUE,
     storage_path TEXT NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    source_kind TEXT NOT NULL DEFAULT 'local',
+    source_url TEXT,
+    requested_ref TEXT,
+    resolved_commit TEXT,
+    content_hash TEXT,
+    cleanup_status TEXT NOT NULL DEFAULT 'not_required',
+    cleanup_error TEXT,
+    temporary_path TEXT
 );
 
 CREATE TABLE IF NOT EXISTS import_attempts (
@@ -281,7 +308,15 @@ CREATE TABLE IF NOT EXISTS import_attempts (
     error_code TEXT,
     error_message TEXT,
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    source_kind TEXT NOT NULL DEFAULT 'local',
+    source_url TEXT,
+    requested_ref TEXT,
+    resolved_commit TEXT,
+    content_hash TEXT,
+    cleanup_status TEXT NOT NULL DEFAULT 'not_required',
+    cleanup_error TEXT,
+    temporary_path TEXT
 );
 
 DROP INDEX IF EXISTS import_attempts_idempotency;
@@ -310,6 +345,7 @@ class ManagementStore:
         try:
             with self._connect() as connection:
                 connection.executescript(_MANAGEMENT_SCHEMA)
+                self._ensure_columns(connection)
         except sqlite3.Error as exc:
             raise StorageError(f"could not initialize management store: {exc}") from exc
 
@@ -321,6 +357,38 @@ class ManagementStore:
         )
         connection.row_factory = sqlite3.Row
         return connection
+
+    @staticmethod
+    def _ensure_columns(connection: sqlite3.Connection) -> None:
+        """Migrate W2 management databases without rewriting user state."""
+
+        additions = {
+            "managed_sources": {
+                "source_kind": "TEXT NOT NULL DEFAULT 'local'",
+                "source_url": "TEXT",
+                "requested_ref": "TEXT",
+                "resolved_commit": "TEXT",
+                "content_hash": "TEXT",
+                "cleanup_status": "TEXT NOT NULL DEFAULT 'not_required'",
+                "cleanup_error": "TEXT",
+                "temporary_path": "TEXT",
+            },
+            "import_attempts": {
+                "source_kind": "TEXT NOT NULL DEFAULT 'local'",
+                "source_url": "TEXT",
+                "requested_ref": "TEXT",
+                "resolved_commit": "TEXT",
+                "content_hash": "TEXT",
+                "cleanup_status": "TEXT NOT NULL DEFAULT 'not_required'",
+                "cleanup_error": "TEXT",
+                "temporary_path": "TEXT",
+            },
+        }
+        for table, columns in additions.items():
+            existing = {row[1] for row in connection.execute(f"PRAGMA table_info({table})").fetchall()}
+            for column, definition in columns.items():
+                if column not in existing:
+                    connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     def list_sources(self) -> tuple[ManagedSourceRecord, ...]:
         with self._connect() as connection:
@@ -357,14 +425,23 @@ class ManagementStore:
         normalized_source_path: str,
         storage_path: str,
         created_at: datetime,
+        source_kind: str = "local",
+        source_url: str | None = None,
+        requested_ref: str | None = None,
+        resolved_commit: str | None = None,
+        content_hash: str | None = None,
+        cleanup_status: str = "not_required",
+        cleanup_error: str | None = None,
+        temporary_path: str | None = None,
     ) -> ManagedSourceRecord:
         connection = self._connect()
         try:
             connection.execute("BEGIN IMMEDIATE")
             connection.execute(
                 "INSERT INTO managed_sources "
-                "(repository_id, project_id, name, source_path, normalized_source_path, storage_path, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "(repository_id, project_id, name, source_path, normalized_source_path, storage_path, created_at, "
+                "source_kind, source_url, requested_ref, resolved_commit, content_hash, cleanup_status, cleanup_error, temporary_path) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     repository_id,
                     project_id,
@@ -373,6 +450,14 @@ class ManagementStore:
                     normalized_source_path,
                     storage_path,
                     _datetime_text(created_at),
+                    source_kind,
+                    source_url,
+                    requested_ref,
+                    resolved_commit,
+                    content_hash,
+                    cleanup_status,
+                    cleanup_error,
+                    temporary_path,
                 ),
             )
             connection.execute("COMMIT")
@@ -408,6 +493,14 @@ class ManagementStore:
         dirty: bool,
         idempotency_key: str | None,
         created_at: datetime,
+        source_kind: str = "local",
+        source_url: str | None = None,
+        requested_ref: str | None = None,
+        resolved_commit: str | None = None,
+        content_hash: str | None = None,
+        cleanup_status: str = "not_required",
+        cleanup_error: str | None = None,
+        temporary_path: str | None = None,
     ) -> ImportAttemptRecord:
         timestamp = _datetime_text(created_at)
         try:
@@ -415,8 +508,9 @@ class ManagementStore:
                 connection.execute(
                     "INSERT INTO import_attempts "
                     "(attempt_id, project_id, repository_id, source_path, normalized_source_path, name, revision, dirty, "
-                    "idempotency_key, status, phase, created_at, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 'queued', ?, ?)",
+                    "idempotency_key, status, phase, created_at, updated_at, source_kind, source_url, requested_ref, "
+                    "resolved_commit, content_hash, cleanup_status, cleanup_error, temporary_path) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         attempt_id,
                         project_id,
@@ -429,6 +523,14 @@ class ManagementStore:
                         idempotency_key,
                         timestamp,
                         timestamp,
+                        source_kind,
+                        source_url,
+                        requested_ref,
+                        resolved_commit,
+                        content_hash,
+                        cleanup_status,
+                        cleanup_error,
+                        temporary_path,
                     ),
                 )
         except sqlite3.IntegrityError as exc:
@@ -467,6 +569,109 @@ class ManagementStore:
                 (normalized_source_path,),
             ).fetchone()
         return None if row is None else _import_attempt_from_row(row)
+
+    def find_attempt_by_commit(
+        self,
+        normalized_source_path: str,
+        resolved_commit: str,
+    ) -> ImportAttemptRecord | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM import_attempts WHERE normalized_source_path = ? AND resolved_commit = ? "
+                "ORDER BY created_at COLLATE BINARY DESC, attempt_id COLLATE BINARY DESC LIMIT 1",
+                (normalized_source_path, resolved_commit),
+            ).fetchone()
+        return None if row is None else _import_attempt_from_row(row)
+
+    def update_source(
+        self,
+        repository_id: str,
+        *,
+        source_path: str | None = None,
+        source_url: str | None | object = _UNSET,
+        requested_ref: str | None | object = _UNSET,
+        resolved_commit: str | None | object = _UNSET,
+        content_hash: str | None | object = _UNSET,
+        cleanup_status: str | object = _UNSET,
+        cleanup_error: str | None | object = _UNSET,
+        temporary_path: str | None | object = _UNSET,
+    ) -> ManagedSourceRecord:
+        updates: list[str] = []
+        values: list[object] = []
+        if source_path is not None:
+            updates.append("source_path = ?")
+            values.append(source_path)
+        for column, value in (
+            ("source_url", source_url),
+            ("requested_ref", requested_ref),
+            ("resolved_commit", resolved_commit),
+            ("content_hash", content_hash),
+            ("cleanup_status", cleanup_status),
+            ("cleanup_error", cleanup_error),
+            ("temporary_path", temporary_path),
+        ):
+            if value is not _UNSET:
+                updates.append(f"{column} = ?")
+                values.append(value)
+        if updates:
+            values.append(repository_id)
+            try:
+                with self._connect() as connection:
+                    cursor = connection.execute(
+                        f"UPDATE managed_sources SET {', '.join(updates)} WHERE repository_id = ?",
+                        values,
+                    )
+                    if cursor.rowcount != 1:
+                        raise StorageNotFoundError(f"managed source {repository_id!r} was not found")
+            except StorageNotFoundError:
+                raise
+            except sqlite3.Error as exc:
+                raise StorageError(f"could not update managed source: {exc}") from exc
+        return self.load_source(repository_id)
+
+    def update_attempt_metadata(
+        self,
+        attempt_id: str,
+        *,
+        source_url: str | None | object = _UNSET,
+        requested_ref: str | None | object = _UNSET,
+        resolved_commit: str | None | object = _UNSET,
+        content_hash: str | None | object = _UNSET,
+        cleanup_status: str | object = _UNSET,
+        cleanup_error: str | None | object = _UNSET,
+        temporary_path: str | None | object = _UNSET,
+    ) -> ImportAttemptRecord:
+        updates: list[str] = []
+        values: list[object] = []
+        for column, value in (
+            ("source_url", source_url),
+            ("requested_ref", requested_ref),
+            ("resolved_commit", resolved_commit),
+            ("content_hash", content_hash),
+            ("cleanup_status", cleanup_status),
+            ("cleanup_error", cleanup_error),
+            ("temporary_path", temporary_path),
+        ):
+            if value is not _UNSET:
+                updates.append(f"{column} = ?")
+                values.append(value)
+        if updates:
+            updates.append("updated_at = ?")
+            values.append(_datetime_text(datetime.now(timezone.utc)))
+            values.append(attempt_id)
+            try:
+                with self._connect() as connection:
+                    cursor = connection.execute(
+                        f"UPDATE import_attempts SET {', '.join(updates)} WHERE attempt_id = ?",
+                        values,
+                    )
+                    if cursor.rowcount != 1:
+                        raise StorageNotFoundError(f"import attempt {attempt_id!r} was not found")
+            except StorageNotFoundError:
+                raise
+            except sqlite3.Error as exc:
+                raise StorageError(f"could not update import attempt metadata: {exc}") from exc
+        return self.load_attempt(attempt_id)
 
     def update_attempt(
         self,
@@ -1490,6 +1695,14 @@ def _managed_source_from_row(row: sqlite3.Row) -> ManagedSourceRecord:
         normalized_source_path=row["normalized_source_path"],
         storage_path=row["storage_path"],
         created_at=_datetime_value(row["created_at"]),
+        source_kind=row["source_kind"],
+        source_url=row["source_url"],
+        requested_ref=row["requested_ref"],
+        resolved_commit=row["resolved_commit"],
+        content_hash=row["content_hash"],
+        cleanup_status=row["cleanup_status"],
+        cleanup_error=row["cleanup_error"],
+        temporary_path=row["temporary_path"],
     )
 
 
@@ -1511,6 +1724,14 @@ def _import_attempt_from_row(row: sqlite3.Row) -> ImportAttemptRecord:
         error_message=row["error_message"],
         created_at=_datetime_value(row["created_at"]),
         updated_at=_datetime_value(row["updated_at"]),
+        source_kind=row["source_kind"],
+        source_url=row["source_url"],
+        requested_ref=row["requested_ref"],
+        resolved_commit=row["resolved_commit"],
+        content_hash=row["content_hash"],
+        cleanup_status=row["cleanup_status"],
+        cleanup_error=row["cleanup_error"],
+        temporary_path=row["temporary_path"],
     )
 
 

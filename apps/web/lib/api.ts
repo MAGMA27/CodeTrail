@@ -113,6 +113,13 @@ export type ImportAttempt = {
   index_id: string | null;
   error_code: string | null;
   error_message: string | null;
+  source_kind: "local" | "github";
+  source_url: string | null;
+  requested_ref: string | null;
+  resolved_commit: string | null;
+  content_hash: string | null;
+  cleanup_status: "not_required" | "pending" | "succeeded" | "failed";
+  cleanup_error: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -120,6 +127,19 @@ export type ImportAttempt = {
 export type LocalImportResponse = {
   schema_version: typeof SCHEMA_VERSION;
   source_path: string;
+  project: ProjectRecord;
+  attempt: ImportAttempt;
+  index: IndexResponse | null;
+};
+
+export type GitHubImportResponse = {
+  schema_version: typeof SCHEMA_VERSION;
+  source_url: string;
+  requested_ref: string | null;
+  resolved_commit: string | null;
+  content_hash: string | null;
+  cleanup_status: "not_required" | "pending" | "succeeded" | "failed";
+  cleanup_error: string | null;
   project: ProjectRecord;
   attempt: ImportAttempt;
   index: IndexResponse | null;
@@ -335,8 +355,31 @@ export function isImportAttempt(value: unknown): value is ImportAttempt {
     isNullableString(value.index_id) &&
     isNullableString(value.error_code) &&
     isNullableString(value.error_message) &&
+    ["local", "github"].includes(String(value.source_kind)) &&
+    isNullableString(value.source_url) &&
+    isNullableString(value.requested_ref) &&
+    isNullableString(value.resolved_commit) &&
+    isNullableString(value.content_hash) &&
+    ["not_required", "pending", "succeeded", "failed"].includes(String(value.cleanup_status)) &&
+    isNullableString(value.cleanup_error) &&
     isString(value.created_at) &&
     isString(value.updated_at)
+  );
+}
+
+export function isGitHubImportResponse(value: unknown): value is GitHubImportResponse {
+  return (
+    isRecord(value) &&
+    value.schema_version === SCHEMA_VERSION &&
+    isString(value.source_url) &&
+    isNullableString(value.requested_ref) &&
+    isNullableString(value.resolved_commit) &&
+    isNullableString(value.content_hash) &&
+    ["not_required", "pending", "succeeded", "failed"].includes(String(value.cleanup_status)) &&
+    isNullableString(value.cleanup_error) &&
+    isProjectRecord(value.project) &&
+    isImportAttempt(value.attempt) &&
+    (value.index === null || isIndexResponse(value.index))
   );
 }
 
@@ -567,6 +610,30 @@ export function importLocalPath(
   );
 }
 
+export function importGitHubRepository(
+  name: string,
+  url: string,
+  ref?: string,
+  idempotencyKey?: string,
+  signal?: AbortSignal,
+): Promise<GitHubImportResponse> {
+  return requestJson(
+    "/api/imports/github",
+    isGitHubImportResponse,
+    {
+      method: "POST",
+      signal,
+      body: JSON.stringify({
+        schema_version: SCHEMA_VERSION,
+        name,
+        url,
+        ...(ref ? { ref } : {}),
+        ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
+      }),
+    },
+  );
+}
+
 export function getImportStatus(
   attemptId: string,
   signal?: AbortSignal,
@@ -585,6 +652,28 @@ export function retryLocalImport(
   return requestJson(
     `/api/imports/${encodeURIComponent(attemptId)}/retry`,
     isLocalImportResponse,
+    { method: "POST", signal },
+  );
+}
+
+export function retryGitHubImport(
+  attemptId: string,
+  signal?: AbortSignal,
+): Promise<GitHubImportResponse> {
+  return requestJson(
+    `/api/imports/${encodeURIComponent(attemptId)}/retry-github`,
+    isGitHubImportResponse,
+    { method: "POST", signal },
+  );
+}
+
+export function retryImportCleanup(
+  attemptId: string,
+  signal?: AbortSignal,
+): Promise<GitHubImportResponse> {
+  return requestJson(
+    `/api/imports/${encodeURIComponent(attemptId)}/cleanup`,
+    isGitHubImportResponse,
     { method: "POST", signal },
   );
 }

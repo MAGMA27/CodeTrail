@@ -20,6 +20,8 @@ from .contracts import (
     CreateProjectIndexRequest,
     CreateProjectRequest,
     EdgeKind,
+    GitHubImportRequest,
+    GitHubImportResponse,
     ImportAttemptResponse,
     IndexResponse,
     LocalImportRequest,
@@ -31,6 +33,7 @@ from .contracts import (
     SearchIndexResponse,
     SourceIndexResponse,
 )
+from .github import GitHubClient
 from .service import IndexService, RepositoryRegistry, ServiceError, WorkspaceService, is_loopback_host
 from .storage import StorageError
 
@@ -68,20 +71,28 @@ def create_app(
     *,
     data_root: str | Path | None = None,
     allowed_import_roots: tuple[str | Path, ...] | list[str | Path] | None = None,
+    github_import_enabled: bool | None = None,
+    mcp_github_import_enabled: bool | None = None,
+    github_client: GitHubClient | None = None,
 ) -> FastAPI:
     """Create an API with a server-owned repository allow-list."""
 
     registry = (
-        RepositoryRegistry.from_environment()
+        RepositoryRegistry.from_environment(
+            github_import_enabled=github_import_enabled,
+            mcp_github_import_enabled=mcp_github_import_enabled,
+        )
         if repository_roots is None
         else RepositoryRegistry(
             repository_roots,
             data_root=data_root,
             allowed_import_roots=allowed_import_roots,
+            github_import_enabled=github_import_enabled,
+            mcp_github_import_enabled=mcp_github_import_enabled,
         )
     )
     index_service = IndexService(registry)
-    workspace_service = WorkspaceService(registry, index_service)
+    workspace_service = WorkspaceService(registry, index_service, github_client=github_client)
     application = FastAPI(title="CodeTrail API", version="0.1.0")
     application.state.index_service = index_service
     application.state.registry = registry
@@ -121,6 +132,15 @@ def create_app(
         _require_local_write(http_request)
         return await run_in_threadpool(workspace_service.import_local, payload)
 
+    @application.post(
+        "/api/imports/github",
+        response_model=GitHubImportResponse,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def import_github(http_request: Request, payload: GitHubImportRequest) -> GitHubImportResponse:
+        _require_local_write(http_request)
+        return await run_in_threadpool(workspace_service.import_github, payload)
+
     @application.get(
         "/api/imports/{attempt_id}",
         response_model=ImportAttemptResponse,
@@ -137,6 +157,24 @@ def create_app(
     async def retry_import(http_request: Request, attempt_id: str) -> LocalImportResponse:
         _require_local_write(http_request)
         return await run_in_threadpool(workspace_service.retry_import, attempt_id)
+
+    @application.post(
+        "/api/imports/{attempt_id}/retry-github",
+        response_model=GitHubImportResponse,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def retry_github_import(http_request: Request, attempt_id: str) -> GitHubImportResponse:
+        _require_local_write(http_request)
+        return await run_in_threadpool(workspace_service.retry_github_import, attempt_id)
+
+    @application.post(
+        "/api/imports/{attempt_id}/cleanup",
+        response_model=GitHubImportResponse,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def retry_import_cleanup(http_request: Request, attempt_id: str) -> GitHubImportResponse:
+        _require_local_write(http_request)
+        return await run_in_threadpool(workspace_service.retry_import_cleanup, attempt_id)
 
     @application.post(
         "/api/projects",

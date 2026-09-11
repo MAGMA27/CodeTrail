@@ -311,10 +311,13 @@ def test_mcp_local_import_is_opt_in_and_shares_http_state(tmp_path: Path) -> Non
         "CODETRAIL_WORKBENCH_URL": "http://localhost:3000",
     }
 
-    def parameters(enabled: bool) -> StdioServerParameters:
+    def parameters(enabled: bool, github: bool = False) -> StdioServerParameters:
         environment = dict(common_environment)
         if enabled:
             environment["CODETRAIL_MCP_LOCAL_IMPORT_ENABLED"] = "1"
+        if github:
+            environment["CODETRAIL_GITHUB_IMPORT_ENABLED"] = "1"
+            environment["CODETRAIL_MCP_GITHUB_IMPORT_ENABLED"] = "1"
         return StdioServerParameters(
             command=sys.executable,
             args=["-m", "app.mcp_server"],
@@ -373,7 +376,22 @@ def test_mcp_local_import_is_opt_in_and_shares_http_state(tmp_path: Path) -> Non
                 },
             )
             assert source_result.structured_content["result"]["evidence"]["excerpt"] == "DEFAULT_TIMEOUT = 30"
-            return mcp_project_id
+
+        async with Client(parameters(False, github=True), read_timeout_seconds=10) as client:
+            github_tools = {tool.name for tool in (await client.list_tools()).tools}
+            assert {
+                "list_projects",
+                "get_project",
+                "list_indexes",
+                "get_index",
+                "search_code",
+                "read_source",
+                "get_neighbors",
+                "get_import_status",
+                "import_github_repository",
+                "retry_github_import",
+            } == github_tools
+        return mcp_project_id
 
     mcp_project_id = asyncio.run(exercise())
 

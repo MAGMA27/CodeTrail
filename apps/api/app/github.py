@@ -1,0 +1,517 @@
+"""Bounded access to public GitHub repositories and safe archive extraction."""
+
+from __future__ import annotations
+
+import hashlib
+import ipaddress
+import json
+import os
+import re
+import shutil
+import tarfile
+import time
+from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
+from typing import Mapping
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote, urlsplit
+from urllib.request import HTTPRedirectHandler, Request, build_opener
+
+
+_GITHUB_API_HOST = "api.github.com"
+_GITHUB_REDIRECT_HOSTS = frozenset({"api.github.com", "codeload.github.com", "github.com"})
+_GIT_SHA_PATTERN = re.compile(r"^[0-9a-fA-F]{40}$")
+_DEFAULT_MAX_ARCHIVE_BYTES = 50 * 1024 * 1024
+_DEFAULT_MAX_FILE_COUNT = 10_000
+_DEFAULT_MAX_UNPACKED_BYTES = 200 * 1024 * 1024
+_DEFAULT_TIMEOUT_SECONDS = 20.0
+_MAX_JSON_BYTES = 2 * 1024 * 1024
+_CHUNK_SIZE = 64 * 1024
+
+
+class GitHubError(RuntimeError):
+    """A safe, user-facing error produced while acquiring a GitHub archive."""
+
+    def __init__(self, code: str, status_code: int, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.status_code = status_code
+        self.message = message
+
+
+@dataclass(frozen=True)
+class GitHubRepository:
+    """The only remote identity accepted by the importer."""
+
+    owner: str
+    name: str
+    canonical_url: str
+    identity: str
+
+
+@dataclass(frozen=True)
+class GitHubResolution:
+    repository: GitHubRepository
+    requested_ref: str | None
+    resolved_commit: str
+
+
+@dataclass(frozen=True)
+class GitHubArchive:
+    resolution: GitHubResolution
+    archive_hash: str
+    extracted_file_count: int
+    extracted_bytes: int
+
+
+@dataclass(frozen=True)
+class _ResponseData:
+    status: int
+    headers: Mapping[str, str]
+    stream: object
+
+
+class _NoRedirectHandler(HTTPRedirectHandler):
+    """Expose redirect responses so the target can be checked explicitly."""
+
+    def redirect_request(self, req: Request, fp: object, code: int, msg: str, headers: Mapping[str, str], newurl: str):  # type: ignore[override]
+        return None
+
+
+class GitHubClient:
+    """Resolve a GitHub ref and fetch one bounded tar archive.
+
+    The opener is injectable so all archive, redirect, budget, and interruption
+    behavior can be tested offline without contacting GitHub.
+    """
+
+    def __init__(
+        self,
+        *,
+        token: str | None = None,
+        opener: object | None = None,
+        timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS,
+        max_archive_bytes: int = _DEFAULT_MAX_ARCHIVE_BYTES,
+        max_file_count: int = _DEFAULT_MAX_FILE_COUNT,
+        max_unpacked_bytes: int = _DEFAULT_MAX_UNPACKED_BYTES,
+        max_redirects: int = 2,
+        max_total_seconds: float = 60.0,
+    ) -> None:
+        if timeout_seconds <= 0 or max_total_seconds <= 0 or max_archive_bytes <= 0 or max_file_count <= 0 or max_unpacked_bytes <= 0:
+            raise ValueError("GitHub acquisition budgets must be positive")
+        if max_redirects < 0:
+            raise ValueError("GitHub redirect budget must not be negative")
+        self.timeout_seconds = timeout_seconds
+        self.max_total_seconds = max_total_seconds
+        self.max_archive_bytes = max_archive_bytes
+        self.max_file_count = max_file_count
+        self.max_unpacked_bytes = max_unpacked_bytes
+        self.max_redirects = max_redirects
+        self._token = token if token is not None else os.getenv("CODETRAIL_GITHUB_TOKEN")
+        self._opener = opener or build_opener(_NoRedirectHandler())
+
+    def resolve(self, url: str, requested_ref: str | None) -> GitHubResolution:
+        repository = parse_github_repository_url(url)
+        ref = _normalize_ref(requested_ref)
+        deadline = time.monotonic() + self.max_total_seconds
+        if ref is None:
+            metadata = self._request_json(
+                f"https://{_GITHUB_API_HOST}/repos/{quote(repository.owner)}/{quote(repository.name)}",
+                deadline=deadline,
+            )
+            default_branch = metadata.get("default_branch")
+            if not isinstance(default_branch, str) or not default_branch:
+                raise GitHubError("internal_error", 503, "GitHub did not return a default branch")
+            ref = default_branch
+        commit = self._request_json(
+            f"https://{_GITHUB_API_HOST}/repos/{quote(repository.owner)}/{quote(repository.name)}/commits/{quote(ref, safe='')}",
+            deadline=deadline,
+        )
+        sha = commit.get("sha")
+        if not isinstance(sha, str) or not _GIT_SHA_PATTERN.fullmatch(sha):
+            raise GitHubError("internal_error", 503, "GitHub did not return a valid commit SHA")
+        return GitHubResolution(
+            repository=repository,
+            requested_ref=requested_ref,
+            resolved_commit=sha.lower(),
+        )
+
+    def download_and_extract(
+        self,
+        resolution: GitHubResolution,
+        destination: Path,
+    ) -> GitHubArchive:
+        destination = destination.resolve(strict=False)
+        destination.mkdir(parents=True, exist_ok=False)
+        archive_path = destination.parent / f"{destination.name}.tar.gz"
+        deadline = time.monotonic() + self.max_total_seconds
+        try:
+            archive_hash = self._download_archive(resolution, archive_path, deadline=deadline)
+            file_count, unpacked_bytes = extract_github_archive(
+                archive_path,
+                destination,
+                max_file_count=self.max_file_count,
+                max_unpacked_bytes=self.max_unpacked_bytes,
+            )
+            return GitHubArchive(
+                resolution=resolution,
+                archive_hash=archive_hash,
+                extracted_file_count=file_count,
+                extracted_bytes=unpacked_bytes,
+            )
+        finally:
+            _unlink_owned_file(archive_path)
+
+    def _headers(self, *, accept: str = "application/vnd.github+json") -> dict[str, str]:
+        headers = {
+            "Accept": accept,
+            "User-Agent": "CodeTrail/0.1",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+        if self._token:
+            headers["Authorization"] = f"Bearer {self._token}"
+        return headers
+
+    def _request_json(self, url: str, *, deadline: float | None = None) -> dict[str, object]:
+        response = self._open(url, allowed_hosts={_GITHUB_API_HOST}, deadline=deadline)
+        try:
+            body = self._read_response(response, max_bytes=_MAX_JSON_BYTES, deadline=deadline)
+            if response.status != 200:
+                raise _http_error(response.status, response.headers)
+        finally:
+            _close_response(response)
+        try:
+            payload = json.loads(body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise GitHubError("internal_error", 503, "GitHub returned invalid JSON") from exc
+        if not isinstance(payload, dict):
+            raise GitHubError("internal_error", 503, "GitHub returned an invalid response")
+        return payload
+
+    def _download_archive(self, resolution: GitHubResolution, archive_path: Path, *, deadline: float | None = None) -> str:
+        url = (
+            f"https://{_GITHUB_API_HOST}/repos/{quote(resolution.repository.owner)}/"
+            f"{quote(resolution.repository.name)}/tarball/{resolution.resolved_commit}"
+        )
+        for redirect_count in range(self.max_redirects + 1):
+            response = self._open(url, allowed_hosts=_GITHUB_REDIRECT_HOSTS, deadline=deadline)
+            if response.status in {301, 302, 303, 307, 308}:
+                try:
+                    location = _header(response.headers, "location")
+                    if not location:
+                        raise GitHubError("internal_error", 503, "GitHub archive redirect has no target")
+                    if redirect_count >= self.max_redirects:
+                        raise GitHubError("budget_exceeded", 429, "GitHub archive redirect limit was exceeded")
+                    url = _validate_remote_url(location, _GITHUB_REDIRECT_HOSTS)
+                    continue
+                finally:
+                    _close_response(response)
+            if response.status != 200:
+                try:
+                    raise _http_error(response.status, response.headers)
+                finally:
+                    _close_response(response)
+            try:
+                return self._stream_to_file(response, archive_path, deadline=deadline)
+            finally:
+                _close_response(response)
+        raise GitHubError("budget_exceeded", 429, "GitHub archive redirect limit was exceeded")
+
+    def _open(
+        self,
+        url: str,
+        *,
+        allowed_hosts: set[str] | frozenset[str],
+        deadline: float | None = None,
+    ) -> _ResponseData:
+        safe_url = _validate_remote_url(url, allowed_hosts)
+        request = Request(safe_url, headers=self._headers(), method="GET")
+        timeout = self.timeout_seconds
+        if deadline is not None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise GitHubError("budget_exceeded", 429, "GitHub total request time exceeded the configured limit")
+            timeout = min(timeout, remaining)
+        try:
+            response = self._opener.open(request, timeout=timeout)  # type: ignore[attr-defined]
+        except HTTPError as exc:
+            return _ResponseData(exc.code, _headers_from_http(exc.headers), exc)
+        except (TimeoutError, URLError, OSError) as exc:
+            raise GitHubError("internal_error", 503, "GitHub request failed or timed out") from exc
+        return _ResponseData(
+            status=int(getattr(response, "status", getattr(response, "code", 0))),
+            headers=_headers_from_http(getattr(response, "headers", {})),
+            stream=response,
+        )
+
+    def _read_response(
+        self,
+        response: _ResponseData,
+        *,
+        max_bytes: int,
+        deadline: float | None = None,
+    ) -> bytes:
+        stream = response.stream
+        body = getattr(stream, "_body", None)
+        if isinstance(body, bytes):
+            if len(body) > max_bytes:
+                raise GitHubError("budget_exceeded", 429, "GitHub response exceeded the configured size limit")
+            return body
+        chunks: list[bytes] = []
+        total = 0
+        try:
+            while True:
+                _check_deadline(deadline)
+                chunk = stream.read(min(_CHUNK_SIZE, max_bytes - total + 1))  # type: ignore[attr-defined]
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > max_bytes:
+                    raise GitHubError("budget_exceeded", 429, "GitHub response exceeded the configured size limit")
+                chunks.append(chunk)
+        except GitHubError:
+            raise
+        except (TimeoutError, URLError, OSError) as exc:
+            raise GitHubError("internal_error", 503, "GitHub response read failed or timed out") from exc
+        return b"".join(chunks)
+
+    def _stream_to_file(
+        self,
+        response: _ResponseData,
+        archive_path: Path,
+        *,
+        deadline: float | None = None,
+    ) -> str:
+        stream = response.stream
+        digest = hashlib.sha256()
+        total = 0
+        try:
+            with archive_path.open("xb") as handle:
+                while True:
+                    _check_deadline(deadline)
+                    chunk = stream.read(_CHUNK_SIZE)  # type: ignore[attr-defined]
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > self.max_archive_bytes:
+                        raise GitHubError("budget_exceeded", 429, "GitHub archive exceeded the configured size limit")
+                    digest.update(chunk)
+                    handle.write(chunk)
+        except GitHubError:
+            raise
+        except (TimeoutError, URLError, OSError) as exc:
+            raise GitHubError("internal_error", 500, "GitHub archive could not be stored") from exc
+        if total == 0:
+            raise GitHubError("internal_error", 503, "GitHub returned an empty archive")
+        return digest.hexdigest()
+
+
+def parse_github_repository_url(value: str) -> GitHubRepository:
+    """Accept only `https://github.com/{owner}/{repo}` repository URLs."""
+
+    raw = value.strip()
+    if not raw or len(raw) > 4_000:
+        raise GitHubError("invalid_input", 400, "GitHub repository URL is invalid")
+    try:
+        parsed = urlsplit(raw)
+        hostname = parsed.hostname
+        port = parsed.port
+    except ValueError as exc:
+        raise GitHubError("invalid_input", 400, "GitHub repository URL is invalid") from exc
+    if parsed.scheme.casefold() != "https" or hostname is None or hostname.casefold() != "github.com":
+        raise GitHubError("invalid_input", 400, "GitHub URL must use the official HTTPS repository host")
+    if parsed.username is not None or parsed.password is not None or port not in {None, 443}:
+        raise GitHubError("invalid_input", 400, "GitHub URL must not contain credentials or a custom port")
+    if parsed.query or parsed.fragment or ";" in parsed.path:
+        raise GitHubError("invalid_input", 400, "GitHub URL must not contain a query, fragment, or parameters")
+    if "%" in parsed.path:
+        raise GitHubError("invalid_input", 400, "GitHub URL must not contain encoded path segments")
+    stripped_path = parsed.path.strip("/")
+    parts = stripped_path.split("/") if stripped_path else []
+    if len(parts) != 2:
+        raise GitHubError("invalid_input", 400, "GitHub URL must point to exactly one repository")
+    owner, name = (part.strip() for part in parts)
+    if not owner or not name or owner in {".", ".."} or name in {".", ".."}:
+        raise GitHubError("invalid_input", 400, "GitHub repository identity is invalid")
+    if name.casefold().endswith(".git"):
+        name = name[:-4]
+    if not name or any(char in owner + name for char in "\\\x00"):
+        raise GitHubError("invalid_input", 400, "GitHub repository identity is invalid")
+    canonical_owner = owner.casefold()
+    canonical_name = name.casefold()
+    canonical_url = f"https://github.com/{canonical_owner}/{canonical_name}"
+    return GitHubRepository(
+        owner=owner,
+        name=name,
+        canonical_url=canonical_url,
+        identity=f"github://{canonical_owner}/{canonical_name}",
+    )
+
+
+def extract_github_archive(
+    archive_path: Path,
+    destination: Path,
+    *,
+    max_file_count: int = _DEFAULT_MAX_FILE_COUNT,
+    max_unpacked_bytes: int = _DEFAULT_MAX_UNPACKED_BYTES,
+) -> tuple[int, int]:
+    """Extract a GitHub tar archive without links, traversal, or special files."""
+
+    if max_file_count <= 0 or max_unpacked_bytes <= 0:
+        raise ValueError("archive extraction budgets must be positive")
+    destination = destination.resolve(strict=False)
+    destination.mkdir(parents=True, exist_ok=True)
+    try:
+        with tarfile.open(archive_path, mode="r:*") as archive:
+            members = archive.getmembers()
+            if len(members) > max_file_count * 2:
+                raise GitHubError("budget_exceeded", 429, "GitHub archive contains too many entries")
+            normalized_members = [_normalized_member(member.name) for member in members]
+            prefix = _archive_prefix(normalized_members)
+            seen: set[str] = set()
+            file_count = 0
+            unpacked_bytes = 0
+            for member, normalized in zip(members, normalized_members):
+                relative = _strip_archive_prefix(normalized, prefix)
+                if not relative:
+                    continue
+                if relative in seen:
+                    raise GitHubError("invalid_input", 400, "GitHub archive contains duplicate paths")
+                seen.add(relative)
+                target = _safe_target(destination, relative)
+                if member.isdir():
+                    target.mkdir(parents=True, exist_ok=True)
+                    continue
+                if not member.isreg():
+                    raise GitHubError("invalid_input", 400, "GitHub archive contains links or special files")
+                file_count += 1
+                if file_count > max_file_count:
+                    raise GitHubError("budget_exceeded", 429, "GitHub archive contains too many files")
+                if member.size < 0 or member.size > max_unpacked_bytes - unpacked_bytes:
+                    raise GitHubError("budget_exceeded", 429, "GitHub archive exceeds the unpacked size limit")
+                unpacked_bytes += member.size
+                target.parent.mkdir(parents=True, exist_ok=True)
+                extracted = archive.extractfile(member)
+                if extracted is None:
+                    raise GitHubError("invalid_input", 400, "GitHub archive contains an unreadable file")
+                with extracted, target.open("xb") as handle:
+                    shutil.copyfileobj(extracted, handle, length=_CHUNK_SIZE)
+            return file_count, unpacked_bytes
+    except GitHubError:
+        raise
+    except (OSError, tarfile.TarError, EOFError) as exc:
+        raise GitHubError("invalid_input", 400, "GitHub archive is not a valid safe tar archive") from exc
+
+
+def _normalize_ref(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    if not normalized or len(normalized) > 200 or "\x00" in normalized:
+        raise GitHubError("invalid_input", 400, "GitHub ref must be a non-empty bounded string")
+    return normalized
+
+
+def _validate_remote_url(value: str, allowed_hosts: set[str] | frozenset[str]) -> str:
+    try:
+        parsed = urlsplit(value)
+        hostname = parsed.hostname
+        port = parsed.port
+    except ValueError as exc:
+        raise GitHubError("forbidden", 403, "GitHub redirect target is invalid") from exc
+    host = hostname.casefold() if hostname else None
+    if parsed.scheme.casefold() != "https" or host not in allowed_hosts:
+        raise GitHubError("forbidden", 403, "GitHub redirect target is not an allowed official HTTPS host")
+    if parsed.username is not None or parsed.password is not None or port not in {None, 443}:
+        raise GitHubError("forbidden", 403, "GitHub redirect target contains an unsafe authority")
+    try:
+        if host is not None and ipaddress.ip_address(host).is_private:
+            raise GitHubError("forbidden", 403, "GitHub redirect target is private or loopback")
+    except ValueError:
+        pass
+    return value
+
+
+def _http_error(status: int, headers: Mapping[str, str]) -> GitHubError:
+    if status == 404:
+        return GitHubError("not_found", 404, "GitHub repository or ref was not found, or is not public")
+    if status in {401, 403, 429}:
+        retry_after = _header(headers, "retry-after")
+        suffix = f" Retry after {retry_after} seconds." if retry_after else ""
+        return GitHubError("budget_exceeded", 429, f"GitHub rate limit or access policy blocked the import.{suffix}")
+    if 500 <= status <= 599:
+        return GitHubError("internal_error", 503, "GitHub is temporarily unavailable")
+    return GitHubError("internal_error", 503, "GitHub returned an unexpected response")
+
+
+def _check_deadline(deadline: float | None) -> None:
+    if deadline is not None and time.monotonic() >= deadline:
+        raise GitHubError("budget_exceeded", 429, "GitHub total request time exceeded the configured limit")
+
+
+def _headers_from_http(headers: object) -> dict[str, str]:
+    if hasattr(headers, "items"):
+        return {str(key).casefold(): str(value) for key, value in headers.items()}  # type: ignore[union-attr]
+    if isinstance(headers, Mapping):
+        return {str(key).casefold(): str(value) for key, value in headers.items()}
+    return {}
+
+
+def _header(headers: Mapping[str, str], name: str) -> str | None:
+    return headers.get(name.casefold())
+
+
+def _close_response(response: _ResponseData) -> None:
+    close = getattr(response.stream, "close", None)
+    if callable(close):
+        close()
+
+
+def _normalized_member(name: str) -> str:
+    if not name or "\x00" in name:
+        raise GitHubError("invalid_input", 400, "GitHub archive contains an invalid path")
+    normalized = name.replace("\\", "/")
+    if normalized.startswith("/"):
+        raise GitHubError("invalid_input", 400, "GitHub archive contains an absolute path")
+    parts = normalized.split("/")
+    if any(part in {"", ".", ".."} for part in parts):
+        raise GitHubError("invalid_input", 400, "GitHub archive contains a traversal path")
+    if ":" in parts[0]:
+        raise GitHubError("invalid_input", 400, "GitHub archive contains a drive-qualified path")
+    return "/".join(parts)
+
+
+def _archive_prefix(members: list[str]) -> str | None:
+    first_segments = {member.split("/", 1)[0] for member in members if member}
+    if len(first_segments) != 1:
+        return None
+    prefix = next(iter(first_segments))
+    if all(member == prefix or member.startswith(f"{prefix}/") for member in members):
+        return prefix
+    return None
+
+
+def _strip_archive_prefix(value: str, prefix: str | None) -> str:
+    if prefix is None:
+        return value
+    if value == prefix:
+        return ""
+    return value[len(prefix) + 1 :]
+
+
+def _safe_target(root: Path, relative: str) -> Path:
+    target = (root / PurePosixPath(relative)).resolve(strict=False)
+    try:
+        target.relative_to(root)
+    except ValueError as exc:
+        raise GitHubError("invalid_input", 400, "GitHub archive path escaped the managed temp directory") from exc
+    return target
+
+
+def _unlink_owned_file(path: Path) -> None:
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        # The archive is inside the per-attempt temp directory and the caller
+        # will report a source cleanup failure if the directory remains.
+        pass

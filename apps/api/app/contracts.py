@@ -125,6 +125,15 @@ class LocalImportRequest(VersionedModel):
     idempotency_key: str | None = Field(default=None, min_length=1, max_length=200)
 
 
+class GitHubImportRequest(VersionedModel):
+    """A bounded import request for one public GitHub repository."""
+
+    name: str = Field(min_length=1, max_length=200)
+    url: str = Field(min_length=1, max_length=4_000)
+    ref: str | None = Field(default=None, min_length=1, max_length=200)
+    idempotency_key: str | None = Field(default=None, min_length=1, max_length=200)
+
+
 class CreateProjectIndexRequest(VersionedModel):
     revision: str = Field(default="working-tree", min_length=1, max_length=200)
     dirty: bool = True
@@ -196,9 +205,12 @@ ImportStatus: TypeAlias = Literal[
     "interrupted",
 ]
 
+SourceKind: TypeAlias = Literal["local", "github"]
+CleanupStatus: TypeAlias = Literal["not_required", "pending", "succeeded", "failed"]
+
 
 class ImportAttempt(VersionedModel):
-    """Persisted lifecycle state for one local source import attempt."""
+    """Persisted lifecycle state for one bounded source import attempt."""
 
     attempt_id: Identifier
     project_id: Identifier
@@ -209,6 +221,13 @@ class ImportAttempt(VersionedModel):
     index_id: Identifier | None = None
     error_code: str | None = Field(default=None, max_length=100)
     error_message: str | None = Field(default=None, max_length=2_000)
+    source_kind: SourceKind = "local"
+    source_url: str | None = Field(default=None, max_length=4_000)
+    requested_ref: str | None = Field(default=None, max_length=200)
+    resolved_commit: str | None = Field(default=None, max_length=64)
+    content_hash: Sha256 | None = None
+    cleanup_status: CleanupStatus = "not_required"
+    cleanup_error: str | None = Field(default=None, max_length=2_000)
     created_at: datetime
     updated_at: datetime
 
@@ -240,6 +259,33 @@ class LocalImportResponse(VersionedModel):
                 raise ValueError("ready import response must include its created index")
         elif self.index is not None:
             raise ValueError("failed or pending import response cannot include a created index")
+        return self
+
+
+class GitHubImportResponse(VersionedModel):
+    """HTTP response for a public GitHub repository import."""
+
+    source_url: str = Field(min_length=1, max_length=4_000)
+    requested_ref: str | None = Field(default=None, max_length=200)
+    resolved_commit: str | None = Field(default=None, max_length=64)
+    content_hash: Sha256 | None = None
+    cleanup_status: CleanupStatus = "not_required"
+    cleanup_error: str | None = Field(default=None, max_length=2_000)
+    project: Project
+    attempt: ImportAttempt
+    index: IndexResponse | None = None
+
+    @model_validator(mode="after")
+    def validate_index_result(self) -> GitHubImportResponse:
+        if self.attempt.source_kind != "github" or self.attempt.source_url != self.source_url:
+            raise ValueError("GitHub import response must contain a GitHub attempt")
+        if self.attempt.status == "ready":
+            if self.index is None or self.index.index.index_id != self.attempt.index_id:
+                raise ValueError("ready GitHub import response must include its created index")
+            if self.resolved_commit is None or self.content_hash is None:
+                raise ValueError("ready GitHub import response must include fixed source identity")
+        elif self.index is not None:
+            raise ValueError("failed or pending GitHub import response cannot include a created index")
         return self
 
 
@@ -785,12 +831,18 @@ class McpNeighborsResponse(McpResultBase):
 
 
 class McpImportResponse(McpResultBase):
-    """Structured MCP result for an enabled local import tool."""
+    """Structured MCP result for an enabled local or GitHub import tool."""
 
     source_path: str | None = Field(default=None, max_length=4_000)
     project: Project | None = None
     attempt: ImportAttempt | None = None
     index: IndexResponse | None = None
+    source_url: str | None = Field(default=None, max_length=4_000)
+    requested_ref: str | None = Field(default=None, max_length=200)
+    resolved_commit: str | None = Field(default=None, max_length=64)
+    content_hash: Sha256 | None = None
+    cleanup_status: CleanupStatus | None = None
+    cleanup_error: str | None = Field(default=None, max_length=2_000)
 
     @model_validator(mode="after")
     def validate_import_result(self) -> McpImportResponse:
@@ -802,13 +854,13 @@ class McpImportResponse(McpResultBase):
                     raise ValueError("ready import results require the created index")
             elif self.index is not None:
                 raise ValueError("pending or failed import results cannot include an index")
-        elif any(value is not None for value in (self.source_path, self.project, self.attempt, self.index)):
+        elif any(value is not None for value in (self.source_path, self.project, self.attempt, self.index, self.source_url)):
             raise ValueError("failed import results cannot include import data")
         return self
 
 
 class McpImportStatusResponse(McpResultBase):
-    """Structured MCP result for a bounded local import status lookup."""
+    """Structured MCP result for a bounded import status lookup."""
 
     source_path: str | None = Field(default=None, max_length=4_000)
     project: Project | None = None

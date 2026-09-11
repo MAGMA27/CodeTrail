@@ -6686,6 +6686,609 @@
       "title": "FixtureResponseSet",
       "type": "object"
     },
+    "GitHubImportRequest": {
+      "additionalProperties": false,
+      "description": "A bounded import request for one public GitHub repository.",
+      "properties": {
+        "idempotency_key": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Idempotency Key"
+        },
+        "name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ref"
+        },
+        "schema_version": {
+          "const": "0.1.0",
+          "default": "0.1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "url": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "url"
+      ],
+      "title": "GitHubImportRequest",
+      "type": "object"
+    },
+    "GitHubImportResponse": {
+      "$defs": {
+        "ImportAttempt": {
+          "additionalProperties": false,
+          "description": "Persisted lifecycle state for one bounded source import attempt.",
+          "properties": {
+            "attempt_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Attempt Id",
+              "type": "string"
+            },
+            "cleanup_error": {
+              "anyOf": [
+                {
+                  "maxLength": 2000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Cleanup Error"
+            },
+            "cleanup_status": {
+              "default": "not_required",
+              "enum": [
+                "not_required",
+                "pending",
+                "succeeded",
+                "failed"
+              ],
+              "title": "Cleanup Status",
+              "type": "string"
+            },
+            "content_hash": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Content Hash"
+            },
+            "created_at": {
+              "format": "date-time",
+              "title": "Created At",
+              "type": "string"
+            },
+            "error_code": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Error Code"
+            },
+            "error_message": {
+              "anyOf": [
+                {
+                  "maxLength": 2000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Error Message"
+            },
+            "index_id": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Id"
+            },
+            "phase": {
+              "enum": [
+                "queued",
+                "acquiring",
+                "indexing",
+                "ready",
+                "failed",
+                "cancelled",
+                "interrupted"
+              ],
+              "title": "Phase",
+              "type": "string"
+            },
+            "project_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Project Id",
+              "type": "string"
+            },
+            "repository_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Repository Id",
+              "type": "string"
+            },
+            "requested_ref": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Requested Ref"
+            },
+            "resolved_commit": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Resolved Commit"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            },
+            "source_kind": {
+              "default": "local",
+              "enum": [
+                "local",
+                "github"
+              ],
+              "title": "Source Kind",
+              "type": "string"
+            },
+            "source_path": {
+              "maxLength": 4000,
+              "minLength": 1,
+              "title": "Source Path",
+              "type": "string"
+            },
+            "source_url": {
+              "anyOf": [
+                {
+                  "maxLength": 4000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source Url"
+            },
+            "status": {
+              "enum": [
+                "queued",
+                "acquiring",
+                "indexing",
+                "ready",
+                "failed",
+                "cancelled",
+                "interrupted"
+              ],
+              "title": "Status",
+              "type": "string"
+            },
+            "updated_at": {
+              "format": "date-time",
+              "title": "Updated At",
+              "type": "string"
+            }
+          },
+          "required": [
+            "attempt_id",
+            "project_id",
+            "repository_id",
+            "source_path",
+            "status",
+            "phase",
+            "created_at",
+            "updated_at"
+          ],
+          "title": "ImportAttempt",
+          "type": "object"
+        },
+        "IndexIssue": {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "decode_error",
+                "file_too_large",
+                "read_error",
+                "symlink",
+                "syntax_error",
+                "outside_root"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "message": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "title": "Message",
+              "type": "string"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "size": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Size"
+            }
+          },
+          "required": [
+            "path",
+            "kind",
+            "message"
+          ],
+          "title": "IndexIssue",
+          "type": "object"
+        },
+        "IndexResponse": {
+          "additionalProperties": false,
+          "properties": {
+            "index": {
+              "$ref": "#/$defs/IndexSnapshot"
+            },
+            "issues": {
+              "items": {
+                "$ref": "#/$defs/IndexIssue"
+              },
+              "title": "Issues",
+              "type": "array"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            },
+            "truncated": {
+              "default": false,
+              "title": "Truncated",
+              "type": "boolean"
+            },
+            "truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Truncation Reason"
+            }
+          },
+          "required": [
+            "index"
+          ],
+          "title": "IndexResponse",
+          "type": "object"
+        },
+        "IndexSnapshot": {
+          "additionalProperties": false,
+          "properties": {
+            "dirty": {
+              "title": "Dirty",
+              "type": "boolean"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "repository_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Repository Id",
+              "type": "string"
+            },
+            "revision": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Revision",
+              "type": "string"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            },
+            "snapshot_hash": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Snapshot Hash",
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "ready",
+                "building",
+                "failed"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "index_id",
+            "repository_id",
+            "revision",
+            "dirty",
+            "snapshot_hash",
+            "status"
+          ],
+          "title": "IndexSnapshot",
+          "type": "object"
+        },
+        "Project": {
+          "additionalProperties": false,
+          "properties": {
+            "available_index_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "title": "Available Index Ids",
+              "type": "array"
+            },
+            "building_index_id": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Building Index Id"
+            },
+            "created_at": {
+              "format": "date-time",
+              "title": "Created At",
+              "type": "string"
+            },
+            "latest_index_id": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Latest Index Id"
+            },
+            "name": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Name",
+              "type": "string"
+            },
+            "project_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Project Id",
+              "type": "string"
+            },
+            "repository_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Repository Id",
+              "type": "string"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            }
+          },
+          "required": [
+            "project_id",
+            "name",
+            "repository_id",
+            "created_at"
+          ],
+          "title": "Project",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "HTTP response for a public GitHub repository import.",
+      "properties": {
+        "attempt": {
+          "$ref": "#/$defs/ImportAttempt"
+        },
+        "cleanup_error": {
+          "anyOf": [
+            {
+              "maxLength": 2000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cleanup Error"
+        },
+        "cleanup_status": {
+          "default": "not_required",
+          "enum": [
+            "not_required",
+            "pending",
+            "succeeded",
+            "failed"
+          ],
+          "title": "Cleanup Status",
+          "type": "string"
+        },
+        "content_hash": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Content Hash"
+        },
+        "index": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IndexResponse"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "project": {
+          "$ref": "#/$defs/Project"
+        },
+        "requested_ref": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Requested Ref"
+        },
+        "resolved_commit": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resolved Commit"
+        },
+        "schema_version": {
+          "const": "0.1.0",
+          "default": "0.1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "source_url": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Source Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_url",
+        "project",
+        "attempt"
+      ],
+      "title": "GitHubImportResponse",
+      "type": "object"
+    },
     "GraphResponse": {
       "$defs": {
         "CandidateLink": {
@@ -7403,13 +8006,50 @@
     },
     "ImportAttempt": {
       "additionalProperties": false,
-      "description": "Persisted lifecycle state for one local source import attempt.",
+      "description": "Persisted lifecycle state for one bounded source import attempt.",
       "properties": {
         "attempt_id": {
           "maxLength": 200,
           "minLength": 1,
           "title": "Attempt Id",
           "type": "string"
+        },
+        "cleanup_error": {
+          "anyOf": [
+            {
+              "maxLength": 2000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cleanup Error"
+        },
+        "cleanup_status": {
+          "default": "not_required",
+          "enum": [
+            "not_required",
+            "pending",
+            "succeeded",
+            "failed"
+          ],
+          "title": "Cleanup Status",
+          "type": "string"
+        },
+        "content_hash": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Content Hash"
         },
         "created_at": {
           "format": "date-time",
@@ -7481,10 +8121,45 @@
           "title": "Repository Id",
           "type": "string"
         },
+        "requested_ref": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Requested Ref"
+        },
+        "resolved_commit": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resolved Commit"
+        },
         "schema_version": {
           "const": "0.1.0",
           "default": "0.1.0",
           "title": "Schema Version",
+          "type": "string"
+        },
+        "source_kind": {
+          "default": "local",
+          "enum": [
+            "local",
+            "github"
+          ],
+          "title": "Source Kind",
           "type": "string"
         },
         "source_path": {
@@ -7492,6 +8167,19 @@
           "minLength": 1,
           "title": "Source Path",
           "type": "string"
+        },
+        "source_url": {
+          "anyOf": [
+            {
+              "maxLength": 4000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Url"
         },
         "status": {
           "enum": [
@@ -7529,13 +8217,50 @@
       "$defs": {
         "ImportAttempt": {
           "additionalProperties": false,
-          "description": "Persisted lifecycle state for one local source import attempt.",
+          "description": "Persisted lifecycle state for one bounded source import attempt.",
           "properties": {
             "attempt_id": {
               "maxLength": 200,
               "minLength": 1,
               "title": "Attempt Id",
               "type": "string"
+            },
+            "cleanup_error": {
+              "anyOf": [
+                {
+                  "maxLength": 2000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Cleanup Error"
+            },
+            "cleanup_status": {
+              "default": "not_required",
+              "enum": [
+                "not_required",
+                "pending",
+                "succeeded",
+                "failed"
+              ],
+              "title": "Cleanup Status",
+              "type": "string"
+            },
+            "content_hash": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Content Hash"
             },
             "created_at": {
               "format": "date-time",
@@ -7607,10 +8332,45 @@
               "title": "Repository Id",
               "type": "string"
             },
+            "requested_ref": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Requested Ref"
+            },
+            "resolved_commit": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Resolved Commit"
+            },
             "schema_version": {
               "const": "0.1.0",
               "default": "0.1.0",
               "title": "Schema Version",
+              "type": "string"
+            },
+            "source_kind": {
+              "default": "local",
+              "enum": [
+                "local",
+                "github"
+              ],
+              "title": "Source Kind",
               "type": "string"
             },
             "source_path": {
@@ -7618,6 +8378,19 @@
               "minLength": 1,
               "title": "Source Path",
               "type": "string"
+            },
+            "source_url": {
+              "anyOf": [
+                {
+                  "maxLength": 4000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source Url"
             },
             "status": {
               "enum": [
@@ -8097,13 +8870,50 @@
       "$defs": {
         "ImportAttempt": {
           "additionalProperties": false,
-          "description": "Persisted lifecycle state for one local source import attempt.",
+          "description": "Persisted lifecycle state for one bounded source import attempt.",
           "properties": {
             "attempt_id": {
               "maxLength": 200,
               "minLength": 1,
               "title": "Attempt Id",
               "type": "string"
+            },
+            "cleanup_error": {
+              "anyOf": [
+                {
+                  "maxLength": 2000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Cleanup Error"
+            },
+            "cleanup_status": {
+              "default": "not_required",
+              "enum": [
+                "not_required",
+                "pending",
+                "succeeded",
+                "failed"
+              ],
+              "title": "Cleanup Status",
+              "type": "string"
+            },
+            "content_hash": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Content Hash"
             },
             "created_at": {
               "format": "date-time",
@@ -8175,10 +8985,45 @@
               "title": "Repository Id",
               "type": "string"
             },
+            "requested_ref": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Requested Ref"
+            },
+            "resolved_commit": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Resolved Commit"
+            },
             "schema_version": {
               "const": "0.1.0",
               "default": "0.1.0",
               "title": "Schema Version",
+              "type": "string"
+            },
+            "source_kind": {
+              "default": "local",
+              "enum": [
+                "local",
+                "github"
+              ],
+              "title": "Source Kind",
               "type": "string"
             },
             "source_path": {
@@ -8186,6 +9031,19 @@
               "minLength": 1,
               "title": "Source Path",
               "type": "string"
+            },
+            "source_url": {
+              "anyOf": [
+                {
+                  "maxLength": 4000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source Url"
             },
             "status": {
               "enum": [
@@ -8535,13 +9393,50 @@
       "$defs": {
         "ImportAttempt": {
           "additionalProperties": false,
-          "description": "Persisted lifecycle state for one local source import attempt.",
+          "description": "Persisted lifecycle state for one bounded source import attempt.",
           "properties": {
             "attempt_id": {
               "maxLength": 200,
               "minLength": 1,
               "title": "Attempt Id",
               "type": "string"
+            },
+            "cleanup_error": {
+              "anyOf": [
+                {
+                  "maxLength": 2000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Cleanup Error"
+            },
+            "cleanup_status": {
+              "default": "not_required",
+              "enum": [
+                "not_required",
+                "pending",
+                "succeeded",
+                "failed"
+              ],
+              "title": "Cleanup Status",
+              "type": "string"
+            },
+            "content_hash": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Content Hash"
             },
             "created_at": {
               "format": "date-time",
@@ -8613,10 +9508,45 @@
               "title": "Repository Id",
               "type": "string"
             },
+            "requested_ref": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Requested Ref"
+            },
+            "resolved_commit": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Resolved Commit"
+            },
             "schema_version": {
               "const": "0.1.0",
               "default": "0.1.0",
               "title": "Schema Version",
+              "type": "string"
+            },
+            "source_kind": {
+              "default": "local",
+              "enum": [
+                "local",
+                "github"
+              ],
+              "title": "Source Kind",
               "type": "string"
             },
             "source_path": {
@@ -8624,6 +9554,19 @@
               "minLength": 1,
               "title": "Source Path",
               "type": "string"
+            },
+            "source_url": {
+              "anyOf": [
+                {
+                  "maxLength": 4000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source Url"
             },
             "status": {
               "enum": [
@@ -8929,7 +9872,7 @@
         }
       },
       "additionalProperties": false,
-      "description": "Structured MCP result for an enabled local import tool.",
+      "description": "Structured MCP result for an enabled local or GitHub import tool.",
       "properties": {
         "attempt": {
           "anyOf": [
@@ -8941,6 +9884,50 @@
             }
           ],
           "default": null
+        },
+        "cleanup_error": {
+          "anyOf": [
+            {
+              "maxLength": 2000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cleanup Error"
+        },
+        "cleanup_status": {
+          "anyOf": [
+            {
+              "enum": [
+                "not_required",
+                "pending",
+                "succeeded",
+                "failed"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cleanup Status"
+        },
+        "content_hash": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Content Hash"
         },
         "error": {
           "anyOf": [
@@ -8979,6 +9966,32 @@
           ],
           "default": null
         },
+        "requested_ref": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Requested Ref"
+        },
+        "resolved_commit": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resolved Commit"
+        },
         "schema_version": {
           "const": "0.1.0",
           "default": "0.1.0",
@@ -8997,6 +10010,19 @@
           ],
           "default": null,
           "title": "Source Path"
+        },
+        "source_url": {
+          "anyOf": [
+            {
+              "maxLength": 4000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Url"
         }
       },
       "required": [
@@ -9009,13 +10035,50 @@
       "$defs": {
         "ImportAttempt": {
           "additionalProperties": false,
-          "description": "Persisted lifecycle state for one local source import attempt.",
+          "description": "Persisted lifecycle state for one bounded source import attempt.",
           "properties": {
             "attempt_id": {
               "maxLength": 200,
               "minLength": 1,
               "title": "Attempt Id",
               "type": "string"
+            },
+            "cleanup_error": {
+              "anyOf": [
+                {
+                  "maxLength": 2000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Cleanup Error"
+            },
+            "cleanup_status": {
+              "default": "not_required",
+              "enum": [
+                "not_required",
+                "pending",
+                "succeeded",
+                "failed"
+              ],
+              "title": "Cleanup Status",
+              "type": "string"
+            },
+            "content_hash": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Content Hash"
             },
             "created_at": {
               "format": "date-time",
@@ -9087,10 +10150,45 @@
               "title": "Repository Id",
               "type": "string"
             },
+            "requested_ref": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Requested Ref"
+            },
+            "resolved_commit": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Resolved Commit"
+            },
             "schema_version": {
               "const": "0.1.0",
               "default": "0.1.0",
               "title": "Schema Version",
+              "type": "string"
+            },
+            "source_kind": {
+              "default": "local",
+              "enum": [
+                "local",
+                "github"
+              ],
+              "title": "Source Kind",
               "type": "string"
             },
             "source_path": {
@@ -9098,6 +10196,19 @@
               "minLength": 1,
               "title": "Source Path",
               "type": "string"
+            },
+            "source_url": {
+              "anyOf": [
+                {
+                  "maxLength": 4000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source Url"
             },
             "status": {
               "enum": [
@@ -9403,7 +10514,7 @@
         }
       },
       "additionalProperties": false,
-      "description": "Structured MCP result for a bounded local import status lookup.",
+      "description": "Structured MCP result for a bounded import status lookup.",
       "properties": {
         "attempt": {
           "anyOf": [
