@@ -11,10 +11,13 @@ import pytest
 from pydantic import ValidationError
 
 from app.contracts import (
+    EvidenceReference,
     FixtureResponseSet,
+    McpSourceResponse,
     ReadSourceParams,
     ReadSourceSuccess,
     Project,
+    SourceIndexResponse,
     SseEventFrame,
 )
 from app.export_schema import build_schema_document
@@ -170,4 +173,30 @@ def test_project_contract_keeps_latest_and_building_indexes_separate() -> None:
             repository_id="repo-one",
             created_at=created_at,
             available_index_ids=["index-one", "index-one"],
+        )
+
+
+def test_mcp_source_reference_must_match_immutable_evidence() -> None:
+    bundle = FixtureResponseSet.model_validate(raw_bundle("success-timeout-missing"))
+    tool_result = next(result for result in bundle.tool_results if isinstance(result, ReadSourceSuccess))
+    source = SourceIndexResponse(index_id=tool_result.index_id, evidence=tool_result.evidence)
+    reference = EvidenceReference(
+        project_id="project-one",
+        index_id=tool_result.index_id,
+        path=tool_result.evidence.path,
+        start_line=tool_result.evidence.start_line,
+        end_line=tool_result.evidence.end_line,
+        content_hash=tool_result.evidence.content_hash,
+        evidence_id=tool_result.evidence.evidence_id,
+        url="http://localhost:3000/?project_id=project-one",
+    )
+
+    response = McpSourceResponse(ok=True, result=source, reference=reference)
+    assert response.reference is not None
+
+    with pytest.raises(ValidationError):
+        McpSourceResponse(
+            ok=True,
+            result=source,
+            reference=reference.model_copy(update={"content_hash": "0" * 64}),
         )

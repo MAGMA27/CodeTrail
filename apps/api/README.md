@@ -46,3 +46,21 @@ API 健康检查为 `GET /api/health`。前端和测试通过项目 API 创建�
 - [存储与查询子系统说明](../../docs/subsystems/storage.md)
 - [数据契约](../../docs/subsystems/contracts.md)
 - [工作区与项目概览决策](../../docs/decisions/2026-09-11-project-workspace.md)
+
+## 本地只读 MCP 入口
+
+`python -m app.mcp_server` 启动 MCP SDK `2.2.0` 的本地 stdio 服务。stdout 只承载 MCP 协议帧，日志写 stderr；服务复用 `WorkspaceService`，不直接访问 SQLite，不创建索引，不执行仓库代码。
+
+只读工具为 `list_projects`、`get_project`、`list_indexes`、`get_index`、`search_code`、`read_source` 和 `get_neighbors`。除项目发现外均要求显式 `project_id`，索引查询同时要求 `index_id`；错误以结构化 `code`、`message`、`retryable` 返回。`read_source` 额外返回包含 project/index、行范围、content hash、evidence_id 和工作台 URL 的引用。
+
+配置工作台引用地址（默认 `http://localhost:3000`）：
+
+```powershell
+$env:CODETRAIL_WORKBENCH_URL = 'http://localhost:3000'
+Set-Location apps/api
+uv run python -m app.mcp_server
+```
+
+用 MCP 客户端启动时，命令为 `uv run --directory apps/api python -m app.mcp_server`，并传入与 HTTP 服务相同的 `CODETRAIL_REPOSITORIES`。A1 仅实现本地 stdio；远程 MCP、认证、写入/下载和模型调用不开放。
+
+设计与验收见 [统一接口决策](../../docs/decisions/2026-09-11-agent-native-interfaces.md)。

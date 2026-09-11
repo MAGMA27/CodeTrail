@@ -237,6 +237,27 @@ class Evidence(LineRangeModel):
         return self
 
 
+class EvidenceReference(VersionedModel):
+    """A stable source citation that can reopen the same project snapshot."""
+
+    project_id: Identifier
+    index_id: Identifier
+    path: RelativePath
+    start_line: PositiveInt
+    end_line: PositiveInt
+    content_hash: Sha256
+    evidence_id: Identifier
+    url: str = Field(min_length=1, max_length=2_000)
+
+    _normalize_path = field_validator("path")(_validate_relative_path)
+
+    @model_validator(mode="after")
+    def validate_reference_range(self) -> EvidenceReference:
+        if self.end_line < self.start_line:
+            raise ValueError("evidence reference end_line must be greater than or equal to start_line")
+        return self
+
+
 class CandidateLink(ContractModel):
     candidate_id: Identifier
     index_id: Identifier
@@ -580,6 +601,109 @@ ApiErrorCode: TypeAlias = Literal[
 class ApiErrorResponse(VersionedModel):
     code: ApiErrorCode
     message: str = Field(min_length=1, max_length=2_000)
+
+
+McpErrorCode: TypeAlias = Literal[
+    "not_found",
+    "invalid_input",
+    "conflict",
+    "budget_exceeded",
+    "internal_error",
+]
+
+
+class McpError(VersionedModel):
+    """Domain failure returned inside a read-only MCP tool result."""
+
+    code: McpErrorCode
+    message: str = Field(min_length=1, max_length=2_000)
+    retryable: bool = False
+
+
+class McpResultBase(VersionedModel):
+    """Common structured MCP result envelope."""
+
+    ok: bool
+    error: McpError | None = None
+
+    @model_validator(mode="after")
+    def validate_result_error(self) -> McpResultBase:
+        if self.ok and self.error is not None:
+            raise ValueError("successful MCP results cannot include an error")
+        if not self.ok and self.error is None:
+            raise ValueError("failed MCP results must include an error")
+        return self
+
+
+class McpProjectListResponse(McpResultBase):
+    projects: list[Project] = Field(default_factory=list)
+    truncated: bool = False
+    truncation_reason: str | None = Field(default=None, max_length=1_000)
+
+    @model_validator(mode="after")
+    def validate_truncation(self) -> McpProjectListResponse:
+        if self.truncated and not self.truncation_reason:
+            raise ValueError("truncated MCP project lists must explain the truncation")
+        if not self.truncated and self.truncation_reason:
+            raise ValueError("non-truncated MCP project lists cannot have a truncation reason")
+        return self
+
+
+class McpProjectResponse(McpResultBase):
+    project: Project | None = None
+
+
+class McpProjectIndexesResponse(McpResultBase):
+    project_id: Identifier
+    indexes: list[IndexSnapshot] = Field(default_factory=list)
+    latest_index_id: Identifier | None = None
+    building_index_id: Identifier | None = None
+    truncated: bool = False
+    truncation_reason: str | None = Field(default=None, max_length=1_000)
+
+    @model_validator(mode="after")
+    def validate_truncation(self) -> McpProjectIndexesResponse:
+        if self.truncated and not self.truncation_reason:
+            raise ValueError("truncated MCP index lists must explain the truncation")
+        if not self.truncated and self.truncation_reason:
+            raise ValueError("non-truncated MCP index lists cannot have a truncation reason")
+        return self
+
+
+class McpIndexResponse(McpResultBase):
+    index: IndexResponse | None = None
+
+
+class McpSearchResponse(McpResultBase):
+    result: SearchIndexResponse | None = None
+
+
+class McpSourceResponse(McpResultBase):
+    result: SourceIndexResponse | None = None
+    reference: EvidenceReference | None = None
+
+    @model_validator(mode="after")
+    def validate_source_reference(self) -> McpSourceResponse:
+        if self.ok:
+            if self.result is None or self.reference is None:
+                raise ValueError("successful source results require evidence and a reference")
+            evidence = self.result.evidence
+            if (
+                evidence.index_id != self.reference.index_id
+                or evidence.path != self.reference.path
+                or evidence.start_line != self.reference.start_line
+                or evidence.end_line != self.reference.end_line
+                or evidence.content_hash != self.reference.content_hash
+                or evidence.evidence_id != self.reference.evidence_id
+            ):
+                raise ValueError("source reference must match returned evidence")
+        elif self.result is not None or self.reference is not None:
+            raise ValueError("failed source results cannot include evidence or a reference")
+        return self
+
+
+class McpNeighborsResponse(McpResultBase):
+    result: NeighborsIndexResponse | None = None
 
 
 ToolSuccessResult: TypeAlias = Annotated[

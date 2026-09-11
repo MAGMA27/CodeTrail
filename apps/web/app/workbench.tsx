@@ -173,6 +173,46 @@ function evidenceLines(evidence: Evidence): Array<{ number: number; text: string
   }));
 }
 
+type EvidenceLink = {
+  projectId: string;
+  indexId: string;
+  path: string;
+  startLine: number;
+  endLine: number;
+  contentHash: string;
+  evidenceId: string;
+};
+
+function readEvidenceLink(): { link: EvidenceLink | null; error: string | null } {
+  const params = new URLSearchParams(window.location.search);
+  const keys = ["project_id", "index_id", "path", "start_line", "end_line", "content_hash", "evidence_id"];
+  const values = Object.fromEntries(keys.map((key) => [key, params.get(key)]));
+  const hasAnyValue = Object.values(values).some((value) => value !== null);
+  if (!hasAnyValue) {
+    return { link: null, error: null };
+  }
+  if (Object.values(values).some((value) => !value)) {
+    return { link: null, error: "工作台引用缺少必要的项目、索引或证据参数。" };
+  }
+  const startLine = Number(values.start_line);
+  const endLine = Number(values.end_line);
+  if (!Number.isInteger(startLine) || !Number.isInteger(endLine) || startLine < 1 || endLine < startLine) {
+    return { link: null, error: "工作台引用的源码行号无效。" };
+  }
+  return {
+    link: {
+      projectId: values.project_id as string,
+      indexId: values.index_id as string,
+      path: values.path as string,
+      startLine,
+      endLine,
+      contentHash: values.content_hash as string,
+      evidenceId: values.evidence_id as string,
+    },
+    error: null,
+  };
+}
+
 export default function Workbench() {
   const [connectionState, setConnectionState] = useState<"checking" | "connected" | "error">("checking");
   const [health, setHealth] = useState<HealthResponse | null>(null);
@@ -195,6 +235,7 @@ export default function Workbench() {
   const [searchResults, setSearchResults] = useState<SearchMatch[]>([]);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [linkedSymbol, setLinkedSymbol] = useState<SymbolRecord | null>(null);
   const [sourceStatus, setSourceStatus] = useState<AsyncStatus>("idle");
   const [sourceResponse, setSourceResponse] = useState<SourceResponse | null>(null);
   const [sourceError, setSourceError] = useState<string | null>(null);
@@ -219,6 +260,8 @@ export default function Workbench() {
   const graphRequestId = useRef(0);
   const sourceRequestId = useRef(0);
   const knownGroupKeys = useRef<Set<string>>(new Set());
+  const evidenceLink = useRef<EvidenceLink | null>(null);
+  const evidenceLinkApplied = useRef(false);
 
   const checkHealth = useCallback(async () => {
     healthController.current?.abort();
@@ -257,9 +300,23 @@ export default function Workbench() {
       }
       setProjects(response.projects);
       setProjectStatus(response.projects.length > 0 ? "success" : "empty");
+      const parsedLink = readEvidenceLink();
+      evidenceLink.current = parsedLink.link;
+      evidenceLinkApplied.current = false;
+      if (parsedLink.error) {
+        setProjectStatus("error");
+        setProjectError(parsedLink.error);
+      }
       const savedProjectId = window.localStorage.getItem("codetrail.selectedProjectId");
-      const nextProject =
-        response.projects.find((project) => project.project_id === savedProjectId) ?? response.projects[0] ?? null;
+      const nextProject = parsedLink.error
+        ? null
+        : parsedLink.link
+          ? response.projects.find((project) => project.project_id === parsedLink.link?.projectId) ?? null
+          : response.projects.find((project) => project.project_id === savedProjectId) ?? response.projects[0] ?? null;
+      if (parsedLink.link && !nextProject) {
+        setProjectStatus("error");
+        setProjectError("引用的 project_id 不存在，已拒绝打开。");
+      }
       setSelectedProjectId(nextProject?.project_id ?? null);
     } catch (error) {
       if (isAbortError(error) || !isLatestRequest(requestId, projectRequestId.current)) {
@@ -293,6 +350,7 @@ export default function Workbench() {
     setSearchResults([]);
     setSearchError(null);
     setSelectedId(null);
+    setLinkedSymbol(null);
     setSourceStatus("idle");
     setSourceResponse(null);
     setSourceError(null);
@@ -302,6 +360,64 @@ export default function Workbench() {
     setExpandedGroups(new Set());
     knownGroupKeys.current.clear();
   }, []);
+
+  const loadLinkedEvidence = useCallback(
+    async (link: EvidenceLink, response: IndexResponse) => {
+      sourceController.current?.abort();
+      const controller = new AbortController();
+      sourceController.current = controller;
+      const requestId = ++sourceRequestId.current;
+      const linked = {
+        symbol_id: `evidence-${link.evidenceId}`,
+        index_id: response.index.index_id,
+        path: link.path,
+        qualified_name: `${link.path}:L${link.startLine}–L${link.endLine}`,
+        kind: "file" as const,
+        start_line: link.startLine,
+        end_line: link.endLine,
+      } satisfies SymbolRecord;
+      setLinkedSymbol(linked);
+      setSelectedId(linked.symbol_id);
+      setSourceWindowStart(link.startLine);
+      setSourceStatus("loading");
+      setSourceError(null);
+      try {
+        const source = await readProjectSource(
+          link.projectId,
+          response.index.index_id,
+          link.path,
+          link.startLine,
+          link.endLine,
+          controller.signal,
+        );
+        if (!isLatestRequest(requestId, sourceRequestId.current)) {
+          return;
+        }
+        const evidence = source.evidence;
+        if (
+          source.index_id !== link.indexId ||
+          evidence.index_id !== link.indexId ||
+          evidence.evidence_id !== link.evidenceId ||
+          evidence.path !== link.path ||
+          evidence.start_line !== link.startLine ||
+          evidence.end_line !== link.endLine ||
+          evidence.content_hash !== link.contentHash
+        ) {
+          throw new Error("返回的源码证据与链接引用不匹配，已拒绝加载。");
+        }
+        setSourceResponse(source);
+        setSourceStatus("success");
+      } catch (error) {
+        if (isAbortError(error) || !isLatestRequest(requestId, sourceRequestId.current)) {
+          return;
+        }
+        setSourceResponse(null);
+        setSourceStatus("error");
+        setSourceError(errorMessage(error));
+      }
+    },
+    [],
+  );
 
   const applyIndexResponse = useCallback(
     (response: IndexResponse) => {
@@ -348,19 +464,33 @@ export default function Workbench() {
               }
             : project
         )));
-        if (!projectIndexResponse.latest_index_id) {
+        const requestedLink =
+          !evidenceLinkApplied.current && evidenceLink.current?.projectId === projectId
+            ? evidenceLink.current
+            : null;
+        const requestedIndexId = requestedLink?.indexId ?? projectIndexResponse.latest_index_id;
+        if (requestedLink && !projectIndexResponse.indexes.some((index) => index.index_id === requestedLink.indexId)) {
+          setIndexStatus("error");
+          setIndexError("引用的 index_id 不属于当前 project_id，已拒绝打开。");
+          return;
+        }
+        if (!requestedIndexId) {
           setIndexStatus("unindexed");
           return;
         }
         const response = await openProjectIndex(
           projectId,
-          projectIndexResponse.latest_index_id,
+          requestedIndexId,
           controller.signal,
         );
         if (!isLatestRequest(requestId, indexRequestId.current)) {
           return;
         }
         applyIndexResponse(response);
+        if (requestedLink) {
+          await loadLinkedEvidence(requestedLink, response);
+          evidenceLinkApplied.current = true;
+        }
       } catch (error) {
         if (isAbortError(error) || !isLatestRequest(requestId, indexRequestId.current)) {
           return;
@@ -369,7 +499,7 @@ export default function Workbench() {
         setIndexError(errorMessage(error));
       }
     },
-    [applyIndexResponse, clearExploration],
+    [applyIndexResponse, clearExploration, loadLinkedEvidence],
   );
 
   useEffect(() => {
@@ -696,9 +826,10 @@ export default function Workbench() {
     return (
       graph.symbols.find((symbol) => symbol.symbol_id === selectedId) ??
       searchResults.find((match) => match.symbol.symbol_id === selectedId)?.symbol ??
+      (linkedSymbol?.symbol_id === selectedId ? linkedSymbol : null) ??
       null
     );
-  }, [graph.symbols, searchResults, selectedId]);
+  }, [graph.symbols, linkedSymbol, searchResults, selectedId]);
 
   const selectedUnresolved = useMemo(
     () => (selectedId ? unresolvedForSymbol(graph.unresolved, selectedId) : []),

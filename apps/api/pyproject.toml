@@ -5,6 +5,7 @@ description = "CodeTrail local API scaffold"
 requires-python = ">=3.10,<3.14"
 dependencies = [
     "fastapi==0.141.1",
+    "mcp==2.2.0",
     "pydantic==2.13.5",
     "uvicorn[standard]==0.52.4",
 ]

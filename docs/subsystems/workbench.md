@@ -2,7 +2,7 @@
 
 ## 状态
 
-已实现基于真实索引 API 的多项目代码关系工作台；项目创建/列表/切换、索引归属与刷新恢复已实现。Issue 分析、Run 生命周期、报告界面和功能概览尚未实现。
+已实现基于真实索引 API 的多项目代码关系工作台；项目创建/列表/切换、索引归属与刷新恢复已实现，并能打开 MCP 生成的固定版本证据引用。Issue 分析、Run 生命周期、报告界面和功能概览尚未实现。
 
 ## 职责与范围
 
@@ -16,13 +16,15 @@
 
 项目状态覆盖列表载入、空列表、就绪和错误；索引状态覆盖未打开、创建中、载入中、就绪、部分完成和错误。切换 project_id 会取消或忽略旧请求，清空旧 index_id、图、源码和错误，再恢复该项目最新可用索引；浏览器只保存最近项目 ID，项目与索引数据从服务端持久化恢复。
 
+证据链接携带 project_id、index_id、路径、行范围、content_hash 和 evidence_id。工作台先检查 project_id 存在且 index_id 属于该项目，再读取项目作用域的固定快照；任何返回的 index、路径、行范围、hash 或 evidence_id 不一致都会显示错误，不会回退到当前 latest index。
+
 ## 错误与限制
 
 前端只提交服务端配置的 repository_id，不接受宿主路径；项目作用域端点拒绝不属于当前 project_id 的 index_id。响应经过运行时形状校验，过期请求通过 AbortController 和递增请求 ID 忽略，API 停止或返回错误时保留明确失败状态。
 
 ## 验证
 
-pnpm --dir apps/web test、pnpm web:typecheck 和 pnpm web:build；浏览器核对两个项目创建、分别建索引、切换、刷新恢复、同名源码隔离，以及既有搜索、关系方向、分组折叠、源码证据、unresolved、API 停止和恢复重试。
+pnpm --dir apps/web test、pnpm web:typecheck 和 pnpm web:build；浏览器核对两个项目创建、分别建索引、切换、刷新恢复、同名源码隔离、MCP 证据 URL 打开与 hash/归属校验，以及既有搜索、关系方向、分组折叠、源码证据、unresolved、API 停止和恢复重试。
 
 ## 相关决策
 

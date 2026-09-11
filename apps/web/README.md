@@ -20,6 +20,8 @@
 
 当前项目由 `project_id` 选择，项目内索引由 `index_id` 选择。切换项目会取消在途请求、清除旧图/源码/错误并载入该项目最新可用索引；浏览器 localStorage 仅保存最近项目 ID，实际数据始终从服务端恢复。旧响应通过 AbortController 和请求序号忽略。
 
+MCP `read_source` 返回的工作台引用使用 `project_id`、`index_id`、路径、行范围、`evidence_id` 和 `content_hash` 查询参数。工作台打开引用时先验证项目和索引归属，再从固定快照读取源码，并拒绝返回证据与链接不一致的响应；不依赖全局当前项目。
+
 ## 使用与配置
 
 后端启动并配置 `CODETRAIL_REPOSITORIES` 后，从仓库根目录执行：
