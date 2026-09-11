@@ -23,10 +23,12 @@ import {
   getHealth,
   getProjectNeighbors,
   getProjectOverview,
+  getProjectFeatureGraph,
   getProjectFeatureGeneration,
   importGitHubRepository,
   importLocalPath,
   listProjectIndexes,
+  listProjectFeatureGenerations,
   listProjects,
   isHealthResponse,
   openProjectIndex,
@@ -39,7 +41,12 @@ import {
   type EdgeKind,
   type Evidence,
   type FeatureGeneration,
+  type FeatureGenerationSummary,
   type FeatureGenerationMode,
+  type FeatureGraph,
+  type FeatureGraphNode,
+  type FeatureGraphOrigin,
+  type FeatureGraphRelation,
   type FeatureSourceScope,
   type HealthResponse,
   type ImportStatus,
@@ -68,7 +75,7 @@ import {
 
 type IndexUiStatus = "unindexed" | "creating" | "loading" | "ready" | "partial" | "error";
 type AsyncStatus = "idle" | "loading" | "success" | "empty" | "error";
-type WorkbenchView = "overview" | "graph";
+type WorkbenchView = "overview" | "feature_graph" | "graph";
 
 type SymbolNodeData = {
   symbol: SymbolRecord;
@@ -89,6 +96,14 @@ type SymbolFlowNode = Node<SymbolNodeData, "symbol">;
 type GroupFlowNode = Node<GroupNodeData, "group">;
 type FlowNode = SymbolFlowNode | GroupFlowNode;
 type FlowEdge = Edge<{ kind: EdgeKind }>;
+
+type FeatureFlowNodeData = {
+  node: FeatureGraphNode;
+  onSelect: (node: FeatureGraphNode) => void;
+};
+
+type FeatureFlowNode = Node<FeatureFlowNodeData, "feature">;
+type FeatureFlowEdge = Edge<{ origin: FeatureGraphOrigin; relation: FeatureGraphRelation }>;
 
 const nodeTypes = {
   symbol: SymbolFlowNodeView,
@@ -152,6 +167,36 @@ function GroupFlowNodeView({ data }: NodeProps<GroupFlowNode>) {
     </div>
   );
 }
+
+function FeatureFlowNodeView({ data }: NodeProps<FeatureFlowNode>) {
+  const { node } = data;
+  return (
+    <div
+      className="flow-feature-card"
+      data-kind={node.kind}
+      onClick={() => data.onSelect(node)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          data.onSelect(node);
+        }
+      }}
+    >
+      <Handle type="target" position={Position.Left} id="target" />
+      <span className="flow-feature-kind">{node.kind.replace("_", " ")}</span>
+      <strong title={node.label}>{node.label}</strong>
+      {node.detail ? <small title={node.detail}>{node.detail}</small> : null}
+      {node.path && node.start_line ? <small>{node.path}:L{node.start_line}–L{node.end_line}</small> : null}
+      <Handle type="source" position={Position.Right} id="source" />
+    </div>
+  );
+}
+
+const featureNodeTypes = {
+  feature: FeatureFlowNodeView,
+};
 
 function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === "AbortError";
@@ -256,6 +301,24 @@ function featureStatusLabel(status: AsyncStatus, generation: FeatureGeneration |
   return "等待生成";
 }
 
+function savedFeatureStatusLabel(status: FeatureGenerationSummary["status"]): string {
+  return {
+    succeeded: "已生成",
+    partial: "部分完成",
+    insufficient_evidence: "证据不足",
+    failed: "失败",
+  }[status];
+}
+
+function formatFeatureCreatedAt(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString("zh-CN", { hour12: false });
+}
+
+function featureSelectionStorageKey(projectId: string, indexId: string): string {
+  return `codetrail.selectedFeatureGenerationId:${projectId}:${indexId}`;
+}
+
 type EvidenceLink = {
   projectId: string;
   indexId: string;
@@ -345,12 +408,22 @@ export default function Workbench() {
   const [featureStatus, setFeatureStatus] = useState<AsyncStatus>("idle");
   const [featureGeneration, setFeatureGeneration] = useState<FeatureGeneration | null>(null);
   const [featureError, setFeatureError] = useState<string | null>(null);
+  const [featureHistory, setFeatureHistory] = useState<FeatureGenerationSummary[]>([]);
+  const [featureHistoryCursor, setFeatureHistoryCursor] = useState<string | null>(null);
+  const [featureHistoryHasMore, setFeatureHistoryHasMore] = useState(false);
+  const [featureHistoryStatus, setFeatureHistoryStatus] = useState<AsyncStatus>("idle");
+  const [featureHistoryError, setFeatureHistoryError] = useState<string | null>(null);
+  const [selectedFeatureGenerationId, setSelectedFeatureGenerationId] = useState<string | null>(null);
+  const [featureGraphStatus, setFeatureGraphStatus] = useState<AsyncStatus>("idle");
+  const [featureGraph, setFeatureGraph] = useState<FeatureGraph | null>(null);
+  const [featureGraphError, setFeatureGraphError] = useState<string | null>(null);
   const [featureMode, setFeatureMode] = useState<FeatureGenerationMode>("fixture");
   const [featureSourceScope, setFeatureSourceScope] = useState<FeatureSourceScope>("entry_reachable");
   const [direction, setDirection] = useState<NeighborDirection>("both");
   const [edgeKinds, setEdgeKinds] = useState<EdgeKind[]>(["calls", "imports"]);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [flowInstance, setFlowInstance] = useState<ReactFlowInstance<FlowNode, FlowEdge> | null>(null);
+  const [featureFlowInstance, setFeatureFlowInstance] = useState<ReactFlowInstance<FeatureFlowNode, FeatureFlowEdge> | null>(null);
 
   const healthController = useRef<AbortController | null>(null);
   const projectController = useRef<AbortController | null>(null);
@@ -361,6 +434,8 @@ export default function Workbench() {
   const sourceController = useRef<AbortController | null>(null);
   const overviewController = useRef<AbortController | null>(null);
   const featureController = useRef<AbortController | null>(null);
+  const featureHistoryController = useRef<AbortController | null>(null);
+  const featureGraphController = useRef<AbortController | null>(null);
   const indexRequestId = useRef(0);
   const projectRequestId = useRef(0);
   const importRequestId = useRef(0);
@@ -369,6 +444,8 @@ export default function Workbench() {
   const sourceRequestId = useRef(0);
   const overviewRequestId = useRef(0);
   const featureRequestId = useRef(0);
+  const featureHistoryRequestId = useRef(0);
+  const featureGraphRequestId = useRef(0);
   const featureIdempotencyKey = useRef<string | null>(null);
   const knownGroupKeys = useRef<Set<string>>(new Set());
   const evidenceLink = useRef<EvidenceLink | null>(null);
@@ -450,6 +527,8 @@ export default function Workbench() {
       sourceController.current?.abort();
       overviewController.current?.abort();
       featureController.current?.abort();
+      featureHistoryController.current?.abort();
+      featureGraphController.current?.abort();
     };
   }, [checkHealth]);
 
@@ -459,10 +538,14 @@ export default function Workbench() {
     sourceController.current?.abort();
     overviewController.current?.abort();
     featureController.current?.abort();
+    featureHistoryController.current?.abort();
+    featureGraphController.current?.abort();
     searchRequestId.current += 1;
     graphRequestId.current += 1;
     sourceRequestId.current += 1;
     overviewRequestId.current += 1;
+    featureHistoryRequestId.current += 1;
+    featureGraphRequestId.current += 1;
     setSearchStatus("idle");
     setSearchResults([]);
     setSearchError(null);
@@ -484,6 +567,15 @@ export default function Workbench() {
     setFeatureStatus("idle");
     setFeatureGeneration(null);
     setFeatureError(null);
+    setFeatureHistory([]);
+    setFeatureHistoryCursor(null);
+    setFeatureHistoryHasMore(false);
+    setFeatureHistoryStatus("idle");
+    setFeatureHistoryError(null);
+    setSelectedFeatureGenerationId(null);
+    setFeatureGraphStatus("idle");
+    setFeatureGraph(null);
+    setFeatureGraphError(null);
     setExpandedGroups(new Set());
     knownGroupKeys.current.clear();
   }, []);
@@ -577,6 +669,138 @@ export default function Workbench() {
     setFeatureError(generation.status === "failed" ? generation.error?.message ?? "功能生成失败。" : null);
   }, []);
 
+  const loadFeatureGenerationById = useCallback(
+    async (projectId: string, indexId: string, generationId: string) => {
+      featureController.current?.abort();
+      const controller = new AbortController();
+      featureController.current = controller;
+      const requestId = ++featureRequestId.current;
+      setFeatureStatus("loading");
+      setFeatureError(null);
+      try {
+        const response = await getProjectFeatureGeneration(projectId, indexId, generationId, controller.signal);
+        if (
+          !isLatestRequest(requestId, featureRequestId.current) ||
+          response.generation.project_id !== projectId ||
+          response.generation.index.index_id !== indexId ||
+          response.generation.generation_id !== generationId
+        ) {
+          return;
+        }
+        setSelectedFeatureGenerationId(generationId);
+        window.localStorage.setItem(featureSelectionStorageKey(projectId, indexId), generationId);
+        applyFeatureGenerationResponse(response.generation);
+      } catch (error) {
+        if (isAbortError(error) || !isLatestRequest(requestId, featureRequestId.current)) {
+          return;
+        }
+        setFeatureStatus("error");
+        setFeatureError(errorMessage(error));
+      }
+    },
+    [applyFeatureGenerationResponse],
+  );
+
+  const selectFeatureGeneration = useCallback(
+    (generationId: string) => {
+      if (!selectedProjectId || !indexResponse) {
+        return;
+      }
+      const indexId = indexResponse.index.index_id;
+      setSelectedFeatureGenerationId(generationId);
+      window.localStorage.setItem(featureSelectionStorageKey(selectedProjectId, indexId), generationId);
+      void loadFeatureGenerationById(selectedProjectId, indexId, generationId);
+    },
+    [indexResponse, loadFeatureGenerationById, selectedProjectId],
+  );
+
+  const loadFeatureHistory = useCallback(
+    async (projectId: string, indexId: string, cursor: string | null = null, append = false) => {
+      if (append && !cursor) {
+        return;
+      }
+      featureHistoryController.current?.abort();
+      const controller = new AbortController();
+      featureHistoryController.current = controller;
+      const requestId = ++featureHistoryRequestId.current;
+      setFeatureHistoryStatus("loading");
+      setFeatureHistoryError(null);
+      try {
+        const response = await listProjectFeatureGenerations(projectId, indexId, 20, cursor ?? undefined, controller.signal);
+        if (!isLatestRequest(requestId, featureHistoryRequestId.current)) {
+          return;
+        }
+        setFeatureHistory((previous) => {
+          if (!append) {
+            return response.generations;
+          }
+          const existing = new Set(previous.map((generation) => generation.generation_id));
+          return [...previous, ...response.generations.filter((generation) => !existing.has(generation.generation_id))];
+        });
+        setFeatureHistoryCursor(response.next_cursor);
+        setFeatureHistoryHasMore(response.has_more);
+        setFeatureHistoryStatus(response.generations.length > 0 || append ? "success" : "empty");
+        if (!append) {
+          const savedId = window.localStorage.getItem(featureSelectionStorageKey(projectId, indexId));
+          const selected =
+            (savedId && response.generations.some((generation) => generation.generation_id === savedId) ? savedId : null) ??
+            response.generations.find((generation) => generation.status === "succeeded" || generation.status === "partial")?.generation_id ??
+            response.generations[0]?.generation_id ??
+            null;
+          setSelectedFeatureGenerationId(selected);
+          if (selected) {
+            window.localStorage.setItem(featureSelectionStorageKey(projectId, indexId), selected);
+            void loadFeatureGenerationById(projectId, indexId, selected);
+          } else {
+            setFeatureGeneration(null);
+            setFeatureStatus("idle");
+            setFeatureGraph(null);
+            setFeatureGraphStatus("idle");
+          }
+        }
+      } catch (error) {
+        if (isAbortError(error) || !isLatestRequest(requestId, featureHistoryRequestId.current)) {
+          return;
+        }
+        setFeatureHistoryStatus("error");
+        setFeatureHistoryError(errorMessage(error));
+      }
+    },
+    [loadFeatureGenerationById],
+  );
+
+  const loadFeatureGraph = useCallback(
+    async (projectId: string, indexId: string, generationId: string) => {
+      featureGraphController.current?.abort();
+      const controller = new AbortController();
+      featureGraphController.current = controller;
+      const requestId = ++featureGraphRequestId.current;
+      setFeatureGraphStatus("loading");
+      setFeatureGraphError(null);
+      try {
+        const response = await getProjectFeatureGraph(projectId, indexId, generationId, 40, 80, controller.signal);
+        if (
+          !isLatestRequest(requestId, featureGraphRequestId.current) ||
+          response.graph.project_id !== projectId ||
+          response.graph.index_id !== indexId ||
+          response.graph.generation_id !== generationId
+        ) {
+          return;
+        }
+        setFeatureGraph(response.graph);
+        setFeatureGraphStatus(response.graph.nodes.length > 0 ? "success" : "empty");
+      } catch (error) {
+        if (isAbortError(error) || !isLatestRequest(requestId, featureGraphRequestId.current)) {
+          return;
+        }
+        setFeatureGraph(null);
+        setFeatureGraphStatus("error");
+        setFeatureGraphError(errorMessage(error));
+      }
+    },
+    [],
+  );
+
   const runFeatureGeneration = useCallback(
     async (retryFailed = false) => {
       if (!indexResponse || !selectedProjectId) {
@@ -616,7 +840,13 @@ export default function Workbench() {
         ) {
           return;
         }
+        setSelectedFeatureGenerationId(response.generation.generation_id);
+        window.localStorage.setItem(
+          featureSelectionStorageKey(selectedProjectId, currentIndexId),
+          response.generation.generation_id,
+        );
         applyFeatureGenerationResponse(response.generation);
+        void loadFeatureHistory(selectedProjectId, currentIndexId);
       } catch (error) {
         if (isAbortError(error) || !isLatestRequest(requestId, featureRequestId.current)) {
           return;
@@ -632,44 +862,21 @@ export default function Workbench() {
       featureSourceScope,
       featureStatus,
       indexResponse,
+      loadFeatureHistory,
       selectedProjectId,
     ],
   );
 
-  const loadSavedFeatureGeneration = useCallback(async () => {
-    if (!indexResponse || !selectedProjectId || !featureGeneration) {
+  const loadSavedFeatureGeneration = useCallback(() => {
+    if (!indexResponse || !selectedProjectId || !selectedFeatureGenerationId) {
       return;
     }
-    featureController.current?.abort();
-    const controller = new AbortController();
-    featureController.current = controller;
-    const requestId = ++featureRequestId.current;
-    const currentIndexId = indexResponse.index.index_id;
-    setFeatureStatus("loading");
-    setFeatureError(null);
-    try {
-      const response = await getProjectFeatureGeneration(
-        selectedProjectId,
-        currentIndexId,
-        featureGeneration.generation_id,
-        controller.signal,
-      );
-      if (
-        !isLatestRequest(requestId, featureRequestId.current) ||
-        response.generation.project_id !== selectedProjectId ||
-        response.generation.index.index_id !== currentIndexId
-      ) {
-        return;
-      }
-      applyFeatureGenerationResponse(response.generation);
-    } catch (error) {
-      if (isAbortError(error) || !isLatestRequest(requestId, featureRequestId.current)) {
-        return;
-      }
-      setFeatureStatus("error");
-      setFeatureError(errorMessage(error));
-    }
-  }, [applyFeatureGenerationResponse, featureGeneration, indexResponse, selectedProjectId]);
+    void loadFeatureGenerationById(
+      selectedProjectId,
+      indexResponse.index.index_id,
+      selectedFeatureGenerationId,
+    );
+  }, [indexResponse, loadFeatureGenerationById, selectedFeatureGenerationId, selectedProjectId]);
 
   const resetFeatureRequest = useCallback((change: () => void) => {
     featureController.current?.abort();
@@ -678,6 +885,9 @@ export default function Workbench() {
     setFeatureGeneration(null);
     setFeatureStatus("idle");
     setFeatureError(null);
+    setFeatureGraph(null);
+    setFeatureGraphStatus("idle");
+    setFeatureGraphError(null);
     change();
   }, []);
 
@@ -818,6 +1028,34 @@ export default function Workbench() {
     }
     void loadOverview(selectedProjectId, indexId);
   }, [indexResponse?.index.index_id, loadOverview, selectedProjectId]);
+
+  useEffect(() => {
+    const indexId = indexResponse?.index.index_id;
+    if (!selectedProjectId || !indexId) {
+      return;
+    }
+    void loadFeatureHistory(selectedProjectId, indexId);
+  }, [indexResponse?.index.index_id, loadFeatureHistory, selectedProjectId]);
+
+  useEffect(() => {
+    const indexId = indexResponse?.index.index_id;
+    const generationId = featureGeneration?.generation_id;
+    if (
+      !selectedProjectId ||
+      !indexId ||
+      !generationId ||
+      featureGeneration.project_id !== selectedProjectId ||
+      featureGeneration.index.index_id !== indexId
+    ) {
+      featureGraphController.current?.abort();
+      featureGraphRequestId.current += 1;
+      setFeatureGraph(null);
+      setFeatureGraphStatus("idle");
+      setFeatureGraphError(null);
+      return;
+    }
+    void loadFeatureGraph(selectedProjectId, indexId, generationId);
+  }, [featureGeneration, indexResponse?.index.index_id, loadFeatureGraph, selectedProjectId]);
 
   const createNewProject = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
@@ -1490,6 +1728,74 @@ export default function Workbench() {
     return { nodes, edges };
   }, [expandedGroups, graph.edges, graph.symbols, groups, indexResponse, loadNeighborhood, selectedId, selectSymbol, toggleGroup]);
 
+  const selectFeatureGraphNode = useCallback(
+    (node: FeatureGraphNode) => {
+      if (node.symbol) {
+        selectSymbol(node.symbol);
+        return;
+      }
+      const evidence = node.evidence_ids
+        .map((evidenceId) => featureGraph?.evidence.find((item) => item.evidence_id === evidenceId))
+        .find((item): item is Evidence => item !== undefined);
+      if (evidence) {
+        selectFeatureEvidence(evidence);
+      }
+    },
+    [featureGraph, selectFeatureEvidence, selectSymbol],
+  );
+
+  const featureFlowModel = useMemo(() => {
+    if (!featureGraph) {
+      return { nodes: [] as FeatureFlowNode[], edges: [] as FeatureFlowEdge[] };
+    }
+    const rowByKind: Record<FeatureGraphNode["kind"], number> = {
+      feature: 0,
+      entry_point: 0,
+      module: 0,
+      symbol: 0,
+    };
+    const positions: Record<FeatureGraphNode["kind"], number> = {
+      feature: 30,
+      entry_point: 390,
+      module: 760,
+      symbol: 760,
+    };
+    const nodes: FeatureFlowNode[] = featureGraph.nodes.map((node) => {
+      const row = rowByKind[node.kind]++;
+      return {
+        id: node.node_id,
+        type: "feature",
+        position: { x: positions[node.kind], y: 25 + row * 112 },
+        data: { node, onSelect: selectFeatureGraphNode },
+        style: { width: node.kind === "feature" ? 300 : 270 },
+        draggable: false,
+      };
+    });
+    const nodeIds = new Set(nodes.map((node) => node.id));
+    const edges: FeatureFlowEdge[] = featureGraph.edges
+      .filter((edge) => nodeIds.has(edge.source_id) && nodeIds.has(edge.target_id))
+      .map((edge) => ({
+        id: edge.edge_id,
+        source: edge.source_id,
+        target: edge.target_id,
+        sourceHandle: "source",
+        targetHandle: "target",
+        type: "smoothstep",
+        label: edge.relation.replaceAll("_", " "),
+        data: { origin: edge.origin, relation: edge.relation },
+        markerEnd: { type: MarkerType.ArrowClosed },
+        style: {
+          stroke: edge.origin === "semantic" ? "#f3a65b" : "#79c8c2",
+          strokeWidth: edge.origin === "semantic" ? 2 : 1.5,
+          strokeDasharray: edge.origin === "static" ? "5 4" : undefined,
+        },
+        labelStyle: { fill: "#e7ece8", fontSize: 10, fontWeight: 700 },
+        labelBgStyle: { fill: "#152421", fillOpacity: 0.92 },
+        labelBgPadding: [5, 3] as [number, number],
+      }));
+    return { nodes, edges };
+  }, [featureGraph, selectFeatureGraphNode]);
+
   useEffect(() => {
     if (flowInstance && flowModel.nodes.length > 0) {
       const timer = window.setTimeout(() => {
@@ -1499,6 +1805,16 @@ export default function Workbench() {
     }
     return undefined;
   }, [flowInstance, flowModel.nodes.length]);
+
+  useEffect(() => {
+    if (featureFlowInstance && featureFlowModel.nodes.length > 0) {
+      const timer = window.setTimeout(() => {
+        featureFlowInstance.fitView({ padding: 0.18, duration: 320 });
+      }, 50);
+      return () => window.clearTimeout(timer);
+    }
+    return undefined;
+  }, [featureFlowInstance, featureFlowModel.nodes.length, featureGraph?.generation_id]);
 
   const connectedEdges = useMemo(() => {
     if (!selectedId) {
@@ -1816,18 +2132,21 @@ export default function Workbench() {
           <div className="search-footnote">搜索只返回当前 index_id 的符号与源码命中，不等于已确认影响。</div>
         </aside>
 
-        <section className="graph-panel panel-surface" aria-label={viewMode === "overview" ? "项目概览" : "代码关系图"}>
+        <section className="graph-panel panel-surface" aria-label={viewMode === "overview" ? "项目知识页" : viewMode === "feature_graph" ? "功能关系图" : "代码关系图"}>
           <div className="panel-heading graph-heading">
             <div>
               <p className="section-index">02 / TOPOLOGY</p>
-              <h2>{viewMode === "overview" ? "项目概览" : "关系图谱"} <span>{viewMode === "overview" ? `${overview?.coverage.visible_modules ?? 0} modules` : `${graph.symbols.length}/40`}</span></h2>
+              <h2>{viewMode === "overview" ? "项目知识页" : viewMode === "feature_graph" ? "功能关系图" : "关系图谱"} <span>{viewMode === "overview" ? `${overview?.coverage.visible_modules ?? 0} modules` : viewMode === "feature_graph" ? `${featureGraph?.nodes.length ?? 0}/40` : `${graph.symbols.length}/40`}</span></h2>
             </div>
             <div className="graph-actions">
               <div className="view-toggle" role="tablist" aria-label="工作台视图">
-                <button type="button" role="tab" aria-selected={viewMode === "overview"} className={viewMode === "overview" ? "is-active" : ""} onClick={() => setViewMode("overview")}>项目概览</button>
+                <button type="button" role="tab" aria-selected={viewMode === "overview"} className={viewMode === "overview" ? "is-active" : ""} onClick={() => setViewMode("overview")}>知识页</button>
+                <button type="button" role="tab" aria-selected={viewMode === "feature_graph"} className={viewMode === "feature_graph" ? "is-active" : ""} onClick={() => setViewMode("feature_graph")} disabled={!featureGeneration}>功能图</button>
                 <button type="button" role="tab" aria-selected={viewMode === "graph"} className={viewMode === "graph" ? "is-active" : ""} onClick={() => setViewMode("graph")}>代码关系</button>
               </div>
-              {viewMode === "graph" ? (
+              {viewMode === "feature_graph" ? (
+                <button type="button" className="focus-button" onClick={() => featureFlowInstance?.fitView({ padding: 0.18, duration: 320 })} disabled={!featureFlowModel.nodes.length}>聚焦</button>
+              ) : viewMode === "graph" ? (
                 <>
                   <label className="compact-select-label">方向
                     <select value={direction} onChange={(event) => changeDirection(event.target.value as NeighborDirection)} disabled={!selectedId}>
@@ -1848,6 +2167,12 @@ export default function Workbench() {
               <span className="graph-status" data-state={overviewStatus}>{overviewStatusLabel(overviewStatus, overview)}</span>
               {overview?.truncated ? <span className="truncated-badge">已截断 · {overview.truncation_reason}</span> : null}
               {overviewError ? <span className="inline-error">{overviewError}</span> : null}
+            </div>
+          ) : viewMode === "feature_graph" ? (
+            <div className="graph-status-row">
+              <span className="graph-status" data-state={featureGraphStatus}>{featureGraphStatus === "loading" ? "功能图载入中" : featureGraphStatus === "error" ? "功能图请求失败" : featureGraphStatus === "empty" ? "当前版本没有可展开节点" : featureGraphStatus === "success" ? "语义 / 静态关系已分开" : "选择一个已保存版本载入功能图"}</span>
+              {featureGraph?.truncated ? <span className="truncated-badge">已截断 · {featureGraph.truncation_reason}</span> : null}
+              {featureGraphError ? <span className="inline-error">{featureGraphError}</span> : null}
             </div>
           ) : (
             <div className="graph-status-row">
@@ -1873,6 +2198,40 @@ export default function Workbench() {
                     <div className="feature-generation-intro">
                       <p>根据当前不可变快照中实际返回的入口、模块、符号和源码证据，生成有边界的主要功能描述。</p>
                       <small>生成是显式操作；fixture 不需要密钥，real 使用 API 服务端配置并可能产生模型费用。</small>
+                    </div>
+                    <div className="feature-history" aria-label="已保存功能版本">
+                      <div className="feature-history-heading">
+                        <span>已保存版本 · 当前快照</span>
+                        <span className="graph-status" data-state={featureHistoryStatus}>
+                          {featureHistoryStatus === "loading" ? "历史载入中" : featureHistoryStatus === "error" ? "历史失败" : `${featureHistory.length} 个版本`}
+                        </span>
+                      </div>
+                      {featureHistoryError ? <div className="feature-error" role="alert">{featureHistoryError}<button type="button" className="text-button" onClick={() => indexResponse && selectedProjectId && void loadFeatureHistory(selectedProjectId, indexResponse.index.index_id)}>重试</button></div> : null}
+                      {featureHistory.length > 0 ? (
+                        <div className="feature-history-list">
+                          {featureHistory.map((generation) => (
+                            <button
+                              type="button"
+                              className={`feature-history-card${selectedFeatureGenerationId === generation.generation_id ? " is-selected" : ""}`}
+                              key={generation.generation_id}
+                              onClick={() => selectFeatureGeneration(generation.generation_id)}
+                              aria-pressed={selectedFeatureGenerationId === generation.generation_id}
+                            >
+                              <span className="feature-history-card-top">
+                                <strong>{savedFeatureStatusLabel(generation.status)}</strong>
+                                <span>{generation.mode === "fixture" ? "FIXTURE" : "REAL"} · {formatFeatureCreatedAt(generation.created_at)}</span>
+                              </span>
+                              <span className="feature-history-card-id"><code>{generation.generation_id}</code><code>{generation.index.revision} · {generation.index.snapshot_hash.slice(0, 12)}</code></span>
+                              <span className="feature-history-card-stats">{generation.feature_count} 功能 · {generation.evidence_count} 证据 · {generation.rules_version}</span>
+                              <span className="feature-history-card-summary">{generation.summary}</span>
+                              {generation.error ? <span className="feature-history-card-error">{generation.error.message}</span> : null}
+                            </button>
+                          ))}
+                        </div>
+                      ) : featureHistoryStatus === "empty" ? (
+                        <p className="feature-history-empty">当前 index_id 没有已保存版本；点击下方按钮显式生成。</p>
+                      ) : null}
+                      {featureHistoryHasMore ? <button type="button" className="secondary-button feature-history-more" onClick={() => indexResponse && selectedProjectId && void loadFeatureHistory(selectedProjectId, indexResponse.index.index_id, featureHistoryCursor, true)} disabled={featureHistoryStatus === "loading"}>加载更多版本</button> : null}
                     </div>
                     <div className="feature-generation-controls">
                       <label className="feature-control">模式
@@ -1905,7 +2264,7 @@ export default function Workbench() {
                           {featureStatus === "loading" ? "生成中…" : "识别主要功能"}
                         </button>
                         {featureGeneration ? (
-                          <button type="button" className="secondary-button" onClick={() => void loadSavedFeatureGeneration()} disabled={featureStatus === "loading"}>
+                          <button type="button" className="secondary-button" onClick={loadSavedFeatureGeneration} disabled={featureStatus === "loading"}>
                             重读已保存结果
                           </button>
                         ) : null}
@@ -2023,6 +2382,50 @@ export default function Workbench() {
                 </div>
               ) : (
                 <div className="graph-empty"><div className="graph-crosshair" aria-hidden="true"><span /><span /></div><p>{indexResponse ? "等待项目概览。" : "建立或打开索引后，这里会显示项目概览。"}</p><small>概览绑定同一 project_id 与 index_id，不执行仓库代码。</small></div>
+              )}
+            </div>
+          ) : viewMode === "feature_graph" ? (
+            <div className="graph-stage feature-graph-stage">
+              {featureGraphStatus === "loading" ? (
+                <div className="loading-note"><span className="loader" /> 正在从已保存版本组装功能图…</div>
+              ) : featureGraphStatus === "error" ? (
+                <div className="graph-empty"><div className="graph-crosshair" aria-hidden="true"><span /><span /></div><p>功能图请求失败。</p><small>{featureGraphError ?? "请重试或重新选择已保存版本。"}</small><button type="button" className="secondary-button" onClick={() => selectedProjectId && indexResponse && featureGeneration && void loadFeatureGraph(selectedProjectId, indexResponse.index.index_id, featureGeneration.generation_id)}>重试</button></div>
+              ) : featureGraph ? (
+                <>
+                  <div className="feature-graph-legend" aria-label="功能图关系图例"><span><i data-origin="semantic" />语义关联</span><span><i data-origin="static" />静态 CodeEdge</span></div>
+                  {featureGraph.nodes.length > 0 ? (
+                    <ReactFlow<FeatureFlowNode, FeatureFlowEdge>
+                      nodes={featureFlowModel.nodes}
+                      edges={featureFlowModel.edges}
+                      nodeTypes={featureNodeTypes}
+                      onInit={setFeatureFlowInstance}
+                      onNodeClick={(_event, node) => {
+                        const graphNode = featureGraph.nodes.find((candidate) => candidate.node_id === node.id);
+                        if (graphNode) {
+                          selectFeatureGraphNode(graphNode);
+                        }
+                      }}
+                      fitView
+                      fitViewOptions={{ padding: 0.18 }}
+                      nodesConnectable={false}
+                      nodesDraggable={false}
+                      elementsSelectable
+                      minZoom={0.25}
+                      maxZoom={1.8}
+                    >
+                      <Background color="#2a413d" gap={24} size={1} />
+                      <Controls showInteractive={false} position="bottom-left" />
+                      <MiniMap pannable zoomable nodeColor={(node) => node.type === "feature" ? "#f3a65b" : "#79c8c2"} maskColor="rgba(10, 20, 18, 0.72)" position="bottom-right" />
+                    </ReactFlow>
+                  ) : (
+                    <div className="graph-empty"><div className="graph-crosshair" aria-hidden="true"><span /><span /></div><p>当前版本没有可展开功能节点。</p><small>失败或证据不足版本仍保留在历史中，但不会伪装成当前成功结论。</small></div>
+                  )}
+                  {featureGraph.limitations.length > 0 || featureGraph.unavailable_target_ids.length > 0 ? (
+                    <div className="feature-graph-limitations"><strong>图边界</strong>{featureGraph.limitations.map((limitation) => <span key={limitation}>{limitation}</span>)}{featureGraph.unavailable_target_ids.length > 0 ? <span>未映射目标 {featureGraph.unavailable_target_ids.length} 个：{featureGraph.unavailable_target_ids.join(", ")}</span> : null}</div>
+                  ) : null}
+                </>
+              ) : (
+                <div className="graph-empty"><div className="graph-crosshair" aria-hidden="true"><span /><span /></div><p>选择一个已保存功能版本。</p><small>功能图只读取保存的功能结果和同一 index_id 的静态关系，不会再次调用模型。</small></div>
               )}
             </div>
           ) : (

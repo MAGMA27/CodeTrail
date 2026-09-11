@@ -22,8 +22,11 @@ from .contracts import (
     CreateProjectIndexRequest,
     CreateProjectRequest,
     FeatureGeneration,
+    FeatureGenerationListResponse,
     FeatureGenerationRequest,
     FeatureGenerationResponse,
+    FeatureGenerationSummary,
+    FeatureGraphResponse,
     GetNeighborsParams,
     GetNeighborsSuccess,
     ImportAttempt,
@@ -61,6 +64,7 @@ from .feature_generation import (
     new_generation_id,
     resolve_model,
 )
+from .feature_graph import build_feature_graph
 from .storage import (
     IndexStore,
     ImportAttemptRecord,
@@ -877,6 +881,87 @@ class WorkspaceService:
             raise ServiceError("not_found", 404, "feature generation does not belong to the selected snapshot")
         return FeatureGenerationResponse(generation=generation)
 
+    def list_feature_generations(
+        self,
+        project_id: str,
+        *,
+        index_id: str | None = None,
+        limit: int = 20,
+        cursor: str | None = None,
+    ) -> FeatureGenerationListResponse:
+        """Read stable saved-generation metadata for a project or selected index."""
+
+        project = self._find_project(project_id)
+        if index_id is not None:
+            self._require_project_index(project_id, index_id)
+        try:
+            with self.registry.store_for_repository(project.repository_id) as store:
+                page = store.list_feature_generations(
+                    project_id,
+                    index_id=index_id,
+                    limit=limit,
+                    cursor=cursor,
+                )
+        except ServiceError:
+            raise
+        except StorageNotFoundError as exc:
+            raise ServiceError("not_found", 404, "requested project or index was not found") from exc
+        except StorageInputError as exc:
+            raise ServiceError("invalid_input", 400, "feature generation history parameters are invalid") from exc
+        except StorageError as exc:
+            raise ServiceError("internal_error", 500, "local index storage failed") from exc
+        return FeatureGenerationListResponse(
+            project_id=project_id,
+            index_id=index_id,
+            generations=[_feature_generation_summary(generation) for generation in page.generations],
+            next_cursor=page.next_cursor,
+            has_more=page.has_more,
+        )
+
+    def get_feature_graph(
+        self,
+        project_id: str,
+        index_id: str,
+        generation_id: str,
+        *,
+        max_nodes: int = 40,
+        max_edges: int = 80,
+    ) -> FeatureGraphResponse:
+        """Build a read-only graph from one saved generation and its immutable snapshot."""
+
+        project = self._find_project(project_id)
+        self._require_project_index(project_id, index_id)
+        try:
+            with self.registry.store_for_repository(project.repository_id) as store:
+                generation = store.load_feature_generation(generation_id)
+                if generation.project_id != project_id or generation.index.index_id != index_id:
+                    raise StorageNotFoundError("feature generation is outside the requested scope")
+                relation = store.load_index(index_id)
+                overview = build_project_overview(
+                    project_id,
+                    relation,
+                    store.read_evidence,
+                )
+                graph = build_feature_graph(
+                    project_id,
+                    generation,
+                    relation,
+                    overview,
+                    max_nodes=max_nodes,
+                    max_edges=max_edges,
+                )
+        except ServiceError:
+            raise
+        except StorageNotFoundError as exc:
+            raise ServiceError("not_found", 404, "feature generation or index was not found") from exc
+        except ValueError as exc:
+            raise ServiceError("invalid_input", 400, "feature graph parameters are invalid") from exc
+        except StorageInputError as exc:
+            raise ServiceError("invalid_input", 400, "feature graph parameters are invalid") from exc
+        except StorageError as exc:
+            raise ServiceError("internal_error", 500, "local index storage failed") from exc
+        return FeatureGraphResponse(graph=graph)
+
     def import_local(
         self,
         request: LocalImportRequest,
@@ -1570,6 +1655,30 @@ def _import_attempt_response(record: ImportAttemptRecord) -> ImportAttempt:
         cleanup_error=record.cleanup_error,
         created_at=record.created_at,
         updated_at=record.updated_at,
+    )
+
+
+def _feature_generation_summary(generation: FeatureGeneration) -> FeatureGenerationSummary:
+    """Project one full saved generation into the bounded history-list contract."""
+
+    return FeatureGenerationSummary(
+        generation_id=generation.generation_id,
+        project_id=generation.project_id,
+        index=generation.index,
+        mode=generation.mode,
+        model=generation.model,
+        prompt_version=generation.prompt_version,
+        rules_version=generation.rules_version,
+        source_scope=generation.source_scope,
+        status=generation.status,
+        summary=generation.summary,
+        feature_count=len(generation.features),
+        evidence_count=len(generation.evidence),
+        usage=generation.usage,
+        created_at=generation.created_at,
+        error=generation.error,
+        truncated=generation.truncated,
+        truncation_reason=generation.truncation_reason,
     )
 
 

@@ -918,6 +918,67 @@ input[type="checkbox"] {
   background: rgba(5, 15, 13, 0.64);
 }
 
+.feature-graph-stage {
+  min-height: 0;
+}
+
+.feature-graph-legend {
+  position: absolute;
+  z-index: 4;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  gap: 10px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  background: rgba(11, 25, 22, 0.9);
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.feature-graph-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.feature-graph-legend i {
+  display: inline-block;
+  width: 18px;
+  border-top: 2px solid var(--mint);
+}
+
+.feature-graph-legend i[data-origin="semantic"] {
+  border-top-color: var(--amber);
+}
+
+.feature-graph-legend i[data-origin="static"] {
+  border-top-style: dashed;
+}
+
+.feature-graph-limitations {
+  position: absolute;
+  z-index: 4;
+  right: 10px;
+  bottom: 10px;
+  display: grid;
+  max-width: min(60%, 470px);
+  gap: 3px;
+  padding: 7px 9px;
+  border: 1px solid rgba(243, 166, 91, 0.28);
+  background: rgba(11, 25, 22, 0.92);
+  color: var(--quiet);
+  font-size: 8px;
+  line-height: 1.45;
+}
+
+.feature-graph-limitations strong {
+  color: var(--amber);
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
 .overview-stage {
   min-height: 0;
   overflow: auto;
@@ -1019,6 +1080,109 @@ input[type="checkbox"] {
 .feature-card-limitations,
 .feature-limitations p {
   color: var(--quiet);
+}
+
+.feature-history {
+  display: grid;
+  gap: 7px;
+  padding: 9px;
+  border: 1px solid rgba(121, 200, 194, 0.2);
+  background: rgba(5, 15, 13, 0.42);
+}
+
+.feature-history-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--quiet);
+  font-size: 8px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.feature-history-list {
+  display: grid;
+  gap: 5px;
+  max-height: 330px;
+  overflow: auto;
+}
+
+.feature-history-card {
+  display: grid;
+  gap: 5px;
+  width: 100%;
+  padding: 9px;
+  border: 1px solid transparent;
+  border-left: 2px solid var(--line-strong);
+  background: rgba(11, 25, 22, 0.7);
+  color: var(--muted);
+  text-align: left;
+}
+
+.feature-history-card:hover,
+.feature-history-card.is-selected {
+  border-color: var(--line-strong);
+  border-left-color: var(--amber);
+  background: rgba(243, 166, 91, 0.08);
+}
+
+.feature-history-card-top,
+.feature-history-card-id {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.feature-history-card-top strong {
+  color: var(--mint-bright);
+  font-size: 9px;
+}
+
+.feature-history-card-top span,
+.feature-history-card-stats,
+.feature-history-card-summary,
+.feature-history-card-error,
+.feature-history-empty {
+  color: var(--quiet);
+  font-size: 8px;
+  line-height: 1.5;
+}
+
+.feature-history-card-id code {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.feature-history-card-id code:first-child {
+  color: var(--mint);
+}
+
+.feature-history-card-summary {
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.feature-history-card-error {
+  color: var(--danger);
+}
+
+.feature-history-empty {
+  margin: 0;
+}
+
+.feature-history-more {
+  justify-self: start;
+  min-height: 27px;
+  padding: 5px 8px;
+  font-size: 8px;
 }
 
 .feature-generation-controls {
@@ -1411,6 +1575,61 @@ input[type="checkbox"] {
 
 .react-flow__edge-text {
   font-family: var(--mono);
+}
+
+.flow-feature-card {
+  position: relative;
+  display: grid;
+  gap: 5px;
+  min-height: 78px;
+  padding: 10px 11px;
+  border: 1px solid rgba(149, 196, 182, 0.28);
+  border-left: 3px solid var(--mint);
+  background: rgba(16, 33, 29, 0.98);
+  box-shadow: 8px 8px 0 rgba(3, 10, 9, 0.2);
+  cursor: pointer;
+  transition: border-color 160ms ease, transform 160ms ease, background 160ms ease;
+}
+
+.flow-feature-card:hover,
+.flow-feature-card:focus-visible {
+  border-color: var(--amber);
+  border-left-color: var(--amber);
+  background: rgba(42, 52, 36, 0.98);
+  outline: none;
+  transform: translateY(-2px);
+}
+
+.flow-feature-card[data-kind="feature"] {
+  border-left-color: var(--amber);
+}
+
+.flow-feature-card[data-kind="entry_point"] {
+  border-left-color: #d9bd72;
+}
+
+.flow-feature-card strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flow-feature-card small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flow-feature-kind {
+  color: var(--amber);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .flow-group-card {

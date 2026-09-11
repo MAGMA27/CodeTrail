@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { isFeatureGenerationResponse, isProjectOverviewResponse, SCHEMA_VERSION } from "./api.ts";
+import {
+  isFeatureGenerationListResponse,
+  isFeatureGenerationResponse,
+  isFeatureGraphResponse,
+  isProjectOverviewResponse,
+  SCHEMA_VERSION,
+} from "./api.ts";
 
 const indexId = "index-overview-test";
 const moduleId = "symbol-module";
@@ -224,4 +230,140 @@ test("feature generation validator rejects broken evidence or association refere
   };
   brokenAssociation.generation.associations[0].feature_id = "feature-missing";
   assert.equal(isFeatureGenerationResponse(brokenAssociation), false);
+});
+
+test("feature history and graph validators keep saved snapshot references explicit", () => {
+  const generation = featureGeneration().generation;
+  const summary = {
+    schema_version: SCHEMA_VERSION,
+    generation_id: generation.generation_id,
+    project_id: generation.project_id,
+    index: generation.index,
+    mode: generation.mode,
+    model: generation.model,
+    prompt_version: generation.prompt_version,
+    rules_version: generation.rules_version,
+    source_scope: generation.source_scope,
+    status: generation.status,
+    summary: generation.summary,
+    feature_count: generation.features.length,
+    evidence_count: generation.evidence.length,
+    usage: generation.usage,
+    created_at: generation.created_at,
+    error: generation.error,
+    truncated: generation.truncated,
+    truncation_reason: generation.truncation_reason,
+  };
+  assert.equal(
+    isFeatureGenerationListResponse({
+      schema_version: SCHEMA_VERSION,
+      project_id: generation.project_id,
+      index_id: indexId,
+      generations: [summary],
+      next_cursor: null,
+      has_more: false,
+    }),
+    true,
+  );
+
+  const graph = {
+    schema_version: SCHEMA_VERSION,
+    project_id: generation.project_id,
+    index_id: indexId,
+    generation_id: generation.generation_id,
+    status: generation.status,
+    nodes: [
+      {
+        node_id: "feature:feature-1",
+        index_id: indexId,
+        kind: "feature",
+        label: "Main flow",
+        detail: "A bounded feature.",
+        feature_id: "feature-1",
+        entry_point_id: null,
+        symbol: null,
+        path: null,
+        start_line: null,
+        end_line: null,
+        evidence_ids: ["evidence-feature"],
+      },
+      {
+        node_id: `entry:${entryId}`,
+        index_id: indexId,
+        kind: "entry_point",
+        label: "main guard",
+        detail: "python_main_guard · python.ast.main_guard",
+        feature_id: null,
+        entry_point_id: entryId,
+        symbol: null,
+        path: "pkg/__main__.py",
+        start_line: 1,
+        end_line: 2,
+        evidence_ids: ["evidence-feature"],
+      },
+      {
+        node_id: moduleId,
+        index_id: indexId,
+        kind: "module",
+        label: "pkg.__main__",
+        detail: "pkg/__main__.py:L1–L2",
+        feature_id: null,
+        entry_point_id: null,
+        symbol: overview().modules[0].symbol,
+        path: null,
+        start_line: null,
+        end_line: null,
+        evidence_ids: ["evidence-feature"],
+      },
+      {
+        node_id: functionId,
+        index_id: indexId,
+        kind: "symbol",
+        label: "pkg.__main__.main",
+        detail: "pkg/__main__.py:L1–L2",
+        feature_id: null,
+        entry_point_id: null,
+        symbol: {
+          ...overview().modules[0].symbol,
+          symbol_id: functionId,
+          qualified_name: "pkg.__main__.main",
+          kind: "function",
+        },
+        path: null,
+        start_line: null,
+        end_line: null,
+        evidence_ids: ["evidence-feature"],
+      },
+    ],
+    edges: [
+      {
+        edge_id: "feature-semantic",
+        index_id: indexId,
+        source_id: "feature:feature-1",
+        target_id: `entry:${entryId}`,
+        origin: "semantic",
+        relation: "triggered_by",
+        evidence_ids: ["evidence-feature"],
+      },
+      {
+        edge_id: "feature-static",
+        index_id: indexId,
+        source_id: moduleId,
+        target_id: functionId,
+        origin: "static",
+        relation: "calls",
+        evidence_ids: [],
+      },
+    ],
+    evidence: generation.evidence,
+    unavailable_target_ids: [],
+    limitations: [],
+    truncated: false,
+    truncation_reason: null,
+  };
+  assert.equal(isFeatureGraphResponse({ schema_version: SCHEMA_VERSION, graph }), true);
+
+  const broken = structuredClone(graph) as typeof graph;
+  broken.edges[0].origin = "static";
+  assert.equal(isFeatureGraphResponse({ schema_version: SCHEMA_VERSION, graph: broken }), false);
 });

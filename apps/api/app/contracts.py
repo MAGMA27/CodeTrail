@@ -1144,6 +1144,203 @@ class FeatureGenerationResponse(VersionedModel):
     generation: FeatureGeneration
 
 
+class FeatureGenerationSummary(VersionedModel):
+    """Bounded metadata for one saved feature generation in a history page."""
+
+    generation_id: Identifier
+    project_id: Identifier
+    index: IndexSnapshot
+    mode: FeatureGenerationMode
+    model: str | None = Field(default=None, max_length=200)
+    prompt_version: Identifier
+    rules_version: Identifier
+    source_scope: FeatureSourceScope
+    status: FeatureGenerationStatus
+    summary: str = Field(min_length=1, max_length=5_000)
+    feature_count: NonNegativeInt
+    evidence_count: NonNegativeInt
+    usage: FeatureGenerationUsage
+    created_at: datetime
+    error: FeatureGenerationError | None = None
+    truncated: bool = False
+    truncation_reason: str | None = Field(default=None, max_length=1_000)
+
+    @model_validator(mode="after")
+    def validate_summary_index(self) -> FeatureGenerationSummary:
+        if self.index.status != "ready":
+            raise ValueError("feature generation summaries must use a ready index")
+        if self.truncated and not self.truncation_reason:
+            raise ValueError("truncated feature generation summaries must explain the truncation")
+        if not self.truncated and self.truncation_reason:
+            raise ValueError("non-truncated feature generation summaries cannot have a truncation reason")
+        if self.status == "failed" and self.error is None:
+            raise ValueError("failed feature generation summaries must include an error")
+        if self.status != "failed" and self.error is not None:
+            raise ValueError("successful feature generation summaries cannot include an error")
+        return self
+
+
+class FeatureGenerationListResponse(VersionedModel):
+    """Stable, read-only history for one project or one selected index."""
+
+    project_id: Identifier
+    index_id: Identifier | None = None
+    generations: list[FeatureGenerationSummary] = Field(default_factory=list, max_length=40)
+    next_cursor: str | None = Field(default=None, max_length=500)
+    has_more: bool = False
+
+    @model_validator(mode="after")
+    def validate_history_scope(self) -> FeatureGenerationListResponse:
+        for generation in self.generations:
+            if generation.project_id != self.project_id:
+                raise ValueError("feature generation history crossed the project boundary")
+            if self.index_id is not None and generation.index.index_id != self.index_id:
+                raise ValueError("feature generation history crossed the index boundary")
+        if self.has_more and not self.next_cursor:
+            raise ValueError("paginated feature history must include a next cursor")
+        if not self.has_more and self.next_cursor is not None:
+            raise ValueError("complete feature history cannot include a next cursor")
+        return self
+
+
+FeatureGraphNodeKind: TypeAlias = Literal["entry_point", "feature", "module", "symbol"]
+FeatureGraphOrigin: TypeAlias = Literal["semantic", "static"]
+FeatureGraphRelation: TypeAlias = Literal[
+    "triggered_by",
+    "implemented_by",
+    "related_to",
+    "contains",
+    "imports",
+    "calls",
+]
+
+
+class FeatureGraphNode(ContractModel):
+    """One bounded node in a saved feature-to-code graph."""
+
+    node_id: Identifier
+    index_id: Identifier
+    kind: FeatureGraphNodeKind
+    label: str = Field(min_length=1, max_length=500)
+    detail: str | None = Field(default=None, max_length=5_000)
+    feature_id: Identifier | None = None
+    entry_point_id: Identifier | None = None
+    symbol: Symbol | None = None
+    path: RelativePath | None = None
+    start_line: PositiveInt | None = None
+    end_line: PositiveInt | None = None
+    evidence_ids: list[Identifier] = Field(default_factory=list, max_length=100)
+
+    _normalize_path = field_validator("path")(_validate_relative_path)
+
+    @model_validator(mode="after")
+    def validate_node_identity(self) -> FeatureGraphNode:
+        if self.kind == "feature":
+            if self.feature_id is None or self.node_id != f"feature:{self.feature_id}":
+                raise ValueError("feature graph feature nodes must use their stable feature ID")
+            if self.entry_point_id is not None or self.symbol is not None:
+                raise ValueError("feature graph feature nodes cannot carry symbol or entry identity")
+            if self.path is not None or self.start_line is not None or self.end_line is not None:
+                raise ValueError("feature graph feature nodes cannot carry source coordinates")
+        elif self.kind == "entry_point":
+            if self.entry_point_id is None or self.node_id != f"entry:{self.entry_point_id}":
+                raise ValueError("feature graph entry nodes must use their stable entry ID")
+            if self.path is None or self.start_line is None or self.end_line is None:
+                raise ValueError("feature graph entry nodes require source coordinates")
+            if self.end_line < self.start_line or self.symbol is not None or self.feature_id is not None:
+                raise ValueError("feature graph entry node identity is invalid")
+        else:
+            if self.symbol is None or self.node_id != self.symbol.symbol_id:
+                raise ValueError("feature graph code nodes must use their stable symbol ID")
+            if self.symbol.index_id != self.index_id:
+                raise ValueError("feature graph code node belongs to a different index_id")
+            if self.kind == "module" and self.symbol.kind != "module":
+                raise ValueError("feature graph module nodes must reference module symbols")
+            if self.kind == "symbol" and self.symbol.kind == "module":
+                raise ValueError("feature graph module symbols must use the module node kind")
+            if self.feature_id is not None or self.entry_point_id is not None:
+                raise ValueError("feature graph code nodes cannot carry feature or entry identity")
+            if self.path is not None or self.start_line is not None or self.end_line is not None:
+                raise ValueError("feature graph code nodes use their embedded symbol coordinates")
+        return self
+
+
+class FeatureGraphEdge(ContractModel):
+    """A semantic association or an existing static CodeTrail edge."""
+
+    edge_id: Identifier
+    index_id: Identifier
+    source_id: Identifier
+    target_id: Identifier
+    origin: FeatureGraphOrigin
+    relation: FeatureGraphRelation
+    evidence_ids: list[Identifier] = Field(default_factory=list, max_length=100)
+
+    @model_validator(mode="after")
+    def validate_edge_origin(self) -> FeatureGraphEdge:
+        semantic = {"triggered_by", "implemented_by", "related_to"}
+        static = {"contains", "imports", "calls"}
+        allowed = semantic if self.origin == "semantic" else static
+        if self.relation not in allowed:
+            raise ValueError("feature graph edge relation does not match its origin")
+        if len(set(self.evidence_ids)) != len(self.evidence_ids):
+            raise ValueError("feature graph edge evidence IDs must be unique")
+        return self
+
+
+class FeatureGraphSnapshot(VersionedModel):
+    """Saved feature mappings overlaid with bounded static relations from one index."""
+
+    project_id: Identifier
+    index_id: Identifier
+    generation_id: Identifier
+    status: FeatureGenerationStatus
+    nodes: list[FeatureGraphNode] = Field(default_factory=list, max_length=40)
+    edges: list[FeatureGraphEdge] = Field(default_factory=list, max_length=120)
+    evidence: list[Evidence] = Field(default_factory=list, max_length=200)
+    unavailable_target_ids: list[Identifier] = Field(default_factory=list, max_length=100)
+    limitations: list[str] = Field(default_factory=list, max_length=30)
+    truncated: bool = False
+    truncation_reason: str | None = Field(default=None, max_length=1_000)
+
+    @model_validator(mode="after")
+    def validate_graph_references(self) -> FeatureGraphSnapshot:
+        node_ids = {node.node_id for node in self.nodes}
+        if len(node_ids) != len(self.nodes):
+            raise ValueError("feature graph node IDs must be unique")
+        evidence_ids = {item.evidence_id for item in self.evidence}
+        if len(evidence_ids) != len(self.evidence):
+            raise ValueError("feature graph evidence IDs must be unique")
+        for item in self.evidence:
+            if item.index_id != self.index_id:
+                raise ValueError("feature graph evidence must use the graph index")
+        for node in self.nodes:
+            if node.index_id != self.index_id or not set(node.evidence_ids).issubset(evidence_ids):
+                raise ValueError("feature graph node references an invalid evidence item")
+        edge_ids = {edge.edge_id for edge in self.edges}
+        if len(edge_ids) != len(self.edges):
+            raise ValueError("feature graph edge IDs must be unique")
+        for edge in self.edges:
+            if (
+                edge.index_id != self.index_id
+                or edge.source_id not in node_ids
+                or edge.target_id not in node_ids
+                or not set(edge.evidence_ids).issubset(evidence_ids)
+            ):
+                raise ValueError("feature graph edge references an invalid node or evidence item")
+        if len(set(self.unavailable_target_ids)) != len(self.unavailable_target_ids):
+            raise ValueError("feature graph unavailable target IDs must be unique")
+        if self.truncated and not self.truncation_reason:
+            raise ValueError("truncated feature graphs must explain the truncation")
+        if not self.truncated and self.truncation_reason:
+            raise ValueError("non-truncated feature graphs cannot have a truncation reason")
+        return self
+
+
+class FeatureGraphResponse(VersionedModel):
+    graph: FeatureGraphSnapshot
+
+
 ApiErrorCode: TypeAlias = Literal[
     "not_found",
     "invalid_input",
@@ -1304,6 +1501,41 @@ class McpFeatureGenerationResponse(McpResultBase):
                     raise ValueError("feature generation references must match returned evidence")
         if not self.ok and (self.generation is not None or self.references):
             raise ValueError("failed feature generation results cannot include generation data")
+        return self
+
+
+class McpFeatureGenerationListResponse(McpResultBase):
+    """Read-only MCP envelope for project or index feature history."""
+
+    result: FeatureGenerationListResponse | None = None
+
+    @model_validator(mode="after")
+    def validate_history_result(self) -> McpFeatureGenerationListResponse:
+        if self.ok and self.result is None:
+            raise ValueError("successful feature history results require a result")
+        if not self.ok and self.result is not None:
+            raise ValueError("failed feature history results cannot include a result")
+        return self
+
+
+class McpFeatureGraphResponse(McpResultBase):
+    """Read-only MCP envelope for one saved feature graph."""
+
+    graph: FeatureGraphSnapshot | None = None
+    references: list[EvidenceReference] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_graph_result(self) -> McpFeatureGraphResponse:
+        if self.ok and self.graph is None:
+            raise ValueError("successful feature graph results require a graph")
+        if self.ok and self.graph is not None:
+            evidence_ids = {item.evidence_id for item in self.graph.evidence}
+            if any(reference.evidence_id not in evidence_ids for reference in self.references):
+                raise ValueError("feature graph references must match returned evidence")
+            if any(reference.index_id != self.graph.index_id for reference in self.references):
+                raise ValueError("feature graph references must match the graph index")
+        if not self.ok and (self.graph is not None or self.references):
+            raise ValueError("failed feature graph results cannot include graph data")
         return self
 
 

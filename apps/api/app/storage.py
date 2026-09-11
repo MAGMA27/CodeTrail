@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import json
 import math
@@ -103,6 +105,15 @@ class ProjectRecord:
     available_index_ids: tuple[str, ...]
     latest_index_id: str | None
     building_index_id: str | None
+
+
+@dataclass(frozen=True)
+class FeatureGenerationPage:
+    """One stable page of saved feature generations."""
+
+    generations: tuple[FeatureGeneration, ...]
+    next_cursor: str | None
+    has_more: bool
 
 
 @dataclass(frozen=True)
@@ -1210,6 +1221,71 @@ class IndexStore:
             return None
         return row["generation_id"], self.load_feature_generation(row["generation_id"])
 
+    def list_feature_generations(
+        self,
+        project_id: str,
+        *,
+        index_id: str | None = None,
+        limit: int = 20,
+        cursor: str | None = None,
+    ) -> FeatureGenerationPage:
+        """List saved generations in stable newest-first order without invoking a model."""
+
+        self.load_project(project_id)
+        if limit < 1 or limit > 40:
+            raise StorageInputError("feature generation history limit is outside the allowed range")
+        if index_id is not None and not self.project_has_index(project_id, index_id):
+            raise StorageNotFoundError(f"index {index_id!r} does not belong to project {project_id!r}")
+
+        cursor_values = _decode_feature_generation_cursor(
+            cursor,
+            project_id=project_id,
+            index_id=index_id,
+        )
+        where = ["project_id = ?"]
+        parameters: list[object] = [project_id]
+        if index_id is not None:
+            where.append("index_id = ?")
+            parameters.append(index_id)
+        if cursor_values is not None:
+            created_at, generation_id = cursor_values
+            where.append("(created_at < ? OR (created_at = ? AND generation_id < ?))")
+            parameters.extend([created_at, created_at, generation_id])
+        rows = self._connection.execute(
+            "SELECT generation_id, created_at, result_json FROM feature_generations "
+            f"WHERE {' AND '.join(where)} "
+            "ORDER BY created_at DESC, generation_id DESC LIMIT ?",
+            (*parameters, limit + 1),
+        ).fetchall()
+        has_more = len(rows) > limit
+        page_rows = rows[:limit]
+        generations: list[FeatureGeneration] = []
+        for row in page_rows:
+            try:
+                generation = FeatureGeneration.model_validate(json.loads(row["result_json"]))
+            except (json.JSONDecodeError, ValidationError) as exc:
+                raise StorageError("persisted feature generation is invalid") from exc
+            if generation.project_id != project_id or (
+                index_id is not None and generation.index.index_id != index_id
+            ):
+                raise StorageError("persisted feature generation scope is invalid")
+            generations.append(generation)
+        next_cursor = (
+            _encode_feature_generation_cursor(
+                str(page_rows[-1]["created_at"]),
+                str(page_rows[-1]["generation_id"]),
+                project_id=project_id,
+                index_id=index_id,
+            )
+            if has_more and page_rows
+            else None
+        )
+        return FeatureGenerationPage(
+            generations=tuple(generations),
+            next_cursor=next_cursor,
+            has_more=has_more,
+        )
+
     def search_symbols(
         self,
         index_id: str,
@@ -1798,6 +1874,59 @@ def _datetime_text(value: datetime) -> str:
 
 def _datetime_value(value: str) -> datetime:
     return datetime.fromisoformat(value).astimezone(timezone.utc)
+
+
+def _encode_feature_generation_cursor(
+    created_at: str,
+    generation_id: str,
+    *,
+    project_id: str,
+    index_id: str | None,
+) -> str:
+    payload = json.dumps(
+        {
+            "created_at": created_at,
+            "generation_id": generation_id,
+            "project_id": project_id,
+            "index_id": index_id,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return base64.urlsafe_b64encode(payload).decode("ascii")
+
+
+def _decode_feature_generation_cursor(
+    cursor: str | None,
+    *,
+    project_id: str,
+    index_id: str | None,
+) -> tuple[str, str] | None:
+    if cursor is None:
+        return None
+    if not cursor or len(cursor) > 500:
+        raise StorageInputError("feature generation history cursor is invalid")
+    try:
+        decoded = base64.urlsafe_b64decode(cursor.encode("ascii"))
+        payload = json.loads(decoded.decode("utf-8"))
+        created_at = payload["created_at"]
+        generation_id = payload["generation_id"]
+        cursor_project_id = payload["project_id"]
+        cursor_index_id = payload["index_id"]
+        _datetime_value(created_at)
+    except (ValueError, KeyError, TypeError, UnicodeError, binascii.Error, json.JSONDecodeError) as exc:
+        raise StorageInputError("feature generation history cursor is invalid") from exc
+    if (
+        not isinstance(created_at, str)
+        or not isinstance(generation_id, str)
+        or not generation_id
+        or len(generation_id) > 200
+        or cursor_project_id != project_id
+        or cursor_index_id != index_id
+    ):
+        raise StorageInputError("feature generation history cursor does not match the requested scope")
+    return created_at, generation_id
 
 
 def _managed_source_from_row(row: sqlite3.Row) -> ManagedSourceRecord:

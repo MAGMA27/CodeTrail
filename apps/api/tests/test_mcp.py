@@ -345,6 +345,9 @@ def test_mcp_local_import_is_opt_in_and_shares_http_state(tmp_path: Path) -> Non
                 "read_source",
                 "get_neighbors",
                 "get_overview",
+                "list_feature_generations",
+                "get_feature_generation",
+                "get_feature_graph",
             } == disabled_names
             assert "import_local_path" not in disabled_names
 
@@ -397,6 +400,9 @@ def test_mcp_local_import_is_opt_in_and_shares_http_state(tmp_path: Path) -> Non
                 "get_neighbors",
                 "get_overview",
                 "get_import_status",
+                "list_feature_generations",
+                "get_feature_generation",
+                "get_feature_graph",
                 "import_github_repository",
                 "retry_github_import",
             } == github_tools
@@ -443,7 +449,7 @@ def test_mcp_feature_generation_is_separately_opt_in_and_returns_citations(tmp_p
         cwd=API_ROOT,
     )
 
-    async def exercise() -> None:
+    async def exercise() -> tuple[dict, dict]:
         async with Client(parameters, read_timeout_seconds=15) as client:
             tool_names = {tool.name for tool in (await client.list_tools()).tools}
             assert {
@@ -455,8 +461,10 @@ def test_mcp_feature_generation_is_separately_opt_in_and_returns_citations(tmp_p
                 "read_source",
                 "get_neighbors",
                 "get_overview",
+                "list_feature_generations",
                 "generate_project_features",
                 "get_feature_generation",
+                "get_feature_graph",
             } == tool_names
             generated = await client.call_tool(
                 "generate_project_features",
@@ -487,7 +495,48 @@ def test_mcp_feature_generation_is_separately_opt_in_and_returns_citations(tmp_p
             )
             assert reread.structured_content["generation"] == generation
 
-    asyncio.run(exercise())
+            history = await client.call_tool(
+                "list_feature_generations",
+                {"project_id": project_id, "index_id": index_id, "limit": 40},
+            )
+            assert history.structured_content["ok"] is True
+            assert history.structured_content["result"]["project_id"] == project_id
+            assert history.structured_content["result"]["index_id"] == index_id
+            assert history.structured_content["result"]["generations"][0]["generation_id"] == generation["generation_id"]
+
+            graph = await client.call_tool(
+                "get_feature_graph",
+                {
+                    "project_id": project_id,
+                    "index_id": index_id,
+                    "generation_id": generation["generation_id"],
+                },
+            )
+            assert graph.structured_content["ok"] is True
+            assert graph.structured_content["graph"]["project_id"] == project_id
+            assert graph.structured_content["graph"]["index_id"] == index_id
+            assert graph.structured_content["graph"]["generation_id"] == generation["generation_id"]
+            assert graph.structured_content["graph"]["nodes"]
+            assert {reference["evidence_id"] for reference in graph.structured_content["references"]} == {
+                evidence["evidence_id"] for evidence in graph.structured_content["graph"]["evidence"]
+            }
+            return history.structured_content, graph.structured_content
+
+    history_result, graph_result = asyncio.run(exercise())
+    status, http_history = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/features?index_id={index_id}&limit=40",
+    )
+    assert status == 200
+    assert history_result["result"] == http_history
+    status, http_graph = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/indexes/{index_id}/features/{history_result['result']['generations'][0]['generation_id']}/graph",
+    )
+    assert status == 200
+    assert graph_result["graph"] == http_graph["graph"]
 
 
 async def _exercise_stdio(
@@ -513,6 +562,9 @@ async def _exercise_stdio(
         "read_source",
         "get_neighbors",
         "get_overview",
+        "list_feature_generations",
+        "get_feature_generation",
+        "get_feature_graph",
     }
     async with Client(parameters, read_timeout_seconds=10) as client:
         tools = await client.list_tools()

@@ -13,7 +13,9 @@ from pydantic import Field
 
 from .contracts import (
     EvidenceReference,
+    FeatureGraphResponse,
     FeatureGenerationBudget,
+    FeatureGenerationListResponse,
     FeatureGenerationRequest,
     FeatureGenerationResponse,
     FeatureGenerationMode,
@@ -22,6 +24,8 @@ from .contracts import (
     GitHubImportResponse,
     Identifier,
     McpError,
+    McpFeatureGenerationListResponse,
+    McpFeatureGraphResponse,
     McpFeatureGenerationResponse,
     McpImportResponse,
     McpImportStatusResponse,
@@ -61,6 +65,9 @@ _DiscoveryLimit = Annotated[int, Field(ge=1, le=_MAX_DISCOVERY_ITEMS, descriptio
 _OverviewDepth = Annotated[int, Field(ge=1, le=8, description="Maximum static overview path depth.")]
 _OverviewPaths = Annotated[int, Field(ge=1, le=40, description="Maximum returned overview paths.")]
 _OverviewModules = Annotated[int, Field(ge=1, le=200, description="Maximum returned overview modules.")]
+_FeatureHistoryCursor = Annotated[str | None, Field(max_length=500, description="Opaque history cursor from a previous page.")]
+_FeatureGraphNodes = Annotated[int, Field(ge=1, le=40, description="Maximum feature graph nodes.")]
+_FeatureGraphEdges = Annotated[int, Field(ge=1, le=120, description="Maximum feature graph edges.")]
 McpResponse = TypeVar("McpResponse", bound=McpResultBase)
 
 
@@ -309,6 +316,86 @@ def create_mcp_server(
         except Exception:
             return _unexpected_failure("get_overview", McpOverviewResponse)
 
+    @server.tool(
+        name="list_feature_generations",
+        title="List saved project feature versions",
+        description=(
+            "Read saved feature-generation metadata for one project, optionally filtered to one immutable index. "
+            "This is read-only, paginated, and never calls retrieval or a model."
+        ),
+        structured_output=True,
+    )
+    def list_feature_generations(
+        project_id: _ProjectId,
+        index_id: _IndexId | None = None,
+        limit: _Limit = 20,
+        cursor: _FeatureHistoryCursor = None,
+    ) -> McpFeatureGenerationListResponse:
+        try:
+            result: FeatureGenerationListResponse = service.list_feature_generations(
+                project_id,
+                index_id=index_id,
+                limit=limit,
+                cursor=cursor,
+            )
+            return McpFeatureGenerationListResponse(ok=True, result=result)
+        except ServiceError as exc:
+            return _failure(McpFeatureGenerationListResponse, exc)
+        except Exception:
+            return _unexpected_failure("list_feature_generations", McpFeatureGenerationListResponse)
+
+    @server.tool(
+        name="get_feature_generation",
+        title="Read saved project features",
+        description=(
+            "Read a previously saved feature generation for the explicit project/index pair. "
+            "This is read-only and never calls a model."
+        ),
+        structured_output=True,
+    )
+    def get_feature_generation(
+        project_id: _ProjectId,
+        index_id: _IndexId,
+        generation_id: _IndexId,
+    ) -> McpFeatureGenerationResponse:
+        try:
+            result = service.get_feature_generation(project_id, index_id, generation_id)
+            return _mcp_feature_generation_response(result, citation_url)
+        except ServiceError as exc:
+            return _failure(McpFeatureGenerationResponse, exc)
+        except Exception:
+            return _unexpected_failure("get_feature_generation", McpFeatureGenerationResponse)
+
+    @server.tool(
+        name="get_feature_graph",
+        title="Read saved feature graph",
+        description=(
+            "Build a bounded read-only graph from one saved feature generation and the same immutable index. "
+            "Semantic feature mappings and static code relations are labeled separately; no model is called."
+        ),
+        structured_output=True,
+    )
+    def get_feature_graph(
+        project_id: _ProjectId,
+        index_id: _IndexId,
+        generation_id: _IndexId,
+        max_nodes: _FeatureGraphNodes = 40,
+        max_edges: _FeatureGraphEdges = 80,
+    ) -> McpFeatureGraphResponse:
+        try:
+            result: FeatureGraphResponse = service.get_feature_graph(
+                project_id,
+                index_id,
+                generation_id,
+                max_nodes=max_nodes,
+                max_edges=max_edges,
+            )
+            return _mcp_feature_graph_response(result, citation_url)
+        except ServiceError as exc:
+            return _failure(McpFeatureGraphResponse, exc)
+        except Exception:
+            return _unexpected_failure("get_feature_graph", McpFeatureGraphResponse)
+
     if feature_generation_enabled:
 
         @server.tool(
@@ -351,7 +438,6 @@ def create_mcp_server(
                         budget=FeatureGenerationBudget(
                             max_tool_calls=max_tool_calls,
                             max_model_calls=max_model_calls,
-                            max_seconds=max_seconds,
                             max_source_lines=max_source_lines,
                             max_total_source_lines=max_total_source_lines,
                             max_input_chars=max_input_chars,
@@ -365,28 +451,6 @@ def create_mcp_server(
                 return _failure(McpFeatureGenerationResponse, exc)
             except Exception:
                 return _unexpected_failure("generate_project_features", McpFeatureGenerationResponse)
-
-        @server.tool(
-            name="get_feature_generation",
-            title="Read saved project features",
-            description=(
-                "Read a previously saved feature generation for the explicit project/index pair. "
-                "This is read-only and never calls a model."
-            ),
-            structured_output=True,
-        )
-        def get_feature_generation(
-            project_id: _ProjectId,
-            index_id: _IndexId,
-            generation_id: _IndexId,
-        ) -> McpFeatureGenerationResponse:
-            try:
-                result = service.get_feature_generation(project_id, index_id, generation_id)
-                return _mcp_feature_generation_response(result, citation_url)
-            except ServiceError as exc:
-                return _failure(McpFeatureGenerationResponse, exc)
-            except Exception:
-                return _unexpected_failure("get_feature_generation", McpFeatureGenerationResponse)
 
     if local_import_enabled:
 
@@ -661,6 +725,36 @@ def _mcp_feature_generation_response(
         for evidence in generation.evidence
     ]
     return McpFeatureGenerationResponse(ok=True, generation=generation, references=references)
+
+
+def _mcp_feature_graph_response(
+    result: FeatureGraphResponse,
+    base_url: str,
+) -> McpFeatureGraphResponse:
+    graph = result.graph
+    references = [
+        EvidenceReference(
+            project_id=graph.project_id,
+            index_id=evidence.index_id,
+            path=evidence.path,
+            start_line=evidence.start_line,
+            end_line=evidence.end_line,
+            content_hash=evidence.content_hash,
+            evidence_id=evidence.evidence_id,
+            url=_citation_url(
+                base_url,
+                project_id=graph.project_id,
+                index_id=evidence.index_id,
+                path=evidence.path,
+                start_line=evidence.start_line,
+                end_line=evidence.end_line,
+                content_hash=evidence.content_hash,
+                evidence_id=evidence.evidence_id,
+            ),
+        )
+        for evidence in graph.evidence
+    ]
+    return McpFeatureGraphResponse(ok=True, graph=graph, references=references)
 
 
 def _failure(model: type[McpResponse], exc: ServiceError, **fields: object) -> McpResponse:

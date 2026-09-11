@@ -350,6 +350,91 @@ export type FeatureGenerationResponse = {
   generation: FeatureGeneration;
 };
 
+export type FeatureGenerationSummary = {
+  schema_version: typeof SCHEMA_VERSION;
+  generation_id: string;
+  project_id: string;
+  index: IndexSnapshot;
+  mode: FeatureGenerationMode;
+  model: string | null;
+  prompt_version: string;
+  rules_version: string;
+  source_scope: FeatureSourceScope;
+  status: FeatureGenerationStatus;
+  summary: string;
+  feature_count: number;
+  evidence_count: number;
+  usage: FeatureGenerationUsage;
+  created_at: string;
+  error: FeatureGenerationError | null;
+  truncated: boolean;
+  truncation_reason: string | null;
+};
+
+export type FeatureGenerationListResponse = {
+  schema_version: typeof SCHEMA_VERSION;
+  project_id: string;
+  index_id: string | null;
+  generations: FeatureGenerationSummary[];
+  next_cursor: string | null;
+  has_more: boolean;
+};
+
+export type FeatureGraphNodeKind = "entry_point" | "feature" | "module" | "symbol";
+export type FeatureGraphOrigin = "semantic" | "static";
+export type FeatureGraphRelation =
+  | "triggered_by"
+  | "implemented_by"
+  | "related_to"
+  | "contains"
+  | "imports"
+  | "calls";
+
+export type FeatureGraphNode = {
+  node_id: string;
+  index_id: string;
+  kind: FeatureGraphNodeKind;
+  label: string;
+  detail: string | null;
+  feature_id: string | null;
+  entry_point_id: string | null;
+  symbol: SymbolRecord | null;
+  path: string | null;
+  start_line: number | null;
+  end_line: number | null;
+  evidence_ids: string[];
+};
+
+export type FeatureGraphEdge = {
+  edge_id: string;
+  index_id: string;
+  source_id: string;
+  target_id: string;
+  origin: FeatureGraphOrigin;
+  relation: FeatureGraphRelation;
+  evidence_ids: string[];
+};
+
+export type FeatureGraph = {
+  schema_version: typeof SCHEMA_VERSION;
+  project_id: string;
+  index_id: string;
+  generation_id: string;
+  status: FeatureGenerationStatus;
+  nodes: FeatureGraphNode[];
+  edges: FeatureGraphEdge[];
+  evidence: Evidence[];
+  unavailable_target_ids: string[];
+  limitations: string[];
+  truncated: boolean;
+  truncation_reason: string | null;
+};
+
+export type FeatureGraphResponse = {
+  schema_version: typeof SCHEMA_VERSION;
+  graph: FeatureGraph;
+};
+
 export type SourceResponse = {
   schema_version: typeof SCHEMA_VERSION;
   index_id: string;
@@ -871,6 +956,250 @@ export function isFeatureGenerationResponse(value: unknown): value is FeatureGen
   return isRecord(value) && value.schema_version === SCHEMA_VERSION && isFeatureGeneration(value.generation);
 }
 
+function isFeatureGenerationUsage(value: unknown): value is FeatureGenerationUsage {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const nonNegativeKeys = [
+    "tool_calls",
+    "model_calls",
+    "repair_calls",
+    "source_lines",
+    "input_chars",
+    "output_chars",
+    "elapsed_ms",
+  ];
+  if (!nonNegativeKeys.every((key) => isNonNegativeInteger(value[key]))) {
+    return false;
+  }
+  if (
+    !Array.isArray(value.model_input_chars) ||
+    !value.model_input_chars.every(isNonNegativeInteger) ||
+    !Array.isArray(value.model_output_chars) ||
+    !value.model_output_chars.every(isNonNegativeInteger) ||
+    value.model_input_chars.length !== value.model_calls ||
+    value.model_output_chars.length > value.model_calls ||
+    value.model_input_chars.reduce((total, chars) => total + chars, 0) !== value.input_chars ||
+    value.model_output_chars.reduce((total, chars) => total + chars, 0) !== value.output_chars ||
+    !isNullableNumber(value.input_tokens) ||
+    !isNullableNumber(value.output_tokens)
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function isFeatureGenerationError(value: unknown): value is FeatureGenerationError {
+  return (
+    isRecord(value) &&
+    isString(value.kind) &&
+    isString(value.message) &&
+    typeof value.retryable === "boolean"
+  );
+}
+
+export function isFeatureGenerationSummary(value: unknown): value is FeatureGenerationSummary {
+  if (
+    !isRecord(value) ||
+    value.schema_version !== SCHEMA_VERSION ||
+    !isString(value.generation_id) ||
+    !isString(value.project_id) ||
+    !isIndexSnapshot(value.index) ||
+    value.index.status !== "ready" ||
+    !["fixture", "real"].includes(String(value.mode)) ||
+    !isNullableString(value.model) ||
+    !isString(value.prompt_version) ||
+    !isString(value.rules_version) ||
+    !["entry_reachable", "visible_modules"].includes(String(value.source_scope)) ||
+    !["succeeded", "partial", "insufficient_evidence", "failed"].includes(String(value.status)) ||
+    !isString(value.summary) ||
+    !isNonNegativeInteger(value.feature_count) ||
+    !isNonNegativeInteger(value.evidence_count) ||
+    !isFeatureGenerationUsage(value.usage) ||
+    !isString(value.created_at) ||
+    !isTruncation(value)
+  ) {
+    return false;
+  }
+  if (value.error !== null && !isFeatureGenerationError(value.error)) {
+    return false;
+  }
+  if (value.status === "failed" ? value.error === null : value.error !== null) {
+    return false;
+  }
+  return true;
+}
+
+export function isFeatureGenerationListResponse(value: unknown): value is FeatureGenerationListResponse {
+  if (
+    !isRecord(value) ||
+    value.schema_version !== SCHEMA_VERSION ||
+    !isString(value.project_id) ||
+    !isNullableString(value.index_id) ||
+    !Array.isArray(value.generations) ||
+    !value.generations.every(isFeatureGenerationSummary) ||
+    !isNullableString(value.next_cursor) ||
+    typeof value.has_more !== "boolean"
+  ) {
+    return false;
+  }
+  if (value.has_more !== (value.next_cursor !== null)) {
+    return false;
+  }
+  return value.generations.every(
+    (generation) =>
+      generation.project_id === value.project_id &&
+      (value.index_id === null || generation.index.index_id === value.index_id),
+  );
+}
+
+function isFeatureGraphNode(
+  value: unknown,
+  indexId: string,
+  evidenceIds: Set<string>,
+): value is FeatureGraphNode {
+  if (
+    !isRecord(value) ||
+    !isString(value.node_id) ||
+    value.index_id !== indexId ||
+    !["entry_point", "feature", "module", "symbol"].includes(String(value.kind)) ||
+    !isString(value.label) ||
+    !isNullableString(value.detail) ||
+    !isNullableString(value.feature_id) ||
+    !isNullableString(value.entry_point_id) ||
+    !(value.symbol === null || isSymbolRecord(value.symbol)) ||
+    !isNullableString(value.path) ||
+    !(value.start_line === null || isNumber(value.start_line)) ||
+    !(value.end_line === null || isNumber(value.end_line)) ||
+    !isStringArray(value.evidence_ids) ||
+    new Set(value.evidence_ids).size !== value.evidence_ids.length ||
+    value.evidence_ids.some((evidenceId) => !evidenceIds.has(evidenceId))
+  ) {
+    return false;
+  }
+  if (value.kind === "feature") {
+    return (
+      isString(value.feature_id) &&
+      value.node_id === `feature:${value.feature_id}` &&
+      value.entry_point_id === null &&
+      value.symbol === null &&
+      value.path === null &&
+      value.start_line === null &&
+      value.end_line === null
+    );
+  }
+  if (value.kind === "entry_point") {
+    return (
+      isString(value.entry_point_id) &&
+      value.node_id === `entry:${value.entry_point_id}` &&
+      value.symbol === null &&
+      isString(value.path) &&
+      isNumber(value.start_line) &&
+      isNumber(value.end_line) &&
+      value.end_line >= value.start_line &&
+      value.feature_id === null
+    );
+  }
+  return (
+    value.symbol !== null &&
+    value.node_id === value.symbol.symbol_id &&
+    value.symbol.index_id === indexId &&
+    value.symbol.kind === (value.kind === "module" ? "module" : value.symbol.kind) &&
+    (value.kind !== "symbol" || value.symbol.kind !== "module") &&
+    value.feature_id === null &&
+    value.entry_point_id === null &&
+    value.path === null &&
+    value.start_line === null &&
+    value.end_line === null
+  );
+}
+
+function isFeatureGraphEdge(
+  value: unknown,
+  indexId: string,
+  nodeIds: Set<string>,
+  evidenceIds: Set<string>,
+): value is FeatureGraphEdge {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const origin = value.origin;
+  const relation = value.relation;
+  if (
+    !isString(value.edge_id) ||
+    value.index_id !== indexId ||
+    !isString(value.source_id) ||
+    !isString(value.target_id) ||
+    !["semantic", "static"].includes(String(origin)) ||
+    ![
+      "triggered_by",
+      "implemented_by",
+      "related_to",
+      "contains",
+      "imports",
+      "calls",
+    ].includes(String(relation)) ||
+    !isStringArray(value.evidence_ids) ||
+    new Set(value.evidence_ids).size !== value.evidence_ids.length ||
+    value.evidence_ids.some((evidenceId) => !evidenceIds.has(evidenceId)) ||
+    !nodeIds.has(value.source_id) ||
+    !nodeIds.has(value.target_id)
+  ) {
+    return false;
+  }
+  const semanticRelations = new Set(["triggered_by", "implemented_by", "related_to"]);
+  return origin === "semantic"
+    ? isString(relation) && semanticRelations.has(relation)
+    : isString(relation) && ["contains", "imports", "calls"].includes(relation);
+}
+
+export function isFeatureGraphResponse(value: unknown): value is FeatureGraphResponse {
+  if (!isRecord(value) || value.schema_version !== SCHEMA_VERSION || !isRecord(value.graph)) {
+    return false;
+  }
+  const graph = value.graph;
+  const graphIndexId = graph.index_id;
+  if (
+    graph.schema_version !== SCHEMA_VERSION ||
+    !isString(graph.project_id) ||
+    !isString(graphIndexId) ||
+    !isString(graph.generation_id) ||
+    !["succeeded", "partial", "insufficient_evidence", "failed"].includes(String(graph.status)) ||
+    !Array.isArray(graph.evidence) ||
+    !graph.evidence.every((evidence) => isEvidence(evidence) && evidence.index_id === graphIndexId) ||
+    !Array.isArray(graph.nodes) ||
+    !Array.isArray(graph.edges) ||
+    !isStringArray(graph.unavailable_target_ids) ||
+    !isStringArray(graph.limitations) ||
+    !isTruncation(graph)
+  ) {
+    return false;
+  }
+  const evidenceIds = new Set(graph.evidence.map((evidence) => evidence.evidence_id));
+  const nodeIds = new Set(graph.nodes.map((node) => (isRecord(node) ? node.node_id : undefined)));
+  if (
+    evidenceIds.size !== graph.evidence.length ||
+    nodeIds.size !== graph.nodes.length ||
+    nodeIds.has(undefined) ||
+    new Set(graph.edges.map((edge) => (isRecord(edge) ? edge.edge_id : undefined))).size !==
+      graph.edges.length ||
+    new Set(graph.unavailable_target_ids).size !== graph.unavailable_target_ids.length
+  ) {
+    return false;
+  }
+  if (!graph.nodes.every((node) => isFeatureGraphNode(node, graphIndexId, evidenceIds))) {
+    return false;
+  }
+  if (
+    !graph.edges.every((edge) =>
+      isFeatureGraphEdge(edge, graphIndexId, nodeIds as Set<string>, evidenceIds),
+    )
+  ) {
+    return false;
+  }
+  return true;
+}
+
 export function isSourceResponse(value: unknown): value is SourceResponse {
   return (
     isRecord(value) &&
@@ -1294,6 +1623,46 @@ export function getProjectFeatureGeneration(
   return requestJson(
     `/api/projects/${encodeURIComponent(projectId)}/indexes/${encodeURIComponent(indexId)}/features/${encodeURIComponent(generationId)}`,
     isFeatureGenerationResponse,
+    { signal },
+  );
+}
+
+export function listProjectFeatureGenerations(
+  projectId: string,
+  indexId?: string,
+  limit = 20,
+  cursor?: string,
+  signal?: AbortSignal,
+): Promise<FeatureGenerationListResponse> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (indexId) {
+    params.set("index_id", indexId);
+  }
+  if (cursor) {
+    params.set("cursor", cursor);
+  }
+  return requestJson(
+    `/api/projects/${encodeURIComponent(projectId)}/features?${params.toString()}`,
+    isFeatureGenerationListResponse,
+    { signal },
+  );
+}
+
+export function getProjectFeatureGraph(
+  projectId: string,
+  indexId: string,
+  generationId: string,
+  maxNodes = 40,
+  maxEdges = 80,
+  signal?: AbortSignal,
+): Promise<FeatureGraphResponse> {
+  const params = new URLSearchParams({
+    max_nodes: String(maxNodes),
+    max_edges: String(maxEdges),
+  });
+  return requestJson(
+    `/api/projects/${encodeURIComponent(projectId)}/indexes/${encodeURIComponent(indexId)}/features/${encodeURIComponent(generationId)}/graph?${params.toString()}`,
+    isFeatureGraphResponse,
     { signal },
   );
 }

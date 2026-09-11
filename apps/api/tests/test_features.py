@@ -204,6 +204,95 @@ def test_fixture_generation_uses_real_tools_persists_and_reuses_idempotency(tmp_
     assert stable == generated
 
 
+def test_feature_history_paginates_and_graph_reads_saved_snapshot_without_model(tmp_path: Path) -> None:
+    application = create_app(
+        {
+            "timeout-demo": _copy_fixture(tmp_path),
+            "other-demo": _copy_fixture(tmp_path, name="other-demo"),
+        }
+    )
+    project_id, index_id = _create_index(application)
+    generation_ids: list[str] = []
+    for prompt_version in ("feature-summary-v2", "feature-summary-v3"):
+        status, generated = request(
+            application,
+            "POST",
+            f"/api/projects/{project_id}/indexes/{index_id}/features",
+            {
+                "schema_version": "0.1.0",
+                "mode": "fixture",
+                "prompt_version": prompt_version,
+                "idempotency_key": f"history-{prompt_version}",
+            },
+        )
+        assert status == 200
+        generation_ids.append(generated["generation"]["generation_id"])
+
+    status, first_page = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/features?index_id={index_id}&limit=1",
+    )
+    assert status == 200
+    assert first_page["project_id"] == project_id
+    assert first_page["index_id"] == index_id
+    assert len(first_page["generations"]) == 1
+    assert first_page["generations"][0]["generation_id"] == generation_ids[-1]
+    assert first_page["generations"][0]["feature_count"] > 0
+    assert first_page["has_more"] is True
+    assert first_page["next_cursor"]
+
+    status, second_page = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/features?index_id={index_id}&limit=1&cursor={first_page['next_cursor']}",
+    )
+    assert status == 200
+    assert second_page["generations"][0]["generation_id"] == generation_ids[0]
+    assert second_page["generations"][0]["generation_id"] != first_page["generations"][0]["generation_id"]
+    assert second_page["has_more"] is False
+    assert second_page["next_cursor"] is None
+
+    status, graph = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/indexes/{index_id}/features/{generation_ids[-1]}/graph",
+    )
+    assert status == 200
+    snapshot = graph["graph"]
+    assert snapshot["project_id"] == project_id
+    assert snapshot["index_id"] == index_id
+    assert snapshot["generation_id"] == generation_ids[-1]
+    assert {node["kind"] for node in snapshot["nodes"]} >= {"feature", "entry_point", "module", "symbol"}
+    assert {edge["origin"] for edge in snapshot["edges"]} >= {"semantic", "static"}
+    node_ids = {node["node_id"] for node in snapshot["nodes"]}
+    evidence_ids = {evidence["evidence_id"] for evidence in snapshot["evidence"]}
+    assert all(edge["source_id"] in node_ids and edge["target_id"] in node_ids for edge in snapshot["edges"])
+    assert all(evidence["index_id"] == index_id for evidence in snapshot["evidence"])
+    assert all(evidence_id in evidence_ids for node in snapshot["nodes"] for evidence_id in node["evidence_ids"])
+    assert any(node["kind"] == "entry_point" and node["path"] and node["start_line"] for node in snapshot["nodes"])
+
+    other_project_id, other_index_id = _create_index(
+        application,
+        repository_id="other-demo",
+        project_name="Other feature project",
+    )
+    status, other_history = request(
+        application,
+        "GET",
+        f"/api/projects/{other_project_id}/features?index_id={other_index_id}&limit=40",
+    )
+    assert status == 200
+    assert other_history["generations"] == []
+    status, cross_graph = request(
+        application,
+        "GET",
+        f"/api/projects/{other_project_id}/indexes/{other_index_id}/features/{generation_ids[-1]}/graph",
+    )
+    assert status == 404
+    assert cross_graph["code"] == "not_found"
+
+
 def test_success_is_converted_to_failure_if_deadline_expires_before_save(tmp_path: Path) -> None:
     application = create_app({"timeout-demo": _copy_fixture(tmp_path)})
     project_id, index_id = _create_index(application)

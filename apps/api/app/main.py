@@ -20,7 +20,9 @@ from .contracts import (
     CreateProjectIndexRequest,
     CreateProjectRequest,
     EdgeKind,
+    FeatureGraphResponse,
     FeatureGenerationRequest,
+    FeatureGenerationListResponse,
     FeatureGenerationResponse,
     GitHubImportRequest,
     GitHubImportResponse,
@@ -233,6 +235,25 @@ def create_app(
         return await run_in_threadpool(workspace_service.get_project_index, project_id, index_id)
 
     @application.get(
+        "/api/projects/{project_id}/features",
+        response_model=FeatureGenerationListResponse,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def list_project_features(
+        project_id: str,
+        index_id: str | None = Query(default=None, max_length=200),
+        limit: int = Query(default=20, ge=1, le=40),
+        cursor: str | None = Query(default=None, max_length=500),
+    ) -> FeatureGenerationListResponse:
+        return await run_in_threadpool(
+            workspace_service.list_feature_generations,
+            project_id,
+            index_id=index_id,
+            limit=limit,
+            cursor=cursor,
+        )
+
+    @application.get(
         "/api/projects/{project_id}/indexes/{index_id}/overview",
         response_model=ProjectOverview,
         responses=_API_ERROR_RESPONSES,
@@ -268,6 +289,27 @@ def create_app(
             project_id,
             index_id,
             request,
+        )
+
+    @application.get(
+        "/api/projects/{project_id}/indexes/{index_id}/features/{generation_id}/graph",
+        response_model=FeatureGraphResponse,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def get_project_feature_graph(
+        project_id: str,
+        index_id: str,
+        generation_id: str,
+        max_nodes: int = Query(default=40, ge=1, le=40),
+        max_edges: int = Query(default=80, ge=1, le=120),
+    ) -> FeatureGraphResponse:
+        return await run_in_threadpool(
+            workspace_service.get_feature_graph,
+            project_id,
+            index_id,
+            generation_id,
+            max_nodes=max_nodes,
+            max_edges=max_edges,
         )
 
     @application.get(
