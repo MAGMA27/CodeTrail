@@ -2,7 +2,7 @@
 
 ## 职责与边界
 
-`apps/web` 提供项目/索引切换、概览、Session/消息、保存功能历史、同快照功能图、源码证据，以及 Session 内显式 fixture/real Run 的启动、状态、事件、工具结果、报告和取消。它只通过公开 HTTP API 访问服务端数据，不直接访问 SQLite、GitHub、宿主路径或模型；SSE 尚未接入。
+`apps/web` 提供项目/索引切换、概览、Session/消息、保存功能历史、同快照功能图、源码证据，以及 Session 内显式 fixture/real Run 的启动、状态、事件、工具结果、报告、SSE 订阅和取消。它只通过公开 HTTP API 访问服务端数据，不直接访问 SQLite、GitHub、宿主路径或模型。
 
 ## 入口与目录导航
 
@@ -16,13 +16,13 @@
 
 ## 接口与依赖
 
-项目、索引、概览、Session/消息和 Run 均通过 `/api/projects/*` 调用；Run 使用同一 Session 的 list/detail/events/tool-results/report/cancel 端点。启动按钮只发送 Issue/模式/fixture 场景/固定 index_id，服务端独立冻结已保存消息；前端不把已加载的消息页当作 Run 输入。HTTP 响应在 [lib/api.ts](lib/api.ts) 经过形状和 project/session/index/hash 边界校验。
+项目、索引、概览、Session/消息和 Run 均通过 `/api/projects/*` 调用；Run 使用同一 Session 的 list/detail/events、`events/stream`、tool-results/report/cancel 端点。启动按钮只发送 Issue/模式/fixture 场景/固定 index_id，服务端独立冻结已保存消息；前端不把已加载的消息页当作 Run 输入。HTTP 响应在 [lib/api.ts](lib/api.ts) 经过形状和 project/session/index/hash 边界校验，SSE 事件按 schema、Run 和连续 sequence 校验。
 
 ## 数据与生命周期
 
-Session 内的 fixture/real 分析必须由用户显式点击对应启动按钮。真实模式启动前显示会发送冻结 Issue、已保存消息和有界源码证据、可能产生费用且失败不回退的提示；启动前若有草稿也会显示提示，但草稿不进入 Run。服务端返回 queued 的 run_id 后，工作台以有界轮询读取 Run 状态、公开事件、工具结果和终态报告。面板展示模式、固定消息范围、input hash、index、execution version、事件时间线、工具结果和报告 evidence，并可从报告 evidence 打开既有源码证据侧栏。
+Session 内的 fixture/real 分析必须由用户显式点击对应启动按钮。真实模式启动前显示会发送冻结 Issue、已保存消息和有界源码证据、可能产生费用且失败不回退的提示；启动前若有草稿也会显示提示，但草稿不进入 Run。服务端返回 queued 的 run_id 后，工作台先读取已持久化事件建立历史，再以 `after_sequence` 订阅 SSE 逐项接收新增公开事件；连接失败经过有限退避后回退到有界轮询。面板展示模式、固定消息范围、input hash、index、execution version、事件时间线、工具结果和报告 evidence，并可从报告 evidence 打开既有源码证据侧栏。
 
-切换 Session 或项目会取消/忽略旧的 Run 请求和轮询，清空旧 Run 详情，再读取新 Session 的 Run 历史；刷新后先恢复项目/Session，再从服务端历史选择活动或最新 Run，重新载入状态，不重复创建。Run 取消使用独立写请求，成功后继续读取终态；消息保存仍只保存消息，不会隐式启动 Run。其它项目/索引/功能历史状态继续按既有 project_id/index_id 键隔离。
+切换 Session 或项目会取消/忽略旧的 Run 请求和轮询，关闭旧 EventSource 并使旧回调失效，清空旧 Run 详情，再读取新 Session 的 Run 历史；刷新后先恢复项目/Session，再从服务端历史选择活动或最新 Run，重新载入状态，不重复创建。Run 事件以 Run/sequence 去重，断线使用最后成功处理的 sequence 续接；连接状态独立于 Run 状态，终态后停止订阅和刷新。Run 取消使用独立写请求，成功后继续读取终态；消息保存仍只保存消息，不会隐式启动 Run。其它项目/索引/功能历史状态继续按既有 project_id/index_id 键隔离。
 
 ## 使用与配置
 
@@ -42,7 +42,7 @@ API 离线、项目/Session/index 不属于当前范围、消息未保存、空 
 
 ## 验证
 
-从仓库根目录执行 `pnpm --dir apps/web test`、`pnpm web:typecheck` 和 `pnpm web:build`。Run 的 HTTP 生命周期、real 模式选择/执行/取消/终态报告/evidence 联动、刷新/切换恢复和浏览器视觉流程已用本地假供应商复核；真实供应商语义质量和 SSE 尚未验证。
+从仓库根目录执行 `pnpm --dir apps/web test`、`pnpm web:typecheck` 和 `pnpm web:build`。Run 的 HTTP 生命周期、real 模式选择/执行/取消/终态报告/evidence 联动、刷新/切换恢复和浏览器视觉流程已用本地假供应商复核；本地 SSE 状态、逐事件显示、断线回退和终态恢复已验证，真实供应商语义质量未验证。
 
 ## 关联文档
 

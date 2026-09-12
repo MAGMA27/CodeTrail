@@ -1203,6 +1203,18 @@ class WorkspaceService:
             has_more=page.has_more,
         )
 
+    def latest_run_event_sequence(self, project_id: str, session_id: str, run_id: str) -> int:
+        """Return the persisted event upper bound for strict SSE cursor validation."""
+
+        project = self._find_project(project_id)
+        try:
+            with self.registry.store_for_repository(project.repository_id) as store:
+                return store.load_run_event_cursor(project_id, session_id, run_id).latest_sequence
+        except StorageNotFoundError as exc:
+            raise ServiceError("not_found", 404, "Run was not found") from exc
+        except StorageError as exc:
+            raise ServiceError("internal_error", 500, "local Run event storage failed") from exc
+
     def list_run_tool_results(
         self,
         project_id: str,

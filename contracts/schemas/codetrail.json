@@ -37266,6 +37266,7 @@
         }
       },
       "additionalProperties": false,
+      "description": "One persisted public Run event encoded as an SSE frame.",
       "properties": {
         "data": {
           "discriminator": {
@@ -37339,9 +37340,10 @@
           "type": "string"
         },
         "id": {
-          "exclusiveMinimum": 0,
+          "maxLength": 402,
+          "minLength": 3,
           "title": "Id",
-          "type": "integer"
+          "type": "string"
         },
         "schema_version": {
           "const": "0.1.0",
@@ -37356,6 +37358,137 @@
         "data"
       ],
       "title": "SseEventFrame",
+      "type": "object"
+    },
+    "SseStreamEnd": {
+      "additionalProperties": false,
+      "description": "Non-persisted control data emitted when a terminal cursor is resumed.",
+      "properties": {
+        "reason": {
+          "const": "terminal",
+          "title": "Reason",
+          "type": "string"
+        },
+        "run_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "0.1.0",
+          "default": "0.1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "sequence": {
+          "minimum": 0,
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "status": {
+          "enum": [
+            "queued",
+            "running",
+            "succeeded",
+            "failed",
+            "cancelled",
+            "interrupted"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "sequence",
+        "reason",
+        "status"
+      ],
+      "title": "SseStreamEnd",
+      "type": "object"
+    },
+    "SseStreamEndFrame": {
+      "$defs": {
+        "SseStreamEnd": {
+          "additionalProperties": false,
+          "description": "Non-persisted control data emitted when a terminal cursor is resumed.",
+          "properties": {
+            "reason": {
+              "const": "terminal",
+              "title": "Reason",
+              "type": "string"
+            },
+            "run_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Run Id",
+              "type": "string"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            },
+            "sequence": {
+              "minimum": 0,
+              "title": "Sequence",
+              "type": "integer"
+            },
+            "status": {
+              "enum": [
+                "queued",
+                "running",
+                "succeeded",
+                "failed",
+                "cancelled",
+                "interrupted"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "run_id",
+            "sequence",
+            "reason",
+            "status"
+          ],
+          "title": "SseStreamEnd",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "A finite-stream marker; it never advances the persisted event sequence.",
+      "properties": {
+        "data": {
+          "$ref": "#/$defs/SseStreamEnd"
+        },
+        "event": {
+          "const": "run.stream.end",
+          "default": "run.stream.end",
+          "title": "Event",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 402,
+          "minLength": 3,
+          "title": "Id",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "0.1.0",
+          "default": "0.1.0",
+          "title": "Schema Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "data"
+      ],
+      "title": "SseStreamEndFrame",
       "type": "object"
     },
     "Symbol": {

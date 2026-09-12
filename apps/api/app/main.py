@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
+from collections.abc import AsyncIterator
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Callable, Literal
 
-from fastapi import FastAPI, Query, Request
+from fastapi import FastAPI, Header, Query, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from .contracts import (
@@ -56,6 +58,17 @@ from .contracts import (
 from .github import GitHubClient
 from .feature_generation import FeatureModelAdapter
 from .issue_analysis import IssueModelAdapter
+from .run_sse import (
+    RunEventStreamConfig,
+    RunEventStreamLease,
+    RunEventStreamRegistry,
+    SseCapacityError,
+    SseCursorError,
+    encode_sse_comment,
+    encode_sse_event,
+    encode_sse_stream_end,
+    resolve_sse_cursor,
+)
 from .service import IndexService, RepositoryRegistry, ServiceError, WorkspaceService, is_loopback_host
 from .storage import StorageError
 
@@ -104,6 +117,7 @@ def create_app(
     feature_adapter_factory: Callable[[str], FeatureModelAdapter] | None = None,
     run_model_adapter_factory: Callable[[str], IssueModelAdapter] | None = None,
     run_max_concurrent_runs: int | None = None,
+    run_sse_config: RunEventStreamConfig | None = None,
 ) -> FastAPI:
     """Create an API with a server-owned repository allow-list."""
 
@@ -141,9 +155,11 @@ def create_app(
         run_max_concurrent_runs=run_max_concurrent_runs,
     )
     application = FastAPI(title="CodeTrail API", version="0.1.0")
+    run_event_streams = RunEventStreamRegistry(run_sse_config)
     application.state.index_service = index_service
     application.state.registry = registry
     application.state.workspace_service = workspace_service
+    application.state.run_event_streams = run_event_streams
     application.add_middleware(
         CORSMiddleware,
         allow_origins=_allowed_origins(),
@@ -367,6 +383,116 @@ def create_app(
             run_id,
             after_sequence=after_sequence,
             limit=limit,
+        )
+
+    @application.get(
+        "/api/projects/{project_id}/sessions/{session_id}/runs/{run_id}/events/stream",
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def stream_run_events(
+        project_id: str,
+        session_id: str,
+        run_id: str,
+        after_sequence: int | None = Query(default=None, ge=0),
+        last_event_id: str | None = Header(default=None, alias="Last-Event-ID", max_length=500),
+    ) -> StreamingResponse:
+        try:
+            cursor = resolve_sse_cursor(
+                run_id,
+                after_sequence=after_sequence,
+                last_event_id=last_event_id,
+            )
+        except SseCursorError as exc:
+            raise ServiceError("invalid_input", 400, str(exc)) from exc
+
+        run_response = await run_in_threadpool(workspace_service.get_run, project_id, session_id, run_id)
+        latest_sequence = await run_in_threadpool(
+            workspace_service.latest_run_event_sequence,
+            project_id,
+            session_id,
+            run_id,
+        )
+        if cursor > latest_sequence:
+            raise ServiceError(
+                "invalid_input",
+                400,
+                "SSE cursor is ahead of the latest persisted Run event",
+            )
+        try:
+            lease = run_event_streams.acquire(run_id)
+        except SseCapacityError as exc:
+            raise ServiceError("budget_exceeded", 429, str(exc)) from exc
+
+        async def body() -> AsyncIterator[bytes]:
+            terminal_statuses = {"succeeded", "failed", "cancelled", "interrupted"}
+            current_cursor = cursor
+            started_at = asyncio.get_running_loop().time()
+            next_heartbeat_at = started_at + run_event_streams.config.idle_heartbeat_seconds
+            try:
+                while True:
+                    now = asyncio.get_running_loop().time()
+                    if now - started_at >= run_event_streams.config.max_lifetime_seconds:
+                        yield encode_sse_comment("stream lifetime limit reached")
+                        return
+
+                    page = await run_in_threadpool(
+                        workspace_service.list_run_events,
+                        project_id,
+                        session_id,
+                        run_id,
+                        after_sequence=current_cursor,
+                        limit=run_event_streams.config.batch_size,
+                    )
+                    if page.events:
+                        for event in page.events:
+                            try:
+                                frame = encode_sse_event(
+                                    event,
+                                    max_bytes=run_event_streams.config.max_event_bytes,
+                                )
+                            except ValueError:
+                                yield encode_sse_comment("event frame exceeds the configured byte limit")
+                                return
+                            yield frame
+                            current_cursor = event.sequence
+                            if event.type in {
+                                "run.completed",
+                                "run.failed",
+                                "run.cancelled",
+                                "run.interrupted",
+                            }:
+                                return
+                        if page.has_more:
+                            continue
+                        next_heartbeat_at = asyncio.get_running_loop().time() + run_event_streams.config.idle_heartbeat_seconds
+                    elif run_response.run.status in terminal_statuses:
+                        try:
+                            yield encode_sse_stream_end(
+                                run_id=run_id,
+                                sequence=latest_sequence,
+                                status=run_response.run.status,
+                                max_bytes=run_event_streams.config.max_event_bytes,
+                            )
+                        except ValueError:
+                            yield encode_sse_comment("stream end frame exceeds the configured byte limit")
+                        return
+
+                    now = asyncio.get_running_loop().time()
+                    if now >= next_heartbeat_at:
+                        yield encode_sse_comment("keep-alive")
+                        next_heartbeat_at = now + run_event_streams.config.idle_heartbeat_seconds
+                    await asyncio.sleep(run_event_streams.config.poll_interval_seconds)
+            finally:
+                lease.release()
+
+        return StreamingResponse(
+            body(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache, no-transform",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
         )
 
     @application.get(

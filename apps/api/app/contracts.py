@@ -2282,14 +2282,44 @@ class EventSequence(VersionedModel):
 
 
 class SseEventFrame(VersionedModel):
-    id: PositiveInt
+    """One persisted public Run event encoded as an SSE frame."""
+
+    id: str = Field(min_length=3, max_length=402)
     event: EventType
     data: Event
 
     @model_validator(mode="after")
     def validate_frame(self) -> SseEventFrame:
-        if self.id != self.data.sequence or self.event != self.data.type:
+        expected_id = f"{self.data.run_id}:{self.data.sequence}"
+        if self.id != expected_id or self.event != self.data.type:
             raise ValueError("SSE frame metadata must match the embedded event")
+        return self
+
+
+SseStreamEndReason: TypeAlias = Literal["terminal"]
+
+
+class SseStreamEnd(VersionedModel):
+    """Non-persisted control data emitted when a terminal cursor is resumed."""
+
+    run_id: Identifier
+    sequence: NonNegativeInt
+    reason: SseStreamEndReason
+    status: RunStatus
+
+
+class SseStreamEndFrame(VersionedModel):
+    """A finite-stream marker; it never advances the persisted event sequence."""
+
+    id: str = Field(min_length=3, max_length=402)
+    event: Literal["run.stream.end"] = "run.stream.end"
+    data: SseStreamEnd
+
+    @model_validator(mode="after")
+    def validate_frame(self) -> SseStreamEndFrame:
+        expected_id = f"{self.data.run_id}:{self.data.sequence}"
+        if self.id != expected_id:
+            raise ValueError("SSE stream-end metadata must match the terminal cursor")
         return self
 
 

@@ -234,6 +234,13 @@ class RunEventPage:
 
 
 @dataclass(frozen=True)
+class RunEventCursor:
+    """The greatest persisted public event sequence for one Run."""
+
+    latest_sequence: int
+
+
+@dataclass(frozen=True)
 class RunToolResultPage:
     """One bounded ascending page of persisted tool results."""
 
@@ -2077,6 +2084,23 @@ class IndexStore:
             next_after_sequence=next_after_sequence,
             has_more=has_more,
         )
+
+    def load_run_event_cursor(
+        self,
+        project_id: str,
+        session_id: str,
+        run_id: str,
+    ) -> RunEventCursor:
+        """Read the persisted upper bound used to validate an SSE resume cursor."""
+
+        self._require_run_scope(project_id, session_id, run_id)
+        row = self._connection.execute(
+            "SELECT COALESCE(MAX(sequence), 0) AS latest_sequence FROM run_events WHERE run_id = ?",
+            (run_id,),
+        ).fetchone()
+        if row is None:
+            raise StorageError("could not read Run event cursor")
+        return RunEventCursor(latest_sequence=int(row["latest_sequence"]))
 
     def load_run_tool_results(
         self,

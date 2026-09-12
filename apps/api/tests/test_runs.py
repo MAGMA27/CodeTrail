@@ -14,6 +14,7 @@ from urllib.parse import urlsplit
 import pytest
 
 from app.main import create_app
+from app.run_sse import RunEventStreamConfig
 from app.storage import IndexStore, StorageError
 
 
@@ -68,7 +69,12 @@ def request(application, method: str, target: str, payload: dict | None = None) 
     return asyncio.run(_request(application, method, target, payload))
 
 
-def setup_workspace(tmp_path: Path, *, run_max_concurrent_runs: int | None = None):
+def setup_workspace(
+    tmp_path: Path,
+    *,
+    run_max_concurrent_runs: int | None = None,
+    run_sse_config: RunEventStreamConfig | None = None,
+):
     repository = tmp_path / "timeout-demo"
     shutil.copytree(
         FIXTURE_ROOT,
@@ -79,6 +85,7 @@ def setup_workspace(tmp_path: Path, *, run_max_concurrent_runs: int | None = Non
         {"timeout-demo": repository},
         data_root=tmp_path / "data",
         run_max_concurrent_runs=run_max_concurrent_runs,
+        run_sse_config=run_sse_config,
     )
     status, project = request(
         application,

@@ -10,7 +10,7 @@
 
 ## 接口与依赖
 
-Run 的公共边界包括 `Run`、`RunInput`、`RunBudget`、`EventSequence` 中的连续事件、`ToolResult`、`Report`、`CreateRunRequest/Response`、Run history/events/tool-results 响应及取消响应。MCP 的 Run 读/写 envelope 只允许对应 `ok` 状态携带 result/report；所有请求/响应保留 `schema_version`。精确字段以声明和生成 Schema 为准，不在文档中复制完整字段表。
+Run 的公共边界包括 `Run`、`RunInput`、`RunBudget`、`EventSequence` 中的连续事件、`ToolResult`、`Report`、`CreateRunRequest/Response`、Run history/events/tool-results 响应及取消响应。`SseEventFrame` 的 `id` 固定为 `{run_id}:{sequence}`，`SseStreamEndFrame` 只作为终态游标续接的非持久化完成标记；两者的 `event`/`data` 必须匹配，均保留 `schema_version`。MCP 的 Run 读/写 envelope 只允许对应 `ok` 状态携带 result/report；所有请求/响应保留 `schema_version`。精确字段以声明和生成 Schema 为准，不在文档中复制完整字段表。
 
 ## 数据与生命周期
 
@@ -18,14 +18,15 @@ Run contract 要求 project/session/index 同时出现，输入消息是从 1 �
 
 ## 错误与限制
 
-契约限制 Run 模式、fixture scenario、工具调用/修复/源码/输入/输出/模型输入/模型输出/事件预算、分页页大小、消息 cutoff 和报告引用；real Run 不携带 fixture scenario。静态关系与候选假设分开；tool failure、insufficient evidence、cancelled 和 interrupted 不冒充 candidate_found。Schema 是机械形状校验，不能单独证明 HTTP 归属、浏览器流程、真实模型质量或执行器时序。
+契约限制 Run 模式、fixture scenario、工具调用/修复/源码/输入/输出/模型输入/模型输出/事件预算、分页页大小、消息 cutoff 和报告引用；real Run 不携带 fixture scenario。SSE 游标和连接资源边界由 API 流程校验，Schema 约束帧元数据、终态完成标记和公开事件形状。静态关系与候选假设分开；tool failure、insufficient evidence、cancelled 和 interrupted 不冒充 candidate_found。Schema 是机械形状校验，不能单独证明 HTTP 归属、浏览器流程、真实模型质量或执行器时序。
 
 ## 验证
 
-修改契约后运行 `uv run --directory apps/api python -m app.export_schema` 和 `pnpm contracts:check`；`apps/api/tests/test_contracts.py` 覆盖 Run/fixture 响应、事件序列、工具结果、报告和非法引用，`apps/api/tests/test_issue_runs.py` 覆盖 real 输出协议，`apps/api/tests/test_runs.py` 覆盖实际生命周期，`apps/web` 单测和 typecheck 覆盖消费边界。当前 Schema 已由生成器重新生成；本轮 `pnpm contracts:check` 为 19 passed，固定响应和文档检查均通过。
+修改契约后运行 `uv run --directory apps/api python -m app.export_schema` 和 `pnpm contracts:check`；`apps/api/tests/test_contracts.py` 覆盖 Run/fixture 响应、事件序列、SSE 帧、工具结果、报告和非法引用，`apps/api/tests/test_run_sse.py` 覆盖实际 SSE 传输，`apps/api/tests/test_issue_runs.py` 覆盖 real 输出协议，`apps/api/tests/test_runs.py` 覆盖实际生命周期，`apps/web` 单测和 typecheck 覆盖消费边界。当前 Schema 已由生成器重新生成；本轮检查结果在交付时按实际输出记录。
 
 ## 相关决策
 
 - [Run 执行决策](../decisions/2026-09-12-run-execution.md)
 - [P2-R2 模型驱动 Issue 分析决策](../decisions/2026-09-12-run-model-analysis.md)
+- [Run SSE 决策](../decisions/2026-09-12-run-sse.md)
 - [统一接口决策](../decisions/2026-09-11-agent-native-interfaces.md)

@@ -142,6 +142,8 @@ type SessionUi = {
   runReport: RunReport | null;
   runStatus: UiAsyncStatus;
   runError: string | null;
+  runStreamStatus: "idle" | "connecting" | "connected" | "reconnecting" | "fallback" | "closed";
+  runStreamError: string | null;
   runWriteStatus: UiAsyncStatus;
   runWriteError: string | null;
   onSelectRun: (runId: string) => void;
@@ -907,6 +909,17 @@ function runStatusLabel(status: RunRecord["status"]): string {
   }[status];
 }
 
+function runStreamStatusLabel(status: SessionUi["runStreamStatus"]): string {
+  return {
+    idle: "未连接",
+    connecting: "实时连接中",
+    connected: "实时已连接",
+    reconnecting: "实时重连中",
+    fallback: "已回退轮询",
+    closed: "实时已结束",
+  }[status];
+}
+
 function runScenarioLabel(scenario: RunScenario): string {
   return {
     "success-timeout-missing": "候选：timeout 缺失",
@@ -965,10 +978,11 @@ function RunPanel({ session }: { session: SessionUi }) {
       {session.runsError ? <div className="ct-error-block compact" role="alert"><span>{session.runsError}</span></div> : null}
       {session.runs.length > 0 ? <div className="ct-run-history" aria-label="Run 历史">{session.runs.map((run) => <button type="button" key={run.run_id} className={`ct-run-history-item${run.run_id === session.selectedRunId ? " is-selected" : ""}`} onClick={() => session.onSelectRun(run.run_id)}><span><strong>{runStatusLabel(run.status)}</strong><small>{run.fixture_scenario ? runScenarioLabel(run.fixture_scenario) : run.mode === "real" ? "REAL / 模型分析" : "FIXTURE / 离线"}</small></span><code>{run.run_id}</code><small>消息 1–{run.message_end_sequence} · {run.execution_version}</small></button>)}</div> : session.runsStatus === "loading" ? <LoadingNote>正在读取 Run 历史…</LoadingNote> : <div className="ct-run-empty">还没有 Run。选择 fixture 或 real 模式后显式启动。</div>}
       {currentRun ? <div className="ct-run-detail">
-        <div className="ct-run-detail-heading"><div><strong>{runStatusLabel(currentRun.status)}</strong><span data-state={session.runStatus}>{session.runStatus === "loading" ? "状态同步中" : session.runStatus === "error" ? "状态请求失败" : "已载入"}</span></div>{active ? <button type="button" className="ct-button ct-button-danger" onClick={() => void session.onCancelRun()} disabled={session.runWriteStatus === "loading"}>取消 Run</button> : null}</div>
+        <div className="ct-run-detail-heading"><div><strong>{runStatusLabel(currentRun.status)}</strong><span data-state={session.runStatus}>{session.runStatus === "loading" ? "状态同步中" : session.runStatus === "error" ? "状态请求失败" : "已载入"}</span><span data-state={session.runStreamStatus}>事件：{runStreamStatusLabel(session.runStreamStatus)}</span></div>{active ? <button type="button" className="ct-button ct-button-danger" onClick={() => void session.onCancelRun()} disabled={session.runWriteStatus === "loading"}>取消 Run</button> : null}</div>
         {session.runStatusResponse ? <>
           <div className="ct-run-snapshot"><span><small>固定消息</small><code>1–{session.runStatusResponse.input.message_end_sequence}</code></span><span><small>INPUT HASH</small><code title={session.runStatusResponse.input.input_hash}>{shortHash(session.runStatusResponse.input.input_hash, 12)}</code></span><span><small>INDEX</small><code title={session.runStatusResponse.run.index_id}>{shortHash(session.runStatusResponse.run.index_id, 16)}</code></span><span><small>版本</small><code>{session.runStatusResponse.run.execution_version}</code></span></div>
           {session.runError ? <p className="ct-inline-error" role="alert">{session.runError}</p> : null}
+          {session.runStreamError ? <p className="ct-inline-note" role="status">{session.runStreamError}</p> : null}
           {session.runEvents.length > 0 ? <div className="ct-run-events"><div className="ct-run-subheading"><strong>公开执行事件</strong><span>{session.runEvents.length} 条</span></div>{session.runEvents.map((event) => <div className="ct-run-event" key={`${event.run_id}-${event.sequence}`}><code>#{event.sequence}</code><span>{runEventLabel(event)}</span></div>)}</div> : null}
           {session.runToolResults.length > 0 ? <div className="ct-run-tools"><div className="ct-run-subheading"><strong>工具结果</strong><span>{session.runToolResults.length} 项</span></div>{session.runToolResults.map((result) => <div className="ct-run-tool" key={result.request_id}><code>{result.tool}</code><span>{result.kind.endsWith("failed") ? "失败" : "已返回"} · #{result.completed_sequence}</span></div>)}</div> : null}
           {session.runReport ? <div className="ct-run-report"><div className="ct-run-subheading"><strong>{session.runReport.outcome === "candidate_found" ? "候选结论" : session.runReport.outcome === "insufficient_evidence" ? "证据不足" : "执行结果"}</strong><span>{session.runReport.fixture_mode ? "FIXTURE" : "REAL"}</span></div><p>{session.runReport.summary}</p>{session.runReport.findings.map((finding) => <div className="ct-run-finding" key={finding.finding_id}><strong>{finding.kind}</strong><span>{finding.text}</span>{finding.evidence_ids.map((evidenceId) => { const evidence = session.runReport?.evidence.find((item) => item.evidence_id === evidenceId); return evidence ? <button type="button" className="ct-link-button" key={evidenceId} onClick={() => session.onSelectRunEvidence(evidence)}>查看证据 · {evidence.path}:L{evidence.start_line}</button> : null; })}</div>)}{session.runReport.evidence.length > 0 ? <div className="ct-run-evidence-list"><small>本次报告证据</small>{session.runReport.evidence.map((evidence) => <button type="button" className="ct-link-button" key={evidence.evidence_id} onClick={() => session.onSelectRunEvidence(evidence)}>{evidence.path}:L{evidence.start_line}–L{evidence.end_line}</button>)}</div> : null}</div> : null}
@@ -1151,7 +1165,7 @@ export default function WorkbenchUi(props: WorkbenchUiProps) {
         {props.panelMode === "source" ? <EvidencePanel evidence={props.evidence} /> : props.panelMode === "graph" || props.panelMode === "feature_graph" ? <GraphPanel graph={props.graph} /> : null}
       </div>
       {props.panelMode !== "none" ? <div className="ct-panel-width-control"><label htmlFor="panel-width">面板宽度</label><input id="panel-width" type="range" min="300" max="440" step="10" value={panelWidth} onChange={(event) => setPanelWidth(Number(event.target.value))} /><output>{panelWidth}px</output></div> : null}
-      <footer className="ct-footer"><span>STATIC FACTS / FIXED EVIDENCE</span><span>Run：显式 fixture / real 分析 · 有界工具循环 · SSE 尚未接入</span><span>{props.index.response ? `${props.graph.codeSymbolCount} nodes · ${props.graph.codeEdgeCount} edges` : "No snapshot loaded"}</span></footer>
+      <footer className="ct-footer"><span>STATIC FACTS / FIXED EVIDENCE</span><span>Run：显式 fixture / real 分析 · 有界工具循环 · SSE 事件流与轮询回退</span><span>{props.index.response ? `${props.graph.codeSymbolCount} nodes · ${props.graph.codeEdgeCount} edges` : "No snapshot loaded"}</span></footer>
     </main>
   );
 }

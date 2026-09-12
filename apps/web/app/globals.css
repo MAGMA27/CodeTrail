@@ -141,6 +141,7 @@ code { font-family: var(--ct-mono); }
 .ct-search-row input { min-height: 38px; }
 .ct-search-row .ct-button { min-width: 65px; }
 .ct-inline-error { margin: 8px 0 0; color: var(--ct-danger); font-size: 11px; line-height: 1.5; }
+.ct-inline-note { margin: 8px 0 0; color: var(--ct-muted); font-size: 11px; line-height: 1.5; }
 .ct-inline-error .ct-link-button { margin-left: 7px; }
 .ct-search-empty, .ct-muted { margin: 11px 0 0; color: var(--ct-muted); font-size: 11px; }
 .ct-search-results { display: grid; gap: 4px; margin-top: 13px; padding-top: 11px; border-top: 1px solid var(--ct-border); }

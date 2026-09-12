@@ -319,6 +319,14 @@ export type RunEventsResponse = {
   has_more: boolean;
 };
 
+export type RunStreamEnd = {
+  schema_version: typeof SCHEMA_VERSION;
+  run_id: string;
+  sequence: number;
+  reason: "terminal";
+  status: RunStatus;
+};
+
 export type RunToolResult = {
   request_id: string;
   run_id: string;
@@ -1103,7 +1111,7 @@ function isRunInput(value: unknown): value is RunInput {
   );
 }
 
-function isRunEvent(value: unknown): value is RunEvent {
+export function isRunEvent(value: unknown): value is RunEvent {
   return (
     isRecord(value) &&
     isString(value.run_id) &&
@@ -1111,6 +1119,19 @@ function isRunEvent(value: unknown): value is RunEvent {
     isString(value.type) &&
     isString(value.timestamp) &&
     isRecord(value.payload)
+  );
+}
+
+export function isRunStreamEnd(value: unknown): value is RunStreamEnd {
+  return (
+    isRecord(value) &&
+    value.schema_version === SCHEMA_VERSION &&
+    isString(value.run_id) &&
+    isNumber(value.sequence) &&
+    Number.isInteger(value.sequence) &&
+    value.sequence >= 0 &&
+    value.reason === "terminal" &&
+    ["queued", "running", "succeeded", "failed", "cancelled", "interrupted"].includes(String(value.status))
   );
 }
 
@@ -2208,6 +2229,16 @@ export function listProjectSessionRunEvents(
     isRunEventsResponse,
     { signal },
   );
+}
+
+export function getProjectSessionRunEventsStreamUrl(
+  projectId: string,
+  sessionId: string,
+  runId: string,
+  afterSequence = 0,
+): string {
+  const params = new URLSearchParams({ after_sequence: String(afterSequence) });
+  return `${apiBaseUrl}/api/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/runs/${encodeURIComponent(runId)}/events/stream?${params.toString()}`;
 }
 
 export function listProjectSessionRunToolResults(

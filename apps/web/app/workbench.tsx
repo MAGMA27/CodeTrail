@@ -25,6 +25,7 @@ import {
   getProjectOverview,
   getProjectFeatureGraph,
   getProjectFeatureGeneration,
+  getProjectSessionRunEventsStreamUrl,
   importGitHubRepository,
   importLocalPath,
   appendProjectSessionMessage,
@@ -43,6 +44,8 @@ import {
   listProjectSessions,
   listProjects,
   isHealthResponse,
+  isRunEvent,
+  isRunStreamEnd,
   openProjectIndex,
   readProjectSource,
   retryLocalImport,
@@ -103,6 +106,30 @@ import WorkbenchUi from "./workbench-ui";
 
 type IndexUiStatus = "unindexed" | "creating" | "loading" | "ready" | "partial" | "error";
 type AsyncStatus = "idle" | "loading" | "success" | "empty" | "error";
+type RunStreamStatus = "idle" | "connecting" | "connected" | "reconnecting" | "fallback" | "closed";
+
+const RUN_EVENT_TYPES = [
+  "run.started",
+  "stage.started",
+  "tool.started",
+  "tool.completed",
+  "tool.failed",
+  "graph.updated",
+  "finding.created",
+  "run.completed",
+  "run.failed",
+  "run.cancelled",
+  "run.interrupted",
+] as const;
+
+const TERMINAL_RUN_EVENT_TYPES = new Set([
+  "run.completed",
+  "run.failed",
+  "run.cancelled",
+  "run.interrupted",
+]);
+
+const RUN_STREAM_MAX_RECONNECT_ATTEMPTS = 5;
 type WorkbenchView = "overview" | "session";
 type WorkbenchPanel = "none" | "source" | "graph" | "feature_graph";
 
@@ -530,6 +557,8 @@ export default function Workbench() {
   const [runReport, setRunReport] = useState<RunReport | null>(null);
   const [runStatus, setRunStatus] = useState<AsyncStatus>("idle");
   const [runError, setRunError] = useState<string | null>(null);
+  const [runStreamStatus, setRunStreamStatus] = useState<RunStreamStatus>("idle");
+  const [runStreamError, setRunStreamError] = useState<string | null>(null);
   const [runWriteStatus, setRunWriteStatus] = useState<AsyncStatus>("idle");
   const [runWriteError, setRunWriteError] = useState<string | null>(null);
   const [direction, setDirection] = useState<NeighborDirection>("both");
@@ -617,11 +646,28 @@ export default function Workbench() {
     key: string;
   } | null>(null);
   const runPollTimer = useRef<number | null>(null);
+  const runStreamSource = useRef<EventSource | null>(null);
+  const runStreamReconnectTimer = useRef<number | null>(null);
+  const runStreamRequestId = useRef(0);
+  const runStreamLastSequence = useRef(0);
+  const runStreamReconnectAttempts = useRef(0);
+  const runDetailsLoader = useRef<((projectId: string, sessionId: string, runId: string, useStream: boolean) => void) | null>(null);
   const knownGroupKeys = useRef<Set<string>>(new Set());
   const evidenceLink = useRef<EvidenceLink | null>(null);
   const evidenceLinkApplied = useRef(false);
   const sessionLink = useRef<SessionLink | null>(null);
   const sessionLinkApplied = useRef(false);
+
+  const closeRunEventStream = useCallback(() => {
+    runStreamRequestId.current += 1;
+    runStreamSource.current?.close();
+    runStreamSource.current = null;
+    if (runStreamReconnectTimer.current !== null) {
+      window.clearTimeout(runStreamReconnectTimer.current);
+      runStreamReconnectTimer.current = null;
+    }
+    runStreamReconnectAttempts.current = 0;
+  }, []);
 
   const checkHealth = useCallback(async () => {
     healthController.current?.abort();
@@ -716,11 +762,12 @@ export default function Workbench() {
       runController.current?.abort();
       runHistoryController.current?.abort();
       runWriteController.current?.abort();
+      closeRunEventStream();
       if (runPollTimer.current !== null) {
         window.clearTimeout(runPollTimer.current);
       }
     };
-  }, [checkHealth]);
+  }, [checkHealth, closeRunEventStream]);
 
   const clearExploration = useCallback(() => {
     searchController.current?.abort();
@@ -1093,6 +1140,7 @@ export default function Workbench() {
     runController.current?.abort();
     runHistoryController.current?.abort();
     runWriteController.current?.abort();
+    closeRunEventStream();
     if (runPollTimer.current !== null) {
       window.clearTimeout(runPollTimer.current);
       runPollTimer.current = null;
@@ -1130,10 +1178,12 @@ export default function Workbench() {
     setRunReport(null);
     setRunStatus("idle");
     setRunError(null);
+    setRunStreamStatus("idle");
+    setRunStreamError(null);
     setRunWriteStatus("idle");
     setRunWriteError(null);
     runCreateRequest.current = null;
-  }, []);
+  }, [closeRunEventStream]);
 
   const loadSessionMessages = useCallback(
     async (projectId: string, sessionId: string, cursor: string | null = null, append = false) => {
@@ -1179,11 +1229,212 @@ export default function Workbench() {
     [],
   );
 
-  const loadRunDetails = useCallback(async (projectId: string, sessionId: string, runId: string) => {
+  const refreshRunAfterStream = useCallback(async (projectId: string, sessionId: string, runId: string, streamRequestId: number) => {
+    const controller = new AbortController();
+    try {
+      const [response, toolResultsResponse] = await Promise.all([
+        getProjectSessionRun(projectId, sessionId, runId, controller.signal),
+        listProjectSessionRunToolResults(projectId, sessionId, runId, 0, 40, controller.signal),
+      ]);
+      if (
+        streamRequestId !== runStreamRequestId.current ||
+        response.run.project_id !== projectId ||
+        response.run.session_id !== sessionId ||
+        response.run.run_id !== runId
+      ) {
+        return;
+      }
+      setRunStatusResponse(response);
+      setRunToolResults(toolResultsResponse.results);
+      setRunHistory((previous) => previous.map((run) => run.run_id === runId ? response.run : run));
+      if (response.run.report_id) {
+        try {
+          const reportResponse = await getProjectSessionRunReport(projectId, sessionId, runId, controller.signal);
+          if (streamRequestId === runStreamRequestId.current) {
+            setRunReport(reportResponse.report);
+          }
+        } catch (error) {
+          if (!isAbortError(error) && !(error instanceof ApiRequestError && error.code === "not_found")) {
+            throw error;
+          }
+          if (streamRequestId === runStreamRequestId.current) {
+            setRunReport(null);
+          }
+        }
+      } else if (streamRequestId === runStreamRequestId.current) {
+        setRunReport(null);
+      }
+      if (streamRequestId === runStreamRequestId.current) {
+        setRunStatus("success");
+      }
+    } catch (error) {
+      if (isAbortError(error) || streamRequestId !== runStreamRequestId.current) {
+        return;
+      }
+      setRunStatus("error");
+      setRunError(errorMessage(error));
+    }
+  }, []);
+
+  const startRunEventStream = useCallback((projectId: string, sessionId: string, runId: string, afterSequence: number) => {
+    closeRunEventStream();
+    runStreamLastSequence.current = afterSequence;
+    const streamRequestId = runStreamRequestId.current;
+    setRunStreamStatus("connecting");
+    setRunStreamError(null);
+
+    const fallbackToPolling = () => {
+      if (streamRequestId !== runStreamRequestId.current) {
+        return;
+      }
+      runStreamSource.current?.close();
+      runStreamSource.current = null;
+      setRunStreamStatus("fallback");
+      setRunStreamError("实时事件流暂时不可用，已回退到有界轮询。");
+      if (runPollTimer.current === null) {
+        runPollTimer.current = window.setTimeout(() => {
+          runPollTimer.current = null;
+          runDetailsLoader.current?.(projectId, sessionId, runId, false);
+        }, 450);
+      }
+    };
+
+    const protocolFailure = (message: string) => {
+      if (streamRequestId !== runStreamRequestId.current) {
+        return;
+      }
+      runStreamSource.current?.close();
+      runStreamSource.current = null;
+      runStreamReconnectAttempts.current = RUN_STREAM_MAX_RECONNECT_ATTEMPTS;
+      setRunStreamError(message);
+      fallbackToPolling();
+    };
+
+    const connect = () => {
+      if (streamRequestId !== runStreamRequestId.current) {
+        return;
+      }
+      if (typeof window === "undefined" || typeof EventSource === "undefined") {
+        fallbackToPolling();
+        return;
+      }
+      const source = new EventSource(
+        getProjectSessionRunEventsStreamUrl(
+          projectId,
+          sessionId,
+          runId,
+          runStreamLastSequence.current,
+        ),
+      );
+      runStreamSource.current = source;
+      const isCurrent = () => streamRequestId === runStreamRequestId.current && runStreamSource.current === source;
+      source.onopen = () => {
+        if (isCurrent()) {
+          runStreamReconnectAttempts.current = 0;
+          setRunStreamStatus("connected");
+          setRunStreamError(null);
+        }
+      };
+
+      const handleEvent = (expectedType: string) => (rawEvent: Event) => {
+        if (!isCurrent()) {
+          return;
+        }
+        const message = rawEvent as MessageEvent<string>;
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(message.data) as unknown;
+        } catch {
+          protocolFailure("实时事件流返回了无法解析的数据。");
+          return;
+        }
+        if (!isRunEvent(parsed) || parsed.run_id !== runId || parsed.type !== expectedType) {
+          protocolFailure("实时事件流返回了越界或不匹配的事件，已拒绝载入。");
+          return;
+        }
+        const lastSequence = runStreamLastSequence.current;
+        if (parsed.sequence <= lastSequence) {
+          return;
+        }
+        if (parsed.sequence !== lastSequence + 1) {
+          protocolFailure("实时事件流出现了不连续的 sequence，已回退到轮询。");
+          return;
+        }
+        runStreamLastSequence.current = parsed.sequence;
+        setRunEvents((previous) => {
+          if (previous.some((event) => event.sequence === parsed.sequence && event.run_id === runId)) {
+            return previous;
+          }
+          return [...previous, parsed];
+        });
+        if (TERMINAL_RUN_EVENT_TYPES.has(parsed.type)) {
+          source.close();
+          runStreamSource.current = null;
+          setRunStreamStatus("closed");
+          setRunStreamError(null);
+          void refreshRunAfterStream(projectId, sessionId, runId, streamRequestId);
+        }
+      };
+      for (const eventType of RUN_EVENT_TYPES) {
+        source.addEventListener(eventType, handleEvent(eventType));
+      }
+      source.addEventListener("run.stream.end", (rawEvent: Event) => {
+        if (!isCurrent()) {
+          return;
+        }
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse((rawEvent as MessageEvent<string>).data) as unknown;
+        } catch {
+          protocolFailure("实时事件流的完成标记无法解析。");
+          return;
+        }
+        if (
+          !isRunStreamEnd(parsed) ||
+          parsed.run_id !== runId ||
+          parsed.sequence !== runStreamLastSequence.current ||
+          !TERMINAL_RUN_EVENT_TYPES.has(parsed.status)
+        ) {
+          protocolFailure("实时事件流返回了无效的完成标记。");
+          return;
+        }
+        source.close();
+        runStreamSource.current = null;
+        setRunStreamStatus("closed");
+        setRunStreamError(null);
+        void refreshRunAfterStream(projectId, sessionId, runId, streamRequestId);
+      });
+      source.onerror = () => {
+        if (!isCurrent()) {
+          return;
+        }
+        source.close();
+        runStreamSource.current = null;
+        const attempts = runStreamReconnectAttempts.current + 1;
+        runStreamReconnectAttempts.current = attempts;
+        if (attempts >= RUN_STREAM_MAX_RECONNECT_ATTEMPTS) {
+          fallbackToPolling();
+          return;
+        }
+        setRunStreamStatus("reconnecting");
+        setRunStreamError(`实时事件流已断开，正在重连（${attempts}/${RUN_STREAM_MAX_RECONNECT_ATTEMPTS}）。`);
+        const delay = Math.min(4_000, 250 * 2 ** (attempts - 1));
+        runStreamReconnectTimer.current = window.setTimeout(() => {
+          runStreamReconnectTimer.current = null;
+          connect();
+        }, delay);
+      };
+    };
+
+    connect();
+  }, [closeRunEventStream, refreshRunAfterStream]);
+
+  const loadRunDetails = useCallback(async (projectId: string, sessionId: string, runId: string, useStream = true) => {
     if (runPollTimer.current !== null) {
       window.clearTimeout(runPollTimer.current);
       runPollTimer.current = null;
     }
+    closeRunEventStream();
     runController.current?.abort();
     const controller = new AbortController();
     runController.current = controller;
@@ -1210,11 +1461,20 @@ export default function Workbench() {
       setRunHistory((previous) => previous.map((run) => run.run_id === runId ? response.run : run));
       if (response.run.status === "queued" || response.run.status === "running") {
         setRunStatus("loading");
-        runPollTimer.current = window.setTimeout(() => {
-          void loadRunDetails(projectId, sessionId, runId);
-        }, 450);
+        runStreamLastSequence.current = eventsResponse.events.at(-1)?.sequence ?? 0;
+        if (useStream) {
+          startRunEventStream(projectId, sessionId, runId, runStreamLastSequence.current);
+        } else {
+          setRunStreamStatus("fallback");
+          runPollTimer.current = window.setTimeout(() => {
+            runPollTimer.current = null;
+            void loadRunDetails(projectId, sessionId, runId, false);
+          }, 450);
+        }
         return;
       }
+      setRunStreamStatus("closed");
+      setRunStreamError(null);
       if (response.run.report_id) {
         try {
           const reportResponse = await getProjectSessionRunReport(projectId, sessionId, runId, controller.signal);
@@ -1238,9 +1498,12 @@ export default function Workbench() {
       setRunStatus("error");
       setRunError(errorMessage(error));
     }
-  }, []);
+  }, [closeRunEventStream, startRunEventStream]);
+
+  runDetailsLoader.current = loadRunDetails;
 
   const loadRunHistory = useCallback(async (projectId: string, sessionId: string) => {
+    closeRunEventStream();
     runHistoryController.current?.abort();
     const controller = new AbortController();
     runHistoryController.current = controller;
@@ -1275,7 +1538,7 @@ export default function Workbench() {
       setRunHistoryStatus("error");
       setRunHistoryError(errorMessage(error));
     }
-  }, [loadRunDetails]);
+  }, [closeRunEventStream, loadRunDetails]);
 
   const selectRun = useCallback((runId: string) => {
     if (!selectedProjectId || !selectedSessionId) {
@@ -1407,6 +1670,7 @@ export default function Workbench() {
       runController.current?.abort();
       runHistoryController.current?.abort();
       runWriteController.current?.abort();
+      closeRunEventStream();
       runRequestId.current += 1;
       runHistoryRequestId.current += 1;
       runWriteRequestId.current += 1;
@@ -1464,6 +1728,8 @@ export default function Workbench() {
         setRunReport(null);
         setRunStatus("idle");
         setRunError(null);
+        setRunStreamStatus("idle");
+        setRunStreamError(null);
         setRunWriteStatus("idle");
         setRunWriteError(null);
         runCreateRequest.current = null;
@@ -1476,7 +1742,7 @@ export default function Workbench() {
         setSessionError(errorMessage(error));
       }
     },
-    [loadRunHistory, loadSessionMessages],
+    [closeRunEventStream, loadRunHistory, loadSessionMessages],
   );
 
   const selectSession = useCallback(
@@ -2790,6 +3056,8 @@ export default function Workbench() {
         runReport,
         runStatus,
         runError,
+        runStreamStatus,
+        runStreamError,
         runWriteStatus,
         runWriteError,
         onSelectRun: selectRun,

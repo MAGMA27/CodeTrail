@@ -170,7 +170,7 @@ def test_sse_frame_metadata_must_match_event() -> None:
     event = bundle.events.events[0]
 
     with pytest.raises(ValidationError):
-        SseEventFrame(id=99, event=event.type, data=event)
+        SseEventFrame(id=f"{event.run_id}:99", event=event.type, data=event)
 
 
 def test_project_contract_keeps_latest_and_building_indexes_separate() -> None:
