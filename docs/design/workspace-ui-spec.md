@@ -123,7 +123,7 @@ UI-S1 不删除任何现有 API 能力；映射是目标信息架构，UI-S2 已
 
 独立原型是 `apps/web/app/prototype/` 下的 `/prototype` 路由，使用本地常量和 React 本地状态，故意不导入 `lib/api.ts`，不访问网络、不读取 SQLite、不读取宿主路径、不调用模型、不创建项目或 Session。右上角“预览状态”明确标记仅为设计评审；状态切换和保存延迟是视觉行为演示，不能当作真实 API 验收。
 
-生产 `/` 页面由 `apps/web/app/workbench.tsx` 编排，并由 `apps/web/app/workbench-ui.tsx` 提供视图。现有 API、HTTP/MCP 契约、项目归属、固定索引、证据和 Session 消息规则继续有效；UI-S2 已完成真实页面迁移。迁移后的生产页与原型继续分开验收，不能因任一截图把 Run、Agent、SSE 或 Issue 分析标为已实现。
+生产 `/` 页面由 `apps/web/app/workbench.tsx` 编排，并由 `apps/web/app/workbench-ui.tsx` 提供视图。现有 API、HTTP/MCP 契约、项目归属、固定索引、证据和 Session 消息规则继续有效；UI-S2 已完成真实页面迁移。生产 Run 面板的 SSE 状态由可测试订阅状态机驱动：有效前进事件才重置重连预算，终态事件或四类终态控制帧结束订阅，有限失败后回退到单一有界轮询；Project/Session/Run 切换、刷新和卸载不得让旧回调写入当前范围。迁移后的生产页与原型继续分开验收，不能因任一截图把 Run、Agent、SSE 或 Issue 分析标为已实现。
 
 ## 截图验收矩阵
 
@@ -166,5 +166,6 @@ UI-S1 不删除任何现有 API 能力；映射是目标信息架构，UI-S2 已
 - [x] 已验证保存响应延迟期间编辑草稿不会被旧成功回调清空；切换 Session 会使旧写请求失效，未变更内容仍按原幂等键重试。
 - [x] Session 标题优先主题与简短固定版本，Session ID、Project ID 和完整 snapshot hash 可在展开详情中访问。
 - [x] 证据面板显示 `project_id/index_id/generation_id` 上下文，图筛选位于图工具栏；合成证据不发起无效关系请求。
+- [x] 生产 Run 面板显示连接与终态状态；本地受限 SSE 生命周期断流后的续接保持事件 sequence 连续且不重复，取消、Run 切换和刷新恢复不启动重复 Run。
 - [x] 视觉使用中性背景、单一强调色、明确焦点和错误状态；无旧网格、装饰渐变、假终端和假精确产品宣传。
 - [x] 原型截图与生产页面分开标记，未实现的 Agent 与候选/潜在影响高亮仍保持未实现；已实现的 Run SSE 状态不会伪装成隐藏推理或模型质量。

@@ -37388,8 +37388,6 @@
         },
         "status": {
           "enum": [
-            "queued",
-            "running",
             "succeeded",
             "failed",
             "cancelled",
@@ -37438,8 +37436,6 @@
             },
             "status": {
               "enum": [
-                "queued",
-                "running",
                 "succeeded",
                 "failed",
                 "cancelled",

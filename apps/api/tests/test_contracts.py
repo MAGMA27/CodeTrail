@@ -19,6 +19,8 @@ from app.contracts import (
     Project,
     SourceIndexResponse,
     SseEventFrame,
+    SseStreamEnd,
+    SseStreamEndFrame,
 )
 from app.export_schema import build_schema_document
 
@@ -171,6 +173,29 @@ def test_sse_frame_metadata_must_match_event() -> None:
 
     with pytest.raises(ValidationError):
         SseEventFrame(id=f"{event.run_id}:99", event=event.type, data=event)
+
+
+def test_sse_stream_end_requires_a_terminal_run_status() -> None:
+    bundle = FixtureResponseSet.model_validate(raw_bundle("insufficient-external-service"))
+    event = bundle.events.events[-1]
+    frame = SseStreamEndFrame(
+        id=f"{event.run_id}:{event.sequence}",
+        data=SseStreamEnd(
+            run_id=event.run_id,
+            sequence=event.sequence,
+            reason="terminal",
+            status="succeeded",
+        ),
+    )
+
+    assert frame.data.status == "succeeded"
+    with pytest.raises(ValidationError):
+        SseStreamEnd(
+            run_id=event.run_id,
+            sequence=event.sequence,
+            reason="terminal",
+            status="running",
+        )
 
 
 def test_project_contract_keeps_latest_and_building_indexes_separate() -> None:

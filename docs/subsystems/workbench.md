@@ -10,7 +10,7 @@
 
 ## 接口与依赖
 
-[workbench.tsx](../../apps/web/app/workbench.tsx) 编排 Project/Index/Session/Run 请求，[workbench-ui.tsx](../../apps/web/app/workbench-ui.tsx) 渲染 Session 和 Run 面板，[api.ts](../../apps/web/lib/api.ts) 校验边界，[globals.css](../../apps/web/app/globals.css) 提供样式。Run 调用 create/list/detail/events/`events/stream`/tool-results/report/cancel 项目 Session 端点；接口语义和 fixture 限制见 [Run 执行子系统](execution.md)。
+[workbench.tsx](../../apps/web/app/workbench.tsx) 编排 Project/Index/Session/Run 请求，[workbench-ui.tsx](../../apps/web/app/workbench-ui.tsx) 渲染 Session 和 Run 面板，[api.ts](../../apps/web/lib/api.ts) 校验边界，[run-event-stream.ts](../../apps/web/lib/run-event-stream.ts) 承载可测试的 SSE 订阅状态机，[globals.css](../../apps/web/app/globals.css) 提供样式。Run 调用 create/list/detail/events/`events/stream`/tool-results/report/cancel 项目 Session 端点；接口语义和 fixture 限制见 [Run 执行子系统](execution.md)。
 
 ## 设计原型与生产边界
 
@@ -18,7 +18,7 @@
 
 ## 数据与生命周期
 
-打开 Session 后读取消息和 Run history；history 选择活动或最新 Run，并载入状态、事件、工具结果和报告。点击“启动离线分析”或“启动真实分析”时只发送当前 Session 的固定 index、模式、主题和 Issue body，服务端独立冻结完整已保存消息；未保存 draft 仅显示警告，不被提交。真实模式启动前明确提示会发送冻结 Issue/消息和有界源码证据、可能产生费用且失败不回退 fixture。Run 返回 queued 后前端先读取事件历史，再以最后成功 sequence 订阅 SSE；事件按 Run/sequence 去重，断线有限指数退避，超过上限才回退 450ms 轮询，连接状态不等于 Run 失败，终态停止订阅和刷新。
+打开 Session 后读取消息和 Run history；history 选择活动或最新 Run，并载入状态、事件、工具结果和报告。点击“启动离线分析”或“启动真实分析”时只发送当前 Session 的固定 index、模式、主题和 Issue body，服务端独立冻结完整已保存消息；未保存 draft 仅显示警告，不被提交。真实模式启动前明确提示会发送冻结 Issue/消息和有界源码证据、可能产生费用且失败不回退 fixture。Run 返回 queued 后前端先读取事件历史，再以最后成功 sequence 订阅 SSE；事件按 Run/sequence 去重，断线有限指数退避，`onopen` 不被视为事件进展，只有有效前进事件重置重连预算；超过上限才回退 450ms 轮询，且不与 SSE 并行，连接状态不等于 Run 失败，四类终态控制帧或终态事件均停止订阅并刷新报告。
 
 切换 Session/Project 会 abort 并递增请求代数，关闭旧 EventSource、清理旧 Run 轮询、状态和详情，旧流回调不能写入新范围；刷新后从服务端历史恢复，不重复创建。Run report 的 evidence 点击进入既有源码证据检查器，并校验 project/index/path/line/hash/evidence_id；工作台不展示隐藏思维链，不把后续消息或 latest index 合并进已冻结 Run。
 
@@ -30,7 +30,7 @@ Session 草稿按 project/session 保存到 localStorage，消息保存旧响应
 
 ## 验证
 
-已运行 `pnpm --dir apps/web test`、`pnpm web:typecheck` 和 `pnpm web:build`；后端生命周期与 MCP 对照由 `apps/api/tests/test_runs.py`、`test_issue_runs.py`、`test_mcp.py` 覆盖，SSE 回放/续接和容量由 `test_run_sse.py` 覆盖。浏览器使用本地 fixture/假供应商复核 Run 选择、启动、事件连接状态、取消、报告和 evidence 联动；真实供应商语义质量为 UNVERIFIED。
+本轮已运行 `pnpm --dir apps/web test`（17 passed）、`pnpm web:typecheck` 和 `pnpm web:build`；`lib/run-event-stream.test.ts` 覆盖实际订阅处理器的四类终态控制帧、错误终态、去重/缺号、连续 open-error 上限、sequence 续接和旧回调清理。后端生命周期与 MCP 对照由 `apps/api/tests/test_runs.py`、`test_issue_runs.py`、`test_mcp.py` 覆盖，SSE 回放/续接和容量由 `test_run_sse.py` 覆盖。浏览器使用本地 fixture/假供应商复核 Run 选择、启动、受限 SSE 生命周期断流后的续接无遗漏/重复、取消、终态报告/evidence、Run 切换和刷新恢复；真实浏览器离线网络切换与真实供应商语义质量为 UNVERIFIED。
 
 ## 相关决策
 

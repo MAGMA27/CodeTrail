@@ -605,6 +605,7 @@ FixtureScenario: TypeAlias = Literal[
 RunStatus: TypeAlias = Literal[
     "queued", "running", "succeeded", "failed", "cancelled", "interrupted"
 ]
+RunTerminalStatus: TypeAlias = Literal["succeeded", "failed", "cancelled", "interrupted"]
 ReportOutcome: TypeAlias = Literal[
     "candidate_found",
     "insufficient_evidence",
@@ -2305,7 +2306,7 @@ class SseStreamEnd(VersionedModel):
     run_id: Identifier
     sequence: NonNegativeInt
     reason: SseStreamEndReason
-    status: RunStatus
+    status: RunTerminalStatus
 
 
 class SseStreamEndFrame(VersionedModel):

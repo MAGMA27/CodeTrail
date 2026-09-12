@@ -208,6 +208,7 @@ export type SessionMessagesResponse = {
 };
 
 export type RunStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
+export type RunTerminalStatus = "succeeded" | "failed" | "cancelled" | "interrupted";
 export type RunMode = "fixture" | "real";
 export type RunScenario =
   | "success-timeout-missing"
@@ -324,7 +325,7 @@ export type RunStreamEnd = {
   run_id: string;
   sequence: number;
   reason: "terminal";
-  status: RunStatus;
+  status: RunTerminalStatus;
 };
 
 export type RunToolResult = {
@@ -1131,7 +1132,7 @@ export function isRunStreamEnd(value: unknown): value is RunStreamEnd {
     Number.isInteger(value.sequence) &&
     value.sequence >= 0 &&
     value.reason === "terminal" &&
-    ["queued", "running", "succeeded", "failed", "cancelled", "interrupted"].includes(String(value.status))
+    ["succeeded", "failed", "cancelled", "interrupted"].includes(String(value.status))
   );
 }
 

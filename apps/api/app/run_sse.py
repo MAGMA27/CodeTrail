@@ -9,7 +9,7 @@ import threading
 from dataclasses import dataclass
 from typing import Final
 
-from .contracts import Event, RunStatus, SseEventFrame, SseStreamEnd, SseStreamEndFrame
+from .contracts import Event, RunTerminalStatus, SseEventFrame, SseStreamEnd, SseStreamEndFrame
 
 
 _DEFAULT_MAX_CONNECTIONS: Final = 8
@@ -212,7 +212,7 @@ def encode_sse_stream_end(
     *,
     run_id: str,
     sequence: int,
-    status: RunStatus,
+    status: RunTerminalStatus,
     max_bytes: int,
 ) -> bytes:
     frame = SseStreamEndFrame(
