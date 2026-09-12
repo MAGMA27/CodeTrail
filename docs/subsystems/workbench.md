@@ -12,6 +12,10 @@
 
 [apps/web README](../../apps/web/README.md) 记录目录职责；[page.tsx](../../apps/web/app/page.tsx) 挂载工作台，[workbench.tsx](../../apps/web/app/workbench.tsx) 管理交互，[api.ts](../../apps/web/lib/api.ts) 验证 HTTP 边界，[graph.ts](../../apps/web/lib/graph.ts) 管理图合并和分组；Next.js 局部规则见 [AGENTS.md](../../apps/web/AGENTS.md)。
 
+## 设计原型与生产边界
+
+UI-S1 的目标布局、尺寸、状态和截图验收见 [工作区 UI 规范](../design/workspace-ui-spec.md)；独立 `/prototype` 由 [prototype/page.tsx](../../apps/web/app/prototype/page.tsx) 提供，仅使用演示数据，不调用 API。生产 `/` 页面尚未按该规范重构，UI-S2 才迁移真实工作台，不能用原型截图替代真实接口和持久化验收。
+
 ## 数据与生命周期
 
 项目状态覆盖列表载入、空列表、就绪和错误；导入状态显示 queued/acquiring/indexing/ready/failed/interrupted 并提供失败/中断重试；索引状态覆盖未打开、创建中、载入中、就绪、部分完成和错误。切换 project_id 会取消或忽略旧请求，清空旧 index_id、图、源码、Session 列表/消息/草稿和历史，再恢复该项目最新可用索引；浏览器保存最近项目 ID、按 project_id 分隔的 selectedSessionId，以及按 project_id/index_id 分隔的明确 generation_id，项目、Session、消息与索引数据从服务端持久化恢复。Session 创建/消息追加使用稳定幂等键，写入失败保留草稿并可重试；切换 Session 不带入旧消息。历史失败版本仍可打开，但默认选择只取最新 succeeded/partial；功能图不单独持久化，按需读取保存生成结果并从同一静态索引组装。

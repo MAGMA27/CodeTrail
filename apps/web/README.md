@@ -8,6 +8,7 @@
 
 - [app/page.tsx](app/page.tsx)：挂载工作台页面。
 - [app/workbench.tsx](app/workbench.tsx)：项目选择、索引生命周期、知识页/Session/历史/功能图/代码关系切换、搜索和源码侧栏交互。
+- [app/prototype/page.tsx](app/prototype/page.tsx)：独立 `/prototype` UI-S1 评审原型，使用演示数据，不调用 API 或写入项目状态。
 - [lib/api.ts](lib/api.ts)：HTTP 请求、Project/Index/Session/Overview/Feature/Graph 响应运行时校验。
 - [lib/graph.ts](lib/graph.ts)：局部图合并、分组和 unresolved 选择逻辑。
 - [app/globals.css](app/globals.css)：工作台全局视觉样式。
@@ -32,6 +33,8 @@ pnpm web:dev
 
 打开 `http://localhost:3000`，可填写服务端 `repository_id` 创建兼容项目，也可在“导入本地目录”表单中填写 API 服务端可见的绝对路径，或在 GitHub 表单中输入 `https://github.com/owner/repository` 和可选分支/tag/commit。路径不是浏览器本机路径；服务端校验边界后在管理目录建立索引。示例本地仓库 ID 为 `timeout-demo`。
 
+UI-S1 评审原型打开 `http://localhost:3000/prototype`；右上角可切换空工作区、知识页、会话、证据和失败状态。原型与生产 `/` 页面分开，状态切换不会创建项目、索引或 Session。
+
 ## 错误与限制
 
 项目为空、本地/GitHub 导入失败/中断、索引未建立、API 离线、项目不存在或索引/Session 不属于当前项目时显示明确状态。概览只使用当前固定快照，入口规则首轮覆盖 `__main__.py` 和顶层 main guard；未识别入口不等于项目没有入口，动态调用仍显示为 unresolved。Session 主题和消息输入受长度限制，消息保存失败时保留草稿并允许同一幂等键重试；切换项目或 Session 不会带入旧消息，当前工作台只发送 human 消息，不展示模型回复或费用，MCP 可选写入仍可保存 agent 消息。功能生成只接受同一项目/索引快照的 evidence 和符号，显示 `succeeded/partial/insufficient_evidence/failed`，失败可重试且不会覆盖已有成功结果；切换项目或索引会取消/忽略旧请求。历史最多按页读取 40 个版本，Session 最多按页读取 40 个，消息最多按页读取 100 条，功能图最多展示 40 个节点/120 条边，semantic 与 static 来源分别标识，规则版本缺失映射和截断/限制明确显示；运行时校验拒绝跨项目、跨索引/Session 和错误 evidence 引用。概览和生成上下文、模型请求、功能数和关系图都有上限。浏览器只提交路径或 GitHub 仓库身份字符串，不能绕过服务端允许根目录、官方重定向、archive 安全和 loopback 写入边界。
@@ -43,5 +46,6 @@ pnpm web:dev
 ## 关联文档
 
 - [工作台子系统说明](../../docs/subsystems/workbench.md)
+- [工作区 UI 规范](../../docs/design/workspace-ui-spec.md)
 - [API 子系统说明](../../docs/subsystems/api.md)
 - [工作区与项目概览决策](../../docs/decisions/2026-09-11-project-workspace.md)
