@@ -12,11 +12,11 @@
 
 ## 接口与依赖
 
-契约版本当前为 `0.1.0`。Project、ProjectListResponse、ProjectIndexListResponse、本地导入请求/attempt/状态响应和 A1 MCP 结构化结果与现有 Index/Graph 契约一起导出；HTTP 路由以 FastAPI response_model 为边界，前端在 [apps/web/lib/api.ts](../apps/web/lib/api.ts) 执行运行时形状校验。
+契约版本当前为 `0.1.0`。Project、Session、fixture Run/RunInput、公开事件、工具结果、Report、来源导入请求/attempt/状态响应和 MCP 结构化结果与现有 Index/Graph 契约一起导出；HTTP 路由以 FastAPI response_model 为边界，前端在 [apps/web/lib/api.ts](../apps/web/lib/api.ts) 执行运行时形状校验。
 
 ## 数据与生命周期
 
-Schema 不保存项目或索引数据，只描述请求/响应形状。Project 的 latest/building 与 available index 关联、ImportAttempt 的 phase/status 和 ready/failed 生命周期必须满足声明旁的 Pydantic 校验；源码、图和证据仍由同一 `index_id` 绑定。
+Schema 不保存项目或索引数据，只描述请求/响应形状。Project 的 latest/building 与 available index 关联、ImportAttempt 的 phase/status、Session 的固定快照、Run 的冻结输入/事件/终态和 Report 的同快照证据都必须满足声明旁的 Pydantic 校验；源码、图、工具结果和报告证据仍由同一 `index_id` 绑定。
 
 ## 使用与配置
 
@@ -31,11 +31,11 @@ pnpm contracts:check
 
 ## 错误与限制
 
-Schema 检查不能证明 HTTP 业务流程、项目隔离、路径边界或浏览器切换正确；固定响应也不代表真实模型或 GitHub 导入已实现。
+Schema 检查不能证明 HTTP 业务流程、项目隔离、路径边界、Run executor 时序或浏览器切换正确；固定响应也不代表真实模型或真实供应商 Run 已实现。
 
 ## 验证
 
-`pnpm contracts:check` 验证 Schema 可重生成和固定响应包；项目接口的归属、持久化与重启行为由 `apps/api/tests/test_api.py` 验证。
+`pnpm contracts:check` 验证 Schema 可重生成和固定响应包；Run 实际生命周期由 `apps/api/tests/test_runs.py` 验证，MCP 双入口由 `apps/api/tests/test_mcp.py` 验证；项目接口的归属、持久化与重启行为由 `apps/api/tests/test_api.py` 验证。
 
 ## 关联文档
 

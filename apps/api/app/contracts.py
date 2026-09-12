@@ -542,41 +542,119 @@ class GraphSnapshot(ContractModel):
 
 
 class RunBudget(ContractModel):
-    max_tool_calls: PositiveInt = Field(le=12)
-    max_seconds: PositiveInt = Field(le=120)
-    max_source_lines: PositiveInt = Field(le=200)
+    """Server-enforced limits and usage counters for one Run."""
+
+    max_tool_calls: PositiveInt = Field(default=8, le=12)
+    max_seconds: PositiveInt = Field(default=30, le=120)
+    max_source_lines: PositiveInt = Field(default=200, le=200)
+    max_total_source_lines: PositiveInt = Field(default=800, le=2_000)
+    max_input_chars: PositiveInt = Field(default=60_000, le=100_000)
+    max_output_chars: PositiveInt = Field(default=50_000, le=100_000)
+    max_events: PositiveInt = Field(default=100, ge=2, le=200)
     tool_calls_used: NonNegativeInt = 0
+    source_lines_used: NonNegativeInt = 0
+    input_chars_used: NonNegativeInt = 0
+    output_chars_used: NonNegativeInt = 0
+    events_used: NonNegativeInt = 0
 
     @model_validator(mode="after")
-    def validate_tool_budget(self) -> RunBudget:
+    def validate_budget_usage(self) -> RunBudget:
         if self.tool_calls_used > self.max_tool_calls:
             raise ValueError("tool_calls_used cannot exceed max_tool_calls")
+        if self.source_lines_used > self.max_total_source_lines:
+            raise ValueError("source_lines_used cannot exceed max_total_source_lines")
+        if self.input_chars_used > self.max_input_chars:
+            raise ValueError("input_chars_used cannot exceed max_input_chars")
+        if self.output_chars_used > self.max_output_chars:
+            raise ValueError("output_chars_used cannot exceed max_output_chars")
+        if self.events_used > self.max_events:
+            raise ValueError("events_used cannot exceed max_events")
+        if self.max_total_source_lines < self.max_source_lines:
+            raise ValueError("total source line budget must cover one source read")
         return self
 
 
 RunMode: TypeAlias = Literal["fixture", "real"]
+FixtureScenario: TypeAlias = Literal[
+    "success-timeout-missing",
+    "insufficient-external-service",
+    "tool-failure-read-source",
+]
 RunStatus: TypeAlias = Literal[
     "queued", "running", "succeeded", "failed", "cancelled", "interrupted"
 ]
-ReportOutcome: TypeAlias = Literal["candidate_found", "insufficient_evidence", "failed"]
+ReportOutcome: TypeAlias = Literal[
+    "candidate_found",
+    "insufficient_evidence",
+    "failed",
+    "cancelled",
+    "interrupted",
+]
+ModelOutputOutcome: TypeAlias = Literal["candidate_found", "insufficient_evidence", "failed"]
+
+
+class RunInput(VersionedModel):
+    """The complete saved Session context frozen for one Run."""
+
+    project_id: Identifier
+    session_id: Identifier
+    index_id: Identifier
+    feature_generation_id: Identifier | None = None
+    message_end_sequence: PositiveInt
+    messages: list[SessionMessage] = Field(min_length=1, max_length=1_000)
+    input_hash: Sha256
+    input_chars: PositiveInt
+    frozen_at: datetime
+
+    @model_validator(mode="after")
+    def validate_input_sequence(self) -> RunInput:
+        expected = list(range(1, self.message_end_sequence + 1))
+        sequences = [message.sequence for message in self.messages]
+        if sequences != expected:
+            raise ValueError("run input messages must contain every sequence through the cutoff")
+        if any(message.session_id != self.session_id for message in self.messages):
+            raise ValueError("run input messages must belong to the input session")
+        if self.input_chars != sum(len(message.content) for message in self.messages):
+            raise ValueError("run input character count must match the frozen messages")
+        return self
 
 
 class Run(VersionedModel):
     run_id: Identifier
+    project_id: Identifier
+    session_id: Identifier
     index_id: Identifier
+    feature_generation_id: Identifier | None = None
     issue: Issue
     mode: RunMode
+    fixture_scenario: FixtureScenario | None = None
     model: str | None = Field(default=None, max_length=200)
     prompt_version: str | None = Field(default=None, max_length=200)
+    execution_version: Identifier = "run-fixture-v1"
     status: RunStatus
     budget: RunBudget
+    message_end_sequence: PositiveInt
+    input_hash: Sha256
+    input_chars: PositiveInt
+    created_at: datetime
     started_at: datetime | None = None
     ended_at: datetime | None = None
+    report_id: Identifier | None = None
 
     @model_validator(mode="after")
     def validate_run_consistency(self) -> Run:
         if self.issue.schema_version != SCHEMA_VERSION:
             raise ValueError("issue schema_version must match the contract version")
+        if self.mode == "fixture" and self.fixture_scenario is None:
+            raise ValueError("fixture runs must declare a fixture scenario")
+        if self.mode == "real" and self.fixture_scenario is not None:
+            raise ValueError("real runs cannot declare a fixture scenario")
+        if self.input_chars != self.budget.input_chars_used:
+            raise ValueError("run input usage must be reflected in the run budget")
+        if self.input_chars > self.budget.max_input_chars:
+            raise ValueError("run input exceeds the input character budget")
+        if self.ended_at and self.ended_at < self.created_at:
+            raise ValueError("ended_at cannot be earlier than created_at")
         if self.started_at and self.ended_at and self.ended_at < self.started_at:
             raise ValueError("ended_at cannot be earlier than started_at")
         if self.status in {"succeeded", "failed", "cancelled", "interrupted"} and not self.ended_at:
@@ -598,10 +676,12 @@ class Finding(ContractModel):
 class Report(VersionedModel):
     report_id: Identifier
     run_id: Identifier
+    project_id: Identifier
+    session_id: Identifier
     index_id: Identifier
     status: Literal["succeeded", "failed", "cancelled", "interrupted"]
     outcome: ReportOutcome
-    fixture_mode: Literal[True] = True
+    fixture_mode: bool = True
     summary: str = Field(min_length=1, max_length=5_000)
     graph: GraphSnapshot
     evidence: list[Evidence] = Field(default_factory=list)
@@ -629,10 +709,15 @@ class Report(VersionedModel):
             raise ValueError("candidate_found reports must include candidate links")
         if self.outcome == "insufficient_evidence" and self.candidate_links:
             raise ValueError("insufficient_evidence reports cannot include candidate links")
-        if self.outcome == "failed" and self.status != "failed":
-            raise ValueError("failed reports must have failed status")
-        if self.outcome != "failed" and self.status != "succeeded":
-            raise ValueError("non-failed outcomes must have succeeded status")
+        expected_status = {
+            "candidate_found": "succeeded",
+            "insufficient_evidence": "succeeded",
+            "failed": "failed",
+            "cancelled": "cancelled",
+            "interrupted": "interrupted",
+        }[self.outcome]
+        if self.status != expected_status:
+            raise ValueError("report outcome and status must agree")
         return self
 
 
@@ -747,6 +832,8 @@ class ReadSourceFailure(ToolResultBase):
 class GetNeighborsSuccess(ToolResultBase):
     kind: Literal["get_neighbors.succeeded"] = "get_neighbors.succeeded"
     tool: Literal["get_neighbors"] = "get_neighbors"
+    root: Symbol | None = None
+    nodes: list[Symbol] = Field(default_factory=list, max_length=40)
     neighbors: list[Neighbor]
     truncated: bool = False
     truncation_reason: str | None = Field(default=None, max_length=1_000)
@@ -1735,6 +1822,114 @@ class McpSessionMessageResponse(McpResultBase):
         return self
 
 
+class McpRunListResponse(McpResultBase):
+    """Read-only MCP envelope for one Session's Run history."""
+
+    result: RunListResponse | None = None
+
+    @model_validator(mode="after")
+    def validate_run_list_result(self) -> McpRunListResponse:
+        if self.ok and self.result is None:
+            raise ValueError("successful Run lists require a result")
+        if not self.ok and self.result is not None:
+            raise ValueError("failed Run lists cannot include Run data")
+        return self
+
+
+class McpRunResponse(McpResultBase):
+    """MCP envelope for one Run status and its frozen input."""
+
+    result: RunStatusResponse | None = None
+
+    @model_validator(mode="after")
+    def validate_run_result(self) -> McpRunResponse:
+        if self.ok and self.result is None:
+            raise ValueError("successful Run reads require a result")
+        if self.ok and self.result is not None:
+            if (
+                self.result.run.project_id != self.result.input.project_id
+                or self.result.run.session_id != self.result.input.session_id
+                or self.result.run.index_id != self.result.input.index_id
+            ):
+                raise ValueError("Run status and frozen input must share their scope")
+        if not self.ok and self.result is not None:
+            raise ValueError("failed Run reads cannot include Run data")
+        return self
+
+
+class McpRunEventsResponse(McpResultBase):
+    """Read-only MCP envelope for bounded Run events."""
+
+    result: RunEventsResponse | None = None
+
+    @model_validator(mode="after")
+    def validate_run_events_result(self) -> McpRunEventsResponse:
+        if self.ok and self.result is None:
+            raise ValueError("successful Run event reads require a result")
+        if not self.ok and self.result is not None:
+            raise ValueError("failed Run event reads cannot include events")
+        return self
+
+
+class McpRunToolResultsResponse(McpResultBase):
+    """Read-only MCP envelope for bounded persisted tool results."""
+
+    result: RunToolResultsResponse | None = None
+
+    @model_validator(mode="after")
+    def validate_run_tool_results_result(self) -> McpRunToolResultsResponse:
+        if self.ok and self.result is None:
+            raise ValueError("successful Run tool-result reads require a result")
+        if not self.ok and self.result is not None:
+            raise ValueError("failed Run tool-result reads cannot include results")
+        return self
+
+
+class McpRunReportResponse(McpResultBase):
+    """Read-only MCP envelope for a completed Run report."""
+
+    report: Report | None = None
+
+    @model_validator(mode="after")
+    def validate_run_report_result(self) -> McpRunReportResponse:
+        if self.ok and self.report is None:
+            raise ValueError("successful Run report reads require a report")
+        if self.ok and self.report is not None:
+            if self.report.run_id == "":
+                raise ValueError("Run report must identify its Run")
+        if not self.ok and self.report is not None:
+            raise ValueError("failed Run report reads cannot include a report")
+        return self
+
+
+class McpRunStartResponse(McpResultBase):
+    """MCP envelope for the explicitly enabled fixture Run start."""
+
+    result: CreateRunResponse | None = None
+
+    @model_validator(mode="after")
+    def validate_run_start_result(self) -> McpRunStartResponse:
+        if self.ok and self.result is None:
+            raise ValueError("successful Run starts require a result")
+        if not self.ok and self.result is not None:
+            raise ValueError("failed Run starts cannot include Run data")
+        return self
+
+
+class McpRunCancelResponse(McpResultBase):
+    """MCP envelope for the explicitly enabled Run cancellation."""
+
+    result: CancelRunResponse | None = None
+
+    @model_validator(mode="after")
+    def validate_run_cancel_result(self) -> McpRunCancelResponse:
+        if self.ok and self.result is None:
+            raise ValueError("successful Run cancellations require a result")
+        if not self.ok and self.result is not None:
+            raise ValueError("failed Run cancellations cannot include Run data")
+        return self
+
+
 class McpImportResponse(McpResultBase):
     """Structured MCP result for an enabled local or GitHub import tool."""
 
@@ -1807,7 +2002,7 @@ class ModelOutput(VersionedModel):
     index_id: Identifier
     fixture_mode: Literal[True] = True
     generated_after_sequence: PositiveInt
-    outcome: ReportOutcome
+    outcome: ModelOutputOutcome
     summary: str = Field(min_length=1, max_length=5_000)
     findings: list[Finding] = Field(default_factory=list)
     candidate_links: list[CandidateLink] = Field(default_factory=list)
@@ -1830,9 +2025,15 @@ class ModelOutput(VersionedModel):
 
 
 class RunStartedPayload(ContractModel):
+    project_id: Identifier
+    session_id: Identifier
     index_id: Identifier
     issue_id: Identifier
     mode: RunMode
+    message_end_sequence: PositiveInt
+    input_hash: Sha256
+    feature_generation_id: Identifier | None = None
+    execution_version: Identifier
     budget: RunBudget
 
 
@@ -1979,7 +2180,7 @@ EventType: TypeAlias = Literal[
 
 class EventSequence(VersionedModel):
     run_id: Identifier
-    events: list[Event] = Field(min_length=1)
+    events: list[Event] = Field(min_length=1, max_length=200)
 
     @model_validator(mode="after")
     def validate_sequence(self) -> EventSequence:
@@ -2014,22 +2215,122 @@ class SseEventFrame(VersionedModel):
 
 
 class CreateRunRequest(VersionedModel):
+    """Start one explicit fixture Run from a saved Session cutoff."""
+
     index_id: Identifier
     issue: Issue
     mode: RunMode
+    fixture_scenario: FixtureScenario | None = None
+    feature_generation_id: Identifier | None = None
+    message_end_sequence: PositiveInt | None = None
     model: str | None = Field(default=None, max_length=200)
     prompt_version: str | None = Field(default=None, max_length=200)
-    budget: RunBudget
+    execution_version: Identifier = "run-fixture-v1"
+    budget: RunBudget = Field(default_factory=RunBudget)
+    idempotency_key: Identifier | None = None
+
+    @model_validator(mode="after")
+    def validate_run_request(self) -> CreateRunRequest:
+        if self.mode == "fixture" and self.fixture_scenario is None:
+            raise ValueError("fixture requests must declare a fixture scenario")
+        if self.mode == "real" and self.fixture_scenario is not None:
+            raise ValueError("real requests cannot declare a fixture scenario")
+        if any(
+            value
+            for value in (
+                self.budget.tool_calls_used,
+                self.budget.source_lines_used,
+                self.budget.input_chars_used,
+                self.budget.output_chars_used,
+                self.budget.events_used,
+            )
+        ):
+            raise ValueError("run request budgets must start with zero usage")
+        return self
 
 
 class CreateRunResponse(VersionedModel):
     run_id: Identifier
+    project_id: Identifier
+    session_id: Identifier
     index_id: Identifier
     status: Literal["queued"]
 
 
 class RunStatusResponse(VersionedModel):
     run: Run
+    input: RunInput
+
+
+class RunListResponse(VersionedModel):
+    """Bounded newest-first Run history for one project Session."""
+
+    project_id: Identifier
+    session_id: Identifier
+    runs: list[Run] = Field(default_factory=list, max_length=40)
+    next_cursor: str | None = Field(default=None, max_length=500)
+    has_more: bool = False
+
+    @model_validator(mode="after")
+    def validate_run_scope(self) -> RunListResponse:
+        run_ids = {run.run_id for run in self.runs}
+        if len(run_ids) != len(self.runs):
+            raise ValueError("run list must contain unique run IDs")
+        if any(run.project_id != self.project_id or run.session_id != self.session_id for run in self.runs):
+            raise ValueError("run list crossed the project or session boundary")
+        if self.has_more and not self.next_cursor:
+            raise ValueError("paginated run lists must include a next cursor")
+        if not self.has_more and self.next_cursor is not None:
+            raise ValueError("complete run lists cannot include a next cursor")
+        return self
+
+
+class RunEventsResponse(VersionedModel):
+    """A bounded event page ordered by the server-assigned sequence."""
+
+    project_id: Identifier
+    session_id: Identifier
+    run_id: Identifier
+    events: list[Event] = Field(default_factory=list, max_length=100)
+    next_after_sequence: NonNegativeInt | None = None
+    has_more: bool = False
+
+    @model_validator(mode="after")
+    def validate_event_scope(self) -> RunEventsResponse:
+        sequences = [event.sequence for event in self.events]
+        if any(event.run_id != self.run_id for event in self.events):
+            raise ValueError("run events crossed the run boundary")
+        if len(set(sequences)) != len(sequences) or sequences != sorted(sequences):
+            raise ValueError("run events must be unique and ascending")
+        if self.has_more and self.next_after_sequence is None:
+            raise ValueError("paginated run events must include a next sequence")
+        if not self.has_more and self.next_after_sequence is not None:
+            raise ValueError("complete run events cannot include a next sequence")
+        return self
+
+
+class RunToolResultsResponse(VersionedModel):
+    """A bounded page of persisted fixture tool results."""
+
+    project_id: Identifier
+    session_id: Identifier
+    run_id: Identifier
+    results: list[ToolResult] = Field(default_factory=list, max_length=40)
+    next_after_sequence: NonNegativeInt | None = None
+    has_more: bool = False
+
+    @model_validator(mode="after")
+    def validate_tool_result_scope(self) -> RunToolResultsResponse:
+        sequences = [result.completed_sequence for result in self.results]
+        if any(result.run_id != self.run_id for result in self.results):
+            raise ValueError("run tool results crossed the run boundary")
+        if len(set(sequences)) != len(sequences) or sequences != sorted(sequences):
+            raise ValueError("run tool results must be ordered by completion sequence")
+        if self.has_more and self.next_after_sequence is None:
+            raise ValueError("paginated run tool results must include a next sequence")
+        if not self.has_more and self.next_after_sequence is not None:
+            raise ValueError("complete run tool results cannot include a next sequence")
+        return self
 
 
 class GraphResponse(VersionedModel):
@@ -2050,9 +2351,11 @@ class CancelRunRequest(VersionedModel):
 
 class CancelRunResponse(VersionedModel):
     run_id: Identifier
+    project_id: Identifier
+    session_id: Identifier
     index_id: Identifier
-    status: Literal["cancelled"]
-    cancel_event_sequence: PositiveInt
+    status: RunStatus
+    cancel_event_sequence: PositiveInt | None = None
 
 
 class FixtureResponseSet(VersionedModel):
@@ -2060,6 +2363,7 @@ class FixtureResponseSet(VersionedModel):
     mode: Literal["fixture"]
     index: IndexSnapshot
     run: Run
+    input: RunInput
     tool_results: list[ToolResult] = Field(min_length=1)
     model_output: ModelOutput
     report: Report
@@ -2071,6 +2375,12 @@ class FixtureResponseSet(VersionedModel):
         run_id = self.run.run_id
         if self.run.index_id != index_id:
             raise ValueError("run must use the fixture index_id")
+        if self.input.project_id != self.run.project_id or self.input.session_id != self.run.session_id:
+            raise ValueError("run input must use the fixture project and session")
+        if self.input.index_id != index_id or self.input.message_end_sequence != self.run.message_end_sequence:
+            raise ValueError("run input must use the fixture run snapshot and cutoff")
+        if self.input.input_hash != self.run.input_hash or self.input.input_chars != self.run.input_chars:
+            raise ValueError("run input must match the fixture run input metadata")
         if self.run.status != self.report.status:
             raise ValueError("run and report statuses must match")
         if self.model_output.run_id != run_id or self.report.run_id != run_id:

@@ -2,28 +2,28 @@
 
 ## 职责与边界
 
-`apps/api` 提供本地 FastAPI 服务、静态仓库 allow-list、受限本地路径导入、公开 GitHub 固定 commit 导入、项目身份、索引构建、项目/索引查询、规则驱动的项目概览、保存版本历史、同快照功能图、显式触发的主要功能语义生成，以及项目内 Session/消息持久化。它不执行被分析仓库代码，不实现 Run、SSE 或 Issue Agent。
+`apps/api` 提供本地 FastAPI 服务、静态仓库 allow-list、受限本地/GitHub 来源导入、Project/Index/Session 管理、规则概览、功能生成，以及显式 fixture Run 的冻结、执行、事件和报告读取。它不执行被分析仓库代码，不开放真实 Issue Agent、真实供应商 Run 或 SSE。
 
 ## 入口与目录导航
 
 - [main.py](app/main.py)：FastAPI 应用和 HTTP 路由。
-- [service.py](app/service.py)：仓库注册、项目生命周期、索引服务和项目归属校验。
-- [storage.py](app/storage.py)：静态仓库快照、服务管理目录中的动态来源注册/导入状态、Session/消息和 SQLite/FTS5 查询。
-- [github.py](app/github.py)：GitHub 官方 API 固定 commit、受限 archive 获取、重定向校验和安全解包。
+- [service.py](app/service.py)：仓库注册、Project/Index/Session/Run 归属和应用服务。
+- [storage.py](app/storage.py)：快照、来源、Session/消息、Run、事件、工具结果、报告和 SQLite/FTS5 查询。
+- [run_execution.py](app/run_execution.py)：有界 daemon 线程中的 fixture Run 执行器，只调用白名单查询工具。
 - [indexing.py](app/indexing.py) 与 [relations.py](app/relations.py)：Python 快照、符号和保守静态关系提取。
-- [overview.py](app/overview.py)：按 `python-entry-v1` 从固定快照生成入口、模块和有界静态路径概览。
-- [feature_graph.py](app/feature_graph.py)：将保存的功能映射与同一不可变快照的静态关系组装为有界、区分来源的功能图。
-- [config.py](app/config.py)：从服务数据目录读取并校验持久化模型供应商配置。
-- [feature_generation.py](app/feature_generation.py)：收集有界快照上下文，调用确定性 fixture 或服务端配置的 DeepSeek/OpenAI-compatible 模型，并校验带证据的功能结果。
-- [tests](tests/)：API、契约、索引、关系和存储测试。
+- [overview.py](app/overview.py)、[feature_generation.py](app/feature_generation.py) 与 [feature_graph.py](app/feature_graph.py)：概览、功能生成和同快照功能图。
+- [mcp_server.py](app/mcp_server.py)：本地 MCP stdio 适配器。
+- [config.py](app/config.py)：服务数据目录中的持久化模型供应商配置。
 
 ## 接口与依赖
 
-契约位于 [contracts.py](app/contracts.py)，Schema 由 [export_schema.py](app/export_schema.py) 生成。旧 `/api/indexes/*` 保留兼容；项目工作区使用 `/api/projects/*`，Session 使用项目作用域的 create/list/detail/messages 端点，本地导入使用 `/api/imports/local`，GitHub 导入使用 `/api/imports/github`，两者都通过 `/api/imports/{attempt_id}` 查询状态；本地和 GitHub 各自有重试入口，GitHub 清理失败可通过 cleanup 入口单独重试。项目索引查询和 Session 读取/追加都必须通过项目归属校验。
+契约位于 [contracts.py](app/contracts.py)，Schema 由 [export_schema.py](app/export_schema.py) 生成。旧 `/api/indexes/*` 保留兼容；项目工作区使用 `/api/projects/*`。Run 的 HTTP 入口为 `/api/projects/{project_id}/sessions/{session_id}/runs` 及其 detail、events、tool-results、report、cancel 子路径；创建只做边界校验、冻结和提交，立即返回 queued 的 run_id，执行由 [Run 执行子系统](../../docs/subsystems/execution.md)负责。所有项目索引、Session 和 Run 操作都复用 WorkspaceService 的归属校验。
 
 ## 数据与生命周期
 
-静态仓库由 `CODETRAIL_REPOSITORIES` JSON 对象提供；本地导入允许根目录由 `CODETRAIL_ALLOWED_IMPORT_ROOTS` JSON 数组提供，动态注册和 `ImportAttempt` 写入 `CODETRAIL_DATA_DIR`（默认 API 工作目录 `.codetrail`）。模型供应商配置从同一服务数据目录的持久化 `config.json` 加载，缺少该文件时使用无密钥的 DeepSeek 默认值。GitHub 导入由 `CODETRAIL_GITHUB_IMPORT_ENABLED=1` 开启，服务端可选读取 `CODETRAIL_GITHUB_TOKEN`；远端身份、requested ref、resolved commit、content hash 和 cleanup 状态写入管理库，archive 临时目录位于管理目录并在完成后清理。新项目的索引库位于管理目录，不在来源目录写入 `.codetrail`。Project 持有稳定 ID、名称、来源 repository_id、创建时间和索引关联；索引源码及证据仍绑定不可变 `index_id`。Session 持有 project_id、创建时固定的 ready index_id、可选同快照 feature_generation_id、主题和时间；创建幂等指纹保存原始 `index_id`（省略与显式选择有区别），绑定的 index_id 单独持久化，重试不会随 latest index 变化；消息在同一 Session 下追加并由事务分配连续 sequence，幂等键冲突时拒绝不同内容。导入状态为 `queued/acquiring/indexing/ready/failed/interrupted`，失败和重启中断不替换原有可用索引。
+静态仓库由 `CODETRAIL_REPOSITORIES` JSON 对象提供；动态来源注册和导入状态写入 `CODETRAIL_DATA_DIR`，索引库归属于服务管理目录或来源的既有存储。Session 在创建时固定 ready `index_id`，消息由事务分配连续 sequence。Run 在同一索引库中保存不可变的 `project_id/session_id/index_id`、可选同快照 feature generation、完整已保存消息前缀及 hash、预算、状态、事件、工具结果和报告；每个 Session 最多一个 `queued/running` Run。服务启动把未完成 Run 标记为 `interrupted`，取消与重启都保存终态事件和终态报告，迟到工具结果不会落库。
+
+Run 当前只接受三个 fixture 场景：候选、证据不足和工具失败。执行器使用实际索引上的 `search_code`、`read_source`、`get_neighbors` 结果组装报告，不执行仓库源码、shell、测试或真实模型。所有报告 evidence 和图节点绑定 Run 的固定 `index_id`；草稿、后续消息和后续 latest index 不会改变已保存 Run 输入。
 
 ## 使用与配置
 
@@ -31,49 +31,43 @@
 
 ```powershell
 $env:CODETRAIL_REPOSITORIES = '{"timeout-demo":"D:\\Dev\\CodeTrail\\fixtures\\repos\\timeout-demo"}'
-$env:CODETRAIL_ALLOWED_IMPORT_ROOTS = '["D:\\Dev\\CodeTrail\\fixtures\\repos"]'
 $env:CODETRAIL_DATA_DIR = 'D:\\Dev\\CodeTrail\\.codetrail-service'
-$env:CODETRAIL_WEB_ORIGINS = 'http://localhost:3000,http://127.0.0.1:3000'
-$env:CODETRAIL_GITHUB_IMPORT_ENABLED = '1'
 Set-Location apps/api
 uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-API 健康检查为 `GET /api/health`。`CODETRAIL_WEB_ORIGINS` 只控制浏览器跨源读取来源，不替代 loopback 写入边界。本地写入口只接受 loopback 客户端；`POST /api/imports/local` 和 `POST /api/imports/github` 同步返回项目、attempt 和索引结果，`GET /api/imports/{attempt_id}` 查询状态，local/GitHub retry 入口重试失败/中断尝试，`POST /api/imports/{attempt_id}/cleanup` 单独重试 GitHub 临时目录清理。GitHub 输入只允许官方 HTTPS 仓库 URL，可选 ref，服务端固定 commit 后再下载官方 archive。前端和测试通过项目 API 创建项目、建立索引，再用 project_id/index_id 查询；Session 通过 `/api/projects/{project_id}/sessions` 创建/列出/读取，消息通过同一 Session 的 `/messages` 读取/追加；O2 使用 `POST /api/projects/{project_id}/indexes/{index_id}/features` 显式生成，O3 使用 `GET /api/projects/{project_id}/features` 按项目/索引分页读取保存版本摘要，使用 `GET /api/projects/{project_id}/indexes/{index_id}/features/{generation_id}` 读取明确版本，并用 `/graph` 读取同快照功能图；历史、版本、功能图和 Session 读取不会再次调用模型。
+API 健康检查为 `GET /api/health`。前端或测试先创建 Project、建立 Index、创建 Session 并追加至少一条已保存消息，再 POST Run 请求；`message_end_sequence` 省略时由服务端读取当前保存消息计数。Run 读取通过同一 Project/Session 的 list/detail/events/tool-results/report 端点，取消使用 cancel 端点。Run 请求可声明预算和幂等键；响应的 Run 状态、输入 hash、消息范围、公开事件、工具结果和报告都是服务端持久化数据。
+
+模型供应商配置仍从服务数据目录的持久化 `config.json` 读取，缺少密钥时 fixture 功能可用而 real 功能明确失败；配置格式和 DeepSeek 示例见下方 MCP 入口说明。Run 不读取该配置，也不调用真实供应商。
 
 ## 错误与限制
 
-本地导入路径必须是服务端绝对路径、位于允许根目录内且不能跨符号链接/junction；服务管理目录与来源目录不能重叠。GitHub 拒绝任意下载 URL、凭据、非官方重定向、绝对/遍历路径、链接和特殊文件，并限制 archive、文件数、解包大小、重定向、单请求/总时间；同仓库同 commit 幂等，分支移动创建新 attempt。幂等键全局绑定一次提交，重复来源复用项目，并发重复提交不会创建重复活动 attempt。未知项目、非所属索引/Session 和未配置 repository_id 返回稳定 `not_found`；输入边界返回 `invalid_input`，非 loopback 写入返回 `forbidden`。Session 创建默认选择当前最新可用索引并在创建后不随重建移动；相同幂等键的并发首次请求和重试都返回首次绑定的 Session/快照，主题、显式索引或功能版本变化返回 `conflict`；Session 与消息分页游标绑定 project/session，消息只能使用 human/agent 来源，HTTP 追加可幂等重试且不创建 Run。功能生成受工具调用、源码行、输入/输出和特征数预算限制，失败、证据不足、部分结果和模型不可用分开返回；fixture 不需要密钥，real 模式只读服务端模型配置且不回退 fixture。历史游标绑定 project_id/index_id，按 `created_at DESC, generation_id DESC` 稳定分页，最多 40 条；可识别的旧单次模型用量只在内存兼容，不改写数据库；不可恢复记录的精确读取返回有界内部错误，历史列表跳过坏行并继续返回其他有效版本。功能图最多 40 个节点、120 条边，semantic 关联与静态 CodeEdge 分开，规则版本不匹配的入口目标明确列为不可用。失败历史可读取但不会替换旧成功结果。当前导入、索引、Session 消息保存和单次功能生成在受限流程中完成，Run、SSE 和 Agent 分析未实现。
+本地/GitHub 导入继续执行绝对路径、allow-list、符号链接/junction、官方 URL、归档安全、时间和大小边界；HTTP 写入口只接受 loopback 客户端。未知项目、非所属索引/Session/Run 返回 `not_found`，参数和预算边界返回 `invalid_input` 或 `budget_exceeded`，失败不泄露宿主路径。
+
+Run 拒绝 `mode=real`，拒绝空 Session、跨项目/Session/index/generation，冻结完整消息前缀而不是前端已加载页；草稿不会进入输入。单次/总源码行、工具调用、输入/输出字符、事件和总时间均有服务端上限；状态只能从 queued/running 进入一个终态，终态事件不可重复，取消幂等，重启中的 Run 标为 interrupted。Run 历史、事件和工具结果分页均有上限并带作用域游标；取消/中断报告无候选结论，失败报告保留已持久化的同快照 evidence。
 
 ## 验证
 
-从 `apps/api` 执行 `uv run pytest -q` 和 `uv run python -m compileall -q app`。项目隔离、旧索引兼容关联、失败不覆盖最新索引、动态本地导入、幂等/并发、路径边界、重试和服务重启恢复由 `tests/test_api.py` 覆盖；其中 Session 测试覆盖同项目隔离、跨项目拒绝、默认索引固定、幂等冲突、并发消息序号、分页和重开恢复；GitHub 固定 commit、archive 安全、分支移动、清理和 HTTP 入口由 `tests/test_github.py` 覆盖；O1 入口规则、静态路径、循环/动态 unresolved、预算和旧快照稳定性由 `tests/test_overview.py` 覆盖；O2/O3 真实工具上下文、结构化模型协议、缓存/幂等、历史分页、功能图边界、跨项目隔离、失败保留、证据校验和模型不可用由 `tests/test_features.py` 覆盖；真实 HTTP/MCP 双进程导入、概览、证据引用、Session HTTP/MCP 对照、历史/版本/功能图对照和可选生成/写入工具由 `tests/test_mcp.py` 覆盖。
+从 `apps/api` 执行 `uv run pytest -q` 和 `uv run python -m compileall -q app`。`tests/test_runs.py` 覆盖冻结输入、后续消息/latest 索引不影响 Run、三类 fixture outcome、同快照工具证据、预算、取消、幂等、活动冲突、终态报告和重启中断；`tests/test_mcp.py` 覆盖 HTTP/MCP Run 对照、默认只读、独立 Run 写开关和可选生成工具。其它项目/索引/导入/Session/O1/O2/O3 测试继续覆盖各自边界。真实供应商语义质量和 SSE 尚未验证。
 
 ## 关联文档
 
+- [Run 执行子系统说明](../../docs/subsystems/execution.md)
 - [API 子系统说明](../../docs/subsystems/api.md)
 - [存储与查询子系统说明](../../docs/subsystems/storage.md)
 - [数据契约](../../docs/subsystems/contracts.md)
-- [工作区与项目概览决策](../../docs/decisions/2026-09-11-project-workspace.md)
+- [项目与会话决策](../../docs/decisions/2026-09-11-project-session-workspace.md)
+- [Run 决策](../../docs/decisions/2026-09-12-run-execution.md)
 
-## 本地只读 MCP 入口
+## 本地 MCP 入口
 
-`python -m app.mcp_server` 启动 MCP SDK `2.2.0` 的本地 stdio 服务。stdout 只承载 MCP 协议帧，日志写 stderr；服务复用 `WorkspaceService`，不直接访问 SQLite，不创建索引，不执行仓库代码。
+`python -m app.mcp_server` 启动 MCP SDK `2.2.0` 的本地 stdio 服务；stdout 只承载协议帧，日志写 stderr。服务复用 WorkspaceService，不直接访问 SQLite，不创建索引，不执行仓库代码。
 
-只读工具为 `list_projects`、`get_project`、`list_sessions`、`get_session`、`list_session_messages`、`list_indexes`、`get_index`、`search_code`、`read_source`、`get_neighbors`、`get_overview`、`list_feature_generations`、`get_feature_generation` 和 `get_feature_graph`。除项目发现外均要求显式 `project_id`，索引查询同时要求 `index_id`，Session 读取还要求 `session_id`；错误以结构化 `code`、`message`、`retryable` 返回。Session 结果附带可打开工作台的 project/session 引用；`read_source`、`get_overview`、`get_feature_generation` 和 `get_feature_graph` 的证据引用均绑定明确项目、索引、行范围、content hash 与 evidence_id；三个功能读取工具和 Session 读取默认只读且不调用模型。
+默认只读工具包括项目、索引、Session/消息、概览、功能历史/版本/图，以及 `list_session_runs`、`get_session_run`、`list_run_events`、`list_run_tool_results`、`get_run_report`。Run 读取只返回持久化数据，不重新执行分析。
 
-设置 `CODETRAIL_MCP_SESSION_WRITE_ENABLED=1` 后，额外注册 `create_session` 和 `append_session_message`；设置 `CODETRAIL_MCP_LOCAL_IMPORT_ENABLED=1` 后，额外注册 `import_local_path`、`get_import_status` 和 `retry_local_import`；设置 `CODETRAIL_MCP_GITHUB_IMPORT_ENABLED=1` 后，额外注册 `import_github_repository`、`get_import_status` 和 `retry_github_import`；设置 `CODETRAIL_MCP_FEATURE_GENERATION_ENABLED=1` 后，仅额外注册会调用模型/fixture 的 `generate_project_features`，历史、精确版本、功能图和 Session 读取不受该开关影响。四个开关独立，GitHub MCP 开关还要求 `CODETRAIL_GITHUB_IMPORT_ENABLED=1`；未设置时 MCP 保持十四项只读工具，默认只读工具不会触发模型。写工具只能使用服务端边界，不能通过参数扩大本地路径或网络权限。
+设置 `CODETRAIL_MCP_RUN_WRITE_ENABLED=1` 后，独立增加 `start_session_run` 和 `cancel_session_run`；它只允许 fixture Run，不会因为该开关开放 `create_session` 或 `append_session_message`。Session 写入仍需 `CODETRAIL_MCP_SESSION_WRITE_ENABLED=1`。未设置时 MCP 保持十九项只读工具，默认只读工具不会调用模型或 Run。
 
-功能生成的 `fixture` 模式使用 `fixture-feature-v1`，不需要密钥；`real` 模式默认适配 DeepSeek，从服务数据目录的 `config.json` 读取服务端配置。未配置密钥时返回 `model_unavailable`，不会静默使用 fixture。请求预算由契约限制工具调用、模型调用、时间、源码行、输入/输出大小、特征数和修复次数；`feature-summary-v2` 的真实请求会发送当前 Pydantic `FeatureModelOutput` JSON Schema 与任务目标，修复请求复用同一契约。模型输入按完整消息正文字符数计算，超限时有界收缩完整证据块或明确拒绝，不切断证据文本；结果中的 `usage.model_input_chars`/`model_output_chars` 保留每次调用，`input_chars`/`output_chars` 为累计值。
-
-DeepSeek 配置文件默认路径为 `apps/api/.codetrail/config.json`；若配置了 `CODETRAIL_DATA_DIR`，则放在该目录下。先复制无密钥模板：
-
-```powershell
-New-Item -ItemType Directory -Force apps/api/.codetrail
-Copy-Item apps/api/config.example.json apps/api/.codetrail/config.json
-```
-
-然后编辑 `config.json`：
+功能生成的 `real` 模式默认适配 DeepSeek，从服务数据目录的 `config.json` 读取配置；例如：
 
 ```json
 {
@@ -84,16 +78,4 @@ Copy-Item apps/api/config.example.json apps/api/.codetrail/config.json
 }
 ```
 
-`config.json` 已位于被 Git 忽略的服务数据目录，密钥只保存在运行 API/MCP 的服务端；不要把真实密钥写入 `config.example.json` 或提交到 Git。修改配置后重启 API/MCP 进程生效。`base_url` 使用 DeepSeek 根地址，不要写成 `/v1`，适配器会请求 `/chat/completions`。如需切换其他 OpenAI-compatible 供应商，可同时修改 `provider`、地址和模型名；请求仍固定使用 JSON 输出格式、受限的 `max_tokens` 和一次修复上限。每次外部调用前后及成功结果保存前都会检查总时间预算，网络响应按同一 deadline 读取；超时只保存带已有证据和用量的失败结果，不写成功结果。
-
-配置工作台引用地址（默认 `http://localhost:3000`）：
-
-```powershell
-$env:CODETRAIL_WORKBENCH_URL = 'http://localhost:3000'
-Set-Location apps/api
-uv run python -m app.mcp_server
-```
-
-用 MCP 客户端启动时，命令为 `uv run --directory apps/api python -m app.mcp_server`，并传入与 HTTP 服务相同的 `CODETRAIL_REPOSITORIES`、`CODETRAIL_DATA_DIR`、`CODETRAIL_ALLOWED_IMPORT_ROOTS`、GitHub 全局开关和可选服务端 token。两个 MCP 导入开关只影响对应导入工具注册；功能生成开关独立控制模型工具，远程 MCP、认证和私有仓库不开放，real 模式只使用服务端模型配置。
-
-设计与验收见 [统一接口决策](../../docs/decisions/2026-09-11-agent-native-interfaces.md)。
+不要提交真实密钥；配置文件位于被 Git 忽略的服务数据目录。设计与验收见 [统一接口决策](../../docs/decisions/2026-09-11-agent-native-interfaces.md) 和 [Run 决策](../../docs/decisions/2026-09-12-run-execution.md)。

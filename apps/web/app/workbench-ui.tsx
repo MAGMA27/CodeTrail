@@ -29,6 +29,12 @@ import type {
   OverviewModule,
   ProjectOverview,
   ProjectRecord,
+  RunEvent,
+  RunRecord,
+  RunReport,
+  RunScenario,
+  RunStatusResponse,
+  RunToolResult,
   SearchMatch,
   Session,
   SessionMessage,
@@ -125,6 +131,22 @@ type SessionUi = {
   draft: string;
   onDraftChange: (value: string) => void;
   onSendMessage: Action;
+  runs: RunRecord[];
+  runsStatus: UiAsyncStatus;
+  runsError: string | null;
+  selectedRunId: string | null;
+  runStatusResponse: RunStatusResponse | null;
+  runEvents: RunEvent[];
+  runToolResults: RunToolResult[];
+  runReport: RunReport | null;
+  runStatus: UiAsyncStatus;
+  runError: string | null;
+  runWriteStatus: UiAsyncStatus;
+  runWriteError: string | null;
+  onSelectRun: (runId: string) => void;
+  onStartRun: (scenario: RunScenario) => void | Promise<void>;
+  onCancelRun: Action;
+  onSelectRunEvidence: (evidence: Evidence) => void;
 };
 
 type KnowledgeUi = {
@@ -873,6 +895,85 @@ function OverviewSections({ overview, knowledge }: { overview: ProjectOverview; 
   );
 }
 
+function runStatusLabel(status: RunRecord["status"]): string {
+  return {
+    queued: "排队中",
+    running: "执行中",
+    succeeded: "已完成",
+    failed: "失败",
+    cancelled: "已取消",
+    interrupted: "已中断",
+  }[status];
+}
+
+function runScenarioLabel(scenario: RunScenario): string {
+  return {
+    "success-timeout-missing": "候选：timeout 缺失",
+    "insufficient-external-service": "证据不足：外部服务",
+    "tool-failure-read-source": "工具失败：read_source",
+  }[scenario];
+}
+
+function runEventLabel(event: RunEvent): string {
+  if (event.type === "tool.started") {
+    const request = event.payload.request;
+    if (request && typeof request === "object" && "params" in request && request.params && typeof request.params === "object" && "tool" in request.params) {
+      return `调用 ${String(request.params.tool)}`;
+    }
+  }
+  if (event.type === "tool.completed" || event.type === "tool.failed") {
+    const result = event.payload.result;
+    if (result && typeof result === "object" && "tool" in result) {
+      return `${String(result.tool)} ${event.type === "tool.failed" ? "失败" : "完成"}`;
+    }
+  }
+  return {
+    "run.started": "Run 已冻结并开始",
+    "stage.started": "阶段开始",
+    "graph.updated": "关系图已更新",
+    "finding.created": "发现已创建",
+    "run.completed": "Run 完成",
+    "run.failed": "Run 失败",
+    "run.cancelled": "Run 已取消",
+    "run.interrupted": "Run 被中断",
+  }[event.type] ?? event.type;
+}
+
+function RunPanel({ session }: { session: SessionUi }) {
+  const [scenario, setScenario] = useState<RunScenario>("success-timeout-missing");
+  const selectedRun = session.runs.find((run) => run.run_id === session.selectedRunId) ?? null;
+  const currentRun = session.runStatusResponse?.run ?? selectedRun;
+  const active = currentRun?.status === "queued" || currentRun?.status === "running";
+  const draftPending = session.draft.trim().length > 0;
+  return (
+    <section className="ct-run-panel" aria-label="显式离线 Run">
+      <div className="ct-run-heading">
+        <div><p className="ct-overline">R1 / EXPLICIT RUN</p><h3>离线分析</h3></div>
+        <span className="ct-count-label">{session.runs.length} 次</span>
+      </div>
+      <p className="ct-run-lede">显式启动后，服务端只冻结当前已保存消息到一个不可变快照；当前草稿不会进入本次 Run，也不会隐式触发分析。</p>
+      {draftPending ? <p className="ct-run-draft-warning" role="status">当前有未保存草稿：启动 Run 不会包含它，请先保存消息。</p> : null}
+      <div className="ct-run-start-row">
+        <label htmlFor="run-scenario">fixture 场景<select id="run-scenario" value={scenario} onChange={(event) => setScenario(event.target.value as RunScenario)} disabled={active || session.runWriteStatus === "loading"}><option value="success-timeout-missing">{runScenarioLabel("success-timeout-missing")}</option><option value="insufficient-external-service">{runScenarioLabel("insufficient-external-service")}</option><option value="tool-failure-read-source">{runScenarioLabel("tool-failure-read-source")}</option></select></label>
+        <button type="button" className="ct-button ct-button-primary" onClick={() => void session.onStartRun(scenario)} disabled={active || session.runWriteStatus === "loading" || session.messagesStatus === "loading"}>{session.runWriteStatus === "loading" ? "处理中…" : "启动离线分析"}</button>
+      </div>
+      {session.runWriteError ? <p className="ct-inline-error" role="alert">{session.runWriteError}</p> : null}
+      {session.runsError ? <div className="ct-error-block compact" role="alert"><span>{session.runsError}</span></div> : null}
+      {session.runs.length > 0 ? <div className="ct-run-history" aria-label="Run 历史">{session.runs.map((run) => <button type="button" key={run.run_id} className={`ct-run-history-item${run.run_id === session.selectedRunId ? " is-selected" : ""}`} onClick={() => session.onSelectRun(run.run_id)}><span><strong>{runStatusLabel(run.status)}</strong><small>{run.fixture_scenario ? runScenarioLabel(run.fixture_scenario) : run.mode}</small></span><code>{run.run_id}</code><small>消息 1–{run.message_end_sequence} · {run.execution_version}</small></button>)}</div> : session.runsStatus === "loading" ? <LoadingNote>正在读取 Run 历史…</LoadingNote> : <div className="ct-run-empty">还没有 Run。选择一个 fixture 场景后显式启动。</div>}
+      {currentRun ? <div className="ct-run-detail">
+        <div className="ct-run-detail-heading"><div><strong>{runStatusLabel(currentRun.status)}</strong><span data-state={session.runStatus}>{session.runStatus === "loading" ? "状态同步中" : session.runStatus === "error" ? "状态请求失败" : "已载入"}</span></div>{active ? <button type="button" className="ct-button ct-button-danger" onClick={() => void session.onCancelRun()} disabled={session.runWriteStatus === "loading"}>取消 Run</button> : null}</div>
+        {session.runStatusResponse ? <>
+          <div className="ct-run-snapshot"><span><small>固定消息</small><code>1–{session.runStatusResponse.input.message_end_sequence}</code></span><span><small>INPUT HASH</small><code title={session.runStatusResponse.input.input_hash}>{shortHash(session.runStatusResponse.input.input_hash, 12)}</code></span><span><small>INDEX</small><code title={session.runStatusResponse.run.index_id}>{shortHash(session.runStatusResponse.run.index_id, 16)}</code></span><span><small>版本</small><code>{session.runStatusResponse.run.execution_version}</code></span></div>
+          {session.runError ? <p className="ct-inline-error" role="alert">{session.runError}</p> : null}
+          {session.runEvents.length > 0 ? <div className="ct-run-events"><div className="ct-run-subheading"><strong>公开执行事件</strong><span>{session.runEvents.length} 条</span></div>{session.runEvents.map((event) => <div className="ct-run-event" key={`${event.run_id}-${event.sequence}`}><code>#{event.sequence}</code><span>{runEventLabel(event)}</span></div>)}</div> : null}
+          {session.runToolResults.length > 0 ? <div className="ct-run-tools"><div className="ct-run-subheading"><strong>工具结果</strong><span>{session.runToolResults.length} 项</span></div>{session.runToolResults.map((result) => <div className="ct-run-tool" key={result.request_id}><code>{result.tool}</code><span>{result.kind.endsWith("failed") ? "失败" : "已返回"} · #{result.completed_sequence}</span></div>)}</div> : null}
+          {session.runReport ? <div className="ct-run-report"><div className="ct-run-subheading"><strong>{session.runReport.outcome === "candidate_found" ? "候选结论" : session.runReport.outcome === "insufficient_evidence" ? "证据不足" : "执行结果"}</strong><span>{session.runReport.fixture_mode ? "FIXTURE" : "REAL"}</span></div><p>{session.runReport.summary}</p>{session.runReport.findings.map((finding) => <div className="ct-run-finding" key={finding.finding_id}><strong>{finding.kind}</strong><span>{finding.text}</span>{finding.evidence_ids.map((evidenceId) => { const evidence = session.runReport?.evidence.find((item) => item.evidence_id === evidenceId); return evidence ? <button type="button" className="ct-link-button" key={evidenceId} onClick={() => session.onSelectRunEvidence(evidence)}>查看证据 · {evidence.path}:L{evidence.start_line}</button> : null; })}</div>)}{session.runReport.evidence.length > 0 ? <div className="ct-run-evidence-list"><small>本次报告证据</small>{session.runReport.evidence.map((evidence) => <button type="button" className="ct-link-button" key={evidence.evidence_id} onClick={() => session.onSelectRunEvidence(evidence)}>{evidence.path}:L{evidence.start_line}–L{evidence.end_line}</button>)}</div> : null}</div> : null}
+        </> : <LoadingNote>正在读取 Run 详情…</LoadingNote>}
+      </div> : null}
+    </section>
+  );
+}
+
 function SessionView({ session, onBack }: { session: SessionUi; onBack: () => void }) {
   const selected = session.sessions.find((item) => item.session_id === session.selectedSessionId) ?? null;
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -887,7 +988,7 @@ function SessionView({ session, onBack }: { session: SessionUi; onBack: () => vo
   return (
     <div className="ct-page ct-session-page">
       <div className="ct-session-header">
-        <div><button type="button" className="ct-back-button" onClick={onBack}>← 返回项目知识</button><p className="ct-overline">SESSION / FIXED SNAPSHOT</p><h2>{selected.topic}</h2><p>当前版本只保存消息，不展示假助手回复、不启动 Run。<span className="ct-session-fixed-version">固定版本 · {selected.index.revision} · {shortHash(selected.index.snapshot_hash, 10)}</span></p></div>
+        <div><button type="button" className="ct-back-button" onClick={onBack}>← 返回项目知识</button><p className="ct-overline">SESSION / FIXED SNAPSHOT</p><h2>{selected.topic}</h2><p>消息与 Run 分开保存；分析只会处理显式启动时已保存的内容。<span className="ct-session-fixed-version">固定版本 · {selected.index.revision} · {shortHash(selected.index.snapshot_hash, 10)}</span></p></div>
         <details className="ct-session-details">
           <summary>查看会话身份</summary>
           <div className="ct-session-identity"><span><small>SESSION ID</small><code>{selected.session_id}</code></span><span><small>PROJECT ID</small><code>{selected.project_id}</code></span><span><small>REVISION</small><code>{selected.index.revision}</code></span><span><small>SNAPSHOT HASH</small><code>{selected.index.snapshot_hash}</code></span></div>
@@ -897,6 +998,7 @@ function SessionView({ session, onBack }: { session: SessionUi; onBack: () => vo
         {session.messagesStatus === "loading" && session.messages.length === 0 ? <LoadingNote>正在读取这个会话的消息…</LoadingNote> : session.messagesStatus === "error" && session.messages.length === 0 ? <div className="ct-error-block"><div><strong>会话消息请求失败</strong><span>{session.messagesError ?? "请重试。"}</span></div><button type="button" className="ct-button ct-button-secondary" onClick={() => void session.onRetryMessages()}>重试</button></div> : session.messages.length > 0 ? <>{session.messages.map((message) => <article className={`ct-message is-${message.source}`} key={message.message_id}><div className="ct-message-heading"><strong>{message.source === "human" ? "你" : "Agent"}</strong><span>#{message.sequence} · {formatDate(message.created_at)}</span></div><p>{message.content}</p></article>)}{session.messagesHasMore ? <div className="ct-message-pager"><span>当前按服务端 sequence 递增读取</span><button type="button" className="ct-button ct-button-secondary" onClick={() => void session.onLoadMoreMessages()} disabled={session.messagesStatus === "loading"}>{session.messagesStatus === "loading" ? "载入中…" : "加载后续消息"}</button></div> : null}</> : <div className="ct-message-empty"><strong>还没有消息</strong><span>先写下问题、约束或补充；保存后仍不会生成回复。</span></div>}
         {session.messagesStatus === "error" && session.messages.length > 0 ? <p className="ct-inline-error" role="alert">{session.messagesError}<button type="button" className="ct-link-button" onClick={() => void session.onRetryMessages()}>重试</button></p> : null}
       </div>
+      <RunPanel session={session} />
       <form className="ct-composer" onSubmit={(event) => { event.preventDefault(); void session.onSendMessage(); }}>
         <div className="ct-composer-heading"><label htmlFor="session-message">追加消息</label><span data-state={session.writeStatus}>{session.writeStatus === "loading" ? "保存中" : session.writeStatus === "success" ? "已保存" : session.writeStatus === "error" ? "保存失败" : "仅保存消息"}</span></div>
         <textarea id="session-message" value={session.draft} onChange={(event) => session.onDraftChange(event.target.value)} onKeyDown={handleKeyDown} placeholder="输入要交给下一步人或 Agent 的问题、约束或补充…" maxLength={20_000} rows={4} />
@@ -1045,7 +1147,7 @@ export default function WorkbenchUi(props: WorkbenchUiProps) {
         {props.panelMode === "source" ? <EvidencePanel evidence={props.evidence} /> : props.panelMode === "graph" || props.panelMode === "feature_graph" ? <GraphPanel graph={props.graph} /> : null}
       </div>
       {props.panelMode !== "none" ? <div className="ct-panel-width-control"><label htmlFor="panel-width">面板宽度</label><input id="panel-width" type="range" min="300" max="440" step="10" value={panelWidth} onChange={(event) => setPanelWidth(Number(event.target.value))} /><output>{panelWidth}px</output></div> : null}
-      <footer className="ct-footer"><span>STATIC FACTS / FIXED EVIDENCE</span><span>Issue 分析 / Run / Agent / SSE 尚未接入</span><span>{props.index.response ? `${props.graph.codeSymbolCount} nodes · ${props.graph.codeEdgeCount} edges` : "No snapshot loaded"}</span></footer>
+      <footer className="ct-footer"><span>STATIC FACTS / FIXED EVIDENCE</span><span>Run：显式 fixture 分析 · Agent / SSE 尚未接入</span><span>{props.index.response ? `${props.graph.codeSymbolCount} nodes · ${props.graph.codeEdgeCount} edges` : "No snapshot loaded"}</span></footer>
     </main>
   );
 }

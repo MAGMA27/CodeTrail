@@ -4,14 +4,28 @@
       {
         "payload": {
           "budget": {
+            "events_used": 0,
+            "input_chars_used": 103,
+            "max_events": 100,
+            "max_input_chars": 60000,
+            "max_output_chars": 50000,
             "max_seconds": 120,
             "max_source_lines": 200,
             "max_tool_calls": 12,
+            "max_total_source_lines": 800,
+            "output_chars_used": 0,
+            "source_lines_used": 0,
             "tool_calls_used": 0
           },
+          "execution_version": "run-fixture-v1",
+          "feature_generation_id": null,
           "index_id": "index-timeout-demo-v1",
+          "input_hash": "095ce2fa7f29db556ffc4477999dfb3e0e6981e0adcda8e0655b8889f6f32899",
           "issue_id": "issue-timeout-missing",
-          "mode": "fixture"
+          "message_end_sequence": 1,
+          "mode": "fixture",
+          "project_id": "project-fixture-timeout-demo",
+          "session_id": "session-fixture-timeout-demo"
         },
         "run_id": "run-success-timeout-missing",
         "sequence": 1,
@@ -194,7 +208,9 @@
                 }
               }
             ],
+            "nodes": [],
             "request_id": "request-success-neighbors",
+            "root": null,
             "run_id": "run-success-timeout-missing",
             "tool": "get_neighbors",
             "truncated": false,
@@ -731,6 +747,28 @@
     "snapshot_hash": "b1c5c5538e60b43882b2fef5dc0270fb0ec2aedcb49763353fd8b1edfa0d57dd",
     "status": "ready"
   },
+  "input": {
+    "feature_generation_id": null,
+    "frozen_at": "2026-09-10T00:00:00Z",
+    "index_id": "index-timeout-demo-v1",
+    "input_chars": 103,
+    "input_hash": "095ce2fa7f29db556ffc4477999dfb3e0e6981e0adcda8e0655b8889f6f32899",
+    "message_end_sequence": 1,
+    "messages": [
+      {
+        "content": "配置未填写 timeout 时初始化失败\n启动 timeout-demo 时没有设置 TIMEOUT_DEMO_TIMEOUT，客户端初始化抛出 KeyError。显式设置 timeout 后应能正常启动。",
+        "created_at": "2026-09-10T00:00:00Z",
+        "message_id": "message-fixture-timeout-demo",
+        "schema_version": "0.1.0",
+        "sequence": 1,
+        "session_id": "session-fixture-timeout-demo",
+        "source": "human"
+      }
+    ],
+    "project_id": "project-fixture-timeout-demo",
+    "schema_version": "0.1.0",
+    "session_id": "session-fixture-timeout-demo"
+  },
   "mode": "fixture",
   "model_output": {
     "candidate_links": [
@@ -1266,22 +1304,38 @@
     },
     "index_id": "index-timeout-demo-v1",
     "outcome": "candidate_found",
+    "project_id": "project-fixture-timeout-demo",
     "report_id": "report-success-timeout-missing",
     "run_id": "run-success-timeout-missing",
     "schema_version": "0.1.0",
+    "session_id": "session-fixture-timeout-demo",
     "status": "succeeded",
     "summary": "固定样本显示缺少 timeout 会在客户端初始化时抛出 KeyError；候选位置和证据已绑定当前快照。",
     "terminal_sequence": 14
   },
   "run": {
     "budget": {
+      "events_used": 0,
+      "input_chars_used": 103,
+      "max_events": 100,
+      "max_input_chars": 60000,
+      "max_output_chars": 50000,
       "max_seconds": 120,
       "max_source_lines": 200,
       "max_tool_calls": 12,
+      "max_total_source_lines": 800,
+      "output_chars_used": 0,
+      "source_lines_used": 0,
       "tool_calls_used": 4
     },
+    "created_at": "2026-09-10T00:00:00Z",
     "ended_at": "2026-09-10T00:00:14Z",
+    "execution_version": "run-fixture-v1",
+    "feature_generation_id": null,
+    "fixture_scenario": "success-timeout-missing",
     "index_id": "index-timeout-demo-v1",
+    "input_chars": 103,
+    "input_hash": "095ce2fa7f29db556ffc4477999dfb3e0e6981e0adcda8e0655b8889f6f32899",
     "issue": {
       "body": "启动 timeout-demo 时没有设置 TIMEOUT_DEMO_TIMEOUT，客户端初始化抛出 KeyError。显式设置 timeout 后应能正常启动。",
       "issue_id": "issue-timeout-missing",
@@ -1290,11 +1344,15 @@
       "stacktrace": null,
       "title": "配置未填写 timeout 时初始化失败"
     },
+    "message_end_sequence": 1,
     "mode": "fixture",
     "model": "fixture:timeout-demo",
+    "project_id": "project-fixture-timeout-demo",
     "prompt_version": "fixture-v1",
+    "report_id": null,
     "run_id": "run-success-timeout-missing",
     "schema_version": "0.1.0",
+    "session_id": "session-fixture-timeout-demo",
     "started_at": "2026-09-10T00:00:00Z",
     "status": "succeeded"
   },
@@ -1393,7 +1451,9 @@
           }
         }
       ],
+      "nodes": [],
       "request_id": "request-success-neighbors",
+      "root": null,
       "run_id": "run-success-timeout-missing",
       "tool": "get_neighbors",
       "truncated": false,

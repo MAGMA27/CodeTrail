@@ -28,6 +28,8 @@ RESPONSES = FIXTURES / "responses"
 MANIFEST_PATH = SCENARIOS / "source-manifest.json"
 UTC = timezone.utc
 BASE_TIME = datetime(2026, 9, 10, 0, 0, 0, tzinfo=UTC)
+FIXTURE_PROJECT_ID = "project-fixture-timeout-demo"
+FIXTURE_SESSION_ID = "session-fixture-timeout-demo"
 
 
 def load_json(path: Path) -> dict:
@@ -192,12 +194,17 @@ def index_snapshot(index_id: str, manifest: dict) -> c.IndexSnapshot:
     )
 
 
-def budget(tool_calls_used: int) -> c.RunBudget:
+def budget(tool_calls_used: int, input_chars_used: int) -> c.RunBudget:
     return c.RunBudget(
         max_tool_calls=12,
         max_seconds=120,
         max_source_lines=200,
+        max_total_source_lines=800,
+        max_input_chars=60_000,
+        max_output_chars=50_000,
+        max_events=100,
         tool_calls_used=tool_calls_used,
+        input_chars_used=input_chars_used,
     )
 
 
@@ -205,23 +212,61 @@ def timestamp(offset: int) -> datetime:
     return BASE_TIME + timedelta(seconds=offset)
 
 
+def frozen_input(index_id: str, issue: c.Issue) -> c.RunInput:
+    message = c.SessionMessage(
+        message_id="message-fixture-timeout-demo",
+        session_id=FIXTURE_SESSION_ID,
+        sequence=1,
+        source="human",
+        content=f"{issue.title}\n{issue.body}",
+        created_at=timestamp(0),
+    )
+    serialized = json.dumps(
+        [message.model_dump(mode="json")],
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return c.RunInput(
+        project_id=FIXTURE_PROJECT_ID,
+        session_id=FIXTURE_SESSION_ID,
+        index_id=index_id,
+        message_end_sequence=1,
+        messages=[message],
+        input_hash=hashlib.sha256(serialized.encode("utf-8")).hexdigest(),
+        input_chars=len(message.content),
+        frozen_at=timestamp(0),
+    )
+
+
 def run(
     run_id: str,
     index_id: str,
     issue: c.Issue,
+    run_input: c.RunInput,
+    fixture_scenario: c.FixtureScenario,
     status: c.RunStatus,
     tool_calls_used: int,
     end_offset: int,
 ) -> c.Run:
     return c.Run(
         run_id=run_id,
+        project_id=FIXTURE_PROJECT_ID,
+        session_id=FIXTURE_SESSION_ID,
         index_id=index_id,
+        feature_generation_id=None,
         issue=issue,
         mode="fixture",
+        fixture_scenario=fixture_scenario,
         model="fixture:timeout-demo",
         prompt_version="fixture-v1",
+        execution_version="run-fixture-v1",
         status=status,
-        budget=budget(tool_calls_used),
+        budget=budget(tool_calls_used, run_input.input_chars),
+        message_end_sequence=run_input.message_end_sequence,
+        input_hash=run_input.input_hash,
+        input_chars=run_input.input_chars,
+        created_at=timestamp(0),
         started_at=timestamp(0),
         ended_at=timestamp(end_offset),
     )
@@ -274,16 +319,22 @@ def make_events(events: Iterable[c.Event], run_id: str) -> c.EventSequence:
     return c.EventSequence(run_id=run_id, events=list(events))
 
 
-def run_started(run_id: str, index_id: str, issue: c.Issue) -> c.RunStartedEvent:
+def run_started(run_id: str, run_input: c.RunInput, run_model: c.Run) -> c.RunStartedEvent:
     return c.RunStartedEvent(
         run_id=run_id,
         sequence=1,
         timestamp=timestamp(0),
         payload=c.RunStartedPayload(
-            index_id=index_id,
-            issue_id=issue.issue_id,
+            project_id=run_input.project_id,
+            session_id=run_input.session_id,
+            index_id=run_input.index_id,
+            issue_id=run_model.issue.issue_id,
             mode="fixture",
-            budget=budget(0),
+            message_end_sequence=run_input.message_end_sequence,
+            input_hash=run_input.input_hash,
+            feature_generation_id=None,
+            execution_version=run_model.execution_version,
+            budget=run_model.budget.model_copy(update={"tool_calls_used": 0}),
         ),
     )
 
@@ -348,6 +399,17 @@ def build_success(manifest: dict) -> c.FixtureResponseSet:
     run_id = "run-success-timeout-missing"
     issue = load_issue("timeout-missing.json")
     index = index_snapshot(index_id, manifest)
+    run_input = frozen_input(index_id, issue)
+    run_model = run(
+        run_id,
+        index_id,
+        issue,
+        run_input,
+        scenario_id,
+        "succeeded",
+        4,
+        14,
+    )
     current_graph = build_graph(index_id)
     config_evidence = evidence("evidence-timeout-config", index_id, manifest, "timeout_demo/config.py", 9, 25)
     client_evidence = evidence("evidence-timeout-client", index_id, manifest, "timeout_demo/client.py", 16, 19)
@@ -416,6 +478,8 @@ def build_success(manifest: dict) -> c.FixtureResponseSet:
     report = c.Report(
         report_id="report-success-timeout-missing",
         run_id=run_id,
+        project_id=FIXTURE_PROJECT_ID,
+        session_id=FIXTURE_SESSION_ID,
         index_id=index_id,
         status="succeeded",
         outcome="candidate_found",
@@ -428,7 +492,7 @@ def build_success(manifest: dict) -> c.FixtureResponseSet:
     )
     events = make_events(
         [
-            run_started(run_id, index_id, issue),
+            run_started(run_id, run_input, run_model),
             stage_event(run_id, 2, "retrieval"),
             tool_started(run_id, 3, search),
             tool_completed(run_id, 4, results[0]),
@@ -458,7 +522,8 @@ def build_success(manifest: dict) -> c.FixtureResponseSet:
         scenario_id=scenario_id,
         mode="fixture",
         index=index,
-        run=run(run_id, index_id, issue, "succeeded", 4, 14),
+        run=run_model,
+        input=run_input,
         tool_results=results,
         model_output=output,
         report=report,
@@ -472,6 +537,17 @@ def build_insufficient(manifest: dict) -> c.FixtureResponseSet:
     run_id = "run-insufficient-external-service"
     issue = load_issue("external-service.json")
     index = index_snapshot(index_id, manifest)
+    run_input = frozen_input(index_id, issue)
+    run_model = run(
+        run_id,
+        index_id,
+        issue,
+        run_input,
+        scenario_id,
+        "succeeded",
+        1,
+        7,
+    )
     search = search_request("request-insufficient-search", run_id, index_id, "external payment service empty response")
     result = c.SearchCodeSuccess(
         **tool_base(search.request_id, run_id, index_id, 4),
@@ -494,6 +570,8 @@ def build_insufficient(manifest: dict) -> c.FixtureResponseSet:
     report = c.Report(
         report_id="report-insufficient-external-service",
         run_id=run_id,
+        project_id=FIXTURE_PROJECT_ID,
+        session_id=FIXTURE_SESSION_ID,
         index_id=index_id,
         status="succeeded",
         outcome="insufficient_evidence",
@@ -504,7 +582,7 @@ def build_insufficient(manifest: dict) -> c.FixtureResponseSet:
     )
     events = make_events(
         [
-            run_started(run_id, index_id, issue),
+            run_started(run_id, run_input, run_model),
             stage_event(run_id, 2, "retrieval"),
             tool_started(run_id, 3, search),
             tool_completed(run_id, 4, result),
@@ -527,7 +605,8 @@ def build_insufficient(manifest: dict) -> c.FixtureResponseSet:
         scenario_id=scenario_id,
         mode="fixture",
         index=index,
-        run=run(run_id, index_id, issue, "succeeded", 1, 7),
+        run=run_model,
+        input=run_input,
         tool_results=[result],
         model_output=output,
         report=report,
@@ -541,6 +620,17 @@ def build_tool_failure(manifest: dict) -> c.FixtureResponseSet:
     run_id = "run-tool-failure-read-source"
     issue = load_issue("timeout-missing.json")
     index = index_snapshot(index_id, manifest)
+    run_input = frozen_input(index_id, issue)
+    run_model = run(
+        run_id,
+        index_id,
+        issue,
+        run_input,
+        scenario_id,
+        "failed",
+        3,
+        9,
+    )
     graph = build_graph(index_id)
     config_evidence = evidence("evidence-tool-config", index_id, manifest, "timeout_demo/config.py", 12, 25)
     search = search_request("request-failure-search", run_id, index_id, "timeout default initialize_client")
@@ -585,6 +675,8 @@ def build_tool_failure(manifest: dict) -> c.FixtureResponseSet:
     report = c.Report(
         report_id="report-tool-failure-read-source",
         run_id=run_id,
+        project_id=FIXTURE_PROJECT_ID,
+        session_id=FIXTURE_SESSION_ID,
         index_id=index_id,
         status="failed",
         outcome="failed",
@@ -596,7 +688,7 @@ def build_tool_failure(manifest: dict) -> c.FixtureResponseSet:
     )
     events = make_events(
         [
-            run_started(run_id, index_id, issue),
+            run_started(run_id, run_input, run_model),
             stage_event(run_id, 2, "retrieval"),
             tool_started(run_id, 3, search),
             tool_completed(run_id, 4, results[0]),
@@ -624,7 +716,8 @@ def build_tool_failure(manifest: dict) -> c.FixtureResponseSet:
         scenario_id=scenario_id,
         mode="fixture",
         index=index,
-        run=run(run_id, index_id, issue, "failed", 3, 9),
+        run=run_model,
+        input=run_input,
         tool_results=results,
         model_output=output,
         report=report,

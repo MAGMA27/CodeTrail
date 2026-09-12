@@ -17,10 +17,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
 from .contracts import (
     CodeEdge,
+    Event,
     Evidence,
     FeatureGeneration,
     GetNeighborsParams,
@@ -28,6 +29,13 @@ from .contracts import (
     IndexSnapshot,
     Neighbor,
     ReadSourceParams,
+    Report,
+    Run,
+    RunInput,
+    RunCancelledEvent,
+    RunCancelledPayload,
+    RunInterruptedEvent,
+    RunInterruptedPayload,
     SearchCodeParams,
     SearchMatch,
     Session,
@@ -35,6 +43,7 @@ from .contracts import (
     SourceLocation,
     Symbol,
     UnresolvedReference,
+    ToolResult,
 )
 from .indexing import DefinitionIndex, SnapshotFile, SnapshotIssue, SourceSnapshot
 from .relations import RelationIndex
@@ -43,7 +52,12 @@ from .relations import RelationIndex
 _UNSET = object()
 _FEATURE_HISTORY_BATCH_SIZE = 40
 _FEATURE_HISTORY_SCAN_LIMIT = 200
+_RUN_HISTORY_SCAN_LIMIT = 200
+_RUN_EVENT_PAGE_SIZE = 100
+_RUN_TOOL_RESULT_PAGE_SIZE = 40
 logger = logging.getLogger(__name__)
+_EVENT_ADAPTER = TypeAdapter(Event)
+_TOOL_RESULT_ADAPTER = TypeAdapter(ToolResult)
 
 
 def _feature_generation_from_json(result_json: str) -> FeatureGeneration:
@@ -188,6 +202,43 @@ class SessionMessagePage:
 
     messages: tuple[SessionMessage, ...]
     next_cursor: str | None
+    has_more: bool
+
+
+@dataclass(frozen=True)
+class RunRecord:
+    """Persisted Run metadata plus the complete immutable frozen input."""
+
+    run: Run
+    input: RunInput
+    idempotency_key: str | None = None
+    request_fingerprint: str = ""
+
+
+@dataclass(frozen=True)
+class RunPage:
+    """One bounded newest-first Run history page."""
+
+    runs: tuple[Run, ...]
+    next_cursor: str | None
+    has_more: bool
+
+
+@dataclass(frozen=True)
+class RunEventPage:
+    """One bounded ascending page of public Run events."""
+
+    events: tuple[Event, ...]
+    next_after_sequence: int | None
+    has_more: bool
+
+
+@dataclass(frozen=True)
+class RunToolResultPage:
+    """One bounded ascending page of persisted tool results."""
+
+    results: tuple[ToolResult, ...]
+    next_after_sequence: int | None
     has_more: bool
 
 
@@ -422,6 +473,80 @@ CREATE UNIQUE INDEX IF NOT EXISTS session_messages_idempotency
 
 CREATE INDEX IF NOT EXISTS session_messages_order
     ON session_messages(session_id, sequence);
+
+CREATE TABLE IF NOT EXISTS runs (
+    run_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    index_id TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled', 'interrupted')),
+    idempotency_key TEXT,
+    request_fingerprint TEXT NOT NULL,
+    report_id TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    run_json TEXT NOT NULL,
+    FOREIGN KEY (project_id, index_id) REFERENCES project_indexes(project_id, index_id) ON DELETE CASCADE,
+    FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS runs_idempotency
+    ON runs(project_id, session_id, idempotency_key)
+    WHERE idempotency_key IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS runs_active_session
+    ON runs(session_id)
+    WHERE status IN ('queued', 'running');
+
+CREATE INDEX IF NOT EXISTS runs_session_activity
+    ON runs(project_id, session_id, created_at DESC, run_id DESC);
+
+CREATE TABLE IF NOT EXISTS run_inputs (
+    run_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    index_id TEXT NOT NULL,
+    input_json TEXT NOT NULL,
+    FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE,
+    FOREIGN KEY (project_id, index_id) REFERENCES project_indexes(project_id, index_id) ON DELETE CASCADE,
+    FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS run_events (
+    run_id TEXT NOT NULL,
+    sequence INTEGER NOT NULL CHECK (sequence > 0),
+    type TEXT NOT NULL,
+    timestamp TEXT NOT NULL,
+    event_json TEXT NOT NULL,
+    PRIMARY KEY (run_id, sequence),
+    FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS run_tool_results (
+    run_id TEXT NOT NULL,
+    request_id TEXT NOT NULL,
+    completed_sequence INTEGER NOT NULL CHECK (completed_sequence > 0),
+    kind TEXT NOT NULL,
+    result_json TEXT NOT NULL,
+    PRIMARY KEY (run_id, request_id),
+    UNIQUE (run_id, completed_sequence),
+    FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS run_tool_results_order
+    ON run_tool_results(run_id, completed_sequence);
+
+CREATE TABLE IF NOT EXISTS run_reports (
+    report_id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL UNIQUE,
+    project_id TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    index_id TEXT NOT NULL,
+    report_json TEXT NOT NULL,
+    FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE,
+    FOREIGN KEY (project_id, index_id) REFERENCES project_indexes(project_id, index_id) ON DELETE CASCADE,
+    FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
+);
 """
 
 
@@ -1702,6 +1827,712 @@ class IndexStore:
         )
         return SessionMessagePage(messages=messages, next_cursor=next_cursor, has_more=has_more)
 
+    def load_session_messages_for_run(
+        self,
+        project_id: str,
+        session_id: str,
+        message_end_sequence: int,
+    ) -> tuple[SessionMessage, ...]:
+        """Read the complete saved message prefix that a Run is allowed to freeze."""
+
+        self.load_project(project_id)
+        if message_end_sequence < 1 or message_end_sequence > 1_000:
+            raise StorageInputError("Run message cutoff is outside the allowed range")
+        session_row = self._connection.execute(
+            "SELECT session_id FROM sessions WHERE session_id = ? AND project_id = ?",
+            (session_id, project_id),
+        ).fetchone()
+        if session_row is None:
+            raise StorageNotFoundError(f"session {session_id!r} was not found")
+        rows = self._connection.execute(
+            "SELECT message_id, session_id, sequence, source, content, created_at "
+            "FROM session_messages WHERE session_id = ? AND sequence <= ? "
+            "ORDER BY sequence ASC LIMIT ?",
+            (session_id, message_end_sequence, message_end_sequence + 1),
+        ).fetchall()
+        if len(rows) != message_end_sequence:
+            raise StorageInputError("Run message cutoff is beyond the saved message sequence")
+        messages = tuple(_session_message_from_row(row) for row in rows)
+        if [message.sequence for message in messages] != list(range(1, message_end_sequence + 1)):
+            raise StorageError("saved session messages are not contiguous")
+        return messages
+
+    def create_run(
+        self,
+        run: Run,
+        run_input: RunInput,
+        *,
+        idempotency_key: str | None,
+        request_fingerprint: str,
+    ) -> tuple[RunRecord, bool]:
+        """Create one queued Run and its complete frozen input atomically."""
+
+        if run.status != "queued":
+            raise StorageInputError("new Runs must start queued")
+        if run.input_hash != run_input.input_hash or run.input_chars != run_input.input_chars:
+            raise StorageInputError("Run input metadata does not match the Run")
+        if run.project_id != run_input.project_id or run.session_id != run_input.session_id:
+            raise StorageInputError("Run input scope does not match the Run")
+        if run.index_id != run_input.index_id or run.message_end_sequence != run_input.message_end_sequence:
+            raise StorageInputError("Run input snapshot does not match the Run")
+        self._require_index(run.index_id)
+        try:
+            self._connection.execute("BEGIN IMMEDIATE")
+            session_row = self._connection.execute(
+                "SELECT project_id, index_id FROM sessions WHERE session_id = ?",
+                (run.session_id,),
+            ).fetchone()
+            if session_row is None or session_row["project_id"] != run.project_id:
+                raise StorageNotFoundError("Run session was not found")
+            if session_row["index_id"] != run.index_id:
+                raise StorageInputError("Run index does not match the Session snapshot")
+            if not self.project_has_index(run.project_id, run.index_id):
+                raise StorageNotFoundError("Run index is outside the project")
+            if idempotency_key is not None:
+                existing_row = self._connection.execute(
+                    "SELECT run_id, request_fingerprint FROM runs "
+                    "WHERE project_id = ? AND session_id = ? AND idempotency_key = ?",
+                    (run.project_id, run.session_id, idempotency_key),
+                ).fetchone()
+                if existing_row is not None:
+                    if existing_row["request_fingerprint"] != request_fingerprint:
+                        raise StorageConflictError("Run idempotency key is bound to different input")
+                    self._connection.execute("COMMIT")
+                    return self.load_run_record(existing_row["run_id"]), False
+            serialized_run = _json_text(run)
+            serialized_input = _json_text(run_input)
+            self._connection.execute(
+                "INSERT INTO runs (run_id, project_id, session_id, index_id, status, idempotency_key, "
+                "request_fingerprint, report_id, created_at, updated_at, run_json) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    run.run_id,
+                    run.project_id,
+                    run.session_id,
+                    run.index_id,
+                    run.status,
+                    idempotency_key,
+                    request_fingerprint,
+                    run.report_id,
+                    _datetime_text(run.created_at),
+                    _datetime_text(run.created_at),
+                    serialized_run,
+                ),
+            )
+            self._connection.execute(
+                "INSERT INTO run_inputs (run_id, project_id, session_id, index_id, input_json) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (
+                    run.run_id,
+                    run_input.project_id,
+                    run_input.session_id,
+                    run_input.index_id,
+                    serialized_input,
+                ),
+            )
+            self._connection.execute("COMMIT")
+        except StorageError:
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise
+        except sqlite3.IntegrityError as exc:
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise StorageConflictError("Run conflicts with an existing active Run") from exc
+        except sqlite3.Error as exc:
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise StorageError(f"could not create Run: {exc}") from exc
+        return self.load_run_record(run.run_id), True
+
+    def load_run_record(self, run_id: str) -> RunRecord:
+        """Read one Run and its separately persisted frozen input."""
+
+        row = self._connection.execute(
+            "SELECT run_json, idempotency_key, request_fingerprint FROM runs WHERE run_id = ?",
+            (run_id,),
+        ).fetchone()
+        if row is None:
+            raise StorageNotFoundError(f"Run {run_id!r} was not found")
+        input_row = self._connection.execute(
+            "SELECT input_json FROM run_inputs WHERE run_id = ?",
+            (run_id,),
+        ).fetchone()
+        if input_row is None:
+            raise StorageError("persisted Run is missing its frozen input")
+        try:
+            run = Run.model_validate(json.loads(row["run_json"]))
+            run_input = RunInput.model_validate(json.loads(input_row["input_json"]))
+        except (json.JSONDecodeError, TypeError, ValidationError) as exc:
+            raise StorageError("persisted Run data is invalid") from exc
+        if (
+            run.run_id != run_id
+            or run.project_id != run_input.project_id
+            or run.session_id != run_input.session_id
+            or run.index_id != run_input.index_id
+            or run.input_hash != run_input.input_hash
+            or run.input_chars != run_input.input_chars
+            or run.message_end_sequence != run_input.message_end_sequence
+        ):
+            raise StorageError("persisted Run data crosses its frozen input boundary")
+        return RunRecord(
+            run=run,
+            input=run_input,
+            idempotency_key=row["idempotency_key"],
+            request_fingerprint=row["request_fingerprint"],
+        )
+
+    def find_run_by_idempotency(
+        self,
+        project_id: str,
+        session_id: str,
+        idempotency_key: str,
+    ) -> RunRecord | None:
+        row = self._connection.execute(
+            "SELECT run_id FROM runs WHERE project_id = ? AND session_id = ? AND idempotency_key = ?",
+            (project_id, session_id, idempotency_key),
+        ).fetchone()
+        return None if row is None else self.load_run_record(row["run_id"])
+
+    def list_runs(
+        self,
+        project_id: str,
+        session_id: str,
+        *,
+        limit: int = 40,
+        cursor: str | None = None,
+    ) -> RunPage:
+        """List one Session's Runs by stable creation order."""
+
+        session_row = self._connection.execute(
+            "SELECT project_id FROM sessions WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+        if session_row is None or session_row["project_id"] != project_id:
+            raise StorageNotFoundError("Run session was not found")
+        if limit < 1 or limit > 40:
+            raise StorageInputError("Run history limit is outside the allowed range")
+        cursor_values = _decode_run_cursor(cursor, project_id=project_id, session_id=session_id)
+        where = ["project_id = ?", "session_id = ?"]
+        parameters: list[object] = [project_id, session_id]
+        if cursor_values is not None:
+            created_at, run_id = cursor_values
+            where.append("(created_at < ? OR (created_at = ? AND run_id < ?))")
+            parameters.extend([created_at, created_at, run_id])
+        rows = self._connection.execute(
+            "SELECT run_id, created_at FROM runs "
+            f"WHERE {' AND '.join(where)} "
+            "ORDER BY created_at DESC, run_id DESC LIMIT ?",
+            (*parameters, limit + 1),
+        ).fetchall()
+        has_more = len(rows) > limit
+        page_rows = rows[:limit]
+        records = tuple(self.load_run_record(row["run_id"]).run for row in page_rows)
+        next_cursor = (
+            _encode_run_cursor(
+                str(page_rows[-1]["created_at"]),
+                str(page_rows[-1]["run_id"]),
+                project_id=project_id,
+                session_id=session_id,
+            )
+            if has_more and page_rows
+            else None
+        )
+        return RunPage(runs=records, next_cursor=next_cursor, has_more=has_more)
+
+    def load_run_events(
+        self,
+        project_id: str,
+        session_id: str,
+        run_id: str,
+        *,
+        after_sequence: int = 0,
+        limit: int = _RUN_EVENT_PAGE_SIZE,
+    ) -> RunEventPage:
+        """Read public Run events after a bounded sequence cursor."""
+
+        self._require_run_scope(project_id, session_id, run_id)
+        if after_sequence < 0 or limit < 1 or limit > _RUN_EVENT_PAGE_SIZE:
+            raise StorageInputError("Run event pagination is outside the allowed range")
+        rows = self._connection.execute(
+            "SELECT sequence, event_json FROM run_events "
+            "WHERE run_id = ? AND sequence > ? ORDER BY sequence ASC LIMIT ?",
+            (run_id, after_sequence, limit + 1),
+        ).fetchall()
+        has_more = len(rows) > limit
+        page_rows = rows[:limit]
+        try:
+            events = tuple(_EVENT_ADAPTER.validate_json(row["event_json"]) for row in page_rows)
+        except (TypeError, ValueError, ValidationError) as exc:
+            raise StorageError("persisted Run event is invalid") from exc
+        next_after_sequence = int(page_rows[-1]["sequence"]) if has_more and page_rows else None
+        return RunEventPage(
+            events=events,
+            next_after_sequence=next_after_sequence,
+            has_more=has_more,
+        )
+
+    def load_run_tool_results(
+        self,
+        project_id: str,
+        session_id: str,
+        run_id: str,
+        *,
+        after_sequence: int = 0,
+        limit: int = _RUN_TOOL_RESULT_PAGE_SIZE,
+    ) -> RunToolResultPage:
+        """Read persisted bounded tool results in completion order."""
+
+        self._require_run_scope(project_id, session_id, run_id)
+        if after_sequence < 0 or limit < 1 or limit > _RUN_TOOL_RESULT_PAGE_SIZE:
+            raise StorageInputError("Run tool-result pagination is outside the allowed range")
+        rows = self._connection.execute(
+            "SELECT completed_sequence, result_json FROM run_tool_results "
+            "WHERE run_id = ? AND completed_sequence > ? ORDER BY completed_sequence ASC LIMIT ?",
+            (run_id, after_sequence, limit + 1),
+        ).fetchall()
+        has_more = len(rows) > limit
+        page_rows = rows[:limit]
+        try:
+            results = tuple(_TOOL_RESULT_ADAPTER.validate_json(row["result_json"]) for row in page_rows)
+        except (TypeError, ValueError, ValidationError) as exc:
+            raise StorageError("persisted Run tool result is invalid") from exc
+        next_after_sequence = int(page_rows[-1]["completed_sequence"]) if has_more and page_rows else None
+        return RunToolResultPage(
+            results=results,
+            next_after_sequence=next_after_sequence,
+            has_more=has_more,
+        )
+
+    def start_run(self, run_id: str, started_at: datetime, event: Event) -> RunRecord | None:
+        """Atomically move a queued Run to running and append run.started."""
+
+        try:
+            self._connection.execute("BEGIN IMMEDIATE")
+            record = self.load_run_record(run_id)
+            if record.run.status != "queued":
+                self._connection.execute("COMMIT")
+                return None
+            if event.type != "run.started" or event.run_id != run_id:
+                raise StorageInputError("Run start event is invalid")
+            next_sequence = self._next_run_sequence(run_id)
+            if event.sequence != next_sequence:
+                raise StorageInputError("Run start event sequence is invalid")
+            updated_budget = record.run.budget.model_copy(
+                update={"events_used": record.run.budget.events_used + 1}
+            )
+            updated_run = _validated_run(
+                record.run,
+                status="running",
+                started_at=started_at,
+                budget=updated_budget,
+            )
+            self._insert_run_event(event)
+            self._update_run_row(updated_run)
+            self._connection.execute("COMMIT")
+            return self.load_run_record(run_id)
+        except StorageError:
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise
+        except sqlite3.Error as exc:
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise StorageError(f"could not start Run: {exc}") from exc
+
+    def append_run_event(self, event: Event) -> int:
+        """Append one non-terminal event while reserving room for a terminal event."""
+
+        try:
+            self._connection.execute("BEGIN IMMEDIATE")
+            record = self.load_run_record(event.run_id)
+            if record.run.status not in {"queued", "running"}:
+                raise StorageConflictError("Run is already terminal")
+            if event.type in {"run.completed", "run.failed", "run.cancelled", "run.interrupted"}:
+                raise StorageInputError("terminal events require terminal Run transition")
+            next_sequence = self._next_run_sequence(event.run_id)
+            if event.sequence != next_sequence:
+                raise StorageInputError("Run event sequence is invalid")
+            if record.run.budget.events_used + 1 >= record.run.budget.max_events:
+                raise StorageInputError("Run event budget is exhausted")
+            updated_budget = record.run.budget.model_copy(
+                update={"events_used": record.run.budget.events_used + 1}
+            )
+            updated_run = _validated_run(record.run, budget=updated_budget)
+            self._insert_run_event(event)
+            self._update_run_row(updated_run)
+            self._connection.execute("COMMIT")
+            return event.sequence
+        except StorageError:
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise
+        except sqlite3.Error as exc:
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise StorageError(f"could not append Run event: {exc}") from exc
+
+    def append_run_tool_result(self, event: Event, result: ToolResult) -> int:
+        """Append a tool completion event and result atomically."""
+
+        if event.type not in {"tool.completed", "tool.failed"}:
+            raise StorageInputError("tool result requires a tool completion event")
+        if event.run_id != result.run_id or event.sequence != result.completed_sequence:
+            raise StorageInputError("tool result does not match its completion event")
+        payload_result = getattr(event.payload, "result", None)
+        if payload_result is None or payload_result.request_id != result.request_id:
+            raise StorageInputError("tool completion event does not match its result")
+        try:
+            self._connection.execute("BEGIN IMMEDIATE")
+            record = self.load_run_record(event.run_id)
+            if record.run.status not in {"queued", "running"}:
+                raise StorageConflictError("Run is already terminal")
+            next_sequence = self._next_run_sequence(event.run_id)
+            if event.sequence != next_sequence:
+                raise StorageInputError("Run tool event sequence is invalid")
+            budget = record.run.budget
+            source_lines = 0
+            if hasattr(result, "evidence"):
+                evidence = getattr(result, "evidence")
+                source_lines = evidence.end_line - evidence.start_line + 1
+            output_chars = len(_json_text(result))
+            updated_budget = budget.model_copy(
+                update={
+                    "tool_calls_used": budget.tool_calls_used + 1,
+                    "source_lines_used": budget.source_lines_used + source_lines,
+                    "output_chars_used": budget.output_chars_used + output_chars,
+                    "events_used": budget.events_used + 1,
+                }
+            )
+            if updated_budget.events_used >= budget.max_events:
+                raise StorageInputError("Run event budget is exhausted")
+            if updated_budget.tool_calls_used > budget.max_tool_calls:
+                raise StorageInputError("Run tool-call budget is exhausted")
+            if source_lines > budget.max_source_lines:
+                raise StorageInputError("Run per-source line budget is exhausted")
+            if updated_budget.source_lines_used > budget.max_total_source_lines:
+                raise StorageInputError("Run source-line budget is exhausted")
+            if output_chars > budget.max_output_chars or updated_budget.output_chars_used > budget.max_output_chars:
+                raise StorageInputError("Run output budget is exhausted")
+            self._connection.execute(
+                "INSERT INTO run_tool_results (run_id, request_id, completed_sequence, kind, result_json) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (
+                    result.run_id,
+                    result.request_id,
+                    result.completed_sequence,
+                    result.kind,
+                    _json_text(result),
+                ),
+            )
+            self._insert_run_event(event)
+            updated_run = _validated_run(record.run, budget=updated_budget)
+            self._update_run_row(updated_run)
+            self._connection.execute("COMMIT")
+            return event.sequence
+        except StorageError:
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise
+        except sqlite3.IntegrityError as exc:
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise StorageConflictError("Run tool result conflicts with an existing request") from exc
+        except sqlite3.Error as exc:
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise StorageError(f"could not persist Run tool result: {exc}") from exc
+
+    def finish_run(
+        self,
+        run: Run,
+        event: Event,
+        report: Report,
+    ) -> RunRecord:
+        """Persist one terminal event, report, and terminal Run state atomically."""
+
+        terminal_types = {"run.completed", "run.failed", "run.cancelled", "run.interrupted"}
+        if event.type not in terminal_types or event.run_id != run.run_id:
+            raise StorageInputError("invalid terminal Run event")
+        if run.status not in {"succeeded", "failed", "cancelled", "interrupted"}:
+            raise StorageInputError("terminal Run status is invalid")
+        expected_status = {
+            "run.completed": "succeeded",
+            "run.failed": "failed",
+            "run.cancelled": "cancelled",
+            "run.interrupted": "interrupted",
+        }[event.type]
+        if run.status != expected_status:
+            raise StorageInputError("terminal event and Run status do not agree")
+        if not isinstance(report, Report):
+            raise StorageInputError("terminal Runs require a validated report")
+        try:
+            self._connection.execute("BEGIN IMMEDIATE")
+            record = self.load_run_record(run.run_id)
+            if record.run.status not in {"queued", "running"}:
+                self._connection.execute("COMMIT")
+                return record
+            if (
+                run.project_id != record.run.project_id
+                or run.session_id != record.run.session_id
+                or run.index_id != record.run.index_id
+                or run.input_hash != record.run.input_hash
+            ):
+                raise StorageInputError("terminal Run crossed its persisted scope")
+            next_sequence = self._next_run_sequence(run.run_id)
+            if event.sequence != next_sequence:
+                raise StorageInputError("terminal Run event sequence is invalid")
+            if record.run.budget.events_used + 1 > record.run.budget.max_events:
+                raise StorageInputError("Run event budget is exhausted")
+            updated_budget = record.run.budget.model_copy(update={"events_used": record.run.budget.events_used + 1})
+            updated_run = _validated_run(
+                record.run,
+                status=run.status,
+                started_at=run.started_at,
+                ended_at=run.ended_at,
+                report_id=run.report_id or report.report_id,
+                budget=updated_budget,
+            )
+            self._validate_terminal_report(report, updated_run, event)
+            self._insert_run_report(report)
+            self._insert_run_event(event)
+            self._update_run_row(updated_run)
+            self._connection.execute("COMMIT")
+            return self.load_run_record(run.run_id)
+        except StorageError:
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise
+        except sqlite3.IntegrityError as exc:
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise StorageConflictError("Run report conflicts with existing data") from exc
+        except sqlite3.Error as exc:
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise StorageError(f"could not finish Run: {exc}") from exc
+
+    def cancel_run(self, run_id: str, reason: str, cancelled_at: datetime) -> tuple[RunRecord, int | None]:
+        """Cancel a queued/running Run once; repeated calls return its terminal state."""
+
+        try:
+            self._connection.execute("BEGIN IMMEDIATE")
+            record = self.load_run_record(run_id)
+            if record.run.status not in {"queued", "running"}:
+                self._connection.execute("COMMIT")
+                return record, None
+            next_sequence = self._next_run_sequence(run_id)
+            if record.run.budget.events_used + 1 > record.run.budget.max_events:
+                raise StorageInputError("Run event budget is exhausted")
+            event = RunCancelledEvent(
+                run_id=run_id,
+                sequence=next_sequence,
+                timestamp=cancelled_at,
+                payload=RunCancelledPayload(status="cancelled", reason=reason),
+            )
+            updated_budget = record.run.budget.model_copy(
+                update={"events_used": record.run.budget.events_used + 1}
+            )
+            updated_run = _validated_run(
+                record.run,
+                status="cancelled",
+                ended_at=cancelled_at,
+                report_id=f"report-{run_id}",
+                budget=updated_budget,
+            )
+            report = _terminal_run_report(
+                record.run,
+                status="cancelled",
+                terminal_sequence=next_sequence,
+                summary="Run was cancelled before it produced a complete analysis conclusion.",
+            )
+            self._insert_run_report(report)
+            self._insert_run_event(event)
+            self._update_run_row(updated_run)
+            self._connection.execute("COMMIT")
+            return self.load_run_record(run_id), next_sequence
+        except StorageError:
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise
+        except sqlite3.Error as exc:
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise StorageError(f"could not cancel Run: {exc}") from exc
+
+    def recover_incomplete_runs(self, interrupted_at: datetime) -> int:
+        """Mark queued/running Runs interrupted after a service restart."""
+
+        rows = self._connection.execute(
+            "SELECT run_id FROM runs WHERE status IN ('queued', 'running') ORDER BY created_at, run_id"
+        ).fetchall()
+        recovered = 0
+        for row in rows:
+            try:
+                self._connection.execute("BEGIN IMMEDIATE")
+                record = self.load_run_record(row["run_id"])
+                if record.run.status not in {"queued", "running"}:
+                    self._connection.execute("COMMIT")
+                    continue
+                next_sequence = self._next_run_sequence(record.run.run_id)
+                if record.run.budget.events_used + 1 > record.run.budget.max_events:
+                    raise StorageError("incomplete Run has no room for interruption event")
+                event = RunInterruptedEvent(
+                    run_id=record.run.run_id,
+                    sequence=next_sequence,
+                    timestamp=interrupted_at,
+                    payload=RunInterruptedPayload(
+                        status="interrupted",
+                        reason="Run was interrupted by a service restart",
+                    ),
+                )
+                updated_budget = record.run.budget.model_copy(
+                    update={"events_used": record.run.budget.events_used + 1}
+                )
+                updated_run = _validated_run(
+                    record.run,
+                    status="interrupted",
+                    ended_at=interrupted_at,
+                    report_id=f"report-{record.run.run_id}",
+                    budget=updated_budget,
+                )
+                report = _terminal_run_report(
+                    record.run,
+                    status="interrupted",
+                    terminal_sequence=next_sequence,
+                    summary="Run was interrupted by a service restart before it produced a complete analysis conclusion.",
+                )
+                self._insert_run_report(report)
+                self._insert_run_event(event)
+                self._update_run_row(updated_run)
+                self._connection.execute("COMMIT")
+                recovered += 1
+            except StorageError:
+                try:
+                    self._connection.execute("ROLLBACK")
+                except sqlite3.Error:
+                    pass
+                raise
+            except sqlite3.Error as exc:
+                try:
+                    self._connection.execute("ROLLBACK")
+                except sqlite3.Error:
+                    pass
+                raise StorageError(f"could not recover Run: {exc}") from exc
+        return recovered
+
+    def load_run_report(self, project_id: str, session_id: str, run_id: str):
+        """Read a saved report only inside its project/session scope."""
+
+        self._require_run_scope(project_id, session_id, run_id)
+        row = self._connection.execute(
+            "SELECT report_json FROM run_reports WHERE run_id = ?",
+            (run_id,),
+        ).fetchone()
+        if row is None:
+            raise StorageNotFoundError("Run report was not found")
+        try:
+            return Report.model_validate(json.loads(row["report_json"]))
+        except (json.JSONDecodeError, TypeError, ValidationError) as exc:
+            raise StorageError("persisted Run report is invalid") from exc
+
+    def _require_run_scope(self, project_id: str, session_id: str, run_id: str) -> RunRecord:
+        record = self.load_run_record(run_id)
+        if record.run.project_id != project_id or record.run.session_id != session_id:
+            raise StorageNotFoundError("Run is outside the requested project/session")
+        return record
+
+    def _next_run_sequence(self, run_id: str) -> int:
+        row = self._connection.execute(
+            "SELECT COALESCE(MAX(sequence), 0) + 1 AS next_sequence FROM run_events WHERE run_id = ?",
+            (run_id,),
+        ).fetchone()
+        return int(row["next_sequence"])
+
+    def _insert_run_event(self, event: Event) -> None:
+        self._connection.execute(
+            "INSERT INTO run_events (run_id, sequence, type, timestamp, event_json) VALUES (?, ?, ?, ?, ?)",
+            (
+                event.run_id,
+                event.sequence,
+                event.type,
+                _datetime_text(event.timestamp),
+                _json_text(event),
+            ),
+        )
+
+    def _insert_run_report(self, report: Report) -> None:
+        self._connection.execute(
+            "INSERT INTO run_reports (report_id, run_id, project_id, session_id, index_id, report_json) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                report.report_id,
+                report.run_id,
+                report.project_id,
+                report.session_id,
+                report.index_id,
+                _json_text(report),
+            ),
+        )
+
+    @staticmethod
+    def _validate_terminal_report(report: Report, run: Run, event: Event) -> None:
+        if (
+            report.run_id != run.run_id
+            or report.project_id != run.project_id
+            or report.session_id != run.session_id
+            or report.index_id != run.index_id
+            or report.status != run.status
+            or run.report_id != report.report_id
+            or report.terminal_sequence != event.sequence
+        ):
+            raise StorageInputError("terminal report does not match the Run transition")
+        event_report_id = getattr(event.payload, "report_id", None)
+        if event_report_id is not None and event_report_id != report.report_id:
+            raise StorageInputError("terminal event does not match its report")
+
+    def _update_run_row(self, run: Run) -> None:
+        self._connection.execute(
+            "UPDATE runs SET status = ?, report_id = ?, updated_at = ?, run_json = ? WHERE run_id = ?",
+            (
+                run.status,
+                run.report_id,
+                _datetime_text(run.ended_at or run.started_at or run.created_at),
+                _json_text(run),
+                run.run_id,
+            ),
+        )
+
     def search_symbols(
         self,
         index_id: str,
@@ -2396,6 +3227,62 @@ def _decode_session_cursor(
     return updated_at, session_id
 
 
+def _encode_run_cursor(
+    created_at: str,
+    run_id: str,
+    *,
+    project_id: str,
+    session_id: str,
+) -> str:
+    payload = json.dumps(
+        {
+            "kind": "runs",
+            "created_at": created_at,
+            "run_id": run_id,
+            "project_id": project_id,
+            "session_id": session_id,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return base64.urlsafe_b64encode(payload).decode("ascii")
+
+
+def _decode_run_cursor(
+    cursor: str | None,
+    *,
+    project_id: str,
+    session_id: str,
+) -> tuple[str, str] | None:
+    if cursor is None:
+        return None
+    if not cursor or len(cursor) > 500:
+        raise StorageInputError("Run cursor is invalid")
+    try:
+        decoded = base64.urlsafe_b64decode(cursor.encode("ascii"))
+        payload = json.loads(decoded.decode("utf-8"))
+        kind = payload["kind"]
+        created_at = payload["created_at"]
+        run_id = payload["run_id"]
+        cursor_project_id = payload["project_id"]
+        cursor_session_id = payload["session_id"]
+        _datetime_value(created_at)
+    except (ValueError, KeyError, TypeError, UnicodeError, binascii.Error, json.JSONDecodeError) as exc:
+        raise StorageInputError("Run cursor is invalid") from exc
+    if (
+        kind != "runs"
+        or not isinstance(created_at, str)
+        or not isinstance(run_id, str)
+        or not run_id
+        or len(run_id) > 200
+        or cursor_project_id != project_id
+        or cursor_session_id != session_id
+    ):
+        raise StorageInputError("Run cursor does not match the requested project/session")
+    return created_at, run_id
+
+
 def _encode_session_message_cursor(
     sequence: int,
     *,
@@ -2527,3 +3414,41 @@ def _model_size(model: object) -> int:
     if callable(model_dump_json):
         return len(model_dump_json().encode("utf-8"))
     return len(json.dumps(model, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+
+
+def _json_text(value: object) -> str:
+    """Serialize a contract or plain payload canonically for storage and hashing."""
+
+    if hasattr(value, "model_dump"):
+        value = value.model_dump(mode="json")  # type: ignore[union-attr]
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _validated_run(run: Run, **updates: object) -> Run:
+    """Apply a persisted Run transition through the current contract validators."""
+
+    return Run.model_validate(run.model_copy(update=updates))
+
+
+def _terminal_run_report(
+    run: Run,
+    *,
+    status: Literal["cancelled", "interrupted"],
+    terminal_sequence: int,
+    summary: str,
+) -> Report:
+    """Create the bounded report retained for non-analysis terminal states."""
+
+    return Report(
+        report_id=f"report-{run.run_id}",
+        run_id=run.run_id,
+        project_id=run.project_id,
+        session_id=run.session_id,
+        index_id=run.index_id,
+        status=status,
+        outcome=status,
+        fixture_mode=True,
+        summary=summary,
+        graph=GraphSnapshot(index_id=run.index_id),
+        terminal_sequence=terminal_sequence,
+    )

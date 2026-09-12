@@ -23,6 +23,10 @@ from .contracts import (
     CreateProjectRequest,
     CreateSessionRequest,
     AppendSessionMessageRequest,
+    CreateRunRequest,
+    CreateRunResponse,
+    CancelRunRequest,
+    CancelRunResponse,
     FeatureGeneration,
     FeatureGenerationListResponse,
     FeatureGenerationRequest,
@@ -45,8 +49,16 @@ from .contracts import (
     Project,
     ProjectIndexListResponse,
     ProjectListResponse,
+    ReportResponse,
     ReadSourceParams,
     ReadSourceSuccess,
+    Run,
+    RunBudget,
+    RunEventsResponse,
+    RunInput,
+    RunListResponse,
+    RunStatusResponse,
+    RunToolResultsResponse,
     SearchCodeParams,
     SearchCodeSuccess,
     SearchIndexResponse,
@@ -84,7 +96,9 @@ from .storage import (
     StorageInputError,
     StorageNotFoundError,
     SessionRecord,
+    RunRecord,
 )
+from .run_execution import RunExecutor
 
 
 class ServiceError(RuntimeError):
@@ -125,6 +139,7 @@ class RepositoryRegistry:
         mcp_github_import_enabled: bool | None = None,
         mcp_feature_generation_enabled: bool | None = None,
         mcp_session_write_enabled: bool | None = None,
+        mcp_run_write_enabled: bool | None = None,
     ) -> None:
         normalized: dict[str, RepositorySpec] = {}
         for repository_id, repository_root in roots.items():
@@ -183,6 +198,11 @@ class RepositoryRegistry:
             if mcp_session_write_enabled is None
             else mcp_session_write_enabled
         )
+        self._mcp_run_write_enabled = (
+            _env_flag("CODETRAIL_MCP_RUN_WRITE_ENABLED")
+            if mcp_run_write_enabled is None
+            else mcp_run_write_enabled
+        )
         self._lock = threading.RLock()
         self._runtime_source_roots: dict[str, Path] = {}
         self._specs = normalized
@@ -196,6 +216,7 @@ class RepositoryRegistry:
         mcp_github_import_enabled: bool | None = None,
         mcp_feature_generation_enabled: bool | None = None,
         mcp_session_write_enabled: bool | None = None,
+        mcp_run_write_enabled: bool | None = None,
     ) -> RepositoryRegistry:
         raw = os.getenv("CODETRAIL_REPOSITORIES", "").strip()
         payload: dict[str, str] = {}
@@ -224,6 +245,7 @@ class RepositoryRegistry:
             mcp_github_import_enabled=mcp_github_import_enabled,
             mcp_feature_generation_enabled=mcp_feature_generation_enabled,
             mcp_session_write_enabled=mcp_session_write_enabled,
+            mcp_run_write_enabled=mcp_run_write_enabled,
         )
 
     @property
@@ -263,6 +285,10 @@ class RepositoryRegistry:
     @property
     def mcp_session_write_enabled(self) -> bool:
         return self._mcp_session_write_enabled
+
+    @property
+    def mcp_run_write_enabled(self) -> bool:
+        return self._mcp_run_write_enabled
 
     @property
     def allowed_import_roots(self) -> tuple[Path, ...]:
@@ -602,6 +628,8 @@ class IndexService:
                     run_id=request.run_id,
                     index_id=request.index_id,
                     completed_sequence=completed_sequence,
+                    root=result.root,
+                    nodes=list(result.nodes),
                     neighbors=result.neighbors,
                     truncated=result.truncated,
                     truncation_reason=result.truncation_reason,
@@ -646,6 +674,8 @@ class WorkspaceService:
         self.github_client = github_client or GitHubClient()
         self.feature_adapter_factory = feature_adapter_factory
         self._recover_interrupted_builds()
+        self._recover_interrupted_runs()
+        self.run_executor = RunExecutor(self)
 
     def create_project(self, request: CreateProjectRequest) -> Project:
         spec = self.registry.spec_for(request.repository_id)
@@ -906,6 +936,271 @@ class WorkspaceService:
             raise ServiceError("invalid_input", 400, "session message parameters are invalid") from exc
         except StorageError as exc:
             raise ServiceError("internal_error", 500, "local session storage failed") from exc
+
+    def create_run(self, project_id: str, session_id: str, request: CreateRunRequest) -> CreateRunResponse:
+        """Freeze a saved Session prefix and submit one explicit fixture Run."""
+
+        if request.mode != "fixture":
+            raise ServiceError("forbidden", 403, "real model Runs are not enabled in this execution step")
+        project = self._find_project(project_id)
+        fingerprint = _run_creation_fingerprint(project_id, session_id, request)
+        try:
+            with self.registry.store_for_repository(project.repository_id) as store:
+                if request.idempotency_key is not None:
+                    existing = store.find_run_by_idempotency(
+                        project_id,
+                        session_id,
+                        request.idempotency_key,
+                    )
+                    if existing is not None:
+                        if existing.request_fingerprint != fingerprint:
+                            raise ServiceError(
+                                "conflict",
+                                409,
+                                "Run idempotency key is already bound to a different request",
+                            )
+                        return _run_create_response(existing.run)
+
+                session = store.load_session(session_id)
+                if session.project_id != project_id:
+                    raise StorageNotFoundError("session is outside the requested project")
+                if request.index_id != session.index_id:
+                    raise ServiceError(
+                        "conflict",
+                        409,
+                        "Run index must match the Session's fixed snapshot",
+                    )
+                index = store.load_index_snapshot(session.index_id)
+                if index.status != "ready":
+                    raise ServiceError("conflict", 409, "Run requires a ready Session snapshot")
+                feature_generation_id = request.feature_generation_id or session.feature_generation_id
+                if feature_generation_id is not None:
+                    generation = store.load_feature_generation(feature_generation_id)
+                    if generation.project_id != project_id or generation.index.index_id != session.index_id:
+                        raise StorageNotFoundError("feature generation is outside the Run snapshot")
+                cutoff = request.message_end_sequence or session.message_count
+                if cutoff < 1:
+                    raise ServiceError("conflict", 409, "Run requires at least one saved Session message")
+                messages = store.load_session_messages_for_run(project_id, session_id, cutoff)
+                input_chars = sum(len(message.content) for message in messages)
+                try:
+                    budget = RunBudget.model_validate(
+                        {**request.budget.model_dump(mode="python"), "input_chars_used": input_chars}
+                    )
+                except ValueError as exc:
+                    raise ServiceError("budget_exceeded", 409, "Run input exceeds its configured budget") from exc
+                input_hash = _run_input_hash(messages)
+                frozen_at = datetime.now(timezone.utc)
+                run_input = RunInput(
+                    project_id=project_id,
+                    session_id=session_id,
+                    index_id=session.index_id,
+                    feature_generation_id=feature_generation_id,
+                    message_end_sequence=cutoff,
+                    messages=list(messages),
+                    input_hash=input_hash,
+                    input_chars=input_chars,
+                    frozen_at=frozen_at,
+                )
+                run = Run(
+                    run_id=f"run-{uuid4().hex}",
+                    project_id=project_id,
+                    session_id=session_id,
+                    index_id=session.index_id,
+                    feature_generation_id=feature_generation_id,
+                    issue=request.issue,
+                    mode="fixture",
+                    fixture_scenario=request.fixture_scenario,
+                    model=request.model,
+                    prompt_version=request.prompt_version,
+                    execution_version=request.execution_version,
+                    status="queued",
+                    budget=budget,
+                    message_end_sequence=cutoff,
+                    input_hash=input_hash,
+                    input_chars=input_chars,
+                    created_at=frozen_at,
+                )
+                try:
+                    record, created = store.create_run(
+                        run,
+                        run_input,
+                        idempotency_key=request.idempotency_key,
+                        request_fingerprint=fingerprint,
+                    )
+                except StorageConflictError:
+                    if request.idempotency_key is None:
+                        raise
+                    existing = store.find_run_by_idempotency(project_id, session_id, request.idempotency_key)
+                    if existing is None or existing.request_fingerprint != fingerprint:
+                        raise
+                    return _run_create_response(existing.run)
+        except ServiceError:
+            raise
+        except StorageConflictError as exc:
+            raise ServiceError("conflict", 409, "Session already has an active Run") from exc
+        except StorageNotFoundError as exc:
+            raise ServiceError("not_found", 404, "project, Session, index, or generation was not found") from exc
+        except StorageInputError as exc:
+            message = str(exc)
+            code = "budget_exceeded" if "budget" in message.lower() else "invalid_input"
+            raise ServiceError(code, 409 if code == "budget_exceeded" else 400, message) from exc
+        except StorageError as exc:
+            raise ServiceError("internal_error", 500, "local Run storage failed") from exc
+        if created:
+            self.run_executor.submit(record.run)
+        return _run_create_response(record.run)
+
+    def get_run(self, project_id: str, session_id: str, run_id: str) -> RunStatusResponse:
+        record = self._load_run_record(project_id, session_id, run_id)
+        return RunStatusResponse(run=record.run, input=record.input)
+
+    def list_runs(
+        self,
+        project_id: str,
+        session_id: str,
+        *,
+        limit: int = 40,
+        cursor: str | None = None,
+    ) -> RunListResponse:
+        project = self._find_project(project_id)
+        try:
+            with self.registry.store_for_repository(project.repository_id) as store:
+                page = store.list_runs(project_id, session_id, limit=limit, cursor=cursor)
+        except StorageNotFoundError as exc:
+            raise ServiceError("not_found", 404, "session was not found") from exc
+        except StorageInputError as exc:
+            raise ServiceError("invalid_input", 400, "Run history parameters are invalid") from exc
+        except StorageError as exc:
+            raise ServiceError("internal_error", 500, "local Run storage failed") from exc
+        return RunListResponse(
+            project_id=project_id,
+            session_id=session_id,
+            runs=list(page.runs),
+            next_cursor=page.next_cursor,
+            has_more=page.has_more,
+        )
+
+    def list_run_events(
+        self,
+        project_id: str,
+        session_id: str,
+        run_id: str,
+        *,
+        after_sequence: int = 0,
+        limit: int = 100,
+    ) -> RunEventsResponse:
+        project = self._find_project(project_id)
+        try:
+            with self.registry.store_for_repository(project.repository_id) as store:
+                page = store.load_run_events(
+                    project_id,
+                    session_id,
+                    run_id,
+                    after_sequence=after_sequence,
+                    limit=limit,
+                )
+        except StorageNotFoundError as exc:
+            raise ServiceError("not_found", 404, "Run was not found") from exc
+        except StorageInputError as exc:
+            raise ServiceError("invalid_input", 400, "Run event parameters are invalid") from exc
+        except StorageError as exc:
+            raise ServiceError("internal_error", 500, "local Run event storage failed") from exc
+        return RunEventsResponse(
+            project_id=project_id,
+            session_id=session_id,
+            run_id=run_id,
+            events=list(page.events),
+            next_after_sequence=page.next_after_sequence,
+            has_more=page.has_more,
+        )
+
+    def list_run_tool_results(
+        self,
+        project_id: str,
+        session_id: str,
+        run_id: str,
+        *,
+        after_sequence: int = 0,
+        limit: int = 40,
+    ) -> RunToolResultsResponse:
+        project = self._find_project(project_id)
+        try:
+            with self.registry.store_for_repository(project.repository_id) as store:
+                page = store.load_run_tool_results(
+                    project_id,
+                    session_id,
+                    run_id,
+                    after_sequence=after_sequence,
+                    limit=limit,
+                )
+        except StorageNotFoundError as exc:
+            raise ServiceError("not_found", 404, "Run was not found") from exc
+        except StorageInputError as exc:
+            raise ServiceError("invalid_input", 400, "Run tool-result parameters are invalid") from exc
+        except StorageError as exc:
+            raise ServiceError("internal_error", 500, "local Run result storage failed") from exc
+        return RunToolResultsResponse(
+            project_id=project_id,
+            session_id=session_id,
+            run_id=run_id,
+            results=list(page.results),
+            next_after_sequence=page.next_after_sequence,
+            has_more=page.has_more,
+        )
+
+    def get_run_report(self, project_id: str, session_id: str, run_id: str) -> ReportResponse:
+        project = self._find_project(project_id)
+        try:
+            with self.registry.store_for_repository(project.repository_id) as store:
+                report = store.load_run_report(project_id, session_id, run_id)
+        except StorageNotFoundError as exc:
+            raise ServiceError("not_found", 404, "Run report is not available") from exc
+        except StorageError as exc:
+            raise ServiceError("internal_error", 500, "local Run report storage failed") from exc
+        return ReportResponse(report=report)
+
+    def cancel_run(
+        self,
+        project_id: str,
+        session_id: str,
+        run_id: str,
+        request: CancelRunRequest,
+    ) -> CancelRunResponse:
+        project = self._find_project(project_id)
+        try:
+            with self.registry.store_for_repository(project.repository_id) as store:
+                record = store._require_run_scope(project_id, session_id, run_id)
+                cancelled, event_sequence = store.cancel_run(
+                    run_id,
+                    request.reason,
+                    datetime.now(timezone.utc),
+                )
+        except StorageNotFoundError as exc:
+            raise ServiceError("not_found", 404, "Run was not found") from exc
+        except StorageInputError as exc:
+            raise ServiceError("conflict", 409, str(exc)) from exc
+        except StorageError as exc:
+            raise ServiceError("internal_error", 500, "local Run cancellation failed") from exc
+        self.run_executor.signal_cancel(run_id)
+        return CancelRunResponse(
+            run_id=cancelled.run.run_id,
+            project_id=cancelled.run.project_id,
+            session_id=cancelled.run.session_id,
+            index_id=cancelled.run.index_id,
+            status=cancelled.run.status,
+            cancel_event_sequence=event_sequence,
+        )
+
+    def _load_run_record(self, project_id: str, session_id: str, run_id: str) -> RunRecord:
+        project = self._find_project(project_id)
+        try:
+            with self.registry.store_for_repository(project.repository_id) as store:
+                return store._require_run_scope(project_id, session_id, run_id)
+        except StorageNotFoundError as exc:
+            raise ServiceError("not_found", 404, "Run was not found") from exc
+        except StorageError as exc:
+            raise ServiceError("internal_error", 500, "local Run storage failed") from exc
 
     def create_project_index(
         self,
@@ -1825,6 +2120,17 @@ class WorkspaceService:
             with self.registry.store_for_repository(repository_id) as store:
                 store.recover_building_projects()
 
+    def _recover_interrupted_runs(self) -> None:
+        """Close persisted queued/running Runs before accepting new work."""
+
+        now = datetime.now(timezone.utc)
+        for repository_id in self.registry.repository_ids:
+            database_path = self.registry.storage_root_for(repository_id) / ".codetrail" / "index.sqlite3"
+            if not database_path.is_file():
+                continue
+            with self.registry.store_for_repository(repository_id) as store:
+                store.recover_incomplete_runs(now)
+
 
 def is_loopback_host(host: str | None) -> bool:
     if host is None or host.casefold() == "localhost":
@@ -2081,6 +2387,37 @@ def _session_message_fingerprint(
     content: str,
 ) -> str:
     return _session_fingerprint("append", project_id, session_id, source, content)
+
+
+def _run_creation_fingerprint(
+    project_id: str,
+    session_id: str,
+    request: CreateRunRequest,
+) -> str:
+    payload = {
+        "kind": "create-run-v1",
+        "project_id": project_id,
+        "session_id": session_id,
+        "request": request.model_dump(mode="json", exclude={"idempotency_key"}),
+    }
+    serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def _run_input_hash(messages: tuple[SessionMessage, ...]) -> str:
+    payload = [message.model_dump(mode="json") for message in messages]
+    serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
+def _run_create_response(run: Run) -> CreateRunResponse:
+    return CreateRunResponse(
+        run_id=run.run_id,
+        project_id=run.project_id,
+        session_id=run.session_id,
+        index_id=run.index_id,
+        status="queued",
+    )
 
 
 def _session_fingerprint(*parts: str | None) -> str:

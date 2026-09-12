@@ -13,7 +13,7 @@
 - `responses/`：三个 `FixtureResponseSet` 固定响应包，包含工具结果、结构化模型输出、报告和事件序列。
 - `../contracts/schemas/codetrail.json`：版本为 `0.1.0` 的聚合 JSON Schema。
 
-每个场景目录的 `scenario.json` 具有稳定场景 ID，并引用独立的 Issue、演示控制和预期结果文件。工具失败场景的注入目前只有定义，`implemented` 明确为 `false`，不能当作已实现或已验证。
+每个场景目录的 `scenario.json` 具有稳定场景 ID，并引用独立的 Issue、演示控制和预期结果文件。工具失败场景的 `read_source` 注入由本地 Run 执行器实际驱动，仍只允许 fixture 模式，不代表真实供应商或任意仓库执行已经开放。
 
 ## 已知 Bug 与复现
 
@@ -50,4 +50,4 @@ Set-Location ../..
 uv run --project apps/api python fixtures/generate_responses.py
 ```
 
-当前校验不启动 API、不调用真实模型，也不执行场景 JSON 中的任意 `command`。工具失败响应没有源码 evidence，失败前已返回的 evidence 会保留；证据不足响应正常结束但 outcome 为 `insufficient_evidence`。
+当前校验不启动 API、不调用真实模型，也不执行场景 JSON 中的任意 `command`。Run 的工具失败响应会保留失败前已返回的同快照 evidence，并把注入的失败结果写入事件/工具结果；证据不足响应正常结束但 outcome 为 `insufficient_evidence`。完整 Run 生命周期由 API fixture executor 另行验证。

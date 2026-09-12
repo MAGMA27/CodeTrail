@@ -4,14 +4,28 @@
       {
         "payload": {
           "budget": {
+            "events_used": 0,
+            "input_chars_used": 74,
+            "max_events": 100,
+            "max_input_chars": 60000,
+            "max_output_chars": 50000,
             "max_seconds": 120,
             "max_source_lines": 200,
             "max_tool_calls": 12,
+            "max_total_source_lines": 800,
+            "output_chars_used": 0,
+            "source_lines_used": 0,
             "tool_calls_used": 0
           },
+          "execution_version": "run-fixture-v1",
+          "feature_generation_id": null,
           "index_id": "index-timeout-demo-v1",
+          "input_hash": "89bd659e8e48117f8616ecc84d04812a89cd76c95bf83b4877c6a8f1720cb53f",
           "issue_id": "issue-external-service-empty-response",
-          "mode": "fixture"
+          "message_end_sequence": 1,
+          "mode": "fixture",
+          "project_id": "project-fixture-timeout-demo",
+          "session_id": "session-fixture-timeout-demo"
         },
         "run_id": "run-insufficient-external-service",
         "sequence": 1,
@@ -112,6 +126,28 @@
     "snapshot_hash": "b1c5c5538e60b43882b2fef5dc0270fb0ec2aedcb49763353fd8b1edfa0d57dd",
     "status": "ready"
   },
+  "input": {
+    "feature_generation_id": null,
+    "frozen_at": "2026-09-10T00:00:00Z",
+    "index_id": "index-timeout-demo-v1",
+    "input_chars": 74,
+    "input_hash": "89bd659e8e48117f8616ecc84d04812a89cd76c95bf83b4877c6a8f1720cb53f",
+    "message_end_sequence": 1,
+    "messages": [
+      {
+        "content": "外部支付服务返回空响应\n生产环境偶发收到外部支付服务的空响应。当前演示仓库不包含该外部服务、网络交互或对应响应样本，请判断现有代码是否足以定位根因。",
+        "created_at": "2026-09-10T00:00:00Z",
+        "message_id": "message-fixture-timeout-demo",
+        "schema_version": "0.1.0",
+        "sequence": 1,
+        "session_id": "session-fixture-timeout-demo",
+        "source": "human"
+      }
+    ],
+    "project_id": "project-fixture-timeout-demo",
+    "schema_version": "0.1.0",
+    "session_id": "session-fixture-timeout-demo"
+  },
   "mode": "fixture",
   "model_output": {
     "candidate_links": [],
@@ -158,22 +194,38 @@
     },
     "index_id": "index-timeout-demo-v1",
     "outcome": "insufficient_evidence",
+    "project_id": "project-fixture-timeout-demo",
     "report_id": "report-insufficient-external-service",
     "run_id": "run-insufficient-external-service",
     "schema_version": "0.1.0",
+    "session_id": "session-fixture-timeout-demo",
     "status": "succeeded",
     "summary": "证据不足：需要外部服务日志、集成样本或对应仓库才能继续核查。",
     "terminal_sequence": 7
   },
   "run": {
     "budget": {
+      "events_used": 0,
+      "input_chars_used": 74,
+      "max_events": 100,
+      "max_input_chars": 60000,
+      "max_output_chars": 50000,
       "max_seconds": 120,
       "max_source_lines": 200,
       "max_tool_calls": 12,
+      "max_total_source_lines": 800,
+      "output_chars_used": 0,
+      "source_lines_used": 0,
       "tool_calls_used": 1
     },
+    "created_at": "2026-09-10T00:00:00Z",
     "ended_at": "2026-09-10T00:00:07Z",
+    "execution_version": "run-fixture-v1",
+    "feature_generation_id": null,
+    "fixture_scenario": "insufficient-external-service",
     "index_id": "index-timeout-demo-v1",
+    "input_chars": 74,
+    "input_hash": "89bd659e8e48117f8616ecc84d04812a89cd76c95bf83b4877c6a8f1720cb53f",
     "issue": {
       "body": "生产环境偶发收到外部支付服务的空响应。当前演示仓库不包含该外部服务、网络交互或对应响应样本，请判断现有代码是否足以定位根因。",
       "issue_id": "issue-external-service-empty-response",
@@ -182,11 +234,15 @@
       "stacktrace": null,
       "title": "外部支付服务返回空响应"
     },
+    "message_end_sequence": 1,
     "mode": "fixture",
     "model": "fixture:timeout-demo",
+    "project_id": "project-fixture-timeout-demo",
     "prompt_version": "fixture-v1",
+    "report_id": null,
     "run_id": "run-insufficient-external-service",
     "schema_version": "0.1.0",
+    "session_id": "session-fixture-timeout-demo",
     "started_at": "2026-09-10T00:00:00Z",
     "status": "succeeded"
   },

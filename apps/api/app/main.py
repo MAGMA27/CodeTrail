@@ -20,6 +20,10 @@ from .contracts import (
     CreateProjectIndexRequest,
     CreateProjectRequest,
     AppendSessionMessageRequest,
+    CancelRunRequest,
+    CancelRunResponse,
+    CreateRunRequest,
+    CreateRunResponse,
     CreateSessionRequest,
     EdgeKind,
     FeatureGraphResponse,
@@ -37,6 +41,11 @@ from .contracts import (
     ProjectIndexListResponse,
     ProjectListResponse,
     ProjectOverview,
+    ReportResponse,
+    RunEventsResponse,
+    RunListResponse,
+    RunStatusResponse,
+    RunToolResultsResponse,
     SearchIndexResponse,
     SessionListResponse,
     SessionMessageResponse,
@@ -87,6 +96,7 @@ def create_app(
     mcp_github_import_enabled: bool | None = None,
     mcp_feature_generation_enabled: bool | None = None,
     mcp_session_write_enabled: bool | None = None,
+    mcp_run_write_enabled: bool | None = None,
     github_client: GitHubClient | None = None,
     feature_adapter_factory: Callable[[str], FeatureModelAdapter] | None = None,
 ) -> FastAPI:
@@ -98,6 +108,7 @@ def create_app(
             mcp_github_import_enabled=mcp_github_import_enabled,
             mcp_feature_generation_enabled=mcp_feature_generation_enabled,
             mcp_session_write_enabled=mcp_session_write_enabled,
+            mcp_run_write_enabled=mcp_run_write_enabled,
         )
         if repository_roots is None
         else RepositoryRegistry(
@@ -108,6 +119,7 @@ def create_app(
             mcp_github_import_enabled=mcp_github_import_enabled,
             mcp_feature_generation_enabled=mcp_feature_generation_enabled,
             mcp_session_write_enabled=mcp_session_write_enabled,
+            mcp_run_write_enabled=mcp_run_write_enabled,
         )
     )
     index_service = IndexService(registry)
@@ -285,6 +297,114 @@ def create_app(
             request,
         )
         return SessionMessageResponse(message=message)
+
+    @application.post(
+        "/api/projects/{project_id}/sessions/{session_id}/runs",
+        response_model=CreateRunResponse,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def create_run(
+        project_id: str,
+        session_id: str,
+        request: CreateRunRequest,
+    ) -> CreateRunResponse:
+        return await run_in_threadpool(workspace_service.create_run, project_id, session_id, request)
+
+    @application.get(
+        "/api/projects/{project_id}/sessions/{session_id}/runs",
+        response_model=RunListResponse,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def list_runs(
+        project_id: str,
+        session_id: str,
+        limit: int = Query(default=40, ge=1, le=40),
+        cursor: str | None = Query(default=None, max_length=500),
+    ) -> RunListResponse:
+        return await run_in_threadpool(
+            workspace_service.list_runs,
+            project_id,
+            session_id,
+            limit=limit,
+            cursor=cursor,
+        )
+
+    @application.get(
+        "/api/projects/{project_id}/sessions/{session_id}/runs/{run_id}",
+        response_model=RunStatusResponse,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def get_run(project_id: str, session_id: str, run_id: str) -> RunStatusResponse:
+        return await run_in_threadpool(workspace_service.get_run, project_id, session_id, run_id)
+
+    @application.get(
+        "/api/projects/{project_id}/sessions/{session_id}/runs/{run_id}/events",
+        response_model=RunEventsResponse,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def list_run_events(
+        project_id: str,
+        session_id: str,
+        run_id: str,
+        after_sequence: int = Query(default=0, ge=0),
+        limit: int = Query(default=100, ge=1, le=100),
+    ) -> RunEventsResponse:
+        return await run_in_threadpool(
+            workspace_service.list_run_events,
+            project_id,
+            session_id,
+            run_id,
+            after_sequence=after_sequence,
+            limit=limit,
+        )
+
+    @application.get(
+        "/api/projects/{project_id}/sessions/{session_id}/runs/{run_id}/tool-results",
+        response_model=RunToolResultsResponse,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def list_run_tool_results(
+        project_id: str,
+        session_id: str,
+        run_id: str,
+        after_sequence: int = Query(default=0, ge=0),
+        limit: int = Query(default=40, ge=1, le=40),
+    ) -> RunToolResultsResponse:
+        return await run_in_threadpool(
+            workspace_service.list_run_tool_results,
+            project_id,
+            session_id,
+            run_id,
+            after_sequence=after_sequence,
+            limit=limit,
+        )
+
+    @application.get(
+        "/api/projects/{project_id}/sessions/{session_id}/runs/{run_id}/report",
+        response_model=ReportResponse,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def get_run_report(project_id: str, session_id: str, run_id: str) -> ReportResponse:
+        return await run_in_threadpool(workspace_service.get_run_report, project_id, session_id, run_id)
+
+    @application.post(
+        "/api/projects/{project_id}/sessions/{session_id}/runs/{run_id}/cancel",
+        response_model=CancelRunResponse,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def cancel_run(
+        project_id: str,
+        session_id: str,
+        run_id: str,
+        request: CancelRunRequest,
+    ) -> CancelRunResponse:
+        return await run_in_threadpool(
+            workspace_service.cancel_run,
+            project_id,
+            session_id,
+            run_id,
+            request,
+        )
 
     @application.get(
         "/api/projects/{project_id}/indexes",

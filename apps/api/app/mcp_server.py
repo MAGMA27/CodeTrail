@@ -13,6 +13,8 @@ from pydantic import Field
 
 from .contracts import (
     EvidenceReference,
+    CancelRunRequest,
+    CreateRunRequest,
     FeatureGraphResponse,
     FeatureGenerationBudget,
     FeatureGenerationListResponse,
@@ -23,6 +25,7 @@ from .contracts import (
     GitHubImportRequest,
     GitHubImportResponse,
     Identifier,
+    Issue,
     AppendSessionMessageRequest,
     CreateSessionRequest,
     McpError,
@@ -44,10 +47,22 @@ from .contracts import (
     McpSessionMessagesResponse,
     McpSessionResponse,
     McpSourceResponse,
+    McpRunCancelResponse,
+    McpRunEventsResponse,
+    McpRunListResponse,
+    McpRunReportResponse,
+    McpRunResponse,
+    McpRunStartResponse,
+    McpRunToolResultsResponse,
     LocalImportRequest,
     LocalImportResponse,
     ProjectIndexListResponse,
     ProjectOverview,
+    ReportResponse,
+    RunEventsResponse,
+    RunListResponse,
+    RunStatusResponse,
+    RunToolResultsResponse,
     SessionListResponse,
     SessionMessage,
     SessionMessagesResponse,
@@ -83,6 +98,15 @@ _SessionCursor = Annotated[str | None, Field(max_length=500, description="Opaque
 _SessionMessageLimit = Annotated[int, Field(ge=1, le=100, description="Maximum session messages.")]
 _SessionMessageCursor = Annotated[str | None, Field(max_length=500, description="Opaque message cursor from a previous page.")]
 _SessionId = Annotated[Identifier, Field(description="Stable CodeTrail session ID.")]
+_RunCursor = Annotated[str | None, Field(max_length=500, description="Opaque Run history cursor from a previous page.")]
+_RunSequence = Annotated[int, Field(ge=0, description="Return events or results after this sequence.")]
+_RunEventLimit = Annotated[int, Field(ge=1, le=100, description="Maximum Run events.")]
+_RunToolLimit = Annotated[int, Field(ge=1, le=40, description="Maximum persisted tool results.")]
+_RunScenario = Literal[
+    "success-timeout-missing",
+    "insufficient-external-service",
+    "tool-failure-read-source",
+]
 McpResponse = TypeVar("McpResponse", bound=McpResultBase)
 
 
@@ -99,16 +123,17 @@ def create_mcp_server(
     github_import_enabled = service.registry.mcp_github_import_enabled
     feature_generation_enabled = service.registry.mcp_feature_generation_enabled
     session_write_enabled = service.registry.mcp_session_write_enabled
+    run_write_enabled = service.registry.mcp_run_write_enabled
     server_description = (
         "Discover CodeTrail projects and query one explicitly selected immutable index. "
-        "Default tools are read-only. Explicitly enabled session writes, local/GitHub import/status/retry, and feature generation are bounded."
-        if local_import_enabled or github_import_enabled or feature_generation_enabled or session_write_enabled
+        "Default tools are read-only. Explicitly enabled session writes, fixture Run start/cancel, local/GitHub import/status/retry, and feature generation are bounded."
+        if local_import_enabled or github_import_enabled or feature_generation_enabled or session_write_enabled or run_write_enabled
         else "Discover CodeTrail projects and query one explicitly selected immutable index. "
         "All tools are read-only and never execute repository code."
     )
     server = MCPServer(
         name="codetrail",
-        title="CodeTrail workspace" if local_import_enabled or github_import_enabled or feature_generation_enabled or session_write_enabled else "CodeTrail read-only workspace",
+        title="CodeTrail workspace" if local_import_enabled or github_import_enabled or feature_generation_enabled or session_write_enabled or run_write_enabled else "CodeTrail read-only workspace",
         description=server_description,
         version="0.1.0",
         log_level="WARNING",
@@ -484,6 +509,126 @@ def create_mcp_server(
         except Exception:
             return _unexpected_failure("get_feature_graph", McpFeatureGraphResponse)
 
+    @server.tool(
+        name="list_session_runs",
+        title="List session Runs",
+        description=(
+            "Read bounded explicit Run history for one project session. "
+            "This is read-only and returns the frozen snapshot metadata for each Run."
+        ),
+        structured_output=True,
+    )
+    def list_session_runs(
+        project_id: _ProjectId,
+        session_id: _SessionId,
+        limit: _Limit = 40,
+        cursor: _RunCursor = None,
+    ) -> McpRunListResponse:
+        try:
+            result: RunListResponse = service.list_runs(
+                project_id,
+                session_id,
+                limit=limit,
+                cursor=cursor,
+            )
+            return McpRunListResponse(ok=True, result=result)
+        except ServiceError as exc:
+            return _failure(McpRunListResponse, exc)
+        except Exception:
+            return _unexpected_failure("list_session_runs", McpRunListResponse)
+
+    @server.tool(
+        name="get_session_run",
+        title="Read a session Run",
+        description="Read one Run's immutable input snapshot and current lifecycle status without starting work.",
+        structured_output=True,
+    )
+    def get_session_run(
+        project_id: _ProjectId,
+        session_id: _SessionId,
+        run_id: _ProjectId,
+    ) -> McpRunResponse:
+        try:
+            result: RunStatusResponse = service.get_run(project_id, session_id, run_id)
+            return McpRunResponse(ok=True, result=result)
+        except ServiceError as exc:
+            return _failure(McpRunResponse, exc)
+        except Exception:
+            return _unexpected_failure("get_session_run", McpRunResponse)
+
+    @server.tool(
+        name="list_run_events",
+        title="Read Run events",
+        description="Read the bounded public lifecycle/tool events for one Run in server sequence order.",
+        structured_output=True,
+    )
+    def list_run_events(
+        project_id: _ProjectId,
+        session_id: _SessionId,
+        run_id: _ProjectId,
+        after_sequence: _RunSequence = 0,
+        limit: _RunEventLimit = 100,
+    ) -> McpRunEventsResponse:
+        try:
+            result: RunEventsResponse = service.list_run_events(
+                project_id,
+                session_id,
+                run_id,
+                after_sequence=after_sequence,
+                limit=limit,
+            )
+            return McpRunEventsResponse(ok=True, result=result)
+        except ServiceError as exc:
+            return _failure(McpRunEventsResponse, exc)
+        except Exception:
+            return _unexpected_failure("list_run_events", McpRunEventsResponse)
+
+    @server.tool(
+        name="list_run_tool_results",
+        title="Read Run tool results",
+        description="Read bounded persisted allowlisted-tool results for one Run; no tool is executed by this read.",
+        structured_output=True,
+    )
+    def list_run_tool_results(
+        project_id: _ProjectId,
+        session_id: _SessionId,
+        run_id: _ProjectId,
+        after_sequence: _RunSequence = 0,
+        limit: _RunToolLimit = 40,
+    ) -> McpRunToolResultsResponse:
+        try:
+            result: RunToolResultsResponse = service.list_run_tool_results(
+                project_id,
+                session_id,
+                run_id,
+                after_sequence=after_sequence,
+                limit=limit,
+            )
+            return McpRunToolResultsResponse(ok=True, result=result)
+        except ServiceError as exc:
+            return _failure(McpRunToolResultsResponse, exc)
+        except Exception:
+            return _unexpected_failure("list_run_tool_results", McpRunToolResultsResponse)
+
+    @server.tool(
+        name="get_run_report",
+        title="Read a Run report",
+        description="Read the saved evidence-backed report for one completed Run without re-running analysis.",
+        structured_output=True,
+    )
+    def get_run_report(
+        project_id: _ProjectId,
+        session_id: _SessionId,
+        run_id: _ProjectId,
+    ) -> McpRunReportResponse:
+        try:
+            result: ReportResponse = service.get_run_report(project_id, session_id, run_id)
+            return McpRunReportResponse(ok=True, report=result.report)
+        except ServiceError as exc:
+            return _failure(McpRunReportResponse, exc)
+        except Exception:
+            return _unexpected_failure("get_run_report", McpRunReportResponse)
+
     if session_write_enabled:
 
         @server.tool(
@@ -549,6 +694,102 @@ def create_mcp_server(
                 return _failure(McpSessionMessageResponse, exc)
             except Exception:
                 return _unexpected_failure("append_session_message", McpSessionMessageResponse)
+
+    if run_write_enabled:
+
+        @server.tool(
+            name="start_session_run",
+            title="Start a fixture session Run",
+            description=(
+                "Explicitly start one bounded fixture analysis for a saved project session. "
+                "The server freezes all saved messages through message_end_sequence (or the current saved cutoff), "
+                "uses only search_code/get_neighbors/read_source, and never invokes a real provider. "
+                "This write switch is independent from session-write permission."
+            ),
+            structured_output=True,
+        )
+        def start_session_run(
+            project_id: _ProjectId,
+            session_id: _SessionId,
+            index_id: _IndexId,
+            issue_id: Annotated[str, Field(min_length=1, max_length=200)],
+            title: Annotated[str, Field(min_length=1, max_length=500)],
+            body: Annotated[str, Field(min_length=1, max_length=20_000)],
+            fixture_scenario: _RunScenario = "success-timeout-missing",
+            mode: Literal["fixture", "real"] = "fixture",
+            feature_generation_id: Annotated[str | None, Field(max_length=200)] = None,
+            message_end_sequence: Annotated[int | None, Field(ge=1)] = None,
+            model: Annotated[str | None, Field(min_length=1, max_length=200)] = None,
+            prompt_version: Annotated[str | None, Field(min_length=1, max_length=200)] = None,
+            idempotency_key: Annotated[str | None, Field(min_length=1, max_length=200)] = None,
+            max_tool_calls: Annotated[int, Field(ge=1, le=12)] = 8,
+            max_seconds: Annotated[int, Field(ge=1, le=120)] = 30,
+            max_source_lines: Annotated[int, Field(ge=1, le=200)] = 200,
+            max_total_source_lines: Annotated[int, Field(ge=1, le=2_000)] = 800,
+            max_input_chars: Annotated[int, Field(ge=1, le=100_000)] = 60_000,
+            max_output_chars: Annotated[int, Field(ge=1, le=100_000)] = 50_000,
+            max_events: Annotated[int, Field(ge=2, le=200)] = 100,
+        ) -> McpRunStartResponse:
+            try:
+                from .contracts import RunBudget
+
+                result = service.create_run(
+                    project_id,
+                    session_id,
+                    CreateRunRequest(
+                        index_id=index_id,
+                        issue=Issue(id=issue_id, title=title, body=body),
+                        mode=mode,
+                        fixture_scenario=fixture_scenario if mode == "fixture" else None,
+                        feature_generation_id=feature_generation_id,
+                        message_end_sequence=message_end_sequence,
+                        model=model,
+                        prompt_version=prompt_version,
+                        idempotency_key=idempotency_key,
+                        budget=RunBudget(
+                            max_tool_calls=max_tool_calls,
+                            max_seconds=max_seconds,
+                            max_source_lines=max_source_lines,
+                            max_total_source_lines=max_total_source_lines,
+                            max_input_chars=max_input_chars,
+                            max_output_chars=max_output_chars,
+                            max_events=max_events,
+                        ),
+                    ),
+                )
+                return McpRunStartResponse(ok=True, result=result)
+            except ServiceError as exc:
+                return _failure(McpRunStartResponse, exc)
+            except Exception:
+                return _unexpected_failure("start_session_run", McpRunStartResponse)
+
+        @server.tool(
+            name="cancel_session_run",
+            title="Cancel a session Run",
+            description=(
+                "Explicitly cancel one queued or running Run. Cancellation is idempotent, persisted as one terminal event, "
+                "and does not grant permission to append session messages."
+            ),
+            structured_output=True,
+        )
+        def cancel_session_run(
+            project_id: _ProjectId,
+            session_id: _SessionId,
+            run_id: _ProjectId,
+            reason: Annotated[str, Field(min_length=1, max_length=1_000)] = "cancelled by MCP caller",
+        ) -> McpRunCancelResponse:
+            try:
+                result = service.cancel_run(
+                    project_id,
+                    session_id,
+                    run_id,
+                    CancelRunRequest(reason=reason),
+                )
+                return McpRunCancelResponse(ok=True, result=result)
+            except ServiceError as exc:
+                return _failure(McpRunCancelResponse, exc)
+            except Exception:
+                return _unexpected_failure("cancel_session_run", McpRunCancelResponse)
 
     if feature_generation_enabled:
 

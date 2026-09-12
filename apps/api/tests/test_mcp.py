@@ -6,6 +6,7 @@ import asyncio
 import json
 import shutil
 import sys
+import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -18,6 +19,13 @@ from app.main import create_app
 ROOT = Path(__file__).resolve().parents[3]
 FIXTURE_ROOT = ROOT / "fixtures" / "repos" / "timeout-demo"
 API_ROOT = ROOT / "apps" / "api"
+RUN_READ_TOOLS = {
+    "list_session_runs",
+    "get_session_run",
+    "list_run_events",
+    "list_run_tool_results",
+    "get_run_report",
+}
 
 
 async def _request(application, method: str, target: str, payload: dict | None = None) -> tuple[int, dict]:
@@ -351,7 +359,7 @@ def test_mcp_local_import_is_opt_in_and_shares_http_state(tmp_path: Path) -> Non
                 "list_feature_generations",
                 "get_feature_generation",
                 "get_feature_graph",
-            } == disabled_names
+            } | RUN_READ_TOOLS == disabled_names
             assert "import_local_path" not in disabled_names
 
         async with Client(parameters(True), read_timeout_seconds=10) as client:
@@ -411,7 +419,7 @@ def test_mcp_local_import_is_opt_in_and_shares_http_state(tmp_path: Path) -> Non
                 "get_feature_graph",
                 "import_github_repository",
                 "retry_github_import",
-            } == github_tools
+            } | RUN_READ_TOOLS == github_tools
         return mcp_project_id
 
     mcp_project_id = asyncio.run(exercise())
@@ -474,7 +482,7 @@ def test_mcp_feature_generation_is_separately_opt_in_and_returns_citations(tmp_p
                 "generate_project_features",
                 "get_feature_generation",
                 "get_feature_graph",
-            } == tool_names
+            } | RUN_READ_TOOLS == tool_names
             generated = await client.call_tool(
                 "generate_project_features",
                 {
@@ -707,7 +715,7 @@ async def _exercise_stdio(
         "list_feature_generations",
         "get_feature_generation",
         "get_feature_graph",
-    }
+    } | RUN_READ_TOOLS
     async with Client(parameters, read_timeout_seconds=10) as client:
         tools = await client.list_tools()
         assert {tool.name for tool in tools.tools} == expected_tools
@@ -826,3 +834,160 @@ async def _exercise_stdio(
             "message": "project was not found",
             "retryable": False,
         }
+
+
+def test_mcp_run_reads_share_http_state_and_writes_are_separately_opt_in(tmp_path: Path) -> None:
+    repository = copy_fixture(tmp_path)
+    application = create_app({"timeout-demo": repository})
+    status, project = request(
+        application,
+        "POST",
+        "/api/projects",
+        {"name": "MCP Run fixture", "repository_id": "timeout-demo"},
+    )
+    assert status == 200
+    project_id = project["project_id"]
+    status, index = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/indexes",
+        {"revision": "mcp-run-v1", "dirty": False},
+    )
+    assert status == 200
+    index_id = index["index"]["index_id"]
+    status, session = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/sessions",
+        {"topic": "MCP Run", "index_id": index_id},
+    )
+    assert status == 200
+    session_id = session["session"]["session_id"]
+    status, _ = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/sessions/{session_id}/messages",
+        {"source": "human", "content": "Inspect the timeout initialization path."},
+    )
+    assert status == 200
+
+    environment = {
+        "CODETRAIL_REPOSITORIES": json.dumps({"timeout-demo": str(repository)}),
+        "CODETRAIL_WORKBENCH_URL": "http://localhost:3000",
+    }
+
+    def parameters(*, run_write: bool = False) -> StdioServerParameters:
+        configured = dict(environment)
+        if run_write:
+            configured["CODETRAIL_MCP_RUN_WRITE_ENABLED"] = "1"
+        return StdioServerParameters(
+            command=sys.executable,
+            args=["-m", "app.mcp_server"],
+            env=configured,
+            cwd=API_ROOT,
+        )
+
+    http_run_payload = {
+        "index_id": index_id,
+        "issue": {
+            "id": "mcp-http-run-issue",
+            "title": "timeout missing",
+            "body": "Inspect the missing timeout during client initialization.",
+        },
+        "mode": "fixture",
+        "fixture_scenario": "success-timeout-missing",
+    }
+    status, http_run = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/sessions/{session_id}/runs",
+        http_run_payload,
+    )
+    assert status == 200
+    http_run_id = http_run["run_id"]
+    for _ in range(100):
+        status, http_status = request(
+            application,
+            "GET",
+            f"/api/projects/{project_id}/sessions/{session_id}/runs/{http_run_id}",
+        )
+        assert status == 200
+        if http_status["run"]["status"] not in {"queued", "running"}:
+            break
+        time.sleep(0.025)
+    assert http_status["run"]["status"] == "succeeded"
+
+    async def exercise() -> None:
+        async with Client(parameters(), read_timeout_seconds=10) as client:
+            tools = {tool.name for tool in (await client.list_tools()).tools}
+            assert RUN_READ_TOOLS <= tools
+            assert "start_session_run" not in tools
+            assert "cancel_session_run" not in tools
+
+            history = await client.call_tool(
+                "list_session_runs",
+                {"project_id": project_id, "session_id": session_id},
+            )
+            assert history.structured_content["ok"] is True
+            assert history.structured_content["result"]["runs"][0]["run_id"] == http_run_id
+
+            read = await client.call_tool(
+                "get_session_run",
+                {"project_id": project_id, "session_id": session_id, "run_id": http_run_id},
+            )
+            assert read.structured_content["result"]["run"]["index_id"] == index_id
+            events = await client.call_tool(
+                "list_run_events",
+                {"project_id": project_id, "session_id": session_id, "run_id": http_run_id},
+            )
+            assert events.structured_content["result"]["events"][-1]["type"] == "run.completed"
+            results = await client.call_tool(
+                "list_run_tool_results",
+                {"project_id": project_id, "session_id": session_id, "run_id": http_run_id},
+            )
+            assert [item["tool"] for item in results.structured_content["result"]["results"]] == [
+                "search_code",
+                "read_source",
+                "get_neighbors",
+            ]
+            report = await client.call_tool(
+                "get_run_report",
+                {"project_id": project_id, "session_id": session_id, "run_id": http_run_id},
+            )
+            assert report.structured_content["report"]["outcome"] == "candidate_found"
+
+        async with Client(parameters(run_write=True), read_timeout_seconds=10) as client:
+            tools = {tool.name for tool in (await client.list_tools()).tools}
+            assert {"start_session_run", "cancel_session_run"} <= tools
+            assert "create_session" not in tools
+            started = await client.call_tool(
+                "start_session_run",
+                {
+                    "project_id": project_id,
+                    "session_id": session_id,
+                    "index_id": index_id,
+                    "issue_id": "mcp-write-run-issue",
+                    "title": "timeout missing",
+                    "body": "Inspect the timeout initialization path.",
+                    "fixture_scenario": "insufficient-external-service",
+                },
+            )
+            assert started.structured_content["ok"] is True
+            started_id = started.structured_content["result"]["run_id"]
+            for _ in range(100):
+                current = await client.call_tool(
+                    "get_session_run",
+                    {"project_id": project_id, "session_id": session_id, "run_id": started_id},
+                )
+                current_run = current.structured_content["result"]["run"]["status"]
+                if current_run not in {"queued", "running"}:
+                    break
+                await asyncio.sleep(0.025)
+            assert current_run == "succeeded"
+            report = await client.call_tool(
+                "get_run_report",
+                {"project_id": project_id, "session_id": session_id, "run_id": started_id},
+            )
+            assert report.structured_content["report"]["outcome"] == "insufficient_evidence"
+
+    asyncio.run(exercise())

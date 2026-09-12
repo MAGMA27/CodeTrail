@@ -207,9 +207,198 @@ export type SessionMessagesResponse = {
   has_more: boolean;
 };
 
+export type RunStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
+export type RunScenario =
+  | "success-timeout-missing"
+  | "insufficient-external-service"
+  | "tool-failure-read-source";
+
+export type RunBudget = {
+  max_tool_calls: number;
+  max_seconds: number;
+  max_source_lines: number;
+  max_total_source_lines: number;
+  max_input_chars: number;
+  max_output_chars: number;
+  max_events: number;
+  tool_calls_used: number;
+  source_lines_used: number;
+  input_chars_used: number;
+  output_chars_used: number;
+  events_used: number;
+};
+
+export type RunInput = {
+  schema_version: typeof SCHEMA_VERSION;
+  project_id: string;
+  session_id: string;
+  index_id: string;
+  feature_generation_id: string | null;
+  message_end_sequence: number;
+  messages: SessionMessage[];
+  input_hash: string;
+  input_chars: number;
+  frozen_at: string;
+};
+
+export type RunRecord = {
+  schema_version: typeof SCHEMA_VERSION;
+  run_id: string;
+  project_id: string;
+  session_id: string;
+  index_id: string;
+  feature_generation_id: string | null;
+  issue: { schema_version: typeof SCHEMA_VERSION; id: string; title: string; body: string; stacktrace: string | null; mentioned_paths: string[] };
+  mode: "fixture" | "real";
+  fixture_scenario: RunScenario | null;
+  model: string | null;
+  prompt_version: string | null;
+  execution_version: string;
+  status: RunStatus;
+  budget: RunBudget;
+  message_end_sequence: number;
+  input_hash: string;
+  input_chars: number;
+  created_at: string;
+  started_at: string | null;
+  ended_at: string | null;
+  report_id: string | null;
+};
+
+export type RunStatusResponse = {
+  schema_version: typeof SCHEMA_VERSION;
+  run: RunRecord;
+  input: RunInput;
+};
+
+export type CreateRunResponse = {
+  schema_version: typeof SCHEMA_VERSION;
+  run_id: string;
+  project_id: string;
+  session_id: string;
+  index_id: string;
+  status: "queued";
+};
+
+export type RunListResponse = {
+  schema_version: typeof SCHEMA_VERSION;
+  project_id: string;
+  session_id: string;
+  runs: RunRecord[];
+  next_cursor: string | null;
+  has_more: boolean;
+};
+
+export type RunEvent = {
+  run_id: string;
+  sequence: number;
+  type: string;
+  timestamp: string;
+  payload: Record<string, unknown>;
+};
+
+export type RunEventsResponse = {
+  schema_version: typeof SCHEMA_VERSION;
+  project_id: string;
+  session_id: string;
+  run_id: string;
+  events: RunEvent[];
+  next_after_sequence: number | null;
+  has_more: boolean;
+};
+
+export type RunToolResult = {
+  request_id: string;
+  run_id: string;
+  index_id: string;
+  completed_sequence: number;
+  kind: string;
+  tool: string;
+  [key: string]: unknown;
+};
+
+export type RunToolResultsResponse = {
+  schema_version: typeof SCHEMA_VERSION;
+  project_id: string;
+  session_id: string;
+  run_id: string;
+  results: RunToolResult[];
+  next_after_sequence: number | null;
+  has_more: boolean;
+};
+
+export type RunCandidateLink = {
+  candidate_id: string;
+  index_id: string;
+  source_symbol_id: string;
+  target_symbol_id: string | null;
+  relation: string;
+  evidence_ids: string[];
+};
+
+export type RunFinding = {
+  finding_id: string;
+  kind: "observation" | "hypothesis" | "suggestion";
+  text: string;
+  symbol_ids: string[];
+  evidence_ids: string[];
+};
+
+export type RunReport = {
+  schema_version: typeof SCHEMA_VERSION;
+  report_id: string;
+  run_id: string;
+  project_id: string;
+  session_id: string;
+  index_id: string;
+  status: "succeeded" | "failed" | "cancelled" | "interrupted";
+  outcome: "candidate_found" | "insufficient_evidence" | "failed" | "cancelled" | "interrupted";
+  fixture_mode: boolean;
+  summary: string;
+  graph: {
+    index_id: string;
+    nodes: SymbolRecord[];
+    static_edges: CodeEdge[];
+    unresolved: UnresolvedReference[];
+    candidate_links: RunCandidateLink[];
+    truncated: boolean;
+    truncation_reason: string | null;
+  };
+  evidence: Evidence[];
+  findings: RunFinding[];
+  candidate_links: RunCandidateLink[];
+  terminal_sequence: number;
+};
+
+export type RunReportResponse = {
+  schema_version: typeof SCHEMA_VERSION;
+  report: RunReport;
+};
+
+export type CancelRunResponse = {
+  schema_version: typeof SCHEMA_VERSION;
+  run_id: string;
+  project_id: string;
+  session_id: string;
+  index_id: string;
+  status: RunStatus;
+  cancel_event_sequence: number | null;
+};
+
 export type CreateSessionInput = {
   topic: string;
   indexId?: string;
+  featureGenerationId?: string;
+  idempotencyKey?: string;
+};
+
+export type CreateRunInput = {
+  indexId: string;
+  issueId: string;
+  title: string;
+  body: string;
+  scenario: RunScenario;
+  messageEndSequence?: number;
   featureGenerationId?: string;
   idempotencyKey?: string;
 };
@@ -802,6 +991,281 @@ export function isSessionMessagesResponse(value: unknown): value is SessionMessa
     new Set(value.messages.map((message) => message.message_id)).size === value.messages.length &&
     value.messages.every((message) => message.session_id === value.session_id) &&
     sequences.every((sequence, index) => index === 0 || sequence > sequences[index - 1])
+  );
+}
+
+function isRunStatus(value: unknown): value is RunStatus {
+  return ["queued", "running", "succeeded", "failed", "cancelled", "interrupted"].includes(String(value));
+}
+
+function isRunScenario(value: unknown): value is RunScenario {
+  return ["success-timeout-missing", "insufficient-external-service", "tool-failure-read-source"].includes(String(value));
+}
+
+function isRunBudget(value: unknown): value is RunBudget {
+  if (!isRecord(value)) {
+    return false;
+  }
+  return [
+    "max_tool_calls",
+    "max_seconds",
+    "max_source_lines",
+    "max_total_source_lines",
+    "max_input_chars",
+    "max_output_chars",
+    "max_events",
+    "tool_calls_used",
+    "source_lines_used",
+    "input_chars_used",
+    "output_chars_used",
+    "events_used",
+  ].every((key) => isNonNegativeInteger(value[key]));
+}
+
+function isRunRecord(value: unknown): value is RunRecord {
+  if (!isRecord(value)) {
+    return false;
+  }
+  if (!isRunBudget(value.budget)) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  const issue = record.issue;
+  return (
+    record.schema_version === SCHEMA_VERSION &&
+    isString(record.run_id) &&
+    isString(record.project_id) &&
+    isString(record.session_id) &&
+    isString(record.index_id) &&
+    isNullableString(record.feature_generation_id) &&
+    isRecord(issue) &&
+    issue.schema_version === SCHEMA_VERSION &&
+    isString(issue.id) &&
+    isString(issue.title) &&
+    isString(issue.body) &&
+    isNullableString(issue.stacktrace) &&
+    isStringArray(issue.mentioned_paths) &&
+    ["fixture", "real"].includes(String(record.mode)) &&
+    (record.fixture_scenario === null || isRunScenario(record.fixture_scenario)) &&
+    isNullableString(record.model) &&
+    isNullableString(record.prompt_version) &&
+    isString(record.execution_version) &&
+    isRunStatus(record.status) &&
+    isPositiveInteger(record.message_end_sequence) &&
+    isString(record.input_hash) &&
+    isPositiveInteger(record.input_chars) &&
+    isString(record.created_at) &&
+    isNullableString(record.started_at) &&
+    isNullableString(record.ended_at) &&
+    isNullableString(record.report_id)
+  );
+}
+
+
+function isRunInput(value: unknown): value is RunInput {
+  return (
+    isRecord(value) &&
+    value.schema_version === SCHEMA_VERSION &&
+    isString(value.project_id) &&
+    isString(value.session_id) &&
+    isString(value.index_id) &&
+    isNullableString(value.feature_generation_id) &&
+    isPositiveInteger(value.message_end_sequence) &&
+    Array.isArray(value.messages) &&
+    value.messages.every(isSessionMessage) &&
+    isString(value.input_hash) &&
+    isPositiveInteger(value.input_chars) &&
+    isString(value.frozen_at)
+  );
+}
+
+function isRunEvent(value: unknown): value is RunEvent {
+  return (
+    isRecord(value) &&
+    isString(value.run_id) &&
+    isPositiveInteger(value.sequence) &&
+    isString(value.type) &&
+    isString(value.timestamp) &&
+    isRecord(value.payload)
+  );
+}
+
+function isRunToolResult(value: unknown): value is RunToolResult {
+  return (
+    isRecord(value) &&
+    isString(value.request_id) &&
+    isString(value.run_id) &&
+    isString(value.index_id) &&
+    isPositiveInteger(value.completed_sequence) &&
+    isString(value.kind) &&
+    isString(value.tool)
+  );
+}
+
+export function isRunStatusResponse(value: unknown): value is RunStatusResponse {
+  return (
+    isRecord(value) &&
+    value.schema_version === SCHEMA_VERSION &&
+    isRunRecord(value.run) &&
+    isRunInput(value.input) &&
+    value.run.project_id === value.input.project_id &&
+    value.run.session_id === value.input.session_id &&
+    value.run.index_id === value.input.index_id &&
+    value.run.message_end_sequence === value.input.message_end_sequence &&
+    value.run.input_hash === value.input.input_hash
+  );
+}
+
+export function isRunListResponse(value: unknown): value is RunListResponse {
+  if (
+    !isRecord(value) ||
+    value.schema_version !== SCHEMA_VERSION ||
+    !isString(value.project_id) ||
+    !isString(value.session_id) ||
+    !Array.isArray(value.runs) ||
+    !value.runs.every(isRunRecord) ||
+    !isNullableString(value.next_cursor) ||
+    typeof value.has_more !== "boolean" ||
+    value.has_more !== (value.next_cursor !== null)
+  ) {
+    return false;
+  }
+  return value.runs.every(
+    (run) => run.project_id === value.project_id && run.session_id === value.session_id,
+  );
+}
+
+export function isRunEventsResponse(value: unknown): value is RunEventsResponse {
+  if (
+    !isRecord(value) ||
+    value.schema_version !== SCHEMA_VERSION ||
+    !isString(value.project_id) ||
+    !isString(value.session_id) ||
+    !isString(value.run_id) ||
+    !Array.isArray(value.events) ||
+    !value.events.every(isRunEvent) ||
+    !isNullableNumber(value.next_after_sequence) ||
+    typeof value.has_more !== "boolean" ||
+    value.has_more !== (value.next_after_sequence !== null)
+  ) {
+    return false;
+  }
+  const sequences = value.events.map((event) => event.sequence);
+  return (
+    value.events.every((event) => event.run_id === value.run_id) &&
+    sequences.every((sequence, index) => index === 0 || sequence > sequences[index - 1])
+  );
+}
+
+export function isRunToolResultsResponse(value: unknown): value is RunToolResultsResponse {
+  if (
+    !isRecord(value) ||
+    value.schema_version !== SCHEMA_VERSION ||
+    !isString(value.project_id) ||
+    !isString(value.session_id) ||
+    !isString(value.run_id) ||
+    !Array.isArray(value.results) ||
+    !value.results.every(isRunToolResult) ||
+    !isNullableNumber(value.next_after_sequence) ||
+    typeof value.has_more !== "boolean" ||
+    value.has_more !== (value.next_after_sequence !== null)
+  ) {
+    return false;
+  }
+  const sequences = value.results.map((result) => result.completed_sequence);
+  return (
+    value.results.every((result) => result.run_id === value.run_id) &&
+    sequences.every((sequence, index) => index === 0 || sequence > sequences[index - 1])
+  );
+}
+
+function isRunCandidateLink(value: unknown): value is RunCandidateLink {
+  return (
+    isRecord(value) &&
+    isString(value.candidate_id) &&
+    isString(value.index_id) &&
+    isString(value.source_symbol_id) &&
+    isNullableString(value.target_symbol_id) &&
+    isString(value.relation) &&
+    isStringArray(value.evidence_ids)
+  );
+}
+
+function isRunFinding(value: unknown): value is RunFinding {
+  return (
+    isRecord(value) &&
+    isString(value.finding_id) &&
+    ["observation", "hypothesis", "suggestion"].includes(String(value.kind)) &&
+    isString(value.text) &&
+    isStringArray(value.symbol_ids) &&
+    isStringArray(value.evidence_ids)
+  );
+}
+
+function isRunReport(value: unknown): value is RunReport {
+  if (!isRecord(value) || !isRecord(value.graph)) {
+    return false;
+  }
+  const graph = value.graph;
+  return (
+    value.schema_version === SCHEMA_VERSION &&
+    isString(value.report_id) &&
+    isString(value.run_id) &&
+    isString(value.project_id) &&
+    isString(value.session_id) &&
+    isString(value.index_id) &&
+    ["succeeded", "failed", "cancelled", "interrupted"].includes(String(value.status)) &&
+    ["candidate_found", "insufficient_evidence", "failed", "cancelled", "interrupted"].includes(String(value.outcome)) &&
+    typeof value.fixture_mode === "boolean" &&
+    isString(value.summary) &&
+    isString(graph.index_id) &&
+    graph.index_id === value.index_id &&
+    Array.isArray(graph.nodes) &&
+    graph.nodes.every(isSymbolRecord) &&
+    Array.isArray(graph.static_edges) &&
+    graph.static_edges.every(isCodeEdge) &&
+    Array.isArray(graph.unresolved) &&
+    graph.unresolved.every(isUnresolvedReference) &&
+    Array.isArray(graph.candidate_links) &&
+    graph.candidate_links.every(isRunCandidateLink) &&
+    typeof graph.truncated === "boolean" &&
+    isNullableString(graph.truncation_reason) &&
+    Array.isArray(value.evidence) &&
+    value.evidence.every(isEvidence) &&
+    Array.isArray(value.findings) &&
+    value.findings.every(isRunFinding) &&
+    Array.isArray(value.candidate_links) &&
+    value.candidate_links.every(isRunCandidateLink) &&
+    isPositiveInteger(value.terminal_sequence)
+  );
+}
+
+export function isRunReportResponse(value: unknown): value is RunReportResponse {
+  return isRecord(value) && value.schema_version === SCHEMA_VERSION && isRunReport(value.report);
+}
+
+export function isCreateRunResponse(value: unknown): value is CreateRunResponse {
+  return (
+    isRecord(value) &&
+    value.schema_version === SCHEMA_VERSION &&
+    isString(value.run_id) &&
+    isString(value.project_id) &&
+    isString(value.session_id) &&
+    isString(value.index_id) &&
+    value.status === "queued"
+  );
+}
+
+export function isCancelRunResponse(value: unknown): value is CancelRunResponse {
+  return (
+    isRecord(value) &&
+    value.schema_version === SCHEMA_VERSION &&
+    isString(value.run_id) &&
+    isString(value.project_id) &&
+    isString(value.session_id) &&
+    isString(value.index_id) &&
+    isRunStatus(value.status) &&
+    (value.cancel_event_sequence === null || isPositiveInteger(value.cancel_event_sequence))
   );
 }
 
@@ -1642,6 +2106,131 @@ export function appendProjectSessionMessage(
       }),
     },
   ).then((response) => response.message);
+}
+
+export function createProjectSessionRun(
+  projectId: string,
+  sessionId: string,
+  input: CreateRunInput,
+  signal?: AbortSignal,
+): Promise<CreateRunResponse> {
+  return requestJson(
+    `/api/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/runs`,
+    isCreateRunResponse,
+    {
+      method: "POST",
+      signal,
+      body: JSON.stringify({
+        schema_version: SCHEMA_VERSION,
+        index_id: input.indexId,
+        issue: {
+          schema_version: SCHEMA_VERSION,
+          id: input.issueId,
+          title: input.title,
+          body: input.body,
+        },
+        mode: "fixture",
+        fixture_scenario: input.scenario,
+        ...(input.featureGenerationId ? { feature_generation_id: input.featureGenerationId } : {}),
+        ...(input.messageEndSequence ? { message_end_sequence: input.messageEndSequence } : {}),
+        ...(input.idempotencyKey ? { idempotency_key: input.idempotencyKey } : {}),
+      }),
+    },
+  );
+}
+
+export function listProjectSessionRuns(
+  projectId: string,
+  sessionId: string,
+  limit = 40,
+  cursor?: string,
+  signal?: AbortSignal,
+): Promise<RunListResponse> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (cursor) {
+    params.set("cursor", cursor);
+  }
+  return requestJson(
+    `/api/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/runs?${params.toString()}`,
+    isRunListResponse,
+    { signal },
+  );
+}
+
+export function getProjectSessionRun(
+  projectId: string,
+  sessionId: string,
+  runId: string,
+  signal?: AbortSignal,
+): Promise<RunStatusResponse> {
+  return requestJson(
+    `/api/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/runs/${encodeURIComponent(runId)}`,
+    isRunStatusResponse,
+    { signal },
+  );
+}
+
+export function listProjectSessionRunEvents(
+  projectId: string,
+  sessionId: string,
+  runId: string,
+  afterSequence = 0,
+  limit = 100,
+  signal?: AbortSignal,
+): Promise<RunEventsResponse> {
+  const params = new URLSearchParams({ after_sequence: String(afterSequence), limit: String(limit) });
+  return requestJson(
+    `/api/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/runs/${encodeURIComponent(runId)}/events?${params.toString()}`,
+    isRunEventsResponse,
+    { signal },
+  );
+}
+
+export function listProjectSessionRunToolResults(
+  projectId: string,
+  sessionId: string,
+  runId: string,
+  afterSequence = 0,
+  limit = 40,
+  signal?: AbortSignal,
+): Promise<RunToolResultsResponse> {
+  const params = new URLSearchParams({ after_sequence: String(afterSequence), limit: String(limit) });
+  return requestJson(
+    `/api/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/runs/${encodeURIComponent(runId)}/tool-results?${params.toString()}`,
+    isRunToolResultsResponse,
+    { signal },
+  );
+}
+
+export function getProjectSessionRunReport(
+  projectId: string,
+  sessionId: string,
+  runId: string,
+  signal?: AbortSignal,
+): Promise<RunReportResponse> {
+  return requestJson(
+    `/api/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/runs/${encodeURIComponent(runId)}/report`,
+    isRunReportResponse,
+    { signal },
+  );
+}
+
+export function cancelProjectSessionRun(
+  projectId: string,
+  sessionId: string,
+  runId: string,
+  reason = "cancelled from the workbench",
+  signal?: AbortSignal,
+): Promise<CancelRunResponse> {
+  return requestJson(
+    `/api/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/runs/${encodeURIComponent(runId)}/cancel`,
+    isCancelRunResponse,
+    {
+      method: "POST",
+      signal,
+      body: JSON.stringify({ schema_version: SCHEMA_VERSION, reason }),
+    },
+  );
 }
 
 export function createProjectIndex(

@@ -28,11 +28,18 @@ import {
   importGitHubRepository,
   importLocalPath,
   appendProjectSessionMessage,
+  cancelProjectSessionRun,
+  createProjectSessionRun,
   createProjectSession,
   getProjectSession,
+  getProjectSessionRun,
+  getProjectSessionRunReport,
   listProjectIndexes,
   listProjectFeatureGenerations,
   listProjectSessionMessages,
+  listProjectSessionRunEvents,
+  listProjectSessionRunToolResults,
+  listProjectSessionRuns,
   listProjectSessions,
   listProjects,
   isHealthResponse,
@@ -64,6 +71,12 @@ import {
   type OverviewModule,
   type ProjectOverview,
   type ProjectRecord,
+  type RunEvent,
+  type RunReport,
+  type RunScenario,
+  type RunStatusResponse,
+  type RunToolResult,
+  type RunRecord,
   type SearchMatch,
   type Session,
   type SessionMessage,
@@ -506,6 +519,18 @@ export default function Workbench() {
   const [sessionDrafts, setSessionDrafts] = useState<Record<string, string>>(readSessionDrafts);
   const [sessionWriteStatus, setSessionWriteStatus] = useState<AsyncStatus>("idle");
   const [sessionWriteError, setSessionWriteError] = useState<string | null>(null);
+  const [runHistory, setRunHistory] = useState<RunRecord[]>([]);
+  const [runHistoryStatus, setRunHistoryStatus] = useState<AsyncStatus>("idle");
+  const [runHistoryError, setRunHistoryError] = useState<string | null>(null);
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [runStatusResponse, setRunStatusResponse] = useState<RunStatusResponse | null>(null);
+  const [runEvents, setRunEvents] = useState<RunEvent[]>([]);
+  const [runToolResults, setRunToolResults] = useState<RunToolResult[]>([]);
+  const [runReport, setRunReport] = useState<RunReport | null>(null);
+  const [runStatus, setRunStatus] = useState<AsyncStatus>("idle");
+  const [runError, setRunError] = useState<string | null>(null);
+  const [runWriteStatus, setRunWriteStatus] = useState<AsyncStatus>("idle");
+  const [runWriteError, setRunWriteError] = useState<string | null>(null);
   const [direction, setDirection] = useState<NeighborDirection>("both");
   const [edgeKinds, setEdgeKinds] = useState<EdgeKind[]>(["calls", "imports"]);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
@@ -554,6 +579,9 @@ export default function Workbench() {
   const sessionOpenController = useRef<AbortController | null>(null);
   const sessionMessagesController = useRef<AbortController | null>(null);
   const sessionWriteController = useRef<AbortController | null>(null);
+  const runController = useRef<AbortController | null>(null);
+  const runHistoryController = useRef<AbortController | null>(null);
+  const runWriteController = useRef<AbortController | null>(null);
   const indexRequestId = useRef(0);
   const projectRequestId = useRef(0);
   const importRequestId = useRef(0);
@@ -568,6 +596,9 @@ export default function Workbench() {
   const sessionOpenRequestId = useRef(0);
   const sessionMessagesRequestId = useRef(0);
   const sessionWriteRequestId = useRef(0);
+  const runRequestId = useRef(0);
+  const runHistoryRequestId = useRef(0);
+  const runWriteRequestId = useRef(0);
   const featureIdempotencyKey = useRef<string | null>(null);
   const sessionCreateRequest = useRef<{ projectId: string; topic: string; key: string } | null>(null);
   const sessionMessageRequest = useRef<{
@@ -577,6 +608,13 @@ export default function Workbench() {
     key: string;
     draftRevision: number;
   } | null>(null);
+  const runCreateRequest = useRef<{
+    projectId: string;
+    sessionId: string;
+    scenario: RunScenario;
+    key: string;
+  } | null>(null);
+  const runPollTimer = useRef<number | null>(null);
   const knownGroupKeys = useRef<Set<string>>(new Set());
   const evidenceLink = useRef<EvidenceLink | null>(null);
   const evidenceLinkApplied = useRef(false);
@@ -673,6 +711,12 @@ export default function Workbench() {
       sessionOpenController.current?.abort();
       sessionMessagesController.current?.abort();
       sessionWriteController.current?.abort();
+      runController.current?.abort();
+      runHistoryController.current?.abort();
+      runWriteController.current?.abort();
+      if (runPollTimer.current !== null) {
+        window.clearTimeout(runPollTimer.current);
+      }
     };
   }, [checkHealth]);
 
@@ -1044,10 +1088,20 @@ export default function Workbench() {
     sessionOpenController.current?.abort();
     sessionMessagesController.current?.abort();
     sessionWriteController.current?.abort();
+    runController.current?.abort();
+    runHistoryController.current?.abort();
+    runWriteController.current?.abort();
+    if (runPollTimer.current !== null) {
+      window.clearTimeout(runPollTimer.current);
+      runPollTimer.current = null;
+    }
     sessionRequestId.current += 1;
     sessionOpenRequestId.current += 1;
     sessionMessagesRequestId.current += 1;
     sessionWriteRequestId.current += 1;
+    runRequestId.current += 1;
+    runHistoryRequestId.current += 1;
+    runWriteRequestId.current += 1;
     sessionCreateRequest.current = null;
     sessionMessageRequest.current = null;
     setSessions([]);
@@ -1064,6 +1118,19 @@ export default function Workbench() {
     setSessionTopic("");
     setSessionWriteStatus("idle");
     setSessionWriteError(null);
+    setRunHistory([]);
+    setRunHistoryStatus("idle");
+    setRunHistoryError(null);
+    setSelectedRunId(null);
+    setRunStatusResponse(null);
+    setRunEvents([]);
+    setRunToolResults([]);
+    setRunReport(null);
+    setRunStatus("idle");
+    setRunError(null);
+    setRunWriteStatus("idle");
+    setRunWriteError(null);
+    runCreateRequest.current = null;
   }, []);
 
   const loadSessionMessages = useCallback(
@@ -1110,10 +1177,240 @@ export default function Workbench() {
     [],
   );
 
+  const loadRunDetails = useCallback(async (projectId: string, sessionId: string, runId: string) => {
+    if (runPollTimer.current !== null) {
+      window.clearTimeout(runPollTimer.current);
+      runPollTimer.current = null;
+    }
+    runController.current?.abort();
+    const controller = new AbortController();
+    runController.current = controller;
+    const requestId = ++runRequestId.current;
+    setRunStatus((previous) => previous === "idle" ? "loading" : previous);
+    setRunError(null);
+    try {
+      const response = await getProjectSessionRun(projectId, sessionId, runId, controller.signal);
+      const [eventsResponse, toolResultsResponse] = await Promise.all([
+        listProjectSessionRunEvents(projectId, sessionId, runId, 0, 100, controller.signal),
+        listProjectSessionRunToolResults(projectId, sessionId, runId, 0, 40, controller.signal),
+      ]);
+      if (
+        !isLatestRequest(requestId, runRequestId.current) ||
+        response.run.project_id !== projectId ||
+        response.run.session_id !== sessionId ||
+        response.run.run_id !== runId
+      ) {
+        return;
+      }
+      setRunStatusResponse(response);
+      setRunEvents(eventsResponse.events);
+      setRunToolResults(toolResultsResponse.results);
+      setRunHistory((previous) => previous.map((run) => run.run_id === runId ? response.run : run));
+      if (response.run.status === "queued" || response.run.status === "running") {
+        setRunStatus("loading");
+        runPollTimer.current = window.setTimeout(() => {
+          void loadRunDetails(projectId, sessionId, runId);
+        }, 450);
+        return;
+      }
+      if (response.run.report_id) {
+        try {
+          const reportResponse = await getProjectSessionRunReport(projectId, sessionId, runId, controller.signal);
+          if (isLatestRequest(requestId, runRequestId.current)) {
+            setRunReport(reportResponse.report);
+          }
+        } catch (error) {
+          if (!isAbortError(error) && !(error instanceof ApiRequestError && error.code === "not_found")) {
+            throw error;
+          }
+          setRunReport(null);
+        }
+      } else {
+        setRunReport(null);
+      }
+      setRunStatus("success");
+    } catch (error) {
+      if (isAbortError(error) || !isLatestRequest(requestId, runRequestId.current)) {
+        return;
+      }
+      setRunStatus("error");
+      setRunError(errorMessage(error));
+    }
+  }, []);
+
+  const loadRunHistory = useCallback(async (projectId: string, sessionId: string) => {
+    runHistoryController.current?.abort();
+    const controller = new AbortController();
+    runHistoryController.current = controller;
+    const requestId = ++runHistoryRequestId.current;
+    setRunHistoryStatus("loading");
+    setRunHistoryError(null);
+    try {
+      const response = await listProjectSessionRuns(projectId, sessionId, 40, undefined, controller.signal);
+      if (
+        !isLatestRequest(requestId, runHistoryRequestId.current) ||
+        response.project_id !== projectId ||
+        response.session_id !== sessionId
+      ) {
+        return;
+      }
+      setRunHistory(response.runs);
+      setRunHistoryStatus(response.runs.length > 0 ? "success" : "empty");
+      const selected = response.runs.find((run) => run.status === "queued" || run.status === "running") ?? response.runs[0] ?? null;
+      setSelectedRunId(selected?.run_id ?? null);
+      setRunStatusResponse(null);
+      setRunEvents([]);
+      setRunToolResults([]);
+      setRunReport(null);
+      setRunStatus(selected ? "loading" : "idle");
+      if (selected) {
+        void loadRunDetails(projectId, sessionId, selected.run_id);
+      }
+    } catch (error) {
+      if (isAbortError(error) || !isLatestRequest(requestId, runHistoryRequestId.current)) {
+        return;
+      }
+      setRunHistoryStatus("error");
+      setRunHistoryError(errorMessage(error));
+    }
+  }, [loadRunDetails]);
+
+  const selectRun = useCallback((runId: string) => {
+    if (!selectedProjectId || !selectedSessionId) {
+      return;
+    }
+    setSelectedRunId(runId);
+    setRunReport(null);
+    void loadRunDetails(selectedProjectId, selectedSessionId, runId);
+  }, [loadRunDetails, selectedProjectId, selectedSessionId]);
+
+  const startSessionRun = useCallback(async (scenario: RunScenario) => {
+    if (!selectedProjectId || !selectedSessionId) {
+      setRunWriteStatus("error");
+      setRunWriteError("请先选择一个会话。");
+      return;
+    }
+    if (runWriteStatus === "loading") {
+      return;
+    }
+    const selectedSession = sessions.find((session) => session.session_id === selectedSessionId);
+    if (!selectedSession) {
+      setRunWriteStatus("error");
+      setRunWriteError("当前会话尚未载入，无法启动 Run。");
+      return;
+    }
+    const activeRun = runHistory.find((run) => run.status === "queued" || run.status === "running");
+    if (activeRun) {
+      setSelectedRunId(activeRun.run_id);
+      setRunWriteStatus("error");
+      setRunWriteError("这个会话已有一个进行中的 Run，请等待完成或先取消。");
+      void loadRunDetails(selectedProjectId, selectedSessionId, activeRun.run_id);
+      return;
+    }
+    const previous = runCreateRequest.current;
+    const key = previous?.projectId === selectedProjectId && previous.sessionId === selectedSessionId && previous.scenario === scenario
+      ? previous.key
+      : newSessionIdempotencyKey();
+    runCreateRequest.current = { projectId: selectedProjectId, sessionId: selectedSessionId, scenario, key };
+    runWriteController.current?.abort();
+    const controller = new AbortController();
+    runWriteController.current = controller;
+    const requestId = ++runWriteRequestId.current;
+    setRunWriteStatus("loading");
+    setRunWriteError(null);
+    const savedContext = sessionMessages.map((message) => message.content).join("\n\n").trim();
+    try {
+      const response = await createProjectSessionRun(
+        selectedProjectId,
+        selectedSessionId,
+        {
+          indexId: selectedSession.index.index_id,
+          issueId: `session-${selectedSessionId}`,
+          title: selectedSession.topic,
+          body: (savedContext || selectedSession.topic).slice(0, 20_000),
+          scenario,
+          idempotencyKey: key,
+        },
+        controller.signal,
+      );
+      if (!isLatestRequest(requestId, runWriteRequestId.current)) {
+        return;
+      }
+      if (response.project_id !== selectedProjectId || response.session_id !== selectedSessionId) {
+        throw new Error("返回的 Run 不属于当前项目或会话，已拒绝载入。");
+      }
+      setSelectedRunId(response.run_id);
+      setRunWriteStatus("success");
+      setRunWriteError(null);
+      await loadRunHistory(selectedProjectId, selectedSessionId);
+      if (!isLatestRequest(requestId, runWriteRequestId.current)) {
+        return;
+      }
+      setSelectedRunId(response.run_id);
+      void loadRunDetails(selectedProjectId, selectedSessionId, response.run_id);
+    } catch (error) {
+      if (isAbortError(error) || !isLatestRequest(requestId, runWriteRequestId.current)) {
+        return;
+      }
+      setRunWriteStatus("error");
+      setRunWriteError(errorMessage(error));
+    }
+  }, [loadRunDetails, loadRunHistory, runHistory, runWriteStatus, selectedProjectId, selectedSessionId, sessionMessages, sessions]);
+
+  const cancelSelectedRun = useCallback(async () => {
+    if (!selectedProjectId || !selectedSessionId || !selectedRunId) {
+      return;
+    }
+    const selectedRun = runStatusResponse?.run ?? runHistory.find((run) => run.run_id === selectedRunId) ?? null;
+    if (!selectedRun || (selectedRun.status !== "queued" && selectedRun.status !== "running")) {
+      return;
+    }
+    runWriteController.current?.abort();
+    const controller = new AbortController();
+    runWriteController.current = controller;
+    const requestId = ++runWriteRequestId.current;
+    setRunWriteStatus("loading");
+    setRunWriteError(null);
+    try {
+      await cancelProjectSessionRun(
+        selectedProjectId,
+        selectedSessionId,
+        selectedRunId,
+        "cancelled from the workbench",
+        controller.signal,
+      );
+      if (!isLatestRequest(requestId, runWriteRequestId.current)) {
+        return;
+      }
+      setRunWriteStatus("success");
+      await loadRunHistory(selectedProjectId, selectedSessionId);
+      if (!isLatestRequest(requestId, runWriteRequestId.current)) {
+        return;
+      }
+      void loadRunDetails(selectedProjectId, selectedSessionId, selectedRunId);
+    } catch (error) {
+      if (isAbortError(error) || !isLatestRequest(requestId, runWriteRequestId.current)) {
+        return;
+      }
+      setRunWriteStatus("error");
+      setRunWriteError(errorMessage(error));
+    }
+  }, [loadRunDetails, loadRunHistory, runHistory, runStatusResponse, selectedProjectId, selectedRunId, selectedSessionId]);
+
   const openSession = useCallback(
     async (projectId: string, sessionId: string, knownSession?: Session) => {
       sessionWriteController.current?.abort();
       sessionWriteRequestId.current += 1;
+      runController.current?.abort();
+      runHistoryController.current?.abort();
+      runWriteController.current?.abort();
+      runRequestId.current += 1;
+      runHistoryRequestId.current += 1;
+      runWriteRequestId.current += 1;
+      if (runPollTimer.current !== null) {
+        window.clearTimeout(runPollTimer.current);
+        runPollTimer.current = null;
+      }
       sessionMessageRequest.current = null;
       let session = knownSession;
       const requestId = ++sessionOpenRequestId.current;
@@ -1154,6 +1451,20 @@ export default function Workbench() {
         setSessionMessagesCursor(null);
         setSessionMessagesHasMore(false);
         void loadSessionMessages(projectId, sessionId);
+        setRunHistory([]);
+        setRunHistoryStatus("idle");
+        setRunHistoryError(null);
+        setSelectedRunId(null);
+        setRunStatusResponse(null);
+        setRunEvents([]);
+        setRunToolResults([]);
+        setRunReport(null);
+        setRunStatus("idle");
+        setRunError(null);
+        setRunWriteStatus("idle");
+        setRunWriteError(null);
+        runCreateRequest.current = null;
+        void loadRunHistory(projectId, sessionId);
       } catch (error) {
         if (isAbortError(error) || !isLatestRequest(requestId, sessionOpenRequestId.current)) {
           return;
@@ -1162,7 +1473,7 @@ export default function Workbench() {
         setSessionError(errorMessage(error));
       }
     },
-    [loadSessionMessages],
+    [loadRunHistory, loadSessionMessages],
   );
 
   const selectSession = useCallback(
@@ -2466,6 +2777,22 @@ export default function Workbench() {
           }
         },
         onSendMessage: () => sendSessionMessage(),
+        runs: runHistory,
+        runsStatus: runHistoryStatus,
+        runsError: runHistoryError,
+        selectedRunId,
+        runStatusResponse,
+        runEvents,
+        runToolResults,
+        runReport,
+        runStatus,
+        runError,
+        runWriteStatus,
+        runWriteError,
+        onSelectRun: selectRun,
+        onStartRun: startSessionRun,
+        onCancelRun: cancelSelectedRun,
+        onSelectRunEvidence: selectFeatureEvidence,
       }}
       knowledge={{
         searchQuery,
