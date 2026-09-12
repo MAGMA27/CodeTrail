@@ -13298,6 +13298,150 @@
       "title": "GraphSnapshot",
       "type": "object"
     },
+    "ImpactPath": {
+      "$defs": {
+        "CodeEdge": {
+          "additionalProperties": false,
+          "properties": {
+            "edge_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Edge Id",
+              "type": "string"
+            },
+            "extraction_method": {
+              "enum": [
+                "ast",
+                "explicit_import",
+                "fixture"
+              ],
+              "title": "Extraction Method",
+              "type": "string"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "contains",
+                "imports",
+                "calls"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "source_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Source Id",
+              "type": "string"
+            },
+            "source_location": {
+              "$ref": "#/$defs/SourceLocation"
+            },
+            "target_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Target Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "edge_id",
+            "index_id",
+            "source_id",
+            "target_id",
+            "kind",
+            "extraction_method",
+            "source_location"
+          ],
+          "title": "CodeEdge",
+          "type": "object"
+        },
+        "SourceLocation": {
+          "additionalProperties": false,
+          "properties": {
+            "end_line": {
+              "exclusiveMinimum": 0,
+              "title": "End Line",
+              "type": "integer"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Start Line",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "start_line",
+            "end_line",
+            "path"
+          ],
+          "title": "SourceLocation",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "One explainable static calls path from an impact root.",
+      "properties": {
+        "depth": {
+          "exclusiveMinimum": 0,
+          "maximum": 2,
+          "title": "Depth",
+          "type": "integer"
+        },
+        "edges": {
+          "items": {
+            "$ref": "#/$defs/CodeEdge"
+          },
+          "maxItems": 2,
+          "minItems": 1,
+          "title": "Edges",
+          "type": "array"
+        },
+        "index_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Index Id",
+          "type": "string"
+        },
+        "path_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Path Id",
+          "type": "string"
+        },
+        "symbol_ids": {
+          "items": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 3,
+          "minItems": 2,
+          "title": "Symbol Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "path_id",
+        "index_id",
+        "symbol_ids",
+        "edges",
+        "depth"
+      ],
+      "title": "ImpactPath",
+      "type": "object"
+    },
     "ImportAttempt": {
       "additionalProperties": false,
       "description": "Persisted lifecycle state for one bounded source import attempt.",
@@ -22930,6 +23074,558 @@
       "title": "McpRunEventsResponse",
       "type": "object"
     },
+    "McpRunImpactResponse": {
+      "$defs": {
+        "CodeEdge": {
+          "additionalProperties": false,
+          "properties": {
+            "edge_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Edge Id",
+              "type": "string"
+            },
+            "extraction_method": {
+              "enum": [
+                "ast",
+                "explicit_import",
+                "fixture"
+              ],
+              "title": "Extraction Method",
+              "type": "string"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "contains",
+                "imports",
+                "calls"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "source_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Source Id",
+              "type": "string"
+            },
+            "source_location": {
+              "$ref": "#/$defs/SourceLocation"
+            },
+            "target_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Target Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "edge_id",
+            "index_id",
+            "source_id",
+            "target_id",
+            "kind",
+            "extraction_method",
+            "source_location"
+          ],
+          "title": "CodeEdge",
+          "type": "object"
+        },
+        "ImpactPath": {
+          "additionalProperties": false,
+          "description": "One explainable static calls path from an impact root.",
+          "properties": {
+            "depth": {
+              "exclusiveMinimum": 0,
+              "maximum": 2,
+              "title": "Depth",
+              "type": "integer"
+            },
+            "edges": {
+              "items": {
+                "$ref": "#/$defs/CodeEdge"
+              },
+              "maxItems": 2,
+              "minItems": 1,
+              "title": "Edges",
+              "type": "array"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "path_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Path Id",
+              "type": "string"
+            },
+            "symbol_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 3,
+              "minItems": 2,
+              "title": "Symbol Ids",
+              "type": "array"
+            }
+          },
+          "required": [
+            "path_id",
+            "index_id",
+            "symbol_ids",
+            "edges",
+            "depth"
+          ],
+          "title": "ImpactPath",
+          "type": "object"
+        },
+        "McpError": {
+          "additionalProperties": false,
+          "description": "Domain failure returned inside a read-only MCP tool result.",
+          "properties": {
+            "code": {
+              "enum": [
+                "not_found",
+                "invalid_input",
+                "conflict",
+                "budget_exceeded",
+                "internal_error",
+                "forbidden"
+              ],
+              "title": "Code",
+              "type": "string"
+            },
+            "message": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "title": "Message",
+              "type": "string"
+            },
+            "retryable": {
+              "default": false,
+              "title": "Retryable",
+              "type": "boolean"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "title": "McpError",
+          "type": "object"
+        },
+        "RunImpactResponse": {
+          "additionalProperties": false,
+          "description": "A bounded static impact view derived from one saved Run report.",
+          "properties": {
+            "candidate_id": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Candidate Id"
+            },
+            "direction": {
+              "enum": [
+                "callers",
+                "callees"
+              ],
+              "title": "Direction",
+              "type": "string"
+            },
+            "edges": {
+              "items": {
+                "$ref": "#/$defs/CodeEdge"
+              },
+              "maxItems": 80,
+              "title": "Edges",
+              "type": "array"
+            },
+            "finding_id": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Finding Id"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "mapping_status": {
+              "enum": [
+                "mapped",
+                "unmapped"
+              ],
+              "title": "Mapping Status",
+              "type": "string"
+            },
+            "max_depth": {
+              "exclusiveMinimum": 0,
+              "maximum": 2,
+              "title": "Max Depth",
+              "type": "integer"
+            },
+            "nodes": {
+              "items": {
+                "$ref": "#/$defs/Symbol"
+              },
+              "maxItems": 40,
+              "title": "Nodes",
+              "type": "array"
+            },
+            "paths": {
+              "items": {
+                "$ref": "#/$defs/ImpactPath"
+              },
+              "maxItems": 40,
+              "title": "Paths",
+              "type": "array"
+            },
+            "project_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Project Id",
+              "type": "string"
+            },
+            "reachable_node_count": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Reachable Node Count",
+              "type": "integer"
+            },
+            "returned_node_count": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Returned Node Count",
+              "type": "integer"
+            },
+            "root": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Symbol"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "root_symbol_id": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Root Symbol Id"
+            },
+            "run_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Run Id",
+              "type": "string"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            },
+            "scope_note": {
+              "maxLength": 1000,
+              "minLength": 1,
+              "title": "Scope Note",
+              "type": "string"
+            },
+            "session_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Session Id",
+              "type": "string"
+            },
+            "truncated": {
+              "default": false,
+              "title": "Truncated",
+              "type": "boolean"
+            },
+            "truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Truncation Reason"
+            },
+            "unresolved": {
+              "items": {
+                "$ref": "#/$defs/UnresolvedReference"
+              },
+              "maxItems": 40,
+              "title": "Unresolved",
+              "type": "array"
+            }
+          },
+          "required": [
+            "project_id",
+            "session_id",
+            "run_id",
+            "index_id",
+            "mapping_status",
+            "direction",
+            "max_depth",
+            "scope_note"
+          ],
+          "title": "RunImpactResponse",
+          "type": "object"
+        },
+        "SourceLocation": {
+          "additionalProperties": false,
+          "properties": {
+            "end_line": {
+              "exclusiveMinimum": 0,
+              "title": "End Line",
+              "type": "integer"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Start Line",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "start_line",
+            "end_line",
+            "path"
+          ],
+          "title": "SourceLocation",
+          "type": "object"
+        },
+        "Symbol": {
+          "additionalProperties": false,
+          "properties": {
+            "end_line": {
+              "exclusiveMinimum": 0,
+              "title": "End Line",
+              "type": "integer"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "module",
+                "file",
+                "class",
+                "function",
+                "test"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "qualified_name": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Qualified Name",
+              "type": "string"
+            },
+            "start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Start Line",
+              "type": "integer"
+            },
+            "symbol_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Symbol Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "start_line",
+            "end_line",
+            "symbol_id",
+            "index_id",
+            "path",
+            "qualified_name",
+            "kind"
+          ],
+          "title": "Symbol",
+          "type": "object"
+        },
+        "UnresolvedReference": {
+          "additionalProperties": false,
+          "properties": {
+            "end_line": {
+              "exclusiveMinimum": 0,
+              "title": "End Line",
+              "type": "integer"
+            },
+            "expression": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Expression",
+              "type": "string"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "possible_target_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "title": "Possible Target Ids",
+              "type": "array"
+            },
+            "reason": {
+              "maxLength": 1000,
+              "minLength": 1,
+              "title": "Reason",
+              "type": "string"
+            },
+            "source_symbol_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Source Symbol Id",
+              "type": "string"
+            },
+            "start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Start Line",
+              "type": "integer"
+            },
+            "unresolved_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Unresolved Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "start_line",
+            "end_line",
+            "unresolved_id",
+            "index_id",
+            "source_symbol_id",
+            "path",
+            "expression",
+            "reason"
+          ],
+          "title": "UnresolvedReference",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Read-only MCP envelope for a bounded Run candidate impact query.",
+      "properties": {
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/McpError"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "result": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RunImpactResponse"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "schema_version": {
+          "const": "0.1.0",
+          "default": "0.1.0",
+          "title": "Schema Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ok"
+      ],
+      "title": "McpRunImpactResponse",
+      "type": "object"
+    },
     "McpRunListResponse": {
       "$defs": {
         "Issue": {
@@ -32500,6 +33196,474 @@
         "run_id"
       ],
       "title": "RunEventsResponse",
+      "type": "object"
+    },
+    "RunImpactResponse": {
+      "$defs": {
+        "CodeEdge": {
+          "additionalProperties": false,
+          "properties": {
+            "edge_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Edge Id",
+              "type": "string"
+            },
+            "extraction_method": {
+              "enum": [
+                "ast",
+                "explicit_import",
+                "fixture"
+              ],
+              "title": "Extraction Method",
+              "type": "string"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "contains",
+                "imports",
+                "calls"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "source_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Source Id",
+              "type": "string"
+            },
+            "source_location": {
+              "$ref": "#/$defs/SourceLocation"
+            },
+            "target_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Target Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "edge_id",
+            "index_id",
+            "source_id",
+            "target_id",
+            "kind",
+            "extraction_method",
+            "source_location"
+          ],
+          "title": "CodeEdge",
+          "type": "object"
+        },
+        "ImpactPath": {
+          "additionalProperties": false,
+          "description": "One explainable static calls path from an impact root.",
+          "properties": {
+            "depth": {
+              "exclusiveMinimum": 0,
+              "maximum": 2,
+              "title": "Depth",
+              "type": "integer"
+            },
+            "edges": {
+              "items": {
+                "$ref": "#/$defs/CodeEdge"
+              },
+              "maxItems": 2,
+              "minItems": 1,
+              "title": "Edges",
+              "type": "array"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "path_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Path Id",
+              "type": "string"
+            },
+            "symbol_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 3,
+              "minItems": 2,
+              "title": "Symbol Ids",
+              "type": "array"
+            }
+          },
+          "required": [
+            "path_id",
+            "index_id",
+            "symbol_ids",
+            "edges",
+            "depth"
+          ],
+          "title": "ImpactPath",
+          "type": "object"
+        },
+        "SourceLocation": {
+          "additionalProperties": false,
+          "properties": {
+            "end_line": {
+              "exclusiveMinimum": 0,
+              "title": "End Line",
+              "type": "integer"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Start Line",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "start_line",
+            "end_line",
+            "path"
+          ],
+          "title": "SourceLocation",
+          "type": "object"
+        },
+        "Symbol": {
+          "additionalProperties": false,
+          "properties": {
+            "end_line": {
+              "exclusiveMinimum": 0,
+              "title": "End Line",
+              "type": "integer"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "module",
+                "file",
+                "class",
+                "function",
+                "test"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "qualified_name": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Qualified Name",
+              "type": "string"
+            },
+            "start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Start Line",
+              "type": "integer"
+            },
+            "symbol_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Symbol Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "start_line",
+            "end_line",
+            "symbol_id",
+            "index_id",
+            "path",
+            "qualified_name",
+            "kind"
+          ],
+          "title": "Symbol",
+          "type": "object"
+        },
+        "UnresolvedReference": {
+          "additionalProperties": false,
+          "properties": {
+            "end_line": {
+              "exclusiveMinimum": 0,
+              "title": "End Line",
+              "type": "integer"
+            },
+            "expression": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Expression",
+              "type": "string"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "possible_target_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "title": "Possible Target Ids",
+              "type": "array"
+            },
+            "reason": {
+              "maxLength": 1000,
+              "minLength": 1,
+              "title": "Reason",
+              "type": "string"
+            },
+            "source_symbol_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Source Symbol Id",
+              "type": "string"
+            },
+            "start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Start Line",
+              "type": "integer"
+            },
+            "unresolved_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Unresolved Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "start_line",
+            "end_line",
+            "unresolved_id",
+            "index_id",
+            "source_symbol_id",
+            "path",
+            "expression",
+            "reason"
+          ],
+          "title": "UnresolvedReference",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "A bounded static impact view derived from one saved Run report.",
+      "properties": {
+        "candidate_id": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Candidate Id"
+        },
+        "direction": {
+          "enum": [
+            "callers",
+            "callees"
+          ],
+          "title": "Direction",
+          "type": "string"
+        },
+        "edges": {
+          "items": {
+            "$ref": "#/$defs/CodeEdge"
+          },
+          "maxItems": 80,
+          "title": "Edges",
+          "type": "array"
+        },
+        "finding_id": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Finding Id"
+        },
+        "index_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Index Id",
+          "type": "string"
+        },
+        "mapping_status": {
+          "enum": [
+            "mapped",
+            "unmapped"
+          ],
+          "title": "Mapping Status",
+          "type": "string"
+        },
+        "max_depth": {
+          "exclusiveMinimum": 0,
+          "maximum": 2,
+          "title": "Max Depth",
+          "type": "integer"
+        },
+        "nodes": {
+          "items": {
+            "$ref": "#/$defs/Symbol"
+          },
+          "maxItems": 40,
+          "title": "Nodes",
+          "type": "array"
+        },
+        "paths": {
+          "items": {
+            "$ref": "#/$defs/ImpactPath"
+          },
+          "maxItems": 40,
+          "title": "Paths",
+          "type": "array"
+        },
+        "project_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Project Id",
+          "type": "string"
+        },
+        "reachable_node_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Reachable Node Count",
+          "type": "integer"
+        },
+        "returned_node_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Returned Node Count",
+          "type": "integer"
+        },
+        "root": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Symbol"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "root_symbol_id": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Root Symbol Id"
+        },
+        "run_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "0.1.0",
+          "default": "0.1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "scope_note": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Scope Note",
+          "type": "string"
+        },
+        "session_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Session Id",
+          "type": "string"
+        },
+        "truncated": {
+          "default": false,
+          "title": "Truncated",
+          "type": "boolean"
+        },
+        "truncation_reason": {
+          "anyOf": [
+            {
+              "maxLength": 1000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Truncation Reason"
+        },
+        "unresolved": {
+          "items": {
+            "$ref": "#/$defs/UnresolvedReference"
+          },
+          "maxItems": 40,
+          "title": "Unresolved",
+          "type": "array"
+        }
+      },
+      "required": [
+        "project_id",
+        "session_id",
+        "run_id",
+        "index_id",
+        "mapping_status",
+        "direction",
+        "max_depth",
+        "scope_note"
+      ],
+      "title": "RunImpactResponse",
       "type": "object"
     },
     "RunInput": {

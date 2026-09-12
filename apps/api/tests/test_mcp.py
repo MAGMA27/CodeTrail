@@ -25,6 +25,7 @@ RUN_READ_TOOLS = {
     "list_run_events",
     "list_run_tool_results",
     "get_run_report",
+    "get_run_impact",
 }
 
 
@@ -957,6 +958,27 @@ def test_mcp_run_reads_share_http_state_and_writes_are_separately_opt_in(tmp_pat
                 {"project_id": project_id, "session_id": session_id, "run_id": http_run_id},
             )
             assert report.structured_content["report"]["outcome"] == "candidate_found"
+            candidate_id = report.structured_content["report"]["candidate_links"][0]["candidate_id"]
+            status, http_impact = await _request(
+                application,
+                "GET",
+                f"/api/projects/{project_id}/sessions/{session_id}/runs/{http_run_id}/impact"
+                f"?candidate_id={candidate_id}&direction=callers&depth=2&limit=40",
+            )
+            assert status == 200
+            impact = await client.call_tool(
+                "get_run_impact",
+                {
+                    "project_id": project_id,
+                    "session_id": session_id,
+                    "run_id": http_run_id,
+                    "candidate_id": candidate_id,
+                    "direction": "callers",
+                    "depth": 2,
+                    "limit": 40,
+                },
+            )
+            assert impact.structured_content["result"] == http_impact
 
         async with Client(parameters(run_write=True), read_timeout_seconds=10) as client:
             tools = {tool.name for tool in (await client.list_tools()).tools}

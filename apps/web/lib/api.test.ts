@@ -6,6 +6,7 @@ import {
   isFeatureGenerationResponse,
   isFeatureGraphResponse,
   isProjectOverviewResponse,
+  isRunImpactResponse,
   isSessionListResponse,
   isSessionMessagesResponse,
   isSessionResponse,
@@ -127,6 +128,80 @@ test("project overview validator rejects broken path or evidence shape", () => {
   };
   brokenEvidence.entries[0].evidence.content_hash = 42;
   assert.equal(isProjectOverviewResponse(brokenEvidence), false);
+});
+
+function runImpact() {
+  const root = {
+    symbol_id: "symbol-root",
+    index_id: indexId,
+    path: "pkg/app.py",
+    qualified_name: "pkg.app.load",
+    kind: "function",
+    start_line: 4,
+    end_line: 7,
+  };
+  const caller = {
+    ...root,
+    symbol_id: "symbol-caller",
+    qualified_name: "pkg.main.run",
+    path: "pkg/main.py",
+    start_line: 2,
+    end_line: 5,
+  };
+  const edge = {
+    edge_id: "edge-caller-root",
+    index_id: indexId,
+    source_id: caller.symbol_id,
+    target_id: root.symbol_id,
+    kind: "calls",
+    extraction_method: "fixture",
+    source_location: { path: "pkg/main.py", start_line: 4, end_line: 4 },
+  };
+  return {
+    schema_version: SCHEMA_VERSION,
+    project_id: "project-impact-test",
+    session_id: "session-impact-test",
+    run_id: "run-impact-test",
+    index_id: indexId,
+    candidate_id: "candidate-impact",
+    finding_id: null,
+    mapping_status: "mapped",
+    direction: "callers",
+    max_depth: 2,
+    root_symbol_id: root.symbol_id,
+    root,
+    nodes: [root, caller],
+    edges: [edge],
+    paths: [{ path_id: "impact-path-1", index_id: indexId, symbol_ids: [root.symbol_id, caller.symbol_id], edges: [edge], depth: 1 }],
+    unresolved: [],
+    reachable_node_count: 1,
+    returned_node_count: 2,
+    scope_note: "Static calls only.",
+    truncated: false,
+    truncation_reason: null,
+  };
+}
+
+test("Run impact validator accepts same-snapshot paths and rejects forged direction", () => {
+  assert.equal(isRunImpactResponse(runImpact()), true);
+  const broken = structuredClone(runImpact());
+  broken.paths[0].edges[0].source_id = broken.root_symbol_id;
+  assert.equal(isRunImpactResponse(broken), false);
+});
+
+test("Run impact validator accepts an explicitly unmapped empty result", () => {
+  const value = runImpact() as any;
+  value.candidate_id = null;
+  value.finding_id = "finding-impact";
+  value.mapping_status = "unmapped";
+  value.root_symbol_id = null;
+  value.root = null;
+  value.nodes = [];
+  value.edges = [];
+  value.paths = [];
+  value.reachable_node_count = 0;
+  value.returned_node_count = 0;
+  assert.equal(isRunImpactResponse(value), true);
 });
 
 function featureGeneration() {

@@ -396,6 +396,41 @@ export type RunReportResponse = {
   report: RunReport;
 };
 
+export type ImpactDirection = "callers" | "callees";
+export type ImpactMappingStatus = "mapped" | "unmapped";
+
+export type ImpactPath = {
+  path_id: string;
+  index_id: string;
+  symbol_ids: string[];
+  edges: CodeEdge[];
+  depth: number;
+};
+
+export type RunImpactResponse = {
+  schema_version: typeof SCHEMA_VERSION;
+  project_id: string;
+  session_id: string;
+  run_id: string;
+  index_id: string;
+  candidate_id: string | null;
+  finding_id: string | null;
+  mapping_status: ImpactMappingStatus;
+  direction: ImpactDirection;
+  max_depth: number;
+  root_symbol_id: string | null;
+  root: SymbolRecord | null;
+  nodes: SymbolRecord[];
+  edges: CodeEdge[];
+  paths: ImpactPath[];
+  unresolved: UnresolvedReference[];
+  reachable_node_count: number;
+  returned_node_count: number;
+  scope_note: string;
+  truncated: boolean;
+  truncation_reason: string | null;
+};
+
 export type CancelRunResponse = {
   schema_version: typeof SCHEMA_VERSION;
   run_id: string;
@@ -1288,6 +1323,141 @@ function isRunReport(value: unknown): value is RunReport {
 
 export function isRunReportResponse(value: unknown): value is RunReportResponse {
   return isRecord(value) && value.schema_version === SCHEMA_VERSION && isRunReport(value.report);
+}
+
+function isImpactPath(
+  value: unknown,
+  indexId: string,
+  direction: ImpactDirection,
+  rootSymbolId: string,
+  nodeIds: Set<string>,
+  edgeIds: Set<string>,
+): value is ImpactPath {
+  if (!isRecord(value) || !isString(value.path_id) || value.index_id !== indexId) {
+    return false;
+  }
+  const symbolIds = value.symbol_ids;
+  const pathEdges = value.edges;
+  if (
+    !Array.isArray(symbolIds) ||
+    !isStringArray(symbolIds) ||
+    symbolIds.length < 2 ||
+    symbolIds.length > 3 ||
+    symbolIds[0] !== rootSymbolId ||
+    new Set(symbolIds).size !== symbolIds.length ||
+    !Array.isArray(pathEdges) ||
+    !pathEdges.every(isCodeEdge) ||
+    pathEdges.length !== symbolIds.length - 1 ||
+    !isPositiveInteger(value.depth) ||
+    value.depth !== pathEdges.length
+  ) {
+    return false;
+  }
+  return symbolIds.every((symbolId) => nodeIds.has(symbolId)) && pathEdges.every((edge, index) => {
+    if (!edgeIds.has(edge.edge_id) || edge.index_id !== indexId || edge.kind !== "calls") {
+      return false;
+    }
+    const sourceId = direction === "callers" ? symbolIds[index + 1] : symbolIds[index];
+    const targetId = direction === "callers" ? symbolIds[index] : symbolIds[index + 1];
+    return edge.source_id === sourceId && edge.target_id === targetId;
+  });
+}
+
+function isRunImpact(value: unknown): value is RunImpactResponse {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const nodes = value.nodes;
+  const edges = value.edges;
+  const paths = value.paths;
+  const unresolved = value.unresolved;
+  if (
+    value.schema_version !== SCHEMA_VERSION ||
+    !isString(value.project_id) ||
+    !isString(value.session_id) ||
+    !isString(value.run_id) ||
+    !isString(value.index_id) ||
+    !isNullableString(value.candidate_id) ||
+    !isNullableString(value.finding_id) ||
+    (value.candidate_id === null) === (value.finding_id === null) ||
+    !["mapped", "unmapped"].includes(String(value.mapping_status)) ||
+    !["callers", "callees"].includes(String(value.direction)) ||
+    !isPositiveInteger(value.max_depth) ||
+    value.max_depth > 2 ||
+    !isNullableString(value.root_symbol_id) ||
+    !(value.root === null || isSymbolRecord(value.root)) ||
+    !Array.isArray(nodes) ||
+    !nodes.every(isSymbolRecord) ||
+    !Array.isArray(edges) ||
+    !edges.every(isCodeEdge) ||
+    !Array.isArray(paths) ||
+    !Array.isArray(unresolved) ||
+    !unresolved.every(isUnresolvedReference) ||
+    !isNonNegativeInteger(value.reachable_node_count) ||
+    !isNonNegativeInteger(value.returned_node_count) ||
+    value.returned_node_count !== nodes.length ||
+    value.reachable_node_count !== Math.max(0, nodes.length - 1) ||
+    !isString(value.scope_note) ||
+    !isTruncation(value)
+  ) {
+    return false;
+  }
+  const nodeIds = new Set(nodes.map((node) => node.symbol_id));
+  if (nodeIds.size !== nodes.length || nodes.some((node) => node.index_id !== value.index_id)) {
+    return false;
+  }
+  if (value.mapping_status === "mapped") {
+    if (
+      value.root === null ||
+      value.root_symbol_id === null ||
+      value.root.symbol_id !== value.root_symbol_id ||
+      value.root.index_id !== value.index_id ||
+      !nodeIds.has(value.root_symbol_id)
+    ) {
+      return false;
+    }
+  } else if (
+    value.root !== null ||
+    value.root_symbol_id !== null ||
+    nodes.length > 0 ||
+    edges.length > 0 ||
+    paths.length > 0 ||
+    unresolved.length > 0 ||
+    value.reachable_node_count !== 0
+  ) {
+    return false;
+  }
+  const edgeIds = new Set<string>();
+  if (edges.some((edge) => {
+    if (edgeIds.has(edge.edge_id)) {
+      return true;
+    }
+    edgeIds.add(edge.edge_id);
+    return edge.index_id !== value.index_id ||
+      edge.kind !== "calls" ||
+      !nodeIds.has(edge.source_id) ||
+      !nodeIds.has(edge.target_id);
+  })) {
+    return false;
+  }
+  if (value.mapping_status === "unmapped" || value.root_symbol_id === null) {
+    return paths.length === 0;
+  }
+  const indexId = value.index_id as string;
+  const direction = value.direction as ImpactDirection;
+  const rootSymbolId = value.root_symbol_id as string;
+  return paths.every((path) => isImpactPath(
+    path,
+    indexId,
+    direction,
+    rootSymbolId,
+    nodeIds,
+    edgeIds,
+  ));
+}
+
+export function isRunImpactResponse(value: unknown): value is RunImpactResponse {
+  return isRecord(value) && isRunImpact(value);
 }
 
 export function isCreateRunResponse(value: unknown): value is CreateRunResponse {
@@ -2267,6 +2437,37 @@ export function getProjectSessionRunReport(
   return requestJson(
     `/api/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/runs/${encodeURIComponent(runId)}/report`,
     isRunReportResponse,
+    { signal },
+  );
+}
+
+export function getProjectSessionRunImpact(
+  projectId: string,
+  sessionId: string,
+  runId: string,
+  query: {
+    candidateId?: string;
+    findingId?: string;
+    direction: ImpactDirection;
+    depth?: number;
+    limit?: number;
+  },
+  signal?: AbortSignal,
+): Promise<RunImpactResponse> {
+  const params = new URLSearchParams({
+    direction: query.direction,
+    depth: String(query.depth ?? 2),
+    limit: String(query.limit ?? 40),
+  });
+  if (query.candidateId) {
+    params.set("candidate_id", query.candidateId);
+  }
+  if (query.findingId) {
+    params.set("finding_id", query.findingId);
+  }
+  return requestJson(
+    `/api/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/runs/${encodeURIComponent(runId)}/impact?${params.toString()}`,
+    isRunImpactResponse,
     { signal },
   );
 }

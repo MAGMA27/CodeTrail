@@ -309,6 +309,13 @@ code { font-family: var(--ct-mono); }
 .ct-run-finding { display: grid; gap: 4px; padding: 8px; border: 1px solid var(--ct-border); border-radius: 6px; background: var(--ct-bg); }
 .ct-run-finding strong { color: var(--ct-blue); font-family: var(--ct-mono); font-size: 9px; text-transform: uppercase; }
 .ct-run-finding span { color: var(--ct-text); font-size: 10px; line-height: 1.5; }
+.ct-run-impact-links { display: grid; gap: 5px; padding: 8px; border: 1px solid var(--ct-border); border-left: 3px solid var(--ct-warning); border-radius: 6px; background: var(--ct-warning-soft); }
+.ct-run-impact-links > small { color: var(--ct-warning); font-family: var(--ct-mono); font-size: 9px; }
+.ct-run-impact-link { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ct-run-impact-link > span { display: grid; min-width: 0; gap: 2px; }
+.ct-run-impact-link code { overflow: hidden; color: var(--ct-text); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.ct-run-impact-link small, .ct-run-impact-unmapped { color: var(--ct-muted); font-size: 9px; }
+.ct-run-impact-unmapped { display: block; }
 .ct-run-evidence-list { display: flex; flex-wrap: wrap; align-items: baseline; gap: 5px 10px; padding-top: 3px; }
 .ct-run-evidence-list small { color: var(--ct-faint); font-size: 9px; }
 .ct-button-danger { border-color: #e2b3b8; background: #fff4f4; color: var(--ct-danger); }
@@ -411,6 +418,8 @@ code { font-family: var(--ct-mono); }
 .ct-graph-legend i { display: inline-block; width: 18px; height: 2px; background: var(--ct-blue); }
 .ct-graph-legend i.is-imports, .ct-graph-legend i.is-static { height: 0; border-top: 2px dotted var(--ct-faint); background: transparent; }
 .ct-graph-legend i.is-semantic { background: var(--ct-blue); }
+.ct-graph-legend i.is-impact-root { width: 10px; height: 10px; border: 2px solid var(--ct-warning); border-radius: 50%; background: transparent; }
+.ct-graph-legend i.is-unknown { height: 0; border-top: 2px dashed var(--ct-warning); background: transparent; }
 .ct-graph-legend small { color: var(--ct-faint); font-size: 9px; }
 .ct-graph-canvas { position: relative; min-height: 480px; flex: 1; overflow: hidden; border-top: 1px solid var(--ct-border); background: var(--ct-subtle); }
 .ct-graph-canvas .react-flow { position: absolute; inset: 0; }
@@ -440,6 +449,15 @@ code { font-family: var(--ct-mono); }
 .ct-graph-empty strong { color: var(--ct-text); font-size: 14px; }
 .ct-graph-empty p { max-width: 240px; margin: 0; font-size: 10px; }
 .ct-graph-limitations { display: grid; gap: 4px; padding: 10px 12px; border-top: 1px solid var(--ct-border); background: var(--ct-warning-soft); color: var(--ct-warning); font-size: 10px; }
+.ct-impact-paths, .ct-impact-unknown { display: grid; gap: 6px; padding: 12px; border-top: 1px solid var(--ct-border); }
+.ct-impact-paths .ct-section-heading { align-items: end; }
+.ct-impact-paths .ct-section-heading h3 { font-size: 14px; }
+.ct-impact-path { display: grid; gap: 3px; padding: 7px 8px; border-left: 2px solid var(--ct-warning); background: var(--ct-bg); }
+.ct-impact-path code { overflow: hidden; color: var(--ct-text); font-size: 9px; line-height: 1.45; text-overflow: ellipsis; white-space: nowrap; }
+.ct-impact-path small, .ct-impact-unknown small, .ct-impact-unknown span { color: var(--ct-muted); font-size: 9px; line-height: 1.45; }
+.ct-impact-unknown { background: var(--ct-warning-soft); }
+.ct-impact-unknown strong { color: var(--ct-warning); font-family: var(--ct-mono); font-size: 9px; }
+.ct-graph-scope-note { margin: 0; padding: 10px 12px 14px; color: var(--ct-faint); font-size: 9px; line-height: 1.5; }
 
 .ct-footer { display: flex; min-height: 27px; align-items: center; justify-content: space-between; gap: 12px; padding: 5px 22px; border-top: 1px solid var(--ct-border); background: var(--ct-surface); color: var(--ct-faint); font-family: var(--ct-mono); font-size: 8px; letter-spacing: .06em; }
 .ct-panel-width-control { position: fixed; right: 13px; bottom: 39px; z-index: 7; display: flex; align-items: center; gap: 7px; padding: 5px 8px; border: 1px solid var(--ct-border); border-radius: 6px; background: var(--ct-surface); box-shadow: 0 2px 8px rgb(32 38 51 / 9%); color: var(--ct-muted); font-size: 9px; }

@@ -51,6 +51,7 @@ from .contracts import (
     McpRunEventsResponse,
     McpRunListResponse,
     McpRunReportResponse,
+    McpRunImpactResponse,
     McpRunResponse,
     McpRunStartResponse,
     McpRunToolResultsResponse,
@@ -60,6 +61,7 @@ from .contracts import (
     ProjectOverview,
     ReportResponse,
     RunEventsResponse,
+    RunImpactResponse,
     RunListResponse,
     RunStatusResponse,
     RunToolResultsResponse,
@@ -79,6 +81,7 @@ _DEFAULT_WORKBENCH_URL = "http://localhost:3000"
 _MAX_DISCOVERY_ITEMS = 100
 _RETRYABLE_CODES = {"budget_exceeded", "internal_error"}
 _NeighborEdgeKind = Literal["imports", "calls"]
+_ImpactDirection = Literal["callers", "callees"]
 _ProjectId = Annotated[Identifier, Field(description="Stable CodeTrail project ID.")]
 _IndexId = Annotated[Identifier, Field(description="Immutable CodeTrail index ID.")]
 _Query = Annotated[str, Field(min_length=1, max_length=500, description="Symbol or source text query.")]
@@ -87,6 +90,7 @@ _LocalPath = Annotated[str, Field(min_length=1, max_length=4_000, description="A
 _Line = Annotated[int, Field(ge=1, description="One-based source line.")]
 _Limit = Annotated[int, Field(ge=1, le=40, description="Maximum number of returned items.")]
 _Depth = Annotated[int, Field(ge=1, le=2, description="Static graph traversal depth.")]
+_ImpactId = Annotated[str | None, Field(min_length=1, max_length=200, description="Exact candidate or finding ID from the saved Run report.")]
 _DiscoveryLimit = Annotated[int, Field(ge=1, le=_MAX_DISCOVERY_ITEMS, description="Maximum discovery items.")]
 _OverviewDepth = Annotated[int, Field(ge=1, le=8, description="Maximum static overview path depth.")]
 _OverviewPaths = Annotated[int, Field(ge=1, le=40, description="Maximum returned overview paths.")]
@@ -629,6 +633,43 @@ def create_mcp_server(
             return _failure(McpRunReportResponse, exc)
         except Exception:
             return _unexpected_failure("get_run_report", McpRunReportResponse)
+
+    @server.tool(
+        name="get_run_impact",
+        title="Read bounded Run impact",
+        description=(
+            "Read a bounded static calls impact view for exactly one candidate_id or finding_id from a saved Run report. "
+            "The result stays on the Run's immutable index snapshot, defaults to callers at depth 2, preserves unresolved "
+            "boundaries, and never calls a model or executes repository source."
+        ),
+        structured_output=True,
+    )
+    def get_run_impact(
+        project_id: _ProjectId,
+        session_id: _SessionId,
+        run_id: _ProjectId,
+        candidate_id: _ImpactId = None,
+        finding_id: _ImpactId = None,
+        direction: _ImpactDirection = "callers",
+        depth: _Depth = 2,
+        limit: _Limit = 40,
+    ) -> McpRunImpactResponse:
+        try:
+            result: RunImpactResponse = service.get_run_impact(
+                project_id,
+                session_id,
+                run_id,
+                candidate_id=candidate_id,
+                finding_id=finding_id,
+                direction=direction,
+                depth=depth,
+                limit=limit,
+            )
+            return McpRunImpactResponse(ok=True, result=result)
+        except ServiceError as exc:
+            return _failure(McpRunImpactResponse, exc)
+        except Exception:
+            return _unexpected_failure("get_run_impact", McpRunImpactResponse)
 
     if session_write_enabled:
 

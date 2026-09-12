@@ -26,6 +26,7 @@ from .contracts import (
     FeatureGeneration,
     GetNeighborsParams,
     GraphSnapshot,
+    ImpactPath,
     IndexSnapshot,
     Neighbor,
     ReadSourceParams,
@@ -145,6 +146,21 @@ class NeighborQueryResult:
     nodes: tuple[Symbol, ...]
     neighbors: tuple[Neighbor, ...]
     unresolved: tuple[UnresolvedReference, ...]
+    truncated: bool
+    truncation_reason: str | None
+
+
+@dataclass(frozen=True)
+class ImpactQueryResult:
+    """Bounded static calls paths rooted at one exact symbol."""
+
+    index_id: str
+    root: Symbol
+    nodes: tuple[Symbol, ...]
+    edges: tuple[CodeEdge, ...]
+    paths: tuple[ImpactPath, ...]
+    unresolved: tuple[UnresolvedReference, ...]
+    reachable_node_count: int
     truncated: bool
     truncation_reason: str | None
 
@@ -2901,6 +2917,159 @@ class IndexStore:
             truncation_reason=truncation_reason,
         )
 
+    def get_static_impact(
+        self,
+        index_id: str,
+        symbol_id: str,
+        direction: Literal["callers", "callees"],
+        depth: int = 2,
+        limit: int = 40,
+        *,
+        max_edges: int = 80,
+        max_paths: int = 40,
+        max_unresolved: int = 40,
+        max_seconds: float = 1.0,
+        max_output_bytes: int = 64_000,
+    ) -> ImpactQueryResult:
+        """Enumerate bounded simple paths over same-snapshot static ``calls`` edges."""
+
+        self._require_index(index_id)
+        if direction not in {"callers", "callees"}:
+            raise StorageInputError("impact direction must be callers or callees")
+        if (
+            depth < 1
+            or depth > 2
+            or limit < 1
+            or limit > 40
+            or max_edges < 1
+            or max_paths < 1
+            or max_unresolved < 1
+            or not math.isfinite(max_seconds)
+            or max_seconds <= 0
+            or max_output_bytes < 1
+        ):
+            raise StorageInputError("impact budgets must be within the supported positive limits")
+
+        root = self._load_symbol(index_id, symbol_id)
+        nodes: dict[str, Symbol] = {root.symbol_id: root}
+        edges: dict[str, CodeEdge] = {}
+        paths: list[ImpactPath] = []
+        seen_path_edges: set[tuple[str, ...]] = set()
+        queue: deque[tuple[str, int, tuple[str, ...], tuple[str, ...]]] = deque(
+            [(root.symbol_id, 0, (root.symbol_id,), ())]
+        )
+        deadline = time.monotonic() + max_seconds
+        output_bytes = _model_size(root)
+        truncated = output_bytes > max_output_bytes
+        truncation_reason: str | None = "max_output_bytes reached" if truncated else None
+
+        def stop(reason: str) -> None:
+            nonlocal truncated, truncation_reason
+            truncated = True
+            truncation_reason = reason
+
+        while queue and not truncated:
+            if time.monotonic() >= deadline:
+                stop("max_seconds exceeded")
+                break
+            current_id, current_depth, symbol_path, edge_path = queue.popleft()
+            if current_depth >= depth:
+                continue
+            rows = self._connection.execute(
+                "SELECT edge_id, source_id, target_id, kind, extraction_method, source_path, "
+                "start_line, end_line FROM static_edges WHERE index_id = ? AND kind = 'calls' "
+                f"AND {'target_id = ?' if direction == 'callers' else 'source_id = ?'} "
+                "ORDER BY source_id COLLATE BINARY, target_id COLLATE BINARY, edge_id",
+                (index_id, current_id),
+            ).fetchall()
+            for row in rows:
+                if time.monotonic() >= deadline:
+                    stop("max_seconds exceeded")
+                    break
+                edge = _edge_from_row(index_id, row)
+                neighbor_id = row["source_id"] if direction == "callers" else row["target_id"]
+                if neighbor_id in symbol_path:
+                    if edge.edge_id not in edges:
+                        if len(edges) >= max_edges:
+                            stop("max_edges reached")
+                            break
+                        if output_bytes + _model_size(edge) > max_output_bytes:
+                            stop("max_output_bytes reached")
+                            break
+                        edges[edge.edge_id] = edge
+                        output_bytes += _model_size(edge)
+                    # Keep the traversal finite and the returned paths simple;
+                    # the cycle-closing edge is retained as a static boundary edge.
+                    continue
+                next_edge_path = (*edge_path, edge.edge_id)
+                if next_edge_path in seen_path_edges:
+                    continue
+                if len(paths) >= max_paths:
+                    stop("max_paths reached")
+                    break
+                if edge.edge_id not in edges and len(edges) >= max_edges:
+                    stop("max_edges reached")
+                    break
+                neighbor = nodes.get(neighbor_id)
+                loaded_neighbor = neighbor
+                if neighbor is None:
+                    if len(nodes) >= limit:
+                        stop("max_nodes reached")
+                        break
+                    loaded_neighbor = self._load_symbol(index_id, neighbor_id)
+                path_edges = [edges.get(edge_id) for edge_id in next_edge_path]
+                path_edges[-1] = edge
+                if any(item is None for item in path_edges):
+                    raise StorageError("impact path references an edge that was not loaded")
+                path = ImpactPath(
+                    path_id=_impact_path_id(index_id, direction, (*symbol_path, neighbor_id), next_edge_path),
+                    index_id=index_id,
+                    symbol_ids=[*symbol_path, neighbor_id],
+                    edges=[item for item in path_edges if item is not None],
+                    depth=current_depth + 1,
+                )
+                candidate_size = _model_size(path)
+                if loaded_neighbor is not None and neighbor is None:
+                    candidate_size += _model_size(loaded_neighbor)
+                if output_bytes + candidate_size > max_output_bytes:
+                    stop("max_output_bytes reached")
+                    break
+                if neighbor is None:
+                    assert loaded_neighbor is not None
+                    nodes[neighbor_id] = loaded_neighbor
+                edges.setdefault(edge.edge_id, edge)
+                paths.append(path)
+                seen_path_edges.add(next_edge_path)
+                output_bytes += candidate_size
+                if current_depth + 1 < depth:
+                    queue.append((neighbor_id, current_depth + 1, (*symbol_path, neighbor_id), next_edge_path))
+
+        unresolved = self._load_unresolved(index_id, tuple(nodes))
+        if len(unresolved) > max_unresolved:
+            unresolved = unresolved[:max_unresolved]
+            if not truncated:
+                stop("max_unresolved reached")
+        bounded_unresolved: list[UnresolvedReference] = []
+        for item in unresolved:
+            if output_bytes + _model_size(item) > max_output_bytes:
+                if not truncated:
+                    stop("max_output_bytes reached")
+                break
+            bounded_unresolved.append(item)
+            output_bytes += _model_size(item)
+
+        return ImpactQueryResult(
+            index_id=index_id,
+            root=root,
+            nodes=tuple(nodes.values()),
+            edges=tuple(edges.values()),
+            paths=tuple(paths),
+            unresolved=tuple(bounded_unresolved),
+            reachable_node_count=max(0, len(nodes) - 1),
+            truncated=truncated,
+            truncation_reason=truncation_reason,
+        )
+
     def _load_unresolved(
         self,
         index_id: str,
@@ -3546,6 +3715,16 @@ def _model_size(model: object) -> int:
     if callable(model_dump_json):
         return len(model_dump_json().encode("utf-8"))
     return len(json.dumps(model, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+
+
+def _impact_path_id(
+    index_id: str,
+    direction: str,
+    symbol_ids: tuple[str, ...],
+    edge_ids: tuple[str, ...],
+) -> str:
+    identity = "\0".join((index_id, direction, *symbol_ids, *edge_ids))
+    return f"impact-path-{hashlib.sha256(identity.encode('utf-8')).hexdigest()[:32]}"
 
 
 def _json_text(value: object) -> str:

@@ -426,6 +426,9 @@ class Symbol(LineRangeModel):
 
 EdgeKind: TypeAlias = Literal["contains", "imports", "calls"]
 
+ImpactDirection: TypeAlias = Literal["callers", "callees"]
+ImpactMappingStatus: TypeAlias = Literal["mapped", "unmapped"]
+
 
 class CodeEdge(ContractModel):
     edge_id: Identifier
@@ -981,6 +984,125 @@ class NeighborsIndexResponse(VersionedModel):
             raise ValueError("truncated neighbor results must explain the truncation")
         if not self.truncated and self.truncation_reason:
             raise ValueError("non-truncated neighbor results cannot have a truncation reason")
+        return self
+
+
+class ImpactPath(ContractModel):
+    """One explainable static calls path from an impact root."""
+
+    path_id: Identifier
+    index_id: Identifier
+    symbol_ids: list[Identifier] = Field(min_length=2, max_length=3)
+    edges: list[CodeEdge] = Field(min_length=1, max_length=2)
+    depth: PositiveInt = Field(le=2)
+
+    @model_validator(mode="after")
+    def validate_path_shape(self) -> ImpactPath:
+        if len(self.edges) != len(self.symbol_ids) - 1:
+            raise ValueError("impact path edges must join every adjacent symbol")
+        if self.depth != len(self.edges):
+            raise ValueError("impact path depth must match its edge count")
+        if len(set(self.symbol_ids)) != len(self.symbol_ids):
+            raise ValueError("impact paths must not repeat symbols")
+        symbol_ids = set(self.symbol_ids)
+        for edge in self.edges:
+            if edge.index_id != self.index_id or edge.kind != "calls":
+                raise ValueError("impact paths may contain only same-index calls edges")
+            if edge.source_id not in symbol_ids or edge.target_id not in symbol_ids:
+                raise ValueError("impact path edges must reference path symbols")
+        return self
+
+
+class RunImpactResponse(VersionedModel):
+    """A bounded static impact view derived from one saved Run report."""
+
+    project_id: Identifier
+    session_id: Identifier
+    run_id: Identifier
+    index_id: Identifier
+    candidate_id: Identifier | None = None
+    finding_id: Identifier | None = None
+    mapping_status: ImpactMappingStatus
+    direction: ImpactDirection
+    max_depth: PositiveInt = Field(le=2)
+    root_symbol_id: Identifier | None = None
+    root: Symbol | None = None
+    nodes: list[Symbol] = Field(default_factory=list, max_length=40)
+    edges: list[CodeEdge] = Field(default_factory=list, max_length=80)
+    paths: list[ImpactPath] = Field(default_factory=list, max_length=40)
+    unresolved: list[UnresolvedReference] = Field(default_factory=list, max_length=40)
+    reachable_node_count: NonNegativeInt = 0
+    returned_node_count: NonNegativeInt = 0
+    scope_note: str = Field(min_length=1, max_length=1_000)
+    truncated: bool = False
+    truncation_reason: str | None = Field(default=None, max_length=1_000)
+
+    @model_validator(mode="after")
+    def validate_impact_consistency(self) -> RunImpactResponse:
+        if (self.candidate_id is None) == (self.finding_id is None):
+            raise ValueError("impact response must identify exactly one candidate or finding")
+        if self.returned_node_count != len(self.nodes):
+            raise ValueError("returned_node_count must match the returned nodes")
+        if self.reachable_node_count != max(0, len(self.nodes) - 1):
+            raise ValueError("reachable_node_count must exclude the root node")
+        if self.mapping_status == "mapped":
+            if self.root is None or self.root_symbol_id is None:
+                raise ValueError("mapped impact responses require a root symbol")
+            if self.root.symbol_id != self.root_symbol_id:
+                raise ValueError("impact root_symbol_id must match root")
+        elif self.root is not None or self.root_symbol_id is not None:
+            raise ValueError("unmapped impact responses cannot include a root symbol")
+        node_ids = {node.symbol_id for node in self.nodes}
+        if len(node_ids) != len(self.nodes):
+            raise ValueError("impact nodes must have unique symbol IDs")
+        for node in self.nodes:
+            if node.index_id != self.index_id:
+                raise ValueError("impact node belongs to a different index_id")
+        if self.mapping_status == "mapped":
+            assert self.root is not None
+            if self.root.index_id != self.index_id or self.root.symbol_id not in node_ids:
+                raise ValueError("impact root must belong to the returned index and nodes")
+        edge_ids: set[str] = set()
+        for edge in self.edges:
+            if edge.edge_id in edge_ids:
+                raise ValueError("impact edges must have unique edge IDs")
+            edge_ids.add(edge.edge_id)
+            if edge.index_id != self.index_id or edge.kind != "calls":
+                raise ValueError("impact edges must be same-index calls edges")
+            if edge.source_id not in node_ids or edge.target_id not in node_ids:
+                raise ValueError("impact edges must reference returned nodes")
+        path_ids: set[str] = set()
+        edge_by_id = {edge.edge_id: edge for edge in self.edges}
+        for path in self.paths:
+            if path.path_id in path_ids:
+                raise ValueError("impact paths must have unique path IDs")
+            path_ids.add(path.path_id)
+            if path.index_id != self.index_id:
+                raise ValueError("impact path belongs to a different index_id")
+            if self.mapping_status != "mapped" or self.root_symbol_id is None:
+                raise ValueError("unmapped impact responses cannot include paths")
+            if path.symbol_ids[0] != self.root_symbol_id:
+                raise ValueError("impact paths must start at the root")
+            for symbol_id in path.symbol_ids:
+                if symbol_id not in node_ids:
+                    raise ValueError("impact paths must reference returned nodes")
+            for edge in path.edges:
+                if edge.edge_id not in edge_by_id:
+                    raise ValueError("impact paths must reference returned edges")
+            for source_id, target_id, edge in zip(path.symbol_ids, path.symbol_ids[1:], path.edges):
+                expected_source, expected_target = (
+                    (target_id, source_id) if self.direction == "callers" else (source_id, target_id)
+                )
+                if edge.source_id != expected_source or edge.target_id != expected_target:
+                    raise ValueError("impact path edge direction does not match the requested direction")
+        if self.mapping_status == "unmapped" and (
+            self.nodes or self.edges or self.paths or self.unresolved or self.reachable_node_count
+        ):
+            raise ValueError("unmapped impact responses must be empty")
+        if self.truncated and not self.truncation_reason:
+            raise ValueError("truncated impact responses must explain the truncation")
+        if not self.truncated and self.truncation_reason:
+            raise ValueError("non-truncated impact responses cannot have a truncation reason")
         return self
 
 
@@ -1972,6 +2094,20 @@ class McpRunReportResponse(McpResultBase):
                 raise ValueError("Run report must identify its Run")
         if not self.ok and self.report is not None:
             raise ValueError("failed Run report reads cannot include a report")
+        return self
+
+
+class McpRunImpactResponse(McpResultBase):
+    """Read-only MCP envelope for a bounded Run candidate impact query."""
+
+    result: RunImpactResponse | None = None
+
+    @model_validator(mode="after")
+    def validate_run_impact_result(self) -> McpRunImpactResponse:
+        if self.ok and self.result is None:
+            raise ValueError("successful Run impact reads require a result")
+        if not self.ok and self.result is not None:
+            raise ValueError("failed Run impact reads cannot include a result")
         return self
 
 

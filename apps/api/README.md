@@ -2,7 +2,7 @@
 
 ## 职责与边界
 
-`apps/api` 提供本地 FastAPI 服务、静态仓库 allow-list、受限本地/GitHub 来源导入、Project/Index/Session 管理、规则概览、功能生成，以及显式 fixture/real Run 的冻结、执行、事件、SSE 和报告读取。它不执行被分析仓库代码、shell 或测试；real Run 只通过有界模型适配器请求服务端配置的兼容供应商。
+`apps/api` 提供本地 FastAPI 服务、静态仓库 allow-list、受限本地/GitHub 来源导入、Project/Index/Session 管理、规则概览、功能生成，以及显式 fixture/real Run 的冻结、执行、事件、SSE、报告读取和报告候选的有界静态影响查询。它不执行被分析仓库代码、shell 或测试；real Run 只通过有界模型适配器请求服务端配置的兼容供应商。
 
 ## 入口与目录导航
 
@@ -19,13 +19,13 @@
 
 ## 接口与依赖
 
-契约位于 [contracts.py](app/contracts.py)，Schema 由 [export_schema.py](app/export_schema.py) 生成。旧 `/api/indexes/*` 保留兼容；项目工作区使用 `/api/projects/*`。Run 的 HTTP 入口为 `/api/projects/{project_id}/sessions/{session_id}/runs` 及其 detail、events、`events/stream`、tool-results、report、cancel 子路径；创建只做边界校验、冻结、容量预留和提交，worker 启动成功后返回 queued 的 run_id；容量满时返回可重试的 `budget_exceeded`/429，不写入 Run。`events/stream` 在握手前校验 project/session/run 与 `after_sequence`/`Last-Event-ID`，按 `{run_id}:{sequence}` 逐帧回放持久化公开事件，终态后关闭，SSE 不可用时由工作台自行回退轮询。执行由 [Run 执行子系统](../../docs/subsystems/execution.md)负责。所有项目索引、Session 和 Run 操作都复用 WorkspaceService 的归属校验。
+契约位于 [contracts.py](app/contracts.py)，Schema 由 [export_schema.py](app/export_schema.py) 生成。旧 `/api/indexes/*` 保留兼容；项目工作区使用 `/api/projects/*`。Run 的 HTTP 入口为 `/api/projects/{project_id}/sessions/{session_id}/runs` 及其 detail、events、`events/stream`、tool-results、report、impact、cancel 子路径；创建只做边界校验、冻结、容量预留和提交，worker 启动成功后返回 queued 的 run_id；容量满时返回可重试的 `budget_exceeded`/429，不写入 Run。`events/stream` 在握手前校验 project/session/run 与 `after_sequence`/`Last-Event-ID`，按 `{run_id}:{sequence}` 逐帧回放持久化公开事件，终态后关闭，SSE 不可用时由工作台自行回退轮询。`impact` 只按已保存报告中的一个 candidate/finding ID 查询 Run 固定 index 上的静态 `calls`，限制方向、深度、节点、路径和 unresolved 输出，不修改 Run。执行由 [Run 执行子系统](../../docs/subsystems/execution.md)负责。所有项目索引、Session 和 Run 操作都复用 WorkspaceService 的归属校验。
 
 ## 数据与生命周期
 
 静态仓库由 `CODETRAIL_REPOSITORIES` JSON 对象提供；动态来源注册和导入状态写入 `CODETRAIL_DATA_DIR`，索引库归属于服务管理目录或来源的既有存储。Session 在创建时固定 ready `index_id`，消息由事务分配连续 sequence。Run 在同一索引库中保存不可变的 `project_id/session_id/index_id`、可选同快照 feature generation、完整已保存消息前缀及 hash、预算、状态、事件、工具结果和报告；每个 Session 最多一个 `queued/running` Run。服务启动把未完成 Run 标记为 `interrupted`，取消与重启都保存终态事件和终态报告，迟到工具结果不会落库。进程内 Run 执行容量由 `CODETRAIL_RUN_MAX_CONCURRENT_RUNS` 配置，默认 2；没有内部等待队列，名额由预留到 worker 终态保持占用。SSE 订阅使用 `CODETRAIL_RUN_SSE_MAX_CONNECTIONS`、`CODETRAIL_RUN_SSE_MAX_PER_RUN`、`CODETRAIL_RUN_SSE_BATCH_SIZE`、`CODETRAIL_RUN_SSE_POLL_INTERVAL_SECONDS`、`CODETRAIL_RUN_SSE_IDLE_HEARTBEAT_SECONDS`、`CODETRAIL_RUN_SSE_MAX_LIFETIME_SECONDS` 和 `CODETRAIL_RUN_SSE_MAX_EVENT_BYTES` 配置有限资源，默认总连接 8、单 Run 2、批次 20、最长 300 秒。
 
-fixture Run 继续接受三个场景：候选、证据不足和工具失败。real Run 每轮由模型选择一个 `search_code`、`read_source` 或 `get_neighbors` 请求，或返回结构化候选/证据不足结论；每个请求都包含完整冻结 Issue/消息和已返回证据，最多做一次有限格式修复。执行器使用实际索引工具结果组装报告，不执行仓库源码、shell 或测试。所有报告 evidence 和图节点绑定 Run 的固定 `index_id`；草稿、后续消息和后续 latest index 不会改变已保存 Run 输入。
+fixture Run 继续接受三个场景：候选、证据不足和工具失败。real Run 每轮由模型选择一个 `search_code`、`read_source` 或 `get_neighbors` 请求，或返回结构化候选/证据不足结论；每个请求都包含完整冻结 Issue/消息和已返回证据，最多做一次有限格式修复。执行器使用实际索引工具结果组装报告，不执行仓库源码、shell 或测试。所有报告 evidence 和图节点绑定 Run 的固定 `index_id`；影响查询重新读取该固定快照的静态 `calls`，不把 imports、dynamic/unresolved 或模型候选升级为确定影响；草稿、后续消息和后续 latest index 不会改变已保存 Run 输入。
 
 ## 使用与配置
 
@@ -46,11 +46,11 @@ API 健康检查为 `GET /api/health`。前端或测试先创建 Project、建�
 
 本地/GitHub 导入继续执行绝对路径、allow-list、符号链接/junction、官方 URL、归档安全、时间和大小边界；HTTP 写入口只接受 loopback 客户端。未知项目、非所属索引/Session/Run 返回 `not_found`，参数、预算和执行容量边界返回 `invalid_input` 或可重试的 `budget_exceeded`，失败不泄露宿主路径。
 
-Run 拒绝未开启能力的 `mode=real`、拒绝空 Session、跨项目/Session/index/generation，冻结完整消息前缀而不是前端已加载页；草稿不会进入输入。单次/总源码行、工具调用、模型调用/修复、模型输入/输出字符、输入/输出字符、事件、总时间和进程并发均有服务端上限；状态只能从 queued/running 进入一个终态，终态事件不可重复，取消幂等，重启中的 Run 标为 interrupted。模型供应商缺失、请求失败、非法结构化输出和预算耗尽明确失败，不回退 fixture；Run 历史、事件和工具结果分页均有上限并带作用域游标。SSE 的跨 Run、未来游标、游标冲突和订阅容量拒绝在流建立前返回结构化错误；断线只释放订阅，不取消或重启 Run，终态游标收到 `run.stream.end` 控制帧后有限结束；容量满不落库且不影响查询/取消/health；取消/中断报告无候选结论，失败报告保留已持久化的同快照 evidence。
+Run 拒绝未开启能力的 `mode=real`、拒绝空 Session、跨项目/Session/index/generation，冻结完整消息前缀而不是前端已加载页；草稿不会进入输入。单次/总源码行、工具调用、模型调用/修复、模型输入/输出字符、输入/输出字符、事件、总时间和进程并发均有服务端上限；状态只能从 queued/running 进入一个终态，终态事件不可重复，取消幂等，重启中的 Run 标为 interrupted。模型供应商缺失、请求失败、非法结构化输出和预算耗尽明确失败，不回退 fixture；Run 历史、事件和工具结果分页均有上限并带作用域游标。SSE 的跨 Run、未来游标、游标冲突和订阅容量拒绝在流建立前返回结构化错误；断线只释放订阅，不取消或重启 Run，终态游标收到 `run.stream.end` 控制帧后有限结束；容量满不落库且不影响查询/取消/health；取消/中断报告无候选结论，失败报告保留已持久化的同快照 evidence。影响查询要求报告中的 candidate/finding 精确归属；找不到唯一源符号时返回有解释的空 unmapped 结果，找到后只遍历同快照 `calls`，最大深度 2、默认节点 40，并保留 cycles 的静态边和 unresolved 未知边界。
 
 ## 验证
 
-从 `apps/api` 执行 `uv run pytest -q` 和 `uv run python -m compileall -q app`。`tests/test_runs.py` 覆盖 fixture 生命周期；`tests/test_run_sse.py` 覆盖持久化逐帧回放、双游标续接、终态控制帧、未来/跨 Run 拒绝、断开释放容量和 health 并发；`tests/test_issue_runs.py` 覆盖 real 工具决策、证据不足、非法引用/工具、有限修复、预算、取消、持久化 config.json 和 OpenAI-compatible 请求；`tests/test_mcp.py` 覆盖 HTTP/MCP Run 对照、默认只读、独立 Run 写开关和 real 能力开关。其它项目/索引/导入/Session/O1/O2/O3 测试继续覆盖各自边界。离线协议、本地假供应商和本地 SSE 流已验证，真实 DeepSeek 语义质量未验证。
+从 `apps/api` 执行 `uv run pytest -q` 和 `uv run python -m compileall -q app`。`tests/test_runs.py` 覆盖 fixture 生命周期和固定 Run 报告影响查询；`tests/test_storage.py` 覆盖静态路径、节点去重、环和输出边界；`tests/test_run_sse.py` 覆盖持久化逐帧回放、双游标续接、终态控制帧、未来/跨 Run 拒绝、断开释放容量和 health 并发；`tests/test_issue_runs.py` 覆盖 real 工具决策、证据不足、非法引用/工具、有限修复、预算、取消、持久化 config.json 和 OpenAI-compatible 请求；`tests/test_mcp.py` 覆盖 HTTP/MCP Run 与影响查询对照、默认只读、独立 Run 写开关和 real 能力开关。其它项目/索引/导入/Session/O1/O2/O3 测试继续覆盖各自边界。离线协议、本地假供应商和本地 SSE 流已验证，真实 DeepSeek 语义质量未验证。
 
 ## 关联文档
 
@@ -67,7 +67,7 @@ Run 拒绝未开启能力的 `mode=real`、拒绝空 Session、跨项目/Session
 
 `python -m app.mcp_server` 启动 MCP SDK `2.2.0` 的本地 stdio 服务；stdout 只承载协议帧，日志写 stderr。服务复用 WorkspaceService，不直接访问 SQLite，不创建索引，不执行仓库代码。
 
-默认只读工具包括项目、索引、Session/消息、概览、功能历史/版本/图，以及 `list_session_runs`、`get_session_run`、`list_run_events`、`list_run_tool_results`、`get_run_report`。Run 读取只返回持久化数据，不重新执行分析。
+默认只读工具包括项目、索引、Session/消息、概览、功能历史/版本/图，以及 `list_session_runs`、`get_session_run`、`list_run_events`、`list_run_tool_results`、`get_run_report`、`get_run_impact`。Run 读取和影响查询只返回持久化报告及其固定快照上的静态结果，不重新执行分析。
 
 设置 `CODETRAIL_MCP_RUN_WRITE_ENABLED=1` 后，独立增加 `start_session_run` 和 `cancel_session_run`；它允许显式选择 fixture 或 real，但 real 还要求 `CODETRAIL_MCP_REAL_RUN_ENABLED=1`，不会因为 Run 写开关开放 `create_session` 或 `append_session_message`。Session 写入仍需 `CODETRAIL_MCP_SESSION_WRITE_ENABLED=1`。未设置时 MCP 保持只读工具，默认只读工具不会调用模型或 Run。
 

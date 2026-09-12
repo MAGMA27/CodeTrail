@@ -34,6 +34,7 @@ import {
   createProjectSession,
   getProjectSession,
   getProjectSessionRun,
+  getProjectSessionRunImpact,
   getProjectSessionRunReport,
   listProjectIndexes,
   listProjectFeatureGenerations,
@@ -62,6 +63,7 @@ import {
   type FeatureGraphRelation,
   type FeatureSourceScope,
   type HealthResponse,
+  type ImpactDirection,
   type ImportStatus,
   type IndexResponse,
   type ImportAttempt,
@@ -75,6 +77,7 @@ import {
   type RunEvent,
   type RunMode,
   type RunReport,
+  type RunImpactResponse,
   type RunScenario,
   type RunStatusResponse,
   type RunToolResult,
@@ -110,7 +113,12 @@ import WorkbenchUi from "./workbench-ui";
 type IndexUiStatus = "unindexed" | "creating" | "loading" | "ready" | "partial" | "error";
 type AsyncStatus = "idle" | "loading" | "success" | "empty" | "error";
 type WorkbenchView = "overview" | "session";
-type WorkbenchPanel = "none" | "source" | "graph" | "feature_graph";
+type WorkbenchPanel = "none" | "source" | "graph" | "feature_graph" | "impact";
+
+type ImpactSelection = {
+  candidateId?: string;
+  findingId?: string;
+};
 
 type SymbolNodeData = {
   symbol: SymbolRecord;
@@ -540,6 +548,12 @@ export default function Workbench() {
   const [runStreamError, setRunStreamError] = useState<string | null>(null);
   const [runWriteStatus, setRunWriteStatus] = useState<AsyncStatus>("idle");
   const [runWriteError, setRunWriteError] = useState<string | null>(null);
+  const [runImpact, setRunImpact] = useState<RunImpactResponse | null>(null);
+  const [runImpactStatus, setRunImpactStatus] = useState<AsyncStatus>("idle");
+  const [runImpactError, setRunImpactError] = useState<string | null>(null);
+  const [runImpactDirection, setRunImpactDirection] = useState<ImpactDirection>("callers");
+  const [runImpactDepth, setRunImpactDepth] = useState(2);
+  const [runImpactSelection, setRunImpactSelection] = useState<ImpactSelection | null>(null);
   const [direction, setDirection] = useState<NeighborDirection>("both");
   const [edgeKinds, setEdgeKinds] = useState<EdgeKind[]>(["calls", "imports"]);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
@@ -591,6 +605,7 @@ export default function Workbench() {
   const runController = useRef<AbortController | null>(null);
   const runHistoryController = useRef<AbortController | null>(null);
   const runWriteController = useRef<AbortController | null>(null);
+  const runImpactController = useRef<AbortController | null>(null);
   const indexRequestId = useRef(0);
   const projectRequestId = useRef(0);
   const importRequestId = useRef(0);
@@ -608,6 +623,7 @@ export default function Workbench() {
   const runRequestId = useRef(0);
   const runHistoryRequestId = useRef(0);
   const runWriteRequestId = useRef(0);
+  const runImpactRequestId = useRef(0);
   const featureIdempotencyKey = useRef<string | null>(null);
   const sessionCreateRequest = useRef<{ projectId: string; topic: string; key: string } | null>(null);
   const sessionMessageRequest = useRef<{
@@ -639,6 +655,15 @@ export default function Workbench() {
     runStreamRequestId.current += 1;
     runEventStreamController.current?.close();
     runEventStreamController.current = null;
+  }, []);
+
+  const resetRunImpact = useCallback(() => {
+    runImpactController.current?.abort();
+    runImpactRequestId.current += 1;
+    setRunImpact(null);
+    setRunImpactStatus("idle");
+    setRunImpactError(null);
+    setRunImpactSelection(null);
   }, []);
 
   const checkHealth = useCallback(async () => {
@@ -734,6 +759,7 @@ export default function Workbench() {
       runController.current?.abort();
       runHistoryController.current?.abort();
       runWriteController.current?.abort();
+      runImpactController.current?.abort();
       closeRunEventStream();
       if (runPollTimer.current !== null) {
         window.clearTimeout(runPollTimer.current);
@@ -749,12 +775,14 @@ export default function Workbench() {
     featureController.current?.abort();
     featureHistoryController.current?.abort();
     featureGraphController.current?.abort();
+    runImpactController.current?.abort();
     searchRequestId.current += 1;
     graphRequestId.current += 1;
     sourceRequestId.current += 1;
     overviewRequestId.current += 1;
     featureHistoryRequestId.current += 1;
     featureGraphRequestId.current += 1;
+    runImpactRequestId.current += 1;
     setSearchStatus("idle");
     setSearchResults([]);
     setSearchError(null);
@@ -787,19 +815,23 @@ export default function Workbench() {
     setFeatureGraphStatus("idle");
     setFeatureGraph(null);
     setFeatureGraphError(null);
+    setRunImpact(null);
+    setRunImpactStatus("idle");
+    setRunImpactError(null);
+    setRunImpactSelection(null);
     setExpandedGroups(new Set());
     knownGroupKeys.current.clear();
   }, []);
 
   const loadLinkedEvidence = useCallback(
-    async (link: EvidenceLink, response: IndexResponse, generationId: string | null = null) => {
+    async (link: EvidenceLink, generationId: string | null = null) => {
       sourceController.current?.abort();
       const controller = new AbortController();
       sourceController.current = controller;
       const requestId = ++sourceRequestId.current;
       const linked = {
         symbol_id: `evidence-${link.evidenceId}`,
-        index_id: response.index.index_id,
+        index_id: link.indexId,
         path: link.path,
         qualified_name: `${link.path}:L${link.startLine}–L${link.endLine}`,
         kind: "file" as const,
@@ -816,7 +848,7 @@ export default function Workbench() {
       try {
         const source = await readProjectSource(
           link.projectId,
-          response.index.index_id,
+          link.indexId,
           link.path,
           link.startLine,
           link.endLine,
@@ -1154,8 +1186,9 @@ export default function Workbench() {
     setRunStreamError(null);
     setRunWriteStatus("idle");
     setRunWriteError(null);
+    resetRunImpact();
     runCreateRequest.current = null;
-  }, [closeRunEventStream]);
+  }, [closeRunEventStream, resetRunImpact]);
 
   const loadSessionMessages = useCallback(
     async (projectId: string, sessionId: string, cursor: string | null = null, append = false) => {
@@ -1373,8 +1406,94 @@ export default function Workbench() {
 
   runDetailsLoader.current = loadRunDetails;
 
+  const loadRunImpact = useCallback(
+    async (
+      selection: ImpactSelection,
+      requestedDirection = runImpactDirection,
+      requestedDepth = runImpactDepth,
+    ) => {
+      if (!selectedProjectId || !selectedSessionId || !selectedRunId) {
+        return;
+      }
+      if (!selection.candidateId && !selection.findingId) {
+        setRunImpactStatus("error");
+        setRunImpactError("影响查询缺少候选或发现标识。");
+        return;
+      }
+      runImpactController.current?.abort();
+      const controller = new AbortController();
+      runImpactController.current = controller;
+      const requestId = ++runImpactRequestId.current;
+      setRunImpactSelection(selection);
+      setRunImpactDirection(requestedDirection);
+      setRunImpactDepth(requestedDepth);
+      setPanelMode("impact");
+      setRunImpactStatus("loading");
+      setRunImpactError(null);
+      setRunImpact(null);
+      try {
+        const response = await getProjectSessionRunImpact(
+          selectedProjectId,
+          selectedSessionId,
+          selectedRunId,
+          {
+            ...(selection.candidateId ? { candidateId: selection.candidateId } : {}),
+            ...(selection.findingId ? { findingId: selection.findingId } : {}),
+            direction: requestedDirection,
+            depth: requestedDepth,
+            limit: 40,
+          },
+          controller.signal,
+        );
+        const expectedIndexId = runStatusResponse?.run.index_id ?? runReport?.index_id;
+        if (
+          !isLatestRequest(requestId, runImpactRequestId.current) ||
+          response.project_id !== selectedProjectId ||
+          response.session_id !== selectedSessionId ||
+          response.run_id !== selectedRunId ||
+          (expectedIndexId !== undefined && response.index_id !== expectedIndexId)
+        ) {
+          return;
+        }
+        setRunImpact(response);
+        setRunImpactStatus(
+          response.mapping_status === "mapped" && response.reachable_node_count > 0 ? "success" : "empty",
+        );
+      } catch (error) {
+        if (isAbortError(error) || !isLatestRequest(requestId, runImpactRequestId.current)) {
+          return;
+        }
+        setRunImpact(null);
+        setRunImpactStatus("error");
+        setRunImpactError(errorMessage(error));
+      }
+    },
+    [runImpactDepth, runImpactDirection, runReport, runStatusResponse, selectedProjectId, selectedRunId, selectedSessionId],
+  );
+
+  const changeRunImpactDirection = useCallback(
+    (nextDirection: ImpactDirection) => {
+      setRunImpactDirection(nextDirection);
+      if (runImpactSelection) {
+        void loadRunImpact(runImpactSelection, nextDirection, runImpactDepth);
+      }
+    },
+    [loadRunImpact, runImpactDepth, runImpactSelection],
+  );
+
+  const changeRunImpactDepth = useCallback(
+    (nextDepth: number) => {
+      setRunImpactDepth(nextDepth);
+      if (runImpactSelection) {
+        void loadRunImpact(runImpactSelection, runImpactDirection, nextDepth);
+      }
+    },
+    [loadRunImpact, runImpactDirection, runImpactSelection],
+  );
+
   const loadRunHistory = useCallback(async (projectId: string, sessionId: string) => {
     closeRunEventStream();
+    resetRunImpact();
     runHistoryController.current?.abort();
     const controller = new AbortController();
     runHistoryController.current = controller;
@@ -1409,16 +1528,17 @@ export default function Workbench() {
       setRunHistoryStatus("error");
       setRunHistoryError(errorMessage(error));
     }
-  }, [closeRunEventStream, loadRunDetails]);
+  }, [closeRunEventStream, loadRunDetails, resetRunImpact]);
 
   const selectRun = useCallback((runId: string) => {
     if (!selectedProjectId || !selectedSessionId) {
       return;
     }
     setSelectedRunId(runId);
+    resetRunImpact();
     setRunReport(null);
     void loadRunDetails(selectedProjectId, selectedSessionId, runId);
-  }, [loadRunDetails, selectedProjectId, selectedSessionId]);
+  }, [loadRunDetails, resetRunImpact, selectedProjectId, selectedSessionId]);
 
   const startSessionRun = useCallback(async (mode: RunMode, scenario: RunScenario) => {
     if (!selectedProjectId || !selectedSessionId) {
@@ -1603,6 +1723,7 @@ export default function Workbench() {
         setRunStreamError(null);
         setRunWriteStatus("idle");
         setRunWriteError(null);
+        resetRunImpact();
         runCreateRequest.current = null;
         void loadRunHistory(projectId, sessionId);
       } catch (error) {
@@ -1613,7 +1734,7 @@ export default function Workbench() {
         setSessionError(errorMessage(error));
       }
     },
-    [closeRunEventStream, loadRunHistory, loadSessionMessages],
+    [closeRunEventStream, loadRunHistory, loadSessionMessages, resetRunImpact],
   );
 
   const selectSession = useCallback(
@@ -1816,7 +1937,7 @@ export default function Workbench() {
 
   const selectFeatureEvidence = useCallback(
     (evidence: Evidence) => {
-      if (!indexResponse || !selectedProjectId) {
+      if (!selectedProjectId) {
         return;
       }
       void loadLinkedEvidence(
@@ -1829,11 +1950,10 @@ export default function Workbench() {
           contentHash: evidence.content_hash,
           evidenceId: evidence.evidence_id,
         },
-        indexResponse,
         selectedFeatureGenerationId,
       );
     },
-    [indexResponse, loadLinkedEvidence, selectedFeatureGenerationId, selectedProjectId],
+    [loadLinkedEvidence, selectedFeatureGenerationId, selectedProjectId],
   );
 
   const applyIndexResponse = useCallback(
@@ -1905,7 +2025,7 @@ export default function Workbench() {
         }
         applyIndexResponse(response);
         if (requestedLink) {
-          await loadLinkedEvidence(requestedLink, response);
+          await loadLinkedEvidence(requestedLink);
           evidenceLinkApplied.current = true;
         }
       } catch (error) {
@@ -2325,7 +2445,7 @@ export default function Workbench() {
 
   const loadSource = useCallback(
     async (symbol: SymbolRecord, startLine = symbol.start_line) => {
-      if (!indexResponse || !selectedProjectId) {
+      if (!selectedProjectId) {
         return;
       }
       sourceController.current?.abort();
@@ -2340,7 +2460,7 @@ export default function Workbench() {
       try {
         const response = await readProjectSource(
           selectedProjectId,
-          indexResponse.index.index_id,
+          symbol.index_id,
           symbol.path,
           startLine,
           endLine,
@@ -2360,7 +2480,7 @@ export default function Workbench() {
         setSourceError(errorMessage(error));
       }
     },
-    [indexResponse, selectedProjectId],
+    [selectedProjectId],
   );
 
   const selectSymbol = useCallback(
@@ -2448,7 +2568,6 @@ export default function Workbench() {
           contentHash: evidence.content_hash,
           evidenceId: evidence.evidence_id,
         },
-        indexResponse,
       );
     },
     [indexResponse, loadLinkedEvidence, selectedProjectId],
@@ -2562,14 +2681,21 @@ export default function Workbench() {
     return (
       graph.symbols.find((symbol) => symbol.symbol_id === selectedId) ??
       searchResults.find((match) => match.symbol.symbol_id === selectedId)?.symbol ??
+      runImpact?.nodes.find((symbol) => symbol.symbol_id === selectedId) ??
       (linkedSymbol?.symbol_id === selectedId ? linkedSymbol : null) ??
       null
     );
-  }, [graph.symbols, linkedSymbol, searchResults, selectedId]);
+  }, [graph.symbols, linkedSymbol, runImpact?.nodes, searchResults, selectedId]);
 
   const selectedUnresolved = useMemo(
-    () => (selectedId ? unresolvedForSymbol(graph.unresolved, selectedId) : []),
-    [graph.unresolved, selectedId],
+    () => {
+      if (!selectedId) {
+        return [];
+      }
+      const fromImpact = runImpact?.nodes.some((symbol) => symbol.symbol_id === selectedId);
+      return unresolvedForSymbol(fromImpact ? runImpact?.unresolved ?? [] : graph.unresolved, selectedId);
+    },
+    [graph.unresolved, runImpact?.nodes, runImpact?.unresolved, selectedId],
   );
 
   const toggleGroup = useCallback((key: string) => {
@@ -2688,6 +2814,67 @@ export default function Workbench() {
     return { nodes, edges };
   }, [expandedGroups, graph.edges, graph.symbols, groups, indexResponse, loadNeighborhood, selectedId, selectSymbol, toggleGroup]);
 
+  const impactFlowModel = useMemo(() => {
+    if (!runImpact || runImpact.mapping_status !== "mapped") {
+      return { nodes: [] as FlowNode[], edges: [] as FlowEdge[] };
+    }
+    const depthById = new Map<string, number>();
+    if (runImpact.root_symbol_id) {
+      depthById.set(runImpact.root_symbol_id, 0);
+    }
+    for (const path of runImpact.paths) {
+      path.symbol_ids.forEach((symbolId, index) => {
+        const current = depthById.get(symbolId);
+        if (current === undefined || index < current) {
+          depthById.set(symbolId, index);
+        }
+      });
+    }
+    const rowsByDepth = new Map<number, number>();
+    const nodes: SymbolFlowNode[] = runImpact.nodes.map((symbol) => {
+      const depth = depthById.get(symbol.symbol_id) ?? 1;
+      const row = rowsByDepth.get(depth) ?? 0;
+      rowsByDepth.set(depth, row + 1);
+      return {
+        id: symbol.symbol_id,
+        type: "symbol",
+        position: { x: 28 + depth * 226, y: 28 + row * 104 },
+        data: {
+          symbol,
+          selected: symbol.symbol_id === runImpact.root_symbol_id,
+          onSelect: (symbolId) => {
+            const next = runImpact.nodes.find((candidate) => candidate.symbol_id === symbolId);
+            if (next) {
+              selectSymbol(next);
+            }
+          },
+          onExpand: () => undefined,
+        },
+        style: { width: 196 },
+        draggable: false,
+      };
+    });
+    const nodeIds = new Set(nodes.map((node) => node.id));
+    const edges: FlowEdge[] = runImpact.edges
+      .filter((edge) => nodeIds.has(edge.source_id) && nodeIds.has(edge.target_id))
+      .map((edge) => ({
+        id: edge.edge_id,
+        source: edge.source_id,
+        target: edge.target_id,
+        sourceHandle: "source",
+        targetHandle: "target",
+        type: "smoothstep",
+        label: "calls",
+        data: { kind: "calls" },
+        markerEnd: { type: MarkerType.ArrowClosed },
+        style: { stroke: "#ee8b55", strokeWidth: 2.2 },
+        labelStyle: { fill: "#e7ece8", fontSize: 10, fontWeight: 700 },
+        labelBgStyle: { fill: "#152421", fillOpacity: 0.92 },
+        labelBgPadding: [5, 3] as [number, number],
+      }));
+    return { nodes, edges };
+  }, [runImpact, selectSymbol]);
+
   const selectFeatureGraphNode = useCallback(
     (node: FeatureGraphNode) => {
       if (node.symbol) {
@@ -2767,6 +2954,16 @@ export default function Workbench() {
   }, [flowInstance, flowModel.nodes.length]);
 
   useEffect(() => {
+    if (panelMode === "impact" && flowInstance && impactFlowModel.nodes.length > 0) {
+      const timer = window.setTimeout(() => {
+        flowInstance.fitView({ padding: 0.18, duration: 320 });
+      }, 50);
+      return () => window.clearTimeout(timer);
+    }
+    return undefined;
+  }, [flowInstance, impactFlowModel.nodes.length, panelMode]);
+
+  useEffect(() => {
     if (featureFlowInstance && featureFlowModel.nodes.length > 0) {
       const timer = window.setTimeout(() => {
         featureFlowInstance.fitView({ padding: 0.18, duration: 320 });
@@ -2780,14 +2977,21 @@ export default function Workbench() {
     if (!selectedId) {
       return [];
     }
-    return graph.edges.filter((edge) => edge.source_id === selectedId || edge.target_id === selectedId);
-  }, [graph.edges, selectedId]);
+    const fromImpact = runImpact?.nodes.some((symbol) => symbol.symbol_id === selectedId);
+    const edges = fromImpact ? runImpact?.edges ?? [] : graph.edges;
+    return edges.filter((edge) => edge.source_id === selectedId || edge.target_id === selectedId);
+  }, [graph.edges, runImpact?.edges, runImpact?.nodes, selectedId]);
 
   const indexIdentity = indexResponse?.index;
   const selectedProject = useMemo(
     () => projects.find((project) => project.project_id === selectedProjectId) ?? null,
     [projects, selectedProjectId],
   );
+  const sourceIndexIdentity = selectedSymbol
+    ? sessions.find((session) => session.session_id === selectedSessionId)?.index.index_id === selectedSymbol.index_id
+      ? sessions.find((session) => session.session_id === selectedSessionId)?.index ?? indexIdentity
+      : indexIdentity
+    : indexIdentity;
   const sourceHasPrevious = selectedSymbol && sourceWindowStart > selectedSymbol.start_line;
   const sourceHasNext =
     selectedSymbol && sourceResponse && sourceResponse.evidence.end_line < selectedSymbol.end_line;
@@ -2935,6 +3139,9 @@ export default function Workbench() {
         onStartRun: startSessionRun,
         onCancelRun: cancelSelectedRun,
         onSelectRunEvidence: selectFeatureEvidence,
+        onSelectRunImpact: (selection) => {
+          void loadRunImpact(selection);
+        },
       }}
       knowledge={{
         searchQuery,
@@ -2991,7 +3198,7 @@ export default function Workbench() {
       }}
       evidence={{
         projectId: selectedProjectId,
-        index: indexIdentity ?? null,
+        index: sourceIndexIdentity ?? null,
         generationId: sourceGenerationId,
         selectedSymbol,
         sourceStatus,
@@ -3018,7 +3225,7 @@ export default function Workbench() {
         onClose: () => setPanelMode("none"),
       }}
       graph={{
-        panelMode: panelMode === "feature_graph" ? "feature_graph" : "graph",
+        panelMode: panelMode === "feature_graph" ? "feature_graph" : panelMode === "impact" ? "impact" : "graph",
         codeModel: flowModel,
         codeStatus: graphStatus,
         codeError: graphError,
@@ -3026,6 +3233,20 @@ export default function Workbench() {
         codeTruncationReason: graph.truncationReason,
         codeSymbolCount: graph.symbols.length,
         codeEdgeCount: graph.edges.length,
+        impactModel: impactFlowModel,
+        impact: runImpact,
+        impactStatus: runImpactStatus,
+        impactError: runImpactError,
+        impactDirection: runImpactDirection,
+        impactDepth: runImpactDepth,
+        onImpactDirectionChange: changeRunImpactDirection,
+        onImpactDepthChange: changeRunImpactDepth,
+        onImpactNodeClick: (nodeId) => {
+          const symbol = runImpact?.nodes.find((candidate) => candidate.symbol_id === nodeId);
+          if (symbol) {
+            selectSymbol(symbol);
+          }
+        },
         featureModel: featureFlowModel,
         featureStatus: featureGraphStatus,
         featureError: featureGraphError,

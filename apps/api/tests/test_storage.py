@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
+from app.contracts import CodeEdge, SourceLocation
 from app.indexing import build_source_snapshot, extract_definitions
 from app.relations import RelationIndex, extract_relations
 from app.storage import (
@@ -64,6 +66,95 @@ def test_fts5_roundtrip_and_reopen_preserve_the_complete_relation_index(tmp_path
 
     with IndexStore(database) as reopened:
         assert reopened.load_index(relation.snapshot.index.index_id) == relation
+
+
+def test_static_impact_keeps_simple_paths_deduplicates_nodes_and_retains_cycle_edges(tmp_path: Path) -> None:
+    relation = fixture_relation(index_id="impact-sample")
+    by_name = {symbol.qualified_name: symbol for symbol in relation.symbols}
+    root = by_name["timeout_demo.__main__.main"]
+    branch = by_name["timeout_demo.app.start"]
+    target = by_name["timeout_demo.config.load_settings"]
+    dynamic_symbol = by_name["timeout_demo.dispatch.dispatch"]
+
+    def edge(edge_id: str, source, target_symbol) -> CodeEdge:
+        return CodeEdge(
+            edge_id=edge_id,
+            index_id=relation.snapshot.index.index_id,
+            source_id=source.symbol_id,
+            target_id=target_symbol.symbol_id,
+            kind="calls",
+            extraction_method="fixture",
+            source_location=SourceLocation(
+                path=source.path,
+                start_line=source.start_line,
+                end_line=source.start_line,
+            ),
+        )
+
+    relation = replace(
+        relation,
+        edges=(
+            edge("impact-root-branch", root, branch),
+            edge("impact-root-target", root, target),
+            edge("impact-branch-target", branch, target),
+            edge("impact-branch-root", branch, root),
+        ),
+    )
+    with IndexStore(tmp_path / "index.sqlite3") as store:
+        store.write_index(relation)
+        result = store.get_static_impact(
+            relation.snapshot.index.index_id,
+            root.symbol_id,
+            "callees",
+            depth=2,
+            limit=40,
+        )
+        assert {symbol.symbol_id for symbol in result.nodes} == {
+            root.symbol_id,
+            branch.symbol_id,
+            target.symbol_id,
+        }
+        assert result.reachable_node_count == 2
+        assert {tuple(path.symbol_ids) for path in result.paths} == {
+            (root.symbol_id, branch.symbol_id),
+            (root.symbol_id, target.symbol_id),
+            (root.symbol_id, branch.symbol_id, target.symbol_id),
+        }
+        assert "impact-branch-root" in {edge.edge_id for edge in result.edges}
+        assert all(len(path.symbol_ids) == len(set(path.symbol_ids)) for path in result.paths)
+
+        shallow = store.get_static_impact(
+            relation.snapshot.index.index_id,
+            root.symbol_id,
+            "callees",
+            depth=1,
+            limit=40,
+        )
+        assert all(path.depth == 1 for path in shallow.paths)
+
+        limited = store.get_static_impact(
+            relation.snapshot.index.index_id,
+            root.symbol_id,
+            "callees",
+            depth=2,
+            limit=2,
+        )
+        assert limited.truncated is True
+        assert limited.truncation_reason == "max_nodes reached"
+        assert limited.reachable_node_count == 1
+
+        dynamic = store.get_static_impact(
+            relation.snapshot.index.index_id,
+            dynamic_symbol.symbol_id,
+            "callees",
+            depth=2,
+            limit=40,
+        )
+        assert any(item.reason == "dynamic_call_target" for item in dynamic.unresolved)
+        assert not any(
+            symbol.qualified_name in {"timeout_demo.handlers.handle", "timeout_demo.other_handlers.handle"}
+            for symbol in dynamic.nodes
+        )
 
 
 def test_roundtrip_preserves_definition_issues_and_relation_truncation(tmp_path: Path) -> None:

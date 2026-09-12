@@ -1,6 +1,6 @@
 # CodeTrail 工作区 UI 规范
 
-状态：UI-S2 已实现的工作区规范与验收记录。本文保留 UI-S1 的设计基线，同时记录生产 `/` 的迁移结果；可浏览原型位于 [apps/web/app/prototype/page.tsx](../../apps/web/app/prototype/page.tsx)，生产组件位于 [apps/web/app/workbench-ui.tsx](../../apps/web/app/workbench-ui.tsx)。
+状态：UI-S2 已实现的工作区规范与验收记录，已包含 P3-I1 Run 报告候选位置与有界静态影响面板。本文保留 UI-S1 的设计基线，同时记录生产 `/` 的迁移结果；可浏览原型位于 [apps/web/app/prototype/page.tsx](../../apps/web/app/prototype/page.tsx)，生产组件位于 [apps/web/app/workbench-ui.tsx](../../apps/web/app/workbench-ui.tsx)。
 
 ## 设计读法
 
@@ -93,6 +93,8 @@ UI-S1 不删除任何现有 API 能力；映射是目标信息架构，UI-S2 已
 
 功能图面板的工具栏负责入口、功能、模块和全部筛选；图结果来自当前固定快照的受限接口。面板中可切换到源码证据，节点点击不隐式改变项目或 Session。证据链接不调用模型，已保存结果和历史读取不触发生成。
 
+Run 报告中的 candidate link 或唯一 symbol finding 提供“查看影响范围”入口。影响面板显示报告固定 `index_id` 上的根节点、调用方/被调用方方向、1–2 层深度、静态 `calls` 路径、截断状态和 unresolved 未知边界；root、静态可达和模型候选使用不同文案/图例，不能显示成已确认 Bug 影响。无唯一符号、失败、取消或中断报告显示 unmapped/空态并保留源码 evidence；点击影响节点进入同一节点 snapshot 的源码证据，不回退到当前 latest。
+
 ### 项目操作
 
 “导入源代码”打开本地路径和 GitHub HTTPS 导入表单，说明路径由 API 服务端读取，来源目录只读；“索引管理”显示固定版本、失败/部分状态、revision、snapshot hash 和重试。生成模式、预算和模型供应商只放在详情或明确的生成操作中。当前真实功能生成仍需用户显式选择 `fixture/real` 与源码范围，原型不调用它。
@@ -123,7 +125,7 @@ UI-S1 不删除任何现有 API 能力；映射是目标信息架构，UI-S2 已
 
 独立原型是 `apps/web/app/prototype/` 下的 `/prototype` 路由，使用本地常量和 React 本地状态，故意不导入 `lib/api.ts`，不访问网络、不读取 SQLite、不读取宿主路径、不调用模型、不创建项目或 Session。右上角“预览状态”明确标记仅为设计评审；状态切换和保存延迟是视觉行为演示，不能当作真实 API 验收。
 
-生产 `/` 页面由 `apps/web/app/workbench.tsx` 编排，并由 `apps/web/app/workbench-ui.tsx` 提供视图。现有 API、HTTP/MCP 契约、项目归属、固定索引、证据和 Session 消息规则继续有效；UI-S2 已完成真实页面迁移。生产 Run 面板的 SSE 状态由可测试订阅状态机驱动：有效前进事件才重置重连预算，终态事件或四类终态控制帧结束订阅，有限失败后回退到单一有界轮询；Project/Session/Run 切换、刷新和卸载不得让旧回调写入当前范围。迁移后的生产页与原型继续分开验收，不能因任一截图把 Run、Agent、SSE 或 Issue 分析标为已实现。
+生产 `/` 页面由 `apps/web/app/workbench.tsx` 编排，并由 `apps/web/app/workbench-ui.tsx` 提供视图。现有 API、HTTP/MCP 契约、项目归属、固定索引、证据和 Session 消息规则继续有效；UI-S2 已完成真实页面迁移。生产 Run 面板的 SSE 状态由可测试订阅状态机驱动：有效前进事件才重置重连预算，终态事件或四类终态控制帧结束订阅，有限失败后回退到单一有界轮询；Project/Session/Run 切换、刷新和卸载不得让旧回调写入当前范围。P3-I1 影响面板是 Run 报告的只读派生视图，按需请求固定 snapshot 的静态 `calls`，方向/深度改变会取消旧请求并重新读取，不改变 Run、报告或模型状态。迁移后的生产页与原型继续分开验收，截图不能把静态可达、Agent 或真实模型质量标为已确认。
 
 ## 截图验收矩阵
 
@@ -168,4 +170,5 @@ UI-S1 不删除任何现有 API 能力；映射是目标信息架构，UI-S2 已
 - [x] 证据面板显示 `project_id/index_id/generation_id` 上下文，图筛选位于图工具栏；合成证据不发起无效关系请求。
 - [x] 生产 Run 面板显示连接与终态状态；本地受限 SSE 生命周期断流后的续接保持事件 sequence 连续且不重复，取消、Run 切换和刷新恢复不启动重复 Run。
 - [x] 视觉使用中性背景、单一强调色、明确焦点和错误状态；无旧网格、装饰渐变、假终端和假精确产品宣传。
-- [x] 原型截图与生产页面分开标记，未实现的 Agent 与候选/潜在影响高亮仍保持未实现；已实现的 Run SSE 状态不会伪装成隐藏推理或模型质量。
+- [x] 原型截图与生产页面分开标记；P3-I1 影响面板明确区分报告候选、静态 calls 可达和 unresolved 未知边界，已实现的 Run SSE 状态不会伪装成隐藏推理或模型质量。
+- [x] 已验证报告 candidate/finding 入口、固定 Run/index 影响结果、方向/深度控制、影响节点到源码证据和图联动，以及失败/取消/无唯一映射的空态；旧 Run 不回退到后续 latest index。

@@ -111,6 +111,12 @@ def test_schema_artifact_includes_session_contracts() -> None:
     } <= models.keys()
 
 
+def test_schema_artifact_includes_run_impact_contracts() -> None:
+    models = build_schema_document()["models"]
+
+    assert {"ImpactPath", "RunImpactResponse", "McpRunImpactResponse"} <= models.keys()
+
+
 def test_cross_snapshot_reference_is_rejected() -> None:
     payload = raw_bundle("success-timeout-missing")
     payload["report"]["index_id"] = "index-other"

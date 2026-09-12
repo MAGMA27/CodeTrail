@@ -284,6 +284,122 @@ def test_fixture_run_outcomes_and_real_mode_boundary(tmp_path: Path) -> None:
     assert response["code"] == "forbidden"
 
 
+def test_run_impact_is_report_scoped_bounded_and_empty_without_a_candidate(tmp_path: Path) -> None:
+    application, project_id, index_id = setup_workspace(tmp_path)
+    session_id = create_session(application, project_id, index_id, "impact")
+    run_id = start_run(application, project_id, session_id, run_payload(index_id))
+    terminal = wait_for_terminal(application, project_id, session_id, run_id)
+    assert terminal["run"]["status"] == "succeeded"
+    status, report_response = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/sessions/{session_id}/runs/{run_id}/report",
+    )
+    assert status == 200
+    candidate_id = report_response["report"]["candidate_links"][0]["candidate_id"]
+    candidate_symbol_id = report_response["report"]["candidate_links"][0]["source_symbol_id"]
+    finding_id = report_response["report"]["findings"][0]["finding_id"]
+    finding_symbol_id = report_response["report"]["findings"][0]["symbol_ids"][0]
+
+    status, callers = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/sessions/{session_id}/runs/{run_id}/impact"
+        f"?candidate_id={candidate_id}&direction=callers&depth=2&limit=40",
+    )
+    assert status == 200, callers
+    assert callers["project_id"] == project_id
+    assert callers["session_id"] == session_id
+    assert callers["run_id"] == run_id
+    assert callers["index_id"] == index_id
+    assert callers["candidate_id"] == candidate_id
+    assert callers["finding_id"] is None
+    assert callers["mapping_status"] == "mapped"
+    assert callers["direction"] == "callers"
+    assert callers["max_depth"] == 2
+    assert callers["root_symbol_id"] == candidate_symbol_id
+    assert callers["reachable_node_count"] == len(callers["nodes"]) - 1
+    assert all(edge["kind"] == "calls" for edge in callers["edges"])
+    assert all(path["symbol_ids"][0] == candidate_symbol_id for path in callers["paths"])
+    assert "静态可达不等同于已确认影响" in callers["scope_note"]
+
+    source_root = application.state.workspace_service.registry.root_for("timeout-demo")
+    config_path = source_root / "timeout_demo" / "config.py"
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8")
+        + "\n# A later source revision must not change the frozen Run.\n",
+        encoding="utf-8",
+    )
+    status, newer_index = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/indexes",
+        {"revision": "run-fixture-v2", "dirty": False},
+    )
+    assert status == 200, newer_index
+    assert newer_index["index"]["index_id"] != index_id
+    status, old_report_impact = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/sessions/{session_id}/runs/{run_id}/impact"
+        f"?candidate_id={candidate_id}",
+    )
+    assert status == 200, old_report_impact
+    assert old_report_impact["index_id"] == index_id
+
+    status, finding_impact = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/sessions/{session_id}/runs/{run_id}/impact"
+        f"?finding_id={finding_id}&direction=callees&depth=1&limit=40",
+    )
+    assert status == 200, finding_impact
+    assert finding_impact["finding_id"] == finding_id
+    assert finding_impact["candidate_id"] is None
+    assert finding_impact["direction"] == "callees"
+    assert finding_impact["max_depth"] == 1
+    assert finding_impact["root_symbol_id"] == finding_symbol_id
+    assert all(path["depth"] == 1 for path in finding_impact["paths"])
+
+    status, invalid_scope = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/sessions/{session_id}/runs/{run_id}/impact"
+        f"?candidate_id={candidate_id}&finding_id={finding_id}",
+    )
+    assert status == 400
+    assert invalid_scope["code"] == "invalid_input"
+
+    status, unknown_candidate = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/sessions/{session_id}/runs/{run_id}/impact"
+        "?candidate_id=not-in-report",
+    )
+    assert status == 404
+    assert unknown_candidate["code"] == "not_found"
+
+    failed_session = create_session(application, project_id, index_id, "failed impact")
+    failed_run = start_run(
+        application,
+        project_id,
+        failed_session,
+        run_payload(index_id, "tool-failure-read-source"),
+    )
+    wait_for_terminal(application, project_id, failed_session, failed_run)
+    status, unmapped = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/sessions/{failed_session}/runs/{failed_run}/impact"
+        f"?finding_id=finding-{failed_run}-failure",
+    )
+    assert status == 200, unmapped
+    assert unmapped["mapping_status"] == "unmapped"
+    assert unmapped["nodes"] == []
+    assert unmapped["paths"] == []
+    assert unmapped["reachable_node_count"] == 0
+
+
 def test_run_idempotency_active_conflict_and_cancellation_are_persisted(tmp_path: Path) -> None:
     application, project_id, index_id = setup_workspace(tmp_path)
     workspace = application.state.workspace_service

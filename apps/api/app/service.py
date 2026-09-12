@@ -35,6 +35,7 @@ from .contracts import (
     FeatureGraphResponse,
     GetNeighborsParams,
     GetNeighborsSuccess,
+    ImpactDirection,
     ImportAttempt,
     ImportAttemptResponse,
     GitHubImportRequest,
@@ -49,6 +50,7 @@ from .contracts import (
     Project,
     ProjectIndexListResponse,
     ProjectListResponse,
+    RunImpactResponse,
     ReportResponse,
     ReadSourceParams,
     ReadSourceSuccess,
@@ -1259,6 +1261,121 @@ class WorkspaceService:
         except StorageError as exc:
             raise ServiceError("internal_error", 500, "local Run report storage failed") from exc
         return ReportResponse(report=report)
+
+    def get_run_impact(
+        self,
+        project_id: str,
+        session_id: str,
+        run_id: str,
+        *,
+        candidate_id: str | None = None,
+        finding_id: str | None = None,
+        direction: ImpactDirection = "callers",
+        depth: int = 2,
+        limit: int = 40,
+    ) -> RunImpactResponse:
+        """Read a bounded static impact view rooted in one saved report symbol."""
+
+        if (candidate_id is None) == (finding_id is None):
+            raise ServiceError(
+                "invalid_input",
+                400,
+                "provide exactly one candidate_id or finding_id",
+            )
+        project = self._find_project(project_id)
+        try:
+            with self.registry.store_for_repository(project.repository_id) as store:
+                record = store._require_run_scope(project_id, session_id, run_id)
+                report = store.load_run_report(project_id, session_id, run_id)
+                if (
+                    report.project_id != project_id
+                    or report.session_id != session_id
+                    or report.run_id != run_id
+                    or report.index_id != record.run.index_id
+                ):
+                    raise StorageInputError("Run report does not match the requested Run scope")
+
+                root_symbol_id: str | None = None
+                mapping_status = "mapped"
+                if report.outcome != "candidate_found":
+                    mapping_status = "unmapped"
+                elif candidate_id is not None:
+                    candidate = next(
+                        (item for item in report.candidate_links if item.candidate_id == candidate_id),
+                        None,
+                    )
+                    if candidate is None:
+                        raise StorageNotFoundError("candidate was not found in the Run report")
+                    root_symbol_id = candidate.source_symbol_id
+                else:
+                    finding = next(
+                        (item for item in report.findings if item.finding_id == finding_id),
+                        None,
+                    )
+                    if finding is None:
+                        raise StorageNotFoundError("finding was not found in the Run report")
+                    if len(finding.symbol_ids) == 1:
+                        root_symbol_id = finding.symbol_ids[0]
+                    else:
+                        mapping_status = "unmapped"
+
+                graph_symbol_ids = {symbol.symbol_id for symbol in report.graph.nodes}
+                if root_symbol_id is not None and root_symbol_id not in graph_symbol_ids:
+                    mapping_status = "unmapped"
+                    root_symbol_id = None
+
+                scope_note = _impact_scope_note(direction, depth)
+                if mapping_status == "unmapped":
+                    return RunImpactResponse(
+                        project_id=project_id,
+                        session_id=session_id,
+                        run_id=run_id,
+                        index_id=record.run.index_id,
+                        candidate_id=candidate_id,
+                        finding_id=finding_id,
+                        mapping_status="unmapped",
+                        direction=direction,
+                        max_depth=depth,
+                        scope_note=(
+                            "当前报告没有一个可用于影响遍历的唯一候选符号；只保留报告中的源码证据。"
+                        ),
+                    )
+
+                result = store.get_static_impact(
+                    record.run.index_id,
+                    root_symbol_id,
+                    direction,
+                    depth,
+                    limit,
+                )
+                return RunImpactResponse(
+                    project_id=project_id,
+                    session_id=session_id,
+                    run_id=run_id,
+                    index_id=record.run.index_id,
+                    candidate_id=candidate_id,
+                    finding_id=finding_id,
+                    mapping_status="mapped",
+                    direction=direction,
+                    max_depth=depth,
+                    root_symbol_id=result.root.symbol_id,
+                    root=result.root,
+                    nodes=list(result.nodes),
+                    edges=list(result.edges),
+                    paths=list(result.paths),
+                    unresolved=list(result.unresolved),
+                    reachable_node_count=result.reachable_node_count,
+                    returned_node_count=len(result.nodes),
+                    scope_note=scope_note,
+                    truncated=result.truncated,
+                    truncation_reason=result.truncation_reason,
+                )
+        except StorageNotFoundError as exc:
+            raise ServiceError("not_found", 404, "Run, report, candidate, or finding was not found") from exc
+        except StorageInputError as exc:
+            raise ServiceError("invalid_input", 400, "Run impact parameters are invalid") from exc
+        except StorageError as exc:
+            raise ServiceError("internal_error", 500, "local Run impact storage failed") from exc
 
     def cancel_run(
         self,
@@ -2537,6 +2654,14 @@ def _run_create_response(run: Run) -> CreateRunResponse:
 def _session_fingerprint(*parts: str | None) -> str:
     payload = json.dumps(parts, ensure_ascii=False, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _impact_scope_note(direction: ImpactDirection, depth: int) -> str:
+    direction_label = "调用方" if direction == "callers" else "被调用方"
+    return (
+        f"仅统计当前 Run 固定 index 快照内的 calls 静态边，方向为{direction_label}、最大深度 {depth}、"
+        "并受节点/边/路径/时间/输出预算限制；静态可达不等同于已确认影响。"
+    )
 
 
 def _index_response(relation) -> IndexResponse:

@@ -20,6 +20,7 @@ import type {
   FeatureGraph,
   FeatureSourceScope,
   HealthResponse,
+  ImpactDirection,
   ImportAttempt,
   ImportStatus,
   IndexResponse,
@@ -33,6 +34,7 @@ import type {
   RunMode,
   RunRecord,
   RunReport,
+  RunImpactResponse,
   RunScenario,
   RunStatusResponse,
   RunToolResult,
@@ -47,7 +49,7 @@ import type { GraphState } from "../lib/graph";
 
 export type UiAsyncStatus = "idle" | "loading" | "success" | "empty" | "error";
 export type UiIndexStatus = "unindexed" | "creating" | "loading" | "ready" | "partial" | "error";
-export type UiPanelMode = "none" | "source" | "graph" | "feature_graph";
+export type UiPanelMode = "none" | "source" | "graph" | "feature_graph" | "impact";
 export type OperationPanel = "create-project" | "import" | "index";
 
 type FormHandler = (event: FormEvent<HTMLFormElement>) => void | Promise<void>;
@@ -150,6 +152,7 @@ type SessionUi = {
   onStartRun: (mode: RunMode, scenario: RunScenario) => void | Promise<void>;
   onCancelRun: Action;
   onSelectRunEvidence: (evidence: Evidence) => void;
+  onSelectRunImpact: (selection: { candidateId?: string; findingId?: string }) => void;
 };
 
 type KnowledgeUi = {
@@ -217,6 +220,15 @@ type GraphUi = {
   codeTruncationReason: string | null;
   codeSymbolCount: number;
   codeEdgeCount: number;
+  impactModel: { nodes: Node[]; edges: Edge[] };
+  impact: RunImpactResponse | null;
+  impactStatus: UiAsyncStatus;
+  impactError: string | null;
+  impactDirection: ImpactDirection;
+  impactDepth: number;
+  onImpactDirectionChange: (direction: ImpactDirection) => void;
+  onImpactDepthChange: (depth: number) => void;
+  onImpactNodeClick: (nodeId: string) => void;
   featureModel: { nodes: Node[]; edges: Edge[] };
   featureStatus: UiAsyncStatus;
   featureError: string | null;
@@ -985,7 +997,7 @@ function RunPanel({ session }: { session: SessionUi }) {
           {session.runStreamError ? <p className="ct-inline-note" role="status">{session.runStreamError}</p> : null}
           {session.runEvents.length > 0 ? <div className="ct-run-events"><div className="ct-run-subheading"><strong>公开执行事件</strong><span>{session.runEvents.length} 条</span></div>{session.runEvents.map((event) => <div className="ct-run-event" key={`${event.run_id}-${event.sequence}`}><code>#{event.sequence}</code><span>{runEventLabel(event)}</span></div>)}</div> : null}
           {session.runToolResults.length > 0 ? <div className="ct-run-tools"><div className="ct-run-subheading"><strong>工具结果</strong><span>{session.runToolResults.length} 项</span></div>{session.runToolResults.map((result) => <div className="ct-run-tool" key={result.request_id}><code>{result.tool}</code><span>{result.kind.endsWith("failed") ? "失败" : "已返回"} · #{result.completed_sequence}</span></div>)}</div> : null}
-          {session.runReport ? <div className="ct-run-report"><div className="ct-run-subheading"><strong>{session.runReport.outcome === "candidate_found" ? "候选结论" : session.runReport.outcome === "insufficient_evidence" ? "证据不足" : "执行结果"}</strong><span>{session.runReport.fixture_mode ? "FIXTURE" : "REAL"}</span></div><p>{session.runReport.summary}</p>{session.runReport.findings.map((finding) => <div className="ct-run-finding" key={finding.finding_id}><strong>{finding.kind}</strong><span>{finding.text}</span>{finding.evidence_ids.map((evidenceId) => { const evidence = session.runReport?.evidence.find((item) => item.evidence_id === evidenceId); return evidence ? <button type="button" className="ct-link-button" key={evidenceId} onClick={() => session.onSelectRunEvidence(evidence)}>查看证据 · {evidence.path}:L{evidence.start_line}</button> : null; })}</div>)}{session.runReport.evidence.length > 0 ? <div className="ct-run-evidence-list"><small>本次报告证据</small>{session.runReport.evidence.map((evidence) => <button type="button" className="ct-link-button" key={evidence.evidence_id} onClick={() => session.onSelectRunEvidence(evidence)}>{evidence.path}:L{evidence.start_line}–L{evidence.end_line}</button>)}</div> : null}</div> : null}
+          {session.runReport ? <div className="ct-run-report"><div className="ct-run-subheading"><strong>{session.runReport.outcome === "candidate_found" ? "候选结论" : session.runReport.outcome === "insufficient_evidence" ? "证据不足" : "执行结果"}</strong><span>{session.runReport.fixture_mode ? "FIXTURE" : "REAL"}</span></div><p>{session.runReport.summary}</p>{session.runReport.candidate_links.length > 0 ? <div className="ct-run-impact-links"><small>候选位置与有界影响</small>{session.runReport.candidate_links.map((candidate) => <div className="ct-run-impact-link" key={candidate.candidate_id}><span><code>{candidate.source_symbol_id}</code><small>{candidate.relation}</small></span><button type="button" className="ct-link-button" onClick={() => session.onSelectRunImpact({ candidateId: candidate.candidate_id })}>查看影响范围</button></div>)}</div> : null}{session.runReport.findings.map((finding) => <div className="ct-run-finding" key={finding.finding_id}><strong>{finding.kind}</strong><span>{finding.text}</span>{finding.symbol_ids.length === 1 ? <button type="button" className="ct-link-button" onClick={() => session.onSelectRunImpact({ findingId: finding.finding_id })}>查看潜在影响</button> : <small className="ct-run-impact-unmapped">无唯一可映射符号 · 仅显示证据</small>}{finding.evidence_ids.map((evidenceId) => { const evidence = session.runReport?.evidence.find((item) => item.evidence_id === evidenceId); return evidence ? <button type="button" className="ct-link-button" key={evidenceId} onClick={() => session.onSelectRunEvidence(evidence)}>查看证据 · {evidence.path}:L{evidence.start_line}</button> : null; })}</div>)}{session.runReport.evidence.length > 0 ? <div className="ct-run-evidence-list"><small>本次报告证据</small>{session.runReport.evidence.map((evidence) => <button type="button" className="ct-link-button" key={evidence.evidence_id} onClick={() => session.onSelectRunEvidence(evidence)}>{evidence.path}:L{evidence.start_line}–L{evidence.end_line}</button>)}</div> : null}</div> : null}
         </> : <LoadingNote>正在读取 Run 详情…</LoadingNote>}
       </div> : null}
     </section>
@@ -1056,24 +1068,34 @@ function EvidencePanel({ evidence }: { evidence: EvidenceUi }) {
 
 function GraphPanel({ graph }: { graph: GraphUi }) {
   const isFeature = graph.panelMode === "feature_graph";
+  const isImpact = graph.panelMode === "impact";
   const featureGraph = graph.featureGraph;
   return (
-    <aside className="ct-side-panel ct-graph-panel" aria-label={isFeature ? "功能图面板" : "代码关系面板"}>
-      <div className="ct-side-panel-header"><div><p className="ct-overline">{isFeature ? "FEATURE TOPOLOGY" : "STATIC TOPOLOGY"}</p><h2>{isFeature ? "功能图" : "代码关系"}</h2></div><button type="button" className="ct-close-button" onClick={graph.onClose}>关闭</button></div>
-      <div className="ct-panel-switch"><button type="button" className={!isFeature ? "is-active" : ""} onClick={() => graph.onPanelModeChange("graph")}>代码关系</button><button type="button" className={isFeature ? "is-active" : ""} onClick={() => graph.onPanelModeChange("feature_graph")} disabled={!graph.featureGeneration}>功能图</button><button type="button" onClick={() => graph.onPanelModeChange("source")} disabled={!graph.selectedId}>源码证据</button></div>
-      {!isFeature ? <>
+    <aside className="ct-side-panel ct-graph-panel" aria-label={isFeature ? "功能图面板" : isImpact ? "候选影响面板" : "代码关系面板"}>
+      <div className="ct-side-panel-header"><div><p className="ct-overline">{isFeature ? "FEATURE TOPOLOGY" : isImpact ? "RUN IMPACT" : "STATIC TOPOLOGY"}</p><h2>{isFeature ? "功能图" : isImpact ? "候选影响" : "代码关系"}</h2></div><button type="button" className="ct-close-button" onClick={graph.onClose}>关闭</button></div>
+      <div className="ct-panel-switch"><button type="button" className={!isFeature && !isImpact ? "is-active" : ""} onClick={() => graph.onPanelModeChange("graph")}>代码关系</button><button type="button" className={isFeature ? "is-active" : ""} onClick={() => graph.onPanelModeChange("feature_graph")} disabled={!graph.featureGeneration}>功能图</button><button type="button" className={isImpact ? "is-active" : ""} onClick={() => graph.onPanelModeChange("impact")} disabled={graph.impactStatus === "idle"}>影响范围</button><button type="button" onClick={() => graph.onPanelModeChange("source")} disabled={!graph.selectedId}>源码证据</button></div>
+      {!isFeature && !isImpact ? <>
         <div className="ct-graph-toolbar"><label>方向<select value={graph.direction} onChange={(event) => graph.onChangeDirection(event.target.value as NeighborDirection)} disabled={!graph.selectedId}><option value="both">双向</option><option value="callers">调用方</option><option value="callees">被调用方</option></select></label><label className="ct-check-field"><input type="checkbox" checked={graph.edgeKinds.includes("calls")} onChange={() => graph.onToggleEdgeKind("calls")} disabled={!graph.selectedId} /><span>calls</span></label><label className="ct-check-field"><input type="checkbox" checked={graph.edgeKinds.includes("imports")} onChange={() => graph.onToggleEdgeKind("imports")} disabled={!graph.selectedId} /><span>imports</span></label><button type="button" className="ct-link-button" onClick={() => graph.flowInstance?.fitView({ padding: 0.18, duration: 240 })} disabled={graph.codeModel.nodes.length === 0}>聚焦</button></div>
         <div className="ct-panel-status"><span data-state={graph.codeStatus}>{graph.codeStatus === "loading" ? "载入关系中" : graph.codeStatus === "error" ? "关系请求失败" : graph.codeStatus === "empty" ? "当前方向没有静态边" : graph.codeStatus === "success" ? `${graph.codeSymbolCount} 个节点 · ${graph.codeEdgeCount} 条边` : "选择搜索命中后载入关系"}</span>{graph.codeTruncated ? <small>已截断 · {graph.codeTruncationReason}</small> : null}</div>
         {graph.codeError ? <p className="ct-inline-error" role="alert">{graph.codeError}</p> : null}
         <div className="ct-graph-legend"><span><i className="is-calls" />calls</span><span><i className="is-imports" />imports</span><small>局部静态子图</small></div>
         <GraphCanvas model={graph.codeModel} nodeTypes={graph.codeNodeTypes} onInit={graph.onCodeInit} onNodeClick={graph.onCodeNodeClick} emptyTitle="建立或打开索引后，这里会显示关系图。" />
-      </> : <>
+      </> : isFeature ? <>
         <div className="ct-graph-toolbar"><span className="ct-graph-legend"><span><i className="is-semantic" />语义关联</span><span><i className="is-static" />静态 CodeEdge</span></span><button type="button" className="ct-link-button" onClick={() => graph.featureFlowInstance?.fitView({ padding: 0.18, duration: 240 })} disabled={graph.featureModel.nodes.length === 0}>聚焦</button></div>
         <div className="ct-panel-status"><span data-state={graph.featureStatus}>{graph.featureStatus === "loading" ? "功能图载入中" : graph.featureStatus === "error" ? "功能图请求失败" : graph.featureStatus === "empty" ? "当前版本没有可展开节点" : graph.featureStatus === "success" ? `${featureGraph?.nodes.length ?? 0} 个节点 · 语义 / 静态关系已分开` : "选择一个已保存版本载入功能图"}</span>{featureGraph?.truncated ? <small>已截断 · {featureGraph.truncation_reason}</small> : null}</div>
         {graph.featureError ? <p className="ct-inline-error" role="alert">{graph.featureError}</p> : null}
         <div className="ct-graph-legend"><span><i className="is-semantic" />语义关联</span><span><i className="is-static" />静态 CodeEdge</span></div>
         <GraphCanvas model={graph.featureModel} nodeTypes={graph.featureNodeTypes} onInit={graph.onFeatureInit} onNodeClick={graph.onFeatureNodeClick} emptyTitle="选择一个已保存功能版本。" />
         {featureGraph && (featureGraph.limitations.length > 0 || featureGraph.unavailable_target_ids.length > 0) ? <div className="ct-graph-limitations"><strong>图边界</strong>{featureGraph.limitations.map((item) => <span key={item}>{item}</span>)}{featureGraph.unavailable_target_ids.length > 0 ? <span>未映射目标 {featureGraph.unavailable_target_ids.length} 个</span> : null}</div> : null}
+      </> : <>
+        <div className="ct-graph-toolbar"><label>方向<select value={graph.impactDirection} onChange={(event) => graph.onImpactDirectionChange(event.target.value as ImpactDirection)}><option value="callers">调用方</option><option value="callees">被调用方</option></select></label><label>深度<select value={graph.impactDepth} onChange={(event) => graph.onImpactDepthChange(Number(event.target.value))}><option value={1}>1 层</option><option value={2}>2 层</option></select></label><button type="button" className="ct-link-button" onClick={() => graph.flowInstance?.fitView({ padding: 0.18, duration: 240 })} disabled={graph.impactModel.nodes.length === 0}>聚焦</button></div>
+        <div className="ct-panel-status"><span data-state={graph.impactStatus}>{graph.impactStatus === "loading" ? "影响范围载入中" : graph.impactStatus === "error" ? "影响范围请求失败" : graph.impact?.mapping_status === "unmapped" ? "没有可映射的唯一符号" : graph.impactStatus === "success" ? `${graph.impact?.reachable_node_count ?? 0} 个可达节点 · ${graph.impact?.paths.length ?? 0} 条路径` : graph.impactStatus === "empty" ? "当前方向没有静态 calls 可达节点" : "从 Run 报告选择一个候选或发现"}</span>{graph.impact?.truncated ? <small>已截断 · {graph.impact.truncation_reason}</small> : null}</div>
+        {graph.impactError ? <p className="ct-inline-error" role="alert">{graph.impactError}</p> : null}
+        <div className="ct-graph-legend"><span><i className="is-impact-root" />候选根</span><span><i className="is-calls" />静态 calls</span><span><i className="is-unknown" />未知边界</span></div>
+        {graph.impactStatus === "loading" ? <LoadingNote>正在从 Run 固定快照计算有界路径…</LoadingNote> : graph.impact?.mapping_status === "unmapped" ? <EmptyState title="报告没有可遍历的唯一符号" detail="保留报告源码证据；不会根据同名符号猜测影响范围。" /> : <GraphCanvas model={graph.impactModel} nodeTypes={graph.codeNodeTypes} onInit={graph.onCodeInit} onNodeClick={graph.onImpactNodeClick} emptyTitle="当前方向没有静态 calls 可达节点。" />}
+        {graph.impact && graph.impact.paths.length > 0 ? <div className="ct-impact-paths"><div className="ct-section-heading"><div><p className="ct-overline">STATIC PATHS</p><h3>可解释路径</h3></div><span className="ct-count-label">{graph.impact.paths.length}</span></div>{graph.impact.paths.slice(0, 12).map((path) => { const names = new Map(graph.impact?.nodes.map((node) => [node.symbol_id, node.qualified_name])); return <div className="ct-impact-path" key={path.path_id}><code>{path.symbol_ids.map((symbolId) => names.get(symbolId) ?? symbolId).join(graph.impact?.direction === "callers" ? " ← " : " → ")}</code><small>{path.edges.map((edge) => `${edge.source_location.path}:L${edge.source_location.start_line}`).join(" · ")}</small></div>; })}</div> : null}
+        {graph.impact && graph.impact.unresolved.length > 0 ? <div className="ct-impact-unknown"><strong>未知边界 · {graph.impact.unresolved.length}</strong><small>动态调用或无法解析的引用不会绘制为确定影响边。</small>{graph.impact.unresolved.map((item) => <span key={item.unresolved_id}><code>{item.expression}</code> · {item.reason}</span>)}</div> : null}
+        {graph.impact ? <p className="ct-graph-scope-note">{graph.impact.scope_note}</p> : null}
       </>}
     </aside>
   );
@@ -1162,7 +1184,7 @@ export default function WorkbenchUi(props: WorkbenchUiProps) {
           {alert ? <div className="ct-global-alert" role="alert"><span>{alert}</span>{props.connection.state === "error" ? <button type="button" className="ct-link-button" onClick={() => void props.connection.onCheck()}>重新检查</button> : null}</div> : null}
           {operationPanel ? <OperationPanel mode={operationPanel} onClose={closeOperation} project={props.project} localImport={props.localImport} githubImport={props.githubImport} index={props.index} /> : props.viewMode === "session" ? <SessionView session={props.session} onBack={openKnowledge} /> : <KnowledgeView project={props.project} index={props.index} knowledge={props.knowledge} onOpenOperation={setOperationPanel} />}
         </section>
-        {props.panelMode === "source" ? <EvidencePanel evidence={props.evidence} /> : props.panelMode === "graph" || props.panelMode === "feature_graph" ? <GraphPanel graph={props.graph} /> : null}
+        {props.panelMode === "source" ? <EvidencePanel evidence={props.evidence} /> : props.panelMode === "graph" || props.panelMode === "feature_graph" || props.panelMode === "impact" ? <GraphPanel graph={props.graph} /> : null}
       </div>
       {props.panelMode !== "none" ? <div className="ct-panel-width-control"><label htmlFor="panel-width">面板宽度</label><input id="panel-width" type="range" min="300" max="440" step="10" value={panelWidth} onChange={(event) => setPanelWidth(Number(event.target.value))} /><output>{panelWidth}px</output></div> : null}
       <footer className="ct-footer"><span>STATIC FACTS / FIXED EVIDENCE</span><span>Run：显式 fixture / real 分析 · 有界工具循环 · SSE 事件流与轮询回退</span><span>{props.index.response ? `${props.graph.codeSymbolCount} nodes · ${props.graph.codeEdgeCount} edges` : "No snapshot loaded"}</span></footer>

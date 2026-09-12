@@ -35,6 +35,7 @@ from .contracts import (
     GitHubImportRequest,
     GitHubImportResponse,
     ImportAttemptResponse,
+    ImpactDirection,
     IndexResponse,
     LocalImportRequest,
     LocalImportResponse,
@@ -44,6 +45,7 @@ from .contracts import (
     ProjectListResponse,
     ProjectOverview,
     ReportResponse,
+    RunImpactResponse,
     RunEventsResponse,
     RunListResponse,
     RunStatusResponse,
@@ -523,6 +525,33 @@ def create_app(
     )
     async def get_run_report(project_id: str, session_id: str, run_id: str) -> ReportResponse:
         return await run_in_threadpool(workspace_service.get_run_report, project_id, session_id, run_id)
+
+    @application.get(
+        "/api/projects/{project_id}/sessions/{session_id}/runs/{run_id}/impact",
+        response_model=RunImpactResponse,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def get_run_impact(
+        project_id: str,
+        session_id: str,
+        run_id: str,
+        candidate_id: str | None = Query(default=None, max_length=200),
+        finding_id: str | None = Query(default=None, max_length=200),
+        direction: ImpactDirection = Query(default="callers"),
+        depth: int = Query(default=2, ge=1, le=2),
+        limit: int = Query(default=40, ge=1, le=40),
+    ) -> RunImpactResponse:
+        return await run_in_threadpool(
+            workspace_service.get_run_impact,
+            project_id,
+            session_id,
+            run_id,
+            candidate_id=candidate_id,
+            finding_id=finding_id,
+            direction=direction,
+            depth=depth,
+            limit=limit,
+        )
 
     @application.post(
         "/api/projects/{project_id}/sessions/{session_id}/runs/{run_id}/cancel",
