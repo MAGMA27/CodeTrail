@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import json
 import shutil
+import threading
 import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
+import pytest
+
 from app.main import create_app
+from app.storage import IndexStore, StorageError
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -63,14 +68,18 @@ def request(application, method: str, target: str, payload: dict | None = None) 
     return asyncio.run(_request(application, method, target, payload))
 
 
-def setup_workspace(tmp_path: Path):
+def setup_workspace(tmp_path: Path, *, run_max_concurrent_runs: int | None = None):
     repository = tmp_path / "timeout-demo"
     shutil.copytree(
         FIXTURE_ROOT,
         repository,
         ignore=shutil.ignore_patterns("__pycache__", ".codetrail"),
     )
-    application = create_app({"timeout-demo": repository}, data_root=tmp_path / "data")
+    application = create_app(
+        {"timeout-demo": repository},
+        data_root=tmp_path / "data",
+        run_max_concurrent_runs=run_max_concurrent_runs,
+    )
     status, project = request(
         application,
         "POST",
@@ -327,12 +336,293 @@ def test_run_idempotency_active_conflict_and_cancellation_are_persisted(tmp_path
     assert status == 200
     assert report["report"]["status"] == "cancelled"
     assert report["report"]["outcome"] == "cancelled"
+    assert workspace.run_executor.state().reserved == 0
+
+
+def test_run_capacity_is_rejected_before_persistence_and_released_after_cancel(tmp_path: Path) -> None:
+    application, project_id, index_id = setup_workspace(tmp_path, run_max_concurrent_runs=1)
+    workspace = application.state.workspace_service
+    workspace.run_executor.tool_delay_seconds = 0.4
+    sessions = {
+        "one": create_session(application, project_id, index_id, "capacity one"),
+        "two": create_session(application, project_id, index_id, "capacity two"),
+    }
+    barrier = threading.Barrier(2)
+
+    def submit(label: str) -> tuple[int, dict]:
+        barrier.wait()
+        return request(
+            application,
+            "POST",
+            f"/api/projects/{project_id}/sessions/{sessions[label]}/runs",
+            run_payload(index_id, idempotency_key=f"capacity-{label}"),
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = {label: pool.submit(submit, label) for label in sessions}
+        responses = {label: future.result() for label, future in futures.items()}
+
+    accepted = [label for label, (status, _) in responses.items() if status == 200]
+    rejected = [label for label, (status, _) in responses.items() if status == 429]
+    assert len(accepted) == 1
+    assert rejected == [next(label for label in sessions if label not in accepted)]
+    accepted_label = accepted[0]
+    rejected_label = rejected[0]
+    accepted_status, accepted_response = responses[accepted_label]
+    rejected_status, rejected_response = responses[rejected_label]
+    assert accepted_status == 200
+    assert rejected_response["code"] == "budget_exceeded"
+    assert "capacity" in rejected_response["message"].lower()
+
+    status, rejected_history = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/sessions/{sessions[rejected_label]}/runs",
+    )
+    assert status == 200
+    assert rejected_history["runs"] == []
+
+    status, repeated = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/sessions/{sessions[accepted_label]}/runs",
+        run_payload(index_id, idempotency_key=f"capacity-{accepted_label}"),
+    )
+    assert status == 200
+    assert repeated["run_id"] == accepted_response["run_id"]
+    state = workspace.run_executor.state()
+    assert state.capacity == 1
+    assert state.reserved == 1
+    assert state.worker_threads <= 1
+    assert state.tracked_threads <= 1
+    assert state.waiting_runs == 0
+
+    status, health = request(application, "GET", "/api/health")
+    assert status == 200
+    assert health["status"] == "ok"
+    accepted_run_id = accepted_response["run_id"]
+    status, cancelled = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/sessions/{sessions[accepted_label]}/runs/{accepted_run_id}/cancel",
+        {"reason": "release capacity"},
+    )
+    assert status == 200
+    assert cancelled["status"] == "cancelled"
+    terminal = wait_for_terminal(
+        application,
+        project_id,
+        sessions[accepted_label],
+        accepted_run_id,
+    )
+    assert terminal["run"]["status"] == "cancelled"
+    for _ in range(40):
+        if workspace.run_executor.state().reserved == 0:
+            break
+        time.sleep(0.025)
+    assert workspace.run_executor.state().reserved == 0
+
+    status, released_response = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/sessions/{sessions[rejected_label]}/runs",
+        run_payload(index_id, idempotency_key="capacity-after-release"),
+    )
+    assert status == 200
+    released_terminal = wait_for_terminal(
+        application,
+        project_id,
+        sessions[rejected_label],
+        released_response["run_id"],
+    )
+    assert released_terminal["run"]["status"] == "succeeded"
+    assert workspace.run_executor.state().reserved == 0
+
+
+def test_run_cancellation_during_queued_worker_start_has_one_terminal_state(tmp_path: Path) -> None:
+    application, project_id, index_id = setup_workspace(tmp_path, run_max_concurrent_runs=1)
+    workspace = application.state.workspace_service
+    start_gate = threading.Event()
+
+    class BlockingStartThread(threading.Thread):
+        def start(self) -> None:
+            assert start_gate.wait(2)
+            super().start()
+
+    workspace.run_executor.thread_factory = BlockingStartThread
+    session_id = create_session(application, project_id, index_id, "queued cancellation")
+    payload = run_payload(index_id, idempotency_key="queued-cancel")
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        pending = pool.submit(
+            request,
+            application,
+            "POST",
+            f"/api/projects/{project_id}/sessions/{session_id}/runs",
+            payload,
+        )
+        run_id: str | None = None
+        for _ in range(80):
+            status, history = request(
+                application,
+                "GET",
+                f"/api/projects/{project_id}/sessions/{session_id}/runs",
+            )
+            assert status == 200
+            if history["runs"]:
+                run_id = history["runs"][0]["run_id"]
+                assert history["runs"][0]["status"] == "queued"
+                break
+            time.sleep(0.025)
+        assert run_id is not None
+        status, cancelled = request(
+            application,
+            "POST",
+            f"/api/projects/{project_id}/sessions/{session_id}/runs/{run_id}/cancel",
+            {"reason": "cancel before worker start"},
+        )
+        assert status == 200
+        assert cancelled["status"] == "cancelled"
+        start_gate.set()
+        pending_status, pending_response = pending.result(timeout=3)
+    assert pending_status == 200
+    assert pending_response["run_id"] == run_id
+    terminal = wait_for_terminal(application, project_id, session_id, run_id)
+    assert terminal["run"]["status"] == "cancelled"
+    status, events = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/sessions/{session_id}/runs/{run_id}/events",
+    )
+    assert status == 200
+    assert events["events"][-1]["type"] == "run.cancelled"
+    assert not any(event["type"] == "run.started" for event in events["events"])
+    for _ in range(40):
+        state = workspace.run_executor.state()
+        if state.reserved == 0 and state.tracked_threads == 0:
+            break
+        time.sleep(0.025)
+    state = workspace.run_executor.state()
+    assert state.reserved == 0
+    assert state.tracked_threads == 0
+
+
+def test_run_worker_start_failure_is_terminal_and_releases_capacity(tmp_path: Path) -> None:
+    application, project_id, index_id = setup_workspace(tmp_path, run_max_concurrent_runs=1)
+    workspace = application.state.workspace_service
+
+    class FailedStartThread(threading.Thread):
+        def start(self) -> None:
+            raise RuntimeError("injected worker start failure")
+
+    workspace.run_executor.thread_factory = FailedStartThread
+    session_id = create_session(application, project_id, index_id, "worker start failure")
+    status, response = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/sessions/{session_id}/runs",
+        run_payload(index_id, idempotency_key="worker-start-failure"),
+    )
+    assert status == 503
+    assert response["code"] == "internal_error"
+    status, history = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/sessions/{session_id}/runs",
+    )
+    assert status == 200
+    assert len(history["runs"]) == 1
+    run_id = history["runs"][0]["run_id"]
+    assert history["runs"][0]["status"] == "failed"
+    status, events = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/sessions/{session_id}/runs/{run_id}/events",
+    )
+    assert status == 200
+    assert events["events"][-1]["type"] == "run.failed"
+    assert events["events"][-1]["payload"]["error"]["code"] == "internal_error"
+    assert workspace.run_executor.state().reserved == 0
+    assert workspace.run_executor.state().tracked_threads == 0
+
+
+def test_run_storage_failure_does_not_leak_reserved_capacity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    application, project_id, index_id = setup_workspace(tmp_path, run_max_concurrent_runs=1)
+    workspace = application.state.workspace_service
+    session_id = create_session(application, project_id, index_id, "storage failure")
+
+    def fail_create_run(*args: object, **kwargs: object) -> None:
+        raise StorageError("injected Run storage failure")
+
+    monkeypatch.setattr(IndexStore, "create_run", fail_create_run)
+    status, response = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/sessions/{session_id}/runs",
+        run_payload(index_id, idempotency_key="storage-failure"),
+    )
+    assert status == 500
+    assert response["code"] == "internal_error"
+    assert workspace.run_executor.state().reserved == 0
+    assert workspace.run_executor.state().tracked_threads == 0
+
+
+def test_run_execution_exception_and_timeout_release_capacity_with_one_terminal_event(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    application, project_id, index_id = setup_workspace(tmp_path, run_max_concurrent_runs=1)
+    workspace = application.state.workspace_service
+    session_id = create_session(application, project_id, index_id, "execution exception")
+
+    def fail_tool(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("injected tool exception")
+
+    monkeypatch.setattr(workspace.index_service, "execute_tool", fail_tool)
+    run_id = start_run(application, project_id, session_id, run_payload(index_id, idempotency_key="tool-exception"))
+    terminal = wait_for_terminal(application, project_id, session_id, run_id)
+    assert terminal["run"]["status"] == "failed"
+    status, events = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/sessions/{session_id}/runs/{run_id}/events",
+    )
+    assert status == 200
+    assert [event["type"] for event in events["events"]].count("run.failed") == 1
+    assert workspace.run_executor.state().reserved == 0
+
+    monkeypatch.undo()
+    timeout_session = create_session(application, project_id, index_id, "execution timeout")
+    workspace.run_executor.tool_delay_seconds = 0.6
+    timeout_run_id = start_run(
+        application,
+        project_id,
+        timeout_session,
+        run_payload(index_id, idempotency_key="tool-timeout", budget={"max_seconds": 1}),
+    )
+    timeout_terminal = wait_for_terminal(application, project_id, timeout_session, timeout_run_id)
+    assert timeout_terminal["run"]["status"] == "failed"
+    status, timeout_events = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/sessions/{timeout_session}/runs/{timeout_run_id}/events",
+    )
+    assert status == 200
+    assert timeout_events["events"][-1]["payload"]["error"]["code"] == "budget_exceeded"
+    assert [event["type"] for event in timeout_events["events"]].count("run.failed") == 1
+    for _ in range(40):
+        if workspace.run_executor.state().reserved == 0:
+            break
+        time.sleep(0.025)
+    assert workspace.run_executor.state().reserved == 0
 
 
 def test_restart_marks_incomplete_run_interrupted(tmp_path: Path) -> None:
     application, project_id, index_id = setup_workspace(tmp_path)
     session_id = create_session(application, project_id, index_id)
-    application.state.workspace_service.run_executor.submit = lambda _run: None
+    def leave_run_queued(_run: object, *, reservation: object) -> None:
+        reservation.release()  # type: ignore[attr-defined]
+
+    application.state.workspace_service.run_executor.submit = leave_run_queued  # type: ignore[method-assign]
     run_id = start_run(application, project_id, session_id, run_payload(index_id))
     status, queued = request(
         application,

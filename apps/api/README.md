@@ -17,11 +17,11 @@
 
 ## 接口与依赖
 
-契约位于 [contracts.py](app/contracts.py)，Schema 由 [export_schema.py](app/export_schema.py) 生成。旧 `/api/indexes/*` 保留兼容；项目工作区使用 `/api/projects/*`。Run 的 HTTP 入口为 `/api/projects/{project_id}/sessions/{session_id}/runs` 及其 detail、events、tool-results、report、cancel 子路径；创建只做边界校验、冻结和提交，立即返回 queued 的 run_id，执行由 [Run 执行子系统](../../docs/subsystems/execution.md)负责。所有项目索引、Session 和 Run 操作都复用 WorkspaceService 的归属校验。
+契约位于 [contracts.py](app/contracts.py)，Schema 由 [export_schema.py](app/export_schema.py) 生成。旧 `/api/indexes/*` 保留兼容；项目工作区使用 `/api/projects/*`。Run 的 HTTP 入口为 `/api/projects/{project_id}/sessions/{session_id}/runs` 及其 detail、events、tool-results、report、cancel 子路径；创建只做边界校验、冻结、容量预留和提交，worker 启动成功后返回 queued 的 run_id；容量满时返回可重试的 `budget_exceeded`/429，不写入 Run。执行由 [Run 执行子系统](../../docs/subsystems/execution.md)负责。所有项目索引、Session 和 Run 操作都复用 WorkspaceService 的归属校验。
 
 ## 数据与生命周期
 
-静态仓库由 `CODETRAIL_REPOSITORIES` JSON 对象提供；动态来源注册和导入状态写入 `CODETRAIL_DATA_DIR`，索引库归属于服务管理目录或来源的既有存储。Session 在创建时固定 ready `index_id`，消息由事务分配连续 sequence。Run 在同一索引库中保存不可变的 `project_id/session_id/index_id`、可选同快照 feature generation、完整已保存消息前缀及 hash、预算、状态、事件、工具结果和报告；每个 Session 最多一个 `queued/running` Run。服务启动把未完成 Run 标记为 `interrupted`，取消与重启都保存终态事件和终态报告，迟到工具结果不会落库。
+静态仓库由 `CODETRAIL_REPOSITORIES` JSON 对象提供；动态来源注册和导入状态写入 `CODETRAIL_DATA_DIR`，索引库归属于服务管理目录或来源的既有存储。Session 在创建时固定 ready `index_id`，消息由事务分配连续 sequence。Run 在同一索引库中保存不可变的 `project_id/session_id/index_id`、可选同快照 feature generation、完整已保存消息前缀及 hash、预算、状态、事件、工具结果和报告；每个 Session 最多一个 `queued/running` Run。服务启动把未完成 Run 标记为 `interrupted`，取消与重启都保存终态事件和终态报告，迟到工具结果不会落库。进程内 Run 执行容量由 `CODETRAIL_RUN_MAX_CONCURRENT_RUNS` 配置，默认 2；没有内部等待队列，名额由预留到 worker 终态保持占用。
 
 Run 当前只接受三个 fixture 场景：候选、证据不足和工具失败。执行器使用实际索引上的 `search_code`、`read_source`、`get_neighbors` 结果组装报告，不执行仓库源码、shell、测试或真实模型。所有报告 evidence 和图节点绑定 Run 的固定 `index_id`；草稿、后续消息和后续 latest index 不会改变已保存 Run 输入。
 
@@ -42,13 +42,13 @@ API 健康检查为 `GET /api/health`。前端或测试先创建 Project、建�
 
 ## 错误与限制
 
-本地/GitHub 导入继续执行绝对路径、allow-list、符号链接/junction、官方 URL、归档安全、时间和大小边界；HTTP 写入口只接受 loopback 客户端。未知项目、非所属索引/Session/Run 返回 `not_found`，参数和预算边界返回 `invalid_input` 或 `budget_exceeded`，失败不泄露宿主路径。
+本地/GitHub 导入继续执行绝对路径、allow-list、符号链接/junction、官方 URL、归档安全、时间和大小边界；HTTP 写入口只接受 loopback 客户端。未知项目、非所属索引/Session/Run 返回 `not_found`，参数、预算和执行容量边界返回 `invalid_input` 或可重试的 `budget_exceeded`，失败不泄露宿主路径。
 
-Run 拒绝 `mode=real`，拒绝空 Session、跨项目/Session/index/generation，冻结完整消息前缀而不是前端已加载页；草稿不会进入输入。单次/总源码行、工具调用、输入/输出字符、事件和总时间均有服务端上限；状态只能从 queued/running 进入一个终态，终态事件不可重复，取消幂等，重启中的 Run 标为 interrupted。Run 历史、事件和工具结果分页均有上限并带作用域游标；取消/中断报告无候选结论，失败报告保留已持久化的同快照 evidence。
+Run 拒绝 `mode=real`，拒绝空 Session、跨项目/Session/index/generation，冻结完整消息前缀而不是前端已加载页；草稿不会进入输入。单次/总源码行、工具调用、输入/输出字符、事件、总时间和进程并发均有服务端上限；状态只能从 queued/running 进入一个终态，终态事件不可重复，取消幂等，重启中的 Run 标为 interrupted。Run 历史、事件和工具结果分页均有上限并带作用域游标；容量满不落库且不影响查询/取消/health；取消/中断报告无候选结论，失败报告保留已持久化的同快照 evidence。
 
 ## 验证
 
-从 `apps/api` 执行 `uv run pytest -q` 和 `uv run python -m compileall -q app`。`tests/test_runs.py` 覆盖冻结输入、后续消息/latest 索引不影响 Run、三类 fixture outcome、同快照工具证据、预算、取消、幂等、活动冲突、终态报告和重启中断；`tests/test_mcp.py` 覆盖 HTTP/MCP Run 对照、默认只读、独立 Run 写开关和可选生成工具。其它项目/索引/导入/Session/O1/O2/O3 测试继续覆盖各自边界。真实供应商语义质量和 SSE 尚未验证。
+从 `apps/api` 执行 `uv run pytest -q` 和 `uv run python -m compileall -q app`。`tests/test_runs.py` 覆盖冻结输入、后续消息/latest 索引不影响 Run、三类 fixture outcome、同快照工具证据、预算、跨 Session 容量、幂等、queued/运行取消、超时、执行/存储/worker 启动失败、活动冲突、终态报告和重启中断；`tests/test_mcp.py` 覆盖 HTTP/MCP Run 对照、默认只读、独立 Run 写开关和可选生成工具。其它项目/索引/导入/Session/O1/O2/O3 测试继续覆盖各自边界。真实供应商语义质量和 SSE 尚未验证。
 
 ## 关联文档
 

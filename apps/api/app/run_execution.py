@@ -8,8 +8,9 @@ second tool implementation.
 
 from __future__ import annotations
 
-import time
 import threading
+import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable
 
@@ -61,52 +62,156 @@ from .storage import (
 )
 
 
-class RunExecutor:
-    """Run a small number of explicit fixture analyses concurrently."""
+class RunExecutorCapacityError(RuntimeError):
+    """Raised when the executor has no admission slot for a new Run."""
 
-    def __init__(self, workspace: Any, *, max_concurrent_runs: int = 2) -> None:
+
+class RunExecutorStartupError(RuntimeError):
+    """Raised when a persisted Run cannot be handed to a worker thread."""
+
+
+class RunReservation:
+    """One idempotent executor capacity reservation."""
+
+    def __init__(self, release_callback: Callable[[], None]) -> None:
+        self._release_callback = release_callback
+        self._released = False
+        self._lock = threading.Lock()
+
+    @property
+    def released(self) -> bool:
+        with self._lock:
+            return self._released
+
+    def release(self) -> None:
+        with self._lock:
+            if self._released:
+                return
+            self._released = True
+        self._release_callback()
+
+
+@dataclass(frozen=True)
+class RunExecutorState:
+    """Bounded runtime counters used by tests and local diagnostics."""
+
+    capacity: int
+    reserved: int
+    worker_threads: int
+    tracked_threads: int
+    waiting_runs: int
+
+
+class RunExecutor:
+    """Run explicit fixture analyses with bounded admission and no wait queue."""
+
+    def __init__(
+        self,
+        workspace: Any,
+        *,
+        max_concurrent_runs: int = 2,
+        thread_factory: Callable[..., threading.Thread] = threading.Thread,
+    ) -> None:
         if max_concurrent_runs < 1:
             raise ValueError("max_concurrent_runs must be positive")
         self.workspace = workspace
+        self.max_concurrent_runs = max_concurrent_runs
         self._slots = threading.BoundedSemaphore(max_concurrent_runs)
         self._threads: set[threading.Thread] = set()
         self._threads_lock = threading.RLock()
+        self._reserved_count = 0
+        self.thread_factory = thread_factory
+        self._cancel_events: dict[str, threading.Event] = {}
         # Tests and local demos may use this to make cancellation observable.
         # It is intentionally not part of the public request contract.
         self.tool_delay_seconds = 0.0
 
-    def submit(self, run: Run) -> None:
-        """Start a daemon worker immediately; the worker owns no persistent queue."""
+    def reserve(self) -> RunReservation:
+        """Reserve one execution slot without creating a waiting worker."""
 
-        thread = threading.Thread(
-            target=self._run_guarded,
-            args=(run,),
-            name=f"codetrail-run-{run.run_id[:20]}",
-            daemon=True,
-        )
+        if not self._slots.acquire(blocking=False):
+            raise RunExecutorCapacityError("local Run executor capacity is full")
         with self._threads_lock:
-            self._threads.add(thread)
-        thread.start()
+            self._reserved_count += 1
+        return RunReservation(self._release_slot)
 
-    def signal_cancel(self, _run_id: str) -> None:
-        """Cancellation is persisted atomically; workers observe it between steps."""
+    def submit(self, run: Run, *, reservation: RunReservation | None = None) -> None:
+        """Start one worker using a caller-owned or newly acquired reservation."""
 
-    def _run_guarded(self, run: Run) -> None:
-        thread = threading.current_thread()
-        deadline = time.monotonic() + float(run.budget.max_seconds)
-        acquired = self._slots.acquire(timeout=max(0.0, float(run.budget.max_seconds)))
+        admission = reservation or self.reserve()
+        if admission.released:
+            raise ValueError("Run executor reservation was already released")
+        thread: threading.Thread | None = None
         try:
-            if not acquired:
+            with self._threads_lock:
+                self._cancel_events[run.run_id] = threading.Event()
+            thread = self.thread_factory(
+                target=self._run_guarded,
+                args=(run, admission),
+                name=f"codetrail-run-{run.run_id[:20]}",
+                daemon=True,
+            )
+            with self._threads_lock:
+                self._threads.add(thread)
+            thread.start()
+        except Exception as exc:
+            with self._threads_lock:
+                if thread is not None:
+                    self._threads.discard(thread)
+                self._cancel_events.pop(run.run_id, None)
+            admission.release()
+            # The Run has already been persisted by WorkspaceService. Turn a
+            # worker-start failure into a queryable terminal Run before
+            # reporting the submission error to the caller.
+            try:
                 self._finish_failure(
                     run,
-                    code="budget_exceeded",
-                    message="local Run executor capacity was exhausted",
+                    code="internal_error",
+                    message="fixture Run worker could not start",
                     evidence=(),
                     symbols=(),
                     static_edges=(),
                     candidate_links=(),
                 )
-                return
+            except (StorageConflictError, StorageNotFoundError, StorageError):
+                # The original startup failure remains the useful error. If
+                # storage is unavailable, no additional state can be made
+                # durable from this process.
+                pass
+            raise RunExecutorStartupError("fixture Run worker could not start") from exc
+
+    def signal_cancel(self, run_id: str) -> None:
+        """Wake a test-gated worker; storage remains the cancellation source of truth."""
+
+        with self._threads_lock:
+            cancel_event = self._cancel_events.get(run_id)
+        if cancel_event is not None:
+            cancel_event.set()
+
+    def state(self) -> RunExecutorState:
+        """Return bounded worker/admission counters without exposing a queue."""
+
+        with self._threads_lock:
+            worker_threads = sum(1 for thread in self._threads if thread.is_alive())
+            return RunExecutorState(
+                capacity=self.max_concurrent_runs,
+                reserved=self._reserved_count,
+                worker_threads=worker_threads,
+                tracked_threads=len(self._threads),
+                waiting_runs=0,
+            )
+
+    def _release_slot(self) -> None:
+        with self._threads_lock:
+            if self._reserved_count < 1:
+                raise RuntimeError("Run executor capacity was released too many times")
+            self._reserved_count -= 1
+        self._slots.release()
+
+    def _run_guarded(self, run: Run, admission: RunReservation) -> None:
+        thread = threading.current_thread()
+        deadline = time.monotonic() + float(run.budget.max_seconds)
+        try:
             self._execute(run, deadline)
         except (StorageConflictError, StorageNotFoundError):
             # A concurrent cancel or a project removal has already made the Run
@@ -135,10 +240,10 @@ class RunExecutor:
                 candidate_links=(),
             )
         finally:
-            if acquired:
-                self._slots.release()
+            admission.release()
             with self._threads_lock:
                 self._threads.discard(thread)
+                self._cancel_events.pop(run.run_id, None)
 
     def _execute(self, initial_run: Run, deadline: float) -> None:
         record = self._load(initial_run)
@@ -341,7 +446,12 @@ class RunExecutor:
         )
         self._with_store(current, lambda store: store.append_run_event(started_event))
         if self.tool_delay_seconds > 0:
-            time.sleep(self.tool_delay_seconds)
+            with self._threads_lock:
+                cancel_event = self._cancel_events.get(current.run.run_id)
+            if cancel_event is None:
+                time.sleep(self.tool_delay_seconds)
+            else:
+                cancel_event.wait(self.tool_delay_seconds)
         current = self._load(current.run)
         self._ensure_running(current, deadline)
         completed_sequence = current.run.budget.events_used + 1

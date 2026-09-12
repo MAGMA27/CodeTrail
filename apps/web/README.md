@@ -36,13 +36,13 @@ pnpm web:dev
 
 ## 错误与限制
 
-API 离线、项目/Session/index 不属于当前范围、消息未保存、空 Session、Run 活动冲突、预算拒绝、取消和重启中断都会显示明确状态；Run 失败不会伪造成功结论。工作台不显示隐藏思维链，只显示服务端公开事件、工具结果、证据和报告；real Run 当前由服务端拒绝，fixture 也不会执行仓库源码或 shell。Run 历史、事件和工具结果使用服务端有界分页，前端当前读取每页最多 40/100/40 项；报告 evidence 必须和 Run 的固定 index_id 一致，否则拒绝载入。
+API 离线、项目/Session/index 不属于当前范围、消息未保存、空 Session、Run 活动冲突、预算或执行容量拒绝、取消和重启中断都会显示明确状态；容量满时服务端在落库前返回可重试错误，工作台不会伪造 queued Run；Run 失败不会伪造成功结论。工作台不显示隐藏思维链，只显示服务端公开事件、工具结果、证据和报告；real Run 当前由服务端拒绝，fixture 也不会执行仓库源码或 shell。Run 历史、事件和工具结果使用服务端有界分页，前端当前读取每页最多 40/100/40 项；报告 evidence 必须和 Run 的固定 index_id 一致，否则拒绝载入。
 
 草稿继续按 project/session 保存到浏览器 localStorage，切换范围不串入；消息保存中的旧响应不能清除新草稿。证据链接携带 project_id、index_id、路径、行范围、content hash 和 evidence_id，Session 链接携带 project_id/session_id，不回退到 latest index。
 
 ## 验证
 
-从仓库根目录执行 `pnpm --dir apps/web test`、`pnpm web:typecheck` 和 `pnpm web:build`。Run 的 HTTP 生命周期、刷新/切换恢复和浏览器视觉流程还需与实际运行 API 一起复核；真实供应商语义质量和 SSE 尚未验证。
+从仓库根目录执行 `pnpm --dir apps/web test`、`pnpm web:typecheck` 和 `pnpm web:build`。Run 的 HTTP 生命周期、取消后终态报告、刷新/切换恢复和浏览器视觉流程已与实际运行 API 复核；真实供应商语义质量和 SSE 尚未验证。
 
 ## 关联文档
 

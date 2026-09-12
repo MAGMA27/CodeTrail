@@ -14,13 +14,13 @@
 
 ## 数据与生命周期
 
-创建 Run 的事务校验 Session 与固定 index，保存完整连续的已保存消息前缀、cutoff、hash 和字符用量；后续追加消息不修改 run_inputs。`runs_active_session` 部分唯一索引限制每个 Session 同时只有一个 queued/running Run，`runs_idempotency` 绑定 project/session/idempotency key 与请求指纹。事件以 `(run_id, sequence)` 连续递增；工具完成事件与结果同事务写入并更新预算；终态事件与报告、Run 终态同事务写入。
+创建 Run 的事务校验 Session 与固定 index，保存完整连续的已保存消息前缀、cutoff、hash 和字符用量；后续追加消息不修改 run_inputs。应用服务在该事务前从进程内执行器预留容量，容量失败不进入存储；存储异常或唯一冲突都会释放预留。`runs_active_session` 部分唯一索引限制每个 Session 同时只有一个 queued/running Run，`runs_idempotency` 绑定 project/session/idempotency key 与请求指纹。事件以 `(run_id, sequence)` 连续递增；工具完成事件与结果同事务写入并更新预算；终态事件与报告、Run 终态同事务写入。
 
-取消和服务启动恢复分别原子写入 cancelled/interrupted 事件和空候选终态报告；终态再次读取不重复写事件。SQLite 连接按存储操作创建/释放，索引查询和 Run worker 使用独立连接，不共享线程连接。索引仍是不可变快照，报告/工具 evidence 只允许指向同一 `index_id`。
+取消和服务启动恢复分别原子写入 cancelled/interrupted 事件和空候选终态报告；worker 启动失败会写入 failed 事件与报告；终态再次读取不重复写事件。SQLite 连接按存储操作创建/释放，索引查询和 Run worker 使用独立连接，不共享线程连接。索引仍是不可变快照，报告/工具 evidence 只允许指向同一 `index_id`。
 
 ## 错误与限制
 
-Run 持久化限制工具调用、单次/总源码行、输入/输出字符、事件和时间预算；事件页最多 100 条、工具结果页最多 40 条、Run 历史最多 40 条，游标绑定 project/session/run。唯一约束冲突映射为 conflict，坏 scope 映射为 not_found，输入或预算违反映射为 invalid_input/budget_exceeded；终态后写工具结果和事件会被拒绝。来源目录只读，索引和服务数据目录由 registry 边界控制。
+Run 持久化限制工具调用、单次/总源码行、输入/输出字符、事件和时间预算；事件页最多 100 条、工具结果页最多 40 条、Run 历史最多 40 条，游标绑定 project/session/run。唯一约束冲突映射为 conflict，坏 scope 映射为 not_found，输入或预算违反映射为 invalid_input/budget_exceeded；执行器容量满在落库前映射为可重试的 budget_exceeded/429；终态后写工具结果和事件会被拒绝。来源目录只读，索引和服务数据目录由 registry 边界控制。
 
 ## 验证
 

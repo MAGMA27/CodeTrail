@@ -98,7 +98,12 @@ from .storage import (
     SessionRecord,
     RunRecord,
 )
-from .run_execution import RunExecutor
+from .run_execution import (
+    RunExecutor,
+    RunExecutorCapacityError,
+    RunExecutorStartupError,
+    RunReservation,
+)
 
 
 class ServiceError(RuntimeError):
@@ -668,6 +673,7 @@ class WorkspaceService:
         *,
         github_client: GitHubClient | None = None,
         feature_adapter_factory: Callable[[str], FeatureModelAdapter] | None = None,
+        run_max_concurrent_runs: int | None = None,
     ) -> None:
         self.registry = registry
         self.index_service = index_service
@@ -675,7 +681,10 @@ class WorkspaceService:
         self.feature_adapter_factory = feature_adapter_factory
         self._recover_interrupted_builds()
         self._recover_interrupted_runs()
-        self.run_executor = RunExecutor(self)
+        self.run_executor = RunExecutor(
+            self,
+            max_concurrent_runs=_configured_run_capacity(run_max_concurrent_runs),
+        )
 
     def create_project(self, request: CreateProjectRequest) -> Project:
         spec = self.registry.spec_for(request.repository_id)
@@ -944,6 +953,8 @@ class WorkspaceService:
             raise ServiceError("forbidden", 403, "real model Runs are not enabled in this execution step")
         project = self._find_project(project_id)
         fingerprint = _run_creation_fingerprint(project_id, session_id, request)
+        reservation: RunReservation | None = None
+        handed_to_worker = False
         try:
             with self.registry.store_for_repository(project.repository_id) as store:
                 if request.idempotency_key is not None:
@@ -1022,6 +1033,14 @@ class WorkspaceService:
                     created_at=frozen_at,
                 )
                 try:
+                    reservation = self.run_executor.reserve()
+                except RunExecutorCapacityError as exc:
+                    raise ServiceError(
+                        "budget_exceeded",
+                        429,
+                        "Run executor capacity is full; retry this Run later",
+                    ) from exc
+                try:
                     record, created = store.create_run(
                         run,
                         run_input,
@@ -1029,12 +1048,20 @@ class WorkspaceService:
                         request_fingerprint=fingerprint,
                     )
                 except StorageConflictError:
-                    if request.idempotency_key is None:
-                        raise
-                    existing = store.find_run_by_idempotency(project_id, session_id, request.idempotency_key)
-                    if existing is None or existing.request_fingerprint != fingerprint:
-                        raise
-                    return _run_create_response(existing.run)
+                    try:
+                        if request.idempotency_key is None:
+                            raise
+                        existing = store.find_run_by_idempotency(project_id, session_id, request.idempotency_key)
+                        if existing is None or existing.request_fingerprint != fingerprint:
+                            raise
+                        return _run_create_response(existing.run)
+                    finally:
+                        assert reservation is not None
+                        reservation.release()
+                except Exception:
+                    assert reservation is not None
+                    reservation.release()
+                    raise
         except ServiceError:
             raise
         except StorageConflictError as exc:
@@ -1047,9 +1074,19 @@ class WorkspaceService:
             raise ServiceError(code, 409 if code == "budget_exceeded" else 400, message) from exc
         except StorageError as exc:
             raise ServiceError("internal_error", 500, "local Run storage failed") from exc
-        if created:
-            self.run_executor.submit(record.run)
-        return _run_create_response(record.run)
+        try:
+            if created:
+                assert reservation is not None
+                self.run_executor.submit(record.run, reservation=reservation)
+                handed_to_worker = True
+            elif reservation is not None:
+                reservation.release()
+            return _run_create_response(record.run)
+        except RunExecutorStartupError as exc:
+            raise ServiceError("internal_error", 503, "Run was saved but its worker could not start") from exc
+        finally:
+            if reservation is not None and not handed_to_worker:
+                reservation.release()
 
     def get_run(self, project_id: str, session_id: str, run_id: str) -> RunStatusResponse:
         record = self._load_run_record(project_id, session_id, run_id)
@@ -2224,6 +2261,20 @@ def _feature_generation_summary(generation: FeatureGeneration) -> FeatureGenerat
 
 def _env_flag(name: str) -> bool:
     return os.getenv(name, "").strip().casefold() in {"1", "true", "yes", "on"}
+
+
+def _configured_run_capacity(value: int | None) -> int:
+    """Resolve the finite process-local Run admission capacity."""
+
+    if value is None:
+        raw = os.getenv("CODETRAIL_RUN_MAX_CONCURRENT_RUNS", "2").strip()
+        try:
+            value = int(raw)
+        except ValueError as exc:
+            raise ValueError("CODETRAIL_RUN_MAX_CONCURRENT_RUNS must be a positive integer") from exc
+    if value < 1:
+        raise ValueError("run_max_concurrent_runs must be positive")
+    return value
 
 
 def _prepare_data_root(value: str | Path) -> Path:

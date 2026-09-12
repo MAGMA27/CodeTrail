@@ -99,6 +99,7 @@ def create_app(
     mcp_run_write_enabled: bool | None = None,
     github_client: GitHubClient | None = None,
     feature_adapter_factory: Callable[[str], FeatureModelAdapter] | None = None,
+    run_max_concurrent_runs: int | None = None,
 ) -> FastAPI:
     """Create an API with a server-owned repository allow-list."""
 
@@ -128,6 +129,7 @@ def create_app(
         index_service,
         github_client=github_client,
         feature_adapter_factory=feature_adapter_factory,
+        run_max_concurrent_runs=run_max_concurrent_runs,
     )
     application = FastAPI(title="CodeTrail API", version="0.1.0")
     application.state.index_service = index_service

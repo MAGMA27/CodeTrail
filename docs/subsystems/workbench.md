@@ -24,13 +24,13 @@
 
 ## 错误与限制
 
-API 离线、归属错误、消息为空、活动 Run 冲突、预算拒绝、取消和 interrupted 状态显示为明确错误或状态；real Run 当前显示服务端拒绝，fixture 不执行仓库源码或 shell。前端读取 Run history/events/tool-results 受服务端页大小限制，报告和证据必须绑定同一 index；请求失败不会用旧项目、旧 Session 或 latest index 的数据填补。
+API 离线、归属错误、消息为空、活动 Run 冲突、预算或执行容量拒绝、取消和 interrupted 状态显示为明确错误或状态；容量拒绝不创建本地 Run，提示可稍后重试。real Run 当前显示服务端拒绝，fixture 不执行仓库源码或 shell。前端读取 Run history/events/tool-results 受服务端页大小限制，报告和证据必须绑定同一 index；请求失败不会用旧项目、旧 Session 或 latest index 的数据填补。
 
 Session 草稿按 project/session 保存到 localStorage，消息保存旧响应不能清除新草稿；Run 请求也按项目/Session取消和代数隔离。工作台只显示公开事件、工具结果、同快照证据、报告结论和用量，不显示模型隐藏思维链。
 
 ## 验证
 
-已运行 `pnpm --dir apps/web test`、`pnpm web:typecheck` 和 `pnpm web:build`；后端生命周期与 MCP 对照由 `apps/api/tests/test_runs.py`、`test_mcp.py` 覆盖。浏览器实际 Run 启动、报告 evidence、取消、切换和刷新流程在最终交付前复核，真实供应商语义质量与 SSE 为 UNVERIFIED。
+已运行 `pnpm --dir apps/web test`、`pnpm web:typecheck` 和 `pnpm web:build`；后端生命周期与 MCP 对照由 `apps/api/tests/test_runs.py`、`test_mcp.py` 覆盖。浏览器实际 Run 启动、报告 evidence、运行中取消、切换和刷新恢复流程已复核，真实供应商语义质量与 SSE 为 UNVERIFIED。
 
 ## 相关决策
 
