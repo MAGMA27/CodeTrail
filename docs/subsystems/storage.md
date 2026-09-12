@@ -16,6 +16,8 @@
 
 静态 Project、project_indexes、索引快照、符号和证据继续由原仓库数据库持久化；动态来源的同类索引数据写入服务管理目录，注册来源和 ImportAttempt 由管理 SQLite 持久化。O2 的 `feature_generations` 保存生成契约 JSON、project/index 作用域、模式、模型、提示词/规则版本、缓存键、幂等键、状态和创建时间；结果内部仍绑定不可变 index_id，读取不调用模型。Session 表保存 project_id、index_id、可选 feature_generation_id、主题、创建/更新时间、消息计数和创建幂等指纹；session_messages 表保存 session_id、唯一 sequence、来源、正文、时间和追加幂等指纹。Session 外键绑定项目索引，消息外键级联于 Session；Session 创建和消息追加使用 SQLite 事务，`BEGIN IMMEDIATE` 保证并发追加序号稳定，游标按项目/Session 作用域校验。成功、部分和证据不足结果可按缓存键复用，失败记录单独保留且不覆盖已有成功结果，同一幂等键不能跨请求语义复用。数据按 index_id/项目/Session 隔离，项目关联校验 repository_id。旧数据库中的未归属索引只在确有未归属记录时迁移到明确的 legacy project；证据读取保存文本，写入事务维持完整性。来源目录只读，管理库连接按操作独立创建并释放。
 
+Session 创建指纹在新格式中保存原始请求的 index_id（包含省略值），Session 行单独保存首次绑定的 index_id；旧指纹按绑定索引兼容比较。`feature_generations` 读取边界对已知的单次模型用量旧格式只做内存归一化，保留已有证据、快照和 hash，不回写运行库；无法恢复的精确记录返回有界错误，历史列表跳过坏行并继续扫描有效记录。
+
 ## 错误与限制
 
 导入来源拒绝路径越界和符号链接/junction 逃逸，管理目录与来源目录不重叠；GitHub 临时目录使用 attempt owner marker，只允许官方归档安全解包，限制 archive/文件数/解包大小/重定向/请求时间，清理失败可单独重试；邻接只遍历静态边，查询受数量和时间预算约束。项目索引构建完成后才提升 latest_index_id，失败只清理 building 标记，不覆盖既有可用索引；已创建 Session 的 index_id 不随后续 reindex 移动，Session 和消息游标不能跨项目/Session 使用，幂等键复用时内容指纹不一致返回冲突，冲突及失败不能留下半套可用索引或消息数据。功能生成写入前由服务层校验 project/index、功能/关联/evidence 同快照，数据库唯一索引约束幂等键；缓存键包含预算，避免窄预算请求复用超预算结果。

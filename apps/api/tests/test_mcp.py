@@ -575,6 +575,26 @@ def test_mcp_session_read_matches_http_and_writes_are_opt_in(tmp_path: Path) -> 
     )
     assert status == 200
     session_id = created["session"]["session_id"]
+    status, retry_created = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/sessions",
+        {"topic": "shared retry", "idempotency_key": "shared-retry"},
+    )
+    assert status == 200
+    config_path = repository / "timeout_demo" / "config.py"
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8").replace("DEFAULT_TIMEOUT = 30", "DEFAULT_TIMEOUT = 31"),
+        encoding="utf-8",
+    )
+    status, new_index = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/indexes",
+        {"revision": "mcp-session-v2", "dirty": False},
+    )
+    assert status == 200
+    assert new_index["index"]["index_id"] != index["index"]["index_id"]
     status, http_sessions = request(application, "GET", f"/api/projects/{project_id}/sessions")
     assert status == 200
     status, http_messages = request(
@@ -602,8 +622,16 @@ def test_mcp_session_read_matches_http_and_writes_are_opt_in(tmp_path: Path) -> 
             assert {"list_sessions", "get_session", "list_session_messages", "create_session", "append_session_message"} <= tool_names
             sessions_result = await client.call_tool("list_sessions", {"project_id": project_id})
             assert sessions_result.structured_content["result"] == http_sessions
-            assert sessions_result.structured_content["references"][0]["project_id"] == project_id
-            assert sessions_result.structured_content["references"][0]["session_id"] == session_id
+            assert all(reference["project_id"] == project_id for reference in sessions_result.structured_content["references"])
+            assert session_id in {
+                reference["session_id"] for reference in sessions_result.structured_content["references"]
+            }
+
+            retried_by_agent = await client.call_tool(
+                "create_session",
+                {"project_id": project_id, "topic": "shared retry", "idempotency_key": "shared-retry"},
+            )
+            assert retried_by_agent.structured_content["session"] == retry_created["session"]
 
             session_result = await client.call_tool(
                 "get_session",

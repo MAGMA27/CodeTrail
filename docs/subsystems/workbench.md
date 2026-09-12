@@ -18,6 +18,8 @@
 
 证据链接携带 project_id、index_id、路径、行范围、content_hash 和 evidence_id；Session 链接携带 project_id、session_id。工作台先检查 project_id 存在且 index_id/Session 属于该项目，再读取项目作用域的固定快照或 Session；任何返回的 index、路径、行范围、hash、evidence_id 或 Session 身份不一致都会显示错误，不会回退到当前 latest index。概览入口只接受 `python-entry-v1` 的 `__main__.py`/顶层 main guard 结果；O2 功能只展示同一生成结果实际返回的 symbol/evidence，明确显示 fixture/real、用量、未查询模块、局限和 partial/insufficient/failed 状态；功能图区分 semantic 与 static 关系，节点点击可回到同一快照的功能/源码证据，入口映射规则版本不一致时显示 unavailable；入口/功能证据进入既有源码检查器，模块选择进入同一快照的关系图，所有概览/生成功能、Session 消息、历史分页、路径/模块请求都有显式上限。
 
+Session 使用同一幂等键重试时，工作台继续使用服务端返回的首次绑定快照，即使项目已经产生新的 latest index；历史页读取旧单次模型用量时由服务端兼容，无法恢复的单条版本不会阻断其他有效历史。
+
 ## 错误与限制
 
 前端可以提交服务端 API 可见的绝对路径，但不读取或解析浏览器本机目录；服务端负责允许根目录、符号链接/junction 和 loopback 写边界。项目作用域端点拒绝不属于当前 project_id 的 index_id 或 Session。Session 主题/消息受长度限制，切换项目或 Session 会清空旧草稿和消息；保存失败保留草稿并允许同一幂等键重试，当前版本不显示模型回复、不启动 Run。概览未识别入口时明确标记未知，不把目录或名为 `main` 的函数冒充入口；动态调用保留 unresolved。功能生成显式触发，real 未配置模型时显示失败且不回退 fixture；切换项目/索引、模式/范围变化和重试都会取消或忽略过期请求。历史和功能图响应经过运行时形状校验，API 停止或返回错误时保留明确失败状态；Session 最多按页读取 40 个，消息最多按页读取 100 条，历史最多按页读取 40 个版本，功能图最多渲染 40 个节点和 120 条边，跨项目/索引/Session/生成版本及错误 evidence 引用均拒绝显示。

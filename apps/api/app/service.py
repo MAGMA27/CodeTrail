@@ -700,36 +700,45 @@ class WorkspaceService:
         project = self._find_project(project_id)
         try:
             with self.registry.store_for_repository(project.repository_id) as store:
-                index_id = request.index_id or project.latest_index_id
-                if index_id is None:
-                    raise ServiceError("conflict", 409, "project has no available index")
-                if not store.project_has_index(project_id, index_id):
-                    raise ServiceError("not_found", 404, "index does not belong to the project")
-                index = store.load_index_snapshot(index_id)
-                if index.status != "ready":
-                    raise ServiceError("conflict", 409, "session requires a ready project index")
-                if request.feature_generation_id is not None:
-                    generation = store.load_feature_generation(request.feature_generation_id)
-                    if generation.project_id != project_id or generation.index.index_id != index_id:
-                        raise StorageNotFoundError("feature generation is outside the session snapshot")
+                # The v2 fingerprint records the caller's original index choice. The
+                # bound index is stored separately in the session row and must not
+                # change when the project's latest index changes between retries.
                 fingerprint = _session_creation_fingerprint(
                     project_id,
-                    index_id,
+                    request.index_id,
                     request.feature_generation_id,
                     request.topic,
                 )
                 record: SessionRecord | None = None
+                index: IndexSnapshot | None = None
                 if request.idempotency_key is not None:
                     existing = store.find_session_by_idempotency(project_id, request.idempotency_key)
                     if existing is not None:
-                        if existing.request_fingerprint != fingerprint:
+                        if not _session_creation_fingerprint_matches(existing, project_id, request):
                             raise ServiceError(
                                 "conflict",
                                 409,
                                 "session idempotency key is already bound to a different request",
                             )
                         record = existing
+                        if not store.project_has_index(project_id, existing.index_id):
+                            raise StorageError("persisted session index is outside its project")
+                        index = store.load_index_snapshot(existing.index_id)
                 if record is None:
+                    current_project = store.load_project(project_id)
+                    index_id = request.index_id or current_project.latest_index_id
+                    if index_id is None:
+                        raise ServiceError("conflict", 409, "project has no available index")
+                    if not store.project_has_index(project_id, index_id):
+                        raise ServiceError("not_found", 404, "index does not belong to the project")
+                    index = store.load_index_snapshot(index_id)
+                    if index.status != "ready":
+                        raise ServiceError("conflict", 409, "session requires a ready project index")
+                    if request.feature_generation_id is not None:
+                        generation = store.load_feature_generation(request.feature_generation_id)
+                        if generation.project_id != project_id or generation.index.index_id != index_id:
+                            raise StorageNotFoundError("feature generation is outside the session snapshot")
+                    assert index is not None
                     now = datetime.now(timezone.utc)
                     session = Session(
                         session_id=_new_session_id(),
@@ -750,9 +759,16 @@ class WorkspaceService:
                         if request.idempotency_key is None:
                             raise
                         existing = store.find_session_by_idempotency(project_id, request.idempotency_key)
-                        if existing is None or existing.request_fingerprint != fingerprint:
+                        if existing is None or not _session_creation_fingerprint_matches(
+                            existing,
+                            project_id,
+                            request,
+                        ):
                             raise
                         record = existing
+                        if not store.project_has_index(project_id, existing.index_id):
+                            raise StorageError("persisted session index is outside its project")
+                        index = store.load_index_snapshot(existing.index_id)
         except ServiceError:
             raise
         except StorageConflictError as exc:
@@ -763,7 +779,7 @@ class WorkspaceService:
             raise ServiceError("invalid_input", 400, "session parameters are invalid") from exc
         except StorageError as exc:
             raise ServiceError("internal_error", 500, "local session storage failed") from exc
-        assert record is not None
+        assert record is not None and index is not None
         return SessionResponse(session=_session_response(record, index))
 
     def list_sessions(
@@ -1999,16 +2015,62 @@ def _session_response(record: SessionRecord, index: IndexSnapshot) -> Session:
 
 def _session_creation_fingerprint(
     project_id: str,
-    index_id: str,
+    requested_index_id: str | None,
     feature_generation_id: str | None,
     topic: str,
 ) -> str:
     return _session_fingerprint(
-        "create",
+        "create-v2",
         project_id,
-        index_id,
+        requested_index_id,
         feature_generation_id,
         topic,
+    )
+
+
+def _legacy_session_creation_fingerprint(
+    project_id: str,
+    bound_index_id: str,
+    feature_generation_id: str | None,
+    topic: str,
+) -> str:
+    """Reproduce the pre-v2 fingerprint for existing session rows."""
+
+    return _session_fingerprint(
+        "create",
+        project_id,
+        bound_index_id,
+        feature_generation_id,
+        topic,
+    )
+
+
+def _session_creation_fingerprint_matches(
+    record: SessionRecord,
+    project_id: str,
+    request: CreateSessionRequest,
+) -> bool:
+    """Compare a retry with the original request while accepting legacy rows safely."""
+
+    fingerprint = _session_creation_fingerprint(
+        project_id,
+        request.index_id,
+        request.feature_generation_id,
+        request.topic,
+    )
+    if record.request_fingerprint == fingerprint:
+        return True
+
+    # Legacy rows only stored the resolved index. An omitted index and an
+    # explicit retry of that same bound index are the only safe compatibility
+    # matches; a different explicit index remains a conflict.
+    if request.index_id is not None and request.index_id != record.index_id:
+        return False
+    return record.request_fingerprint == _legacy_session_creation_fingerprint(
+        project_id,
+        record.index_id,
+        request.feature_generation_id,
+        request.topic,
     )
 
 

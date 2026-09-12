@@ -23,7 +23,7 @@
 
 ## 数据与生命周期
 
-静态仓库由 `CODETRAIL_REPOSITORIES` JSON 对象提供；本地导入允许根目录由 `CODETRAIL_ALLOWED_IMPORT_ROOTS` JSON 数组提供，动态注册和 `ImportAttempt` 写入 `CODETRAIL_DATA_DIR`（默认 API 工作目录 `.codetrail`）。模型供应商配置从同一服务数据目录的持久化 `config.json` 加载，缺少该文件时使用无密钥的 DeepSeek 默认值。GitHub 导入由 `CODETRAIL_GITHUB_IMPORT_ENABLED=1` 开启，服务端可选读取 `CODETRAIL_GITHUB_TOKEN`；远端身份、requested ref、resolved commit、content hash 和 cleanup 状态写入管理库，archive 临时目录位于管理目录并在完成后清理。新项目的索引库位于管理目录，不在来源目录写入 `.codetrail`。Project 持有稳定 ID、名称、来源 repository_id、创建时间和索引关联；索引源码及证据仍绑定不可变 `index_id`。Session 持有 project_id、创建时固定的 ready index_id、可选同快照 feature_generation_id、主题和时间；消息在同一 Session 下追加并由事务分配连续 sequence，幂等键冲突时拒绝不同内容。导入状态为 `queued/acquiring/indexing/ready/failed/interrupted`，失败和重启中断不替换原有可用索引。
+静态仓库由 `CODETRAIL_REPOSITORIES` JSON 对象提供；本地导入允许根目录由 `CODETRAIL_ALLOWED_IMPORT_ROOTS` JSON 数组提供，动态注册和 `ImportAttempt` 写入 `CODETRAIL_DATA_DIR`（默认 API 工作目录 `.codetrail`）。模型供应商配置从同一服务数据目录的持久化 `config.json` 加载，缺少该文件时使用无密钥的 DeepSeek 默认值。GitHub 导入由 `CODETRAIL_GITHUB_IMPORT_ENABLED=1` 开启，服务端可选读取 `CODETRAIL_GITHUB_TOKEN`；远端身份、requested ref、resolved commit、content hash 和 cleanup 状态写入管理库，archive 临时目录位于管理目录并在完成后清理。新项目的索引库位于管理目录，不在来源目录写入 `.codetrail`。Project 持有稳定 ID、名称、来源 repository_id、创建时间和索引关联；索引源码及证据仍绑定不可变 `index_id`。Session 持有 project_id、创建时固定的 ready index_id、可选同快照 feature_generation_id、主题和时间；创建幂等指纹保存原始 `index_id`（省略与显式选择有区别），绑定的 index_id 单独持久化，重试不会随 latest index 变化；消息在同一 Session 下追加并由事务分配连续 sequence，幂等键冲突时拒绝不同内容。导入状态为 `queued/acquiring/indexing/ready/failed/interrupted`，失败和重启中断不替换原有可用索引。
 
 ## 使用与配置
 
@@ -43,7 +43,7 @@ API 健康检查为 `GET /api/health`。`CODETRAIL_WEB_ORIGINS` 只控制浏览�
 
 ## 错误与限制
 
-本地导入路径必须是服务端绝对路径、位于允许根目录内且不能跨符号链接/junction；服务管理目录与来源目录不能重叠。GitHub 拒绝任意下载 URL、凭据、非官方重定向、绝对/遍历路径、链接和特殊文件，并限制 archive、文件数、解包大小、重定向、单请求/总时间；同仓库同 commit 幂等，分支移动创建新 attempt。幂等键全局绑定一次提交，重复来源复用项目，并发重复提交不会创建重复活动 attempt。未知项目、非所属索引/Session 和未配置 repository_id 返回稳定 `not_found`；输入边界返回 `invalid_input`，非 loopback 写入返回 `forbidden`。Session 创建默认选择当前最新可用索引并在创建后不随重建移动；Session 与消息分页游标绑定 project/session，消息只能使用 human/agent 来源，HTTP 追加可幂等重试且不创建 Run。功能生成受工具调用、源码行、输入/输出和特征数预算限制，失败、证据不足、部分结果和模型不可用分开返回；fixture 不需要密钥，real 模式只读服务端模型配置且不回退 fixture。历史游标绑定 project_id/index_id，按 `created_at DESC, generation_id DESC` 稳定分页，最多 40 条；功能图最多 40 个节点、120 条边，semantic 关联与静态 CodeEdge 分开，规则版本不匹配的入口目标明确列为不可用。失败历史可读取但不会替换旧成功结果。当前导入、索引、Session 消息保存和单次功能生成在受限流程中完成，Run、SSE 和 Agent 分析未实现。
+本地导入路径必须是服务端绝对路径、位于允许根目录内且不能跨符号链接/junction；服务管理目录与来源目录不能重叠。GitHub 拒绝任意下载 URL、凭据、非官方重定向、绝对/遍历路径、链接和特殊文件，并限制 archive、文件数、解包大小、重定向、单请求/总时间；同仓库同 commit 幂等，分支移动创建新 attempt。幂等键全局绑定一次提交，重复来源复用项目，并发重复提交不会创建重复活动 attempt。未知项目、非所属索引/Session 和未配置 repository_id 返回稳定 `not_found`；输入边界返回 `invalid_input`，非 loopback 写入返回 `forbidden`。Session 创建默认选择当前最新可用索引并在创建后不随重建移动；相同幂等键的并发首次请求和重试都返回首次绑定的 Session/快照，主题、显式索引或功能版本变化返回 `conflict`；Session 与消息分页游标绑定 project/session，消息只能使用 human/agent 来源，HTTP 追加可幂等重试且不创建 Run。功能生成受工具调用、源码行、输入/输出和特征数预算限制，失败、证据不足、部分结果和模型不可用分开返回；fixture 不需要密钥，real 模式只读服务端模型配置且不回退 fixture。历史游标绑定 project_id/index_id，按 `created_at DESC, generation_id DESC` 稳定分页，最多 40 条；可识别的旧单次模型用量只在内存兼容，不改写数据库；不可恢复记录的精确读取返回有界内部错误，历史列表跳过坏行并继续返回其他有效版本。功能图最多 40 个节点、120 条边，semantic 关联与静态 CodeEdge 分开，规则版本不匹配的入口目标明确列为不可用。失败历史可读取但不会替换旧成功结果。当前导入、索引、Session 消息保存和单次功能生成在受限流程中完成，Run、SSE 和 Agent 分析未实现。
 
 ## 验证
 

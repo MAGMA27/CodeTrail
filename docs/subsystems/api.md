@@ -14,7 +14,7 @@
 
 ## 数据与生命周期
 
-Project 请求使用 project_id，静态来源复用服务端 allow-list 的 repository_id，动态来源使用持久注册的 import-* repository_id；索引与查询同时使用 index_id。阻塞索引进入 worker thread，操作独立管理数据库连接。项目保存可用索引列表与当前构建标记，导入 attempt 单独记录 queued/acquiring/indexing/ready/failed/interrupted，不冒充 Run。Session 服务在创建时选择同项目 ready index_id（省略时取当时 latest），可选 feature_generation_id 必须属于同一项目/快照；Session 详情和消息追加/分页复用同一服务边界，消息来源只允许 human/agent，追加不启动 Run。GitHub attempt 另外记录 canonical URL、requested ref、resolved commit、content hash 与临时清理状态；同仓库同 commit 复用 attempt，分支移动产生新快照。邻接响应返回 root、受限 nodes、静态 neighbors 和对应 unresolved，供工作台绑定同一快照渲染。
+Project 请求使用 project_id，静态来源复用服务端 allow-list 的 repository_id，动态来源使用持久注册的 import-* repository_id；索引与查询同时使用 index_id。阻塞索引进入 worker thread，操作独立管理数据库连接。项目保存可用索引列表与当前构建标记，导入 attempt 单独记录 queued/acquiring/indexing/ready/failed/interrupted，不冒充 Run。Session 服务在创建时选择同项目 ready index_id（省略时取当时 latest），创建指纹保存原始的显式/省略 index_id，Session 行另存首次绑定的快照；可选 feature_generation_id 必须属于同一项目/快照。相同幂等键的并发首次请求和重启后重试都读取该已绑定快照，主题、索引或功能版本不同则冲突。Session 详情和消息追加/分页复用同一服务边界，消息来源只允许 human/agent，追加不启动 Run。GitHub attempt 另外记录 canonical URL、requested ref、resolved commit、content hash 与临时清理状态；同仓库同 commit 复用 attempt，分支移动产生新快照。邻接响应返回 root、受限 nodes、静态 neighbors 和对应 unresolved，供工作台绑定同一快照渲染。
 
 本地 MCP 使用 SDK `2.2.0` 的 stdio 传输，stdout 仅承载协议，日志写 stderr。默认十四项只读工具为 list_projects、get_project、list_sessions、get_session、list_session_messages、list_indexes、get_index、search_code、read_source、get_neighbors、get_overview、list_feature_generations、get_feature_generation、get_feature_graph；启用 `CODETRAIL_MCP_SESSION_WRITE_ENABLED=1` 后才增加 create_session、append_session_message，启用本地或 GitHub 专用开关后才增加相应导入、状态和重试工具，其中 `CODETRAIL_MCP_GITHUB_IMPORT_ENABLED=1` 独立控制网络获取。除项目发现外显式要求 project_id，索引读取同时校验 index_id 所属项目，Session 读取/写入同时校验 session_id 所属项目。MCP 结构化结果复用 Pydantic 领域响应，业务失败带 code、message、retryable；Session 结果附带 project/session 工作台引用，read_source、get_overview、get_feature_generation 和 get_feature_graph 另外生成同一 project_id/index_id、路径、行范围、hash 和 evidence_id 的工作台引用。
 
@@ -25,6 +25,8 @@ O2 的 `POST /api/projects/{project_id}/indexes/{index_id}/features` 复用同�
 ## 错误与限制
 
 静态仓库使用服务端 allow-list；本地导入使用 `CODETRAIL_ALLOWED_IMPORT_ROOTS` 和服务管理目录，拒绝相对路径、越界、符号链接/junction 逃逸和管理目录重叠。GitHub 只接受官方 HTTPS 仓库 URL，先固定 commit，再受限获取官方 archive 并拒绝解包链接/遍历/特殊文件；HTTP 写入口只接受 loopback 客户端。项目作用域拒绝未知项目或不属于项目的 index_id，Session 读取/追加拒绝跨项目 session_id，参数、预算、上游限流和内部失败有错误映射，不泄露宿主路径。旧 `/api/indexes/*` 仍保留为无项目上下文的兼容入口，MCP 不调用该兼容入口。MCP Session 写工具默认未注册，GitHub 网络下载不由本地 MCP 开关隐式授权。持久化模型配置只读服务数据目录，缺失密钥、无效 JSON、未知字段和非法地址均不会泄露配置内容；功能生成区分 `model_unavailable`、模型失败、非法模型输出、证据不足、预算超限和部分截断；real 未配置密钥不回退 fixture，失败记录不覆盖既有成功缓存，非法引用不能保存。Session 创建默认选择当时最新 ready index，后续重建不会移动固定绑定；消息来源只允许 human/agent，幂等键复用时不同正文返回冲突，消息/Session 游标分别绑定 project_id/session_id。历史游标绑定 project_id/index_id，限制为每页最多 40 条；功能图限制为最多 40 个节点/120 条边，并校验节点、边、证据和同快照身份。通用上下文排序按入口关系、静态路径距离和稳定路径/行号排序，不依赖演示仓库符号名。
+
+Session 创建幂等比较优先使用原始请求指纹；对历史行仅按已绑定快照和可复现的旧指纹做兼容匹配，因此 latest index 更新不会把重试响应切换到新快照。功能历史的旧单次模型用量由存储层读取时兼容，无法恢复的单条记录不阻断列表中的其他有效版本。
 
 ## 验证
 

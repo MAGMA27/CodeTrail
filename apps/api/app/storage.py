@@ -6,6 +6,7 @@ import base64
 import binascii
 import hashlib
 import json
+import logging
 import math
 import re
 import sqlite3
@@ -40,6 +41,44 @@ from .relations import RelationIndex
 
 
 _UNSET = object()
+_FEATURE_HISTORY_BATCH_SIZE = 40
+_FEATURE_HISTORY_SCAN_LIMIT = 200
+logger = logging.getLogger(__name__)
+
+
+def _feature_generation_from_json(result_json: str) -> FeatureGeneration:
+    """Validate a saved generation, filling only the known legacy usage shape.
+
+    Early O2 rows recorded aggregate input/output characters but did not keep
+    the per-model-call arrays. For the only recoverable legacy case (zero or
+    one model call), the aggregate is the complete per-call value. This is a
+    read-time, idempotent normalization: the database row is never rewritten,
+    and all other generation, evidence, and snapshot fields remain validated
+    by the current contract.
+    """
+
+    payload = json.loads(result_json)
+    if isinstance(payload, dict):
+        raw_usage = payload.get("usage")
+        if isinstance(raw_usage, dict):
+            model_calls = raw_usage.get("model_calls", 0)
+            if (
+                isinstance(model_calls, int)
+                and not isinstance(model_calls, bool)
+                and model_calls in {0, 1}
+            ):
+                usage = dict(raw_usage)
+                if "model_input_chars" not in usage:
+                    usage["model_input_chars"] = (
+                        [] if model_calls == 0 else [usage.get("input_chars", 0)]
+                    )
+                if "model_output_chars" not in usage:
+                    usage["model_output_chars"] = (
+                        [] if model_calls == 0 else [usage.get("output_chars", 0)]
+                    )
+                payload = dict(payload)
+                payload["usage"] = usage
+    return FeatureGeneration.model_validate(payload)
 
 
 class StorageError(RuntimeError):
@@ -1269,8 +1308,8 @@ class IndexStore:
         if row is None:
             raise StorageNotFoundError(f"feature generation {generation_id!r} was not found")
         try:
-            return FeatureGeneration.model_validate(json.loads(row["result_json"]))
-        except (json.JSONDecodeError, ValidationError) as exc:
+            return _feature_generation_from_json(row["result_json"])
+        except (json.JSONDecodeError, ValidationError, TypeError) as exc:
             raise StorageError("persisted feature generation is invalid") from exc
 
     def find_feature_generation_by_idempotency(
@@ -1330,37 +1369,75 @@ class IndexStore:
         if index_id is not None:
             where.append("index_id = ?")
             parameters.append(index_id)
-        if cursor_values is not None:
-            created_at, generation_id = cursor_values
-            where.append("(created_at < ? OR (created_at = ? AND generation_id < ?))")
-            parameters.extend([created_at, created_at, generation_id])
-        rows = self._connection.execute(
-            "SELECT generation_id, created_at, result_json FROM feature_generations "
-            f"WHERE {' AND '.join(where)} "
-            "ORDER BY created_at DESC, generation_id DESC LIMIT ?",
-            (*parameters, limit + 1),
-        ).fetchall()
-        has_more = len(rows) > limit
-        page_rows = rows[:limit]
-        generations: list[FeatureGeneration] = []
-        for row in page_rows:
-            try:
-                generation = FeatureGeneration.model_validate(json.loads(row["result_json"]))
-            except (json.JSONDecodeError, ValidationError) as exc:
-                raise StorageError("persisted feature generation is invalid") from exc
-            if generation.project_id != project_id or (
-                index_id is not None and generation.index.index_id != index_id
-            ):
-                raise StorageError("persisted feature generation scope is invalid")
-            generations.append(generation)
+        scan_cursor = cursor_values
+        scanned = 0
+        exhausted = False
+        last_scanned: tuple[str, str] | None = None
+        valid_rows: list[tuple[sqlite3.Row, FeatureGeneration]] = []
+        while len(valid_rows) <= limit and scanned < _FEATURE_HISTORY_SCAN_LIMIT:
+            batch_where = list(where)
+            batch_parameters = list(parameters)
+            if scan_cursor is not None:
+                created_at, generation_id = scan_cursor
+                batch_where.append("(created_at < ? OR (created_at = ? AND generation_id < ?))")
+                batch_parameters.extend([created_at, created_at, generation_id])
+            batch_limit = min(_FEATURE_HISTORY_BATCH_SIZE, _FEATURE_HISTORY_SCAN_LIMIT - scanned)
+            rows = self._connection.execute(
+                "SELECT generation_id, created_at, result_json FROM feature_generations "
+                f"WHERE {' AND '.join(batch_where)} "
+                "ORDER BY created_at DESC, generation_id DESC LIMIT ?",
+                (*batch_parameters, batch_limit),
+            ).fetchall()
+            if not rows:
+                exhausted = True
+                break
+            for row in rows:
+                scanned += 1
+                last_scanned = (str(row["created_at"]), str(row["generation_id"]))
+                try:
+                    generation = _feature_generation_from_json(row["result_json"])
+                except (json.JSONDecodeError, ValidationError, TypeError):
+                    logger.warning(
+                        "skipping invalid feature generation history row generation_id=%s",
+                        row["generation_id"],
+                    )
+                    continue
+                if generation.project_id != project_id or (
+                    index_id is not None and generation.index.index_id != index_id
+                ):
+                    logger.warning(
+                        "skipping out-of-scope feature generation history row generation_id=%s",
+                        row["generation_id"],
+                    )
+                    continue
+                valid_rows.append((row, generation))
+                if len(valid_rows) > limit:
+                    break
+            if len(valid_rows) > limit:
+                break
+            if len(rows) < batch_limit:
+                exhausted = True
+                break
+            scan_cursor = last_scanned
+
+        has_more = len(valid_rows) > limit or not exhausted
+        page_rows = valid_rows[:limit]
+        generations = [generation for _, generation in page_rows]
+        next_cursor_values: tuple[str, str] | None = None
+        if has_more:
+            if len(valid_rows) > limit and page_rows:
+                row = page_rows[-1][0]
+                next_cursor_values = (str(row["created_at"]), str(row["generation_id"]))
+            else:
+                next_cursor_values = last_scanned
         next_cursor = (
             _encode_feature_generation_cursor(
-                str(page_rows[-1]["created_at"]),
-                str(page_rows[-1]["generation_id"]),
+                next_cursor_values[0],
+                next_cursor_values[1],
                 project_id=project_id,
                 index_id=index_id,
             )
-            if has_more and page_rows
+            if next_cursor_values is not None
             else None
         )
         return FeatureGenerationPage(

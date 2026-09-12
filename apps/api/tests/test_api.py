@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 import shutil
+import sqlite3
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -759,6 +760,22 @@ def test_http_sessions_are_isolated_snapshot_fixed_idempotent_and_reopenable(tmp
     assert first_session["project_id"] == project_one_id
     assert first_session["index"]["index_id"] == first_index_id
 
+    # Simulate a row written before the request fingerprint began preserving
+    # the caller's omitted-vs-explicit index choice.
+    legacy_fingerprint = hashlib.sha256(
+        json.dumps(
+            ["create", project_one_id, first_index_id, None, "first session"],
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    with sqlite3.connect(repository_one / ".codetrail" / "index.sqlite3") as connection:
+        connection.execute(
+            "UPDATE sessions SET request_fingerprint = ? WHERE session_id = ?",
+            (legacy_fingerprint, first_session["session_id"]),
+        )
+        connection.commit()
+
     status, repeated = request(
         application,
         "POST",
@@ -767,6 +784,19 @@ def test_http_sessions_are_isolated_snapshot_fixed_idempotent_and_reopenable(tmp
     )
     assert status == 200
     assert repeated == first
+
+    def create_parallel_session(_: int) -> tuple[int, dict]:
+        return request(
+            application,
+            "POST",
+            f"/api/projects/{project_one_id}/sessions",
+            {"topic": "parallel session", "idempotency_key": "parallel-session"},
+        )
+
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        parallel_sessions = list(executor.map(create_parallel_session, range(6)))
+    assert all(status == 200 for status, _ in parallel_sessions)
+    assert len({result["session"]["session_id"] for _, result in parallel_sessions}) == 1
 
     status, conflict = request(
         application,
@@ -894,6 +924,52 @@ def test_http_sessions_are_isolated_snapshot_fixed_idempotent_and_reopenable(tmp
     )
     assert status == 200
     assert new_index["index"]["index_id"] != first_index_id
+    status, fixed_retry = request(
+        application,
+        "POST",
+        f"/api/projects/{project_one_id}/sessions",
+        {"topic": "first session", "idempotency_key": "session-one"},
+    )
+    assert status == 200
+    assert fixed_retry["session"]["session_id"] == first_session["session_id"]
+    assert fixed_retry["session"]["index"]["index_id"] == first_index_id
+    assert fixed_retry["session"]["message_count"] == 7
+
+    status, explicit_old = request(
+        application,
+        "POST",
+        f"/api/projects/{project_one_id}/sessions",
+        {
+            "topic": "explicit old session",
+            "index_id": first_index_id,
+            "idempotency_key": "explicit-old-session",
+        },
+    )
+    assert status == 200
+    status, explicit_old_retry = request(
+        application,
+        "POST",
+        f"/api/projects/{project_one_id}/sessions",
+        {
+            "topic": "explicit old session",
+            "index_id": first_index_id,
+            "idempotency_key": "explicit-old-session",
+        },
+    )
+    assert status == 200
+    assert explicit_old_retry == explicit_old
+    status, explicit_index_conflict = request(
+        application,
+        "POST",
+        f"/api/projects/{project_one_id}/sessions",
+        {
+            "topic": "explicit old session",
+            "index_id": new_index["index"]["index_id"],
+            "idempotency_key": "explicit-old-session",
+        },
+    )
+    assert status == 409
+    assert explicit_index_conflict["code"] == "conflict"
     status, fixed_session = request(
         application,
         "GET",
@@ -910,6 +986,15 @@ def test_http_sessions_are_isolated_snapshot_fixed_idempotent_and_reopenable(tmp
     )
     assert status == 200
     assert reopened_session == fixed_session
+    status, reopened_retry = request(
+        reopened,
+        "POST",
+        f"/api/projects/{project_one_id}/sessions",
+        {"topic": "first session", "idempotency_key": "session-one"},
+    )
+    assert status == 200
+    assert reopened_retry["session"]["session_id"] == first_session["session_id"]
+    assert reopened_retry["session"]["index"]["index_id"] == first_index_id
     status, reopened_messages = request(reopened, "GET", first_message_path)
     assert status == 200
     assert [item["sequence"] for item in reopened_messages["messages"]] == list(range(1, 8))

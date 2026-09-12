@@ -6,6 +6,7 @@ import asyncio
 import http.server
 import json
 import shutil
+import sqlite3
 import threading
 import time
 from pathlib import Path
@@ -202,6 +203,113 @@ def test_fixture_generation_uses_real_tools_persists_and_reuses_idempotency(tmp_
     )
     assert status == 200
     assert stable == generated
+
+
+def test_feature_history_normalizes_legacy_usage_and_skips_unrecoverable_rows(tmp_path: Path) -> None:
+    repository = _copy_fixture(tmp_path)
+    application = create_app({"timeout-demo": repository})
+    project_id, index_id = _create_index(application)
+    status, generated_response = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/indexes/{index_id}/features",
+        {
+            "schema_version": "0.1.0",
+            "mode": "fixture",
+            "idempotency_key": "legacy-history",
+        },
+    )
+    assert status == 200
+    generation = generated_response["generation"]
+    generation_id = generation["generation_id"]
+    database_path = repository / ".codetrail" / "index.sqlite3"
+
+    with sqlite3.connect(database_path) as connection:
+        row = connection.execute(
+            "SELECT result_json FROM feature_generations WHERE generation_id = ?",
+            (generation_id,),
+        ).fetchone()
+        assert row is not None
+        legacy_payload = json.loads(row[0])
+        legacy_payload["usage"].pop("model_input_chars")
+        legacy_payload["usage"].pop("model_output_chars")
+        connection.execute(
+            "UPDATE feature_generations SET result_json = ? WHERE generation_id = ?",
+            (json.dumps(legacy_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")), generation_id),
+        )
+
+        unrecoverable_payload = json.loads(row[0])
+        unrecoverable_id = "feature-generation-unrecoverable"
+        unrecoverable_payload["generation_id"] = unrecoverable_id
+        unrecoverable_payload["usage"]["model_calls"] = 2
+        unrecoverable_payload["usage"].pop("model_input_chars")
+        unrecoverable_payload["usage"].pop("model_output_chars")
+        connection.execute(
+            "INSERT INTO feature_generations "
+            "(generation_id, project_id, index_id, cache_key, idempotency_key, mode, model, "
+            "prompt_version, rules_version, status, created_at, result_json) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                unrecoverable_id,
+                project_id,
+                index_id,
+                "unrecoverable-cache-key",
+                None,
+                unrecoverable_payload["mode"],
+                unrecoverable_payload["model"],
+                unrecoverable_payload["prompt_version"],
+                unrecoverable_payload["rules_version"],
+                unrecoverable_payload["status"],
+                "9999-01-01T00:00:00+00:00",
+                json.dumps(
+                    unrecoverable_payload,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+            ),
+        )
+        connection.commit()
+
+    status, reread = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/indexes/{index_id}/features/{generation_id}",
+    )
+    assert status == 200
+    assert reread == generated_response
+    status, reread_again = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/indexes/{index_id}/features/{generation_id}",
+    )
+    assert status == 200
+    assert reread_again == generated_response
+
+    with sqlite3.connect(database_path) as connection:
+        stored_payload = json.loads(
+            connection.execute(
+                "SELECT result_json FROM feature_generations WHERE generation_id = ?",
+                (generation_id,),
+            ).fetchone()[0]
+        )
+    assert "model_input_chars" not in stored_payload["usage"]
+    assert "model_output_chars" not in stored_payload["usage"]
+
+    status, invalid_read = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/indexes/{index_id}/features/{unrecoverable_id}",
+    )
+    assert status == 500
+    assert invalid_read["code"] == "internal_error"
+    status, history = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/features?index_id={index_id}&limit=40",
+    )
+    assert status == 200
+    assert [item["generation_id"] for item in history["generations"]] == [generation_id]
 
 
 def test_feature_history_paginates_and_graph_reads_saved_snapshot_without_model(tmp_path: Path) -> None:
