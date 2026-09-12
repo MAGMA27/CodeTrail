@@ -84,6 +84,7 @@ from .feature_generation import (
     new_generation_id,
     resolve_model,
 )
+from .issue_analysis import ISSUE_EXECUTION_VERSION, ISSUE_PROMPT_VERSION, IssueModelAdapter
 from .feature_graph import build_feature_graph
 from .storage import (
     IndexStore,
@@ -145,6 +146,8 @@ class RepositoryRegistry:
         mcp_feature_generation_enabled: bool | None = None,
         mcp_session_write_enabled: bool | None = None,
         mcp_run_write_enabled: bool | None = None,
+        real_run_enabled: bool | None = None,
+        mcp_real_run_enabled: bool | None = None,
     ) -> None:
         normalized: dict[str, RepositorySpec] = {}
         for repository_id, repository_root in roots.items():
@@ -208,6 +211,16 @@ class RepositoryRegistry:
             if mcp_run_write_enabled is None
             else mcp_run_write_enabled
         )
+        self._real_run_enabled = (
+            _env_flag("CODETRAIL_REAL_RUN_ENABLED")
+            if real_run_enabled is None
+            else real_run_enabled
+        )
+        self._mcp_real_run_enabled = (
+            _env_flag("CODETRAIL_MCP_REAL_RUN_ENABLED")
+            if mcp_real_run_enabled is None
+            else mcp_real_run_enabled
+        )
         self._lock = threading.RLock()
         self._runtime_source_roots: dict[str, Path] = {}
         self._specs = normalized
@@ -222,6 +235,8 @@ class RepositoryRegistry:
         mcp_feature_generation_enabled: bool | None = None,
         mcp_session_write_enabled: bool | None = None,
         mcp_run_write_enabled: bool | None = None,
+        real_run_enabled: bool | None = None,
+        mcp_real_run_enabled: bool | None = None,
     ) -> RepositoryRegistry:
         raw = os.getenv("CODETRAIL_REPOSITORIES", "").strip()
         payload: dict[str, str] = {}
@@ -251,6 +266,8 @@ class RepositoryRegistry:
             mcp_feature_generation_enabled=mcp_feature_generation_enabled,
             mcp_session_write_enabled=mcp_session_write_enabled,
             mcp_run_write_enabled=mcp_run_write_enabled,
+            real_run_enabled=real_run_enabled,
+            mcp_real_run_enabled=mcp_real_run_enabled,
         )
 
     @property
@@ -294,6 +311,14 @@ class RepositoryRegistry:
     @property
     def mcp_run_write_enabled(self) -> bool:
         return self._mcp_run_write_enabled
+
+    @property
+    def real_run_enabled(self) -> bool:
+        return self._real_run_enabled
+
+    @property
+    def mcp_real_run_enabled(self) -> bool:
+        return self._mcp_real_run_enabled
 
     @property
     def allowed_import_roots(self) -> tuple[Path, ...]:
@@ -673,17 +698,20 @@ class WorkspaceService:
         *,
         github_client: GitHubClient | None = None,
         feature_adapter_factory: Callable[[str], FeatureModelAdapter] | None = None,
+        run_model_adapter_factory: Callable[[str], IssueModelAdapter] | None = None,
         run_max_concurrent_runs: int | None = None,
     ) -> None:
         self.registry = registry
         self.index_service = index_service
         self.github_client = github_client or GitHubClient()
         self.feature_adapter_factory = feature_adapter_factory
+        self.run_model_adapter_factory = run_model_adapter_factory
         self._recover_interrupted_builds()
         self._recover_interrupted_runs()
         self.run_executor = RunExecutor(
             self,
             max_concurrent_runs=_configured_run_capacity(run_max_concurrent_runs),
+            model_adapter_factory=run_model_adapter_factory,
         )
 
     def create_project(self, request: CreateProjectRequest) -> Project:
@@ -946,11 +974,24 @@ class WorkspaceService:
         except StorageError as exc:
             raise ServiceError("internal_error", 500, "local session storage failed") from exc
 
-    def create_run(self, project_id: str, session_id: str, request: CreateRunRequest) -> CreateRunResponse:
-        """Freeze a saved Session prefix and submit one explicit fixture Run."""
+    def create_run(
+        self,
+        project_id: str,
+        session_id: str,
+        request: CreateRunRequest,
+        *,
+        via_mcp: bool = False,
+    ) -> CreateRunResponse:
+        """Freeze a saved Session prefix and submit one explicit bounded Run."""
 
-        if request.mode != "fixture":
-            raise ServiceError("forbidden", 403, "real model Runs are not enabled in this execution step")
+        if request.mode == "real":
+            enabled = self.registry.mcp_real_run_enabled if via_mcp else self.registry.real_run_enabled
+            if not enabled:
+                raise ServiceError(
+                    "forbidden",
+                    403,
+                    "real model Runs require the explicit real-run capability switch",
+                )
         project = self._find_project(project_id)
         fingerprint = _run_creation_fingerprint(project_id, session_id, request)
         reservation: RunReservation | None = None
@@ -1013,6 +1054,11 @@ class WorkspaceService:
                     input_chars=input_chars,
                     frozen_at=frozen_at,
                 )
+                resolved_model = (
+                    resolve_model("real", request.model, model_config=self.registry.model_config)
+                    if request.mode == "real"
+                    else request.model
+                )
                 run = Run(
                     run_id=f"run-{uuid4().hex}",
                     project_id=project_id,
@@ -1020,11 +1066,16 @@ class WorkspaceService:
                     index_id=session.index_id,
                     feature_generation_id=feature_generation_id,
                     issue=request.issue,
-                    mode="fixture",
+                    mode=request.mode,
                     fixture_scenario=request.fixture_scenario,
-                    model=request.model,
-                    prompt_version=request.prompt_version,
-                    execution_version=request.execution_version,
+                    model_provider=(self.registry.model_config.provider if request.mode == "real" else None),
+                    model=resolved_model,
+                    prompt_version=(request.prompt_version or ISSUE_PROMPT_VERSION) if request.mode == "real" else request.prompt_version,
+                    execution_version=(
+                        request.execution_version
+                        if request.mode == "fixture" or request.execution_version != "run-fixture-v1"
+                        else ISSUE_EXECUTION_VERSION
+                    ),
                     status="queued",
                     budget=budget,
                     message_end_sequence=cutoff,

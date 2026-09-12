@@ -876,10 +876,12 @@ def test_mcp_run_reads_share_http_state_and_writes_are_separately_opt_in(tmp_pat
         "CODETRAIL_WORKBENCH_URL": "http://localhost:3000",
     }
 
-    def parameters(*, run_write: bool = False) -> StdioServerParameters:
+    def parameters(*, run_write: bool = False, real_run: bool = False) -> StdioServerParameters:
         configured = dict(environment)
         if run_write:
             configured["CODETRAIL_MCP_RUN_WRITE_ENABLED"] = "1"
+        if real_run:
+            configured["CODETRAIL_MCP_REAL_RUN_ENABLED"] = "1"
         return StdioServerParameters(
             command=sys.executable,
             args=["-m", "app.mcp_server"],
@@ -989,5 +991,51 @@ def test_mcp_run_reads_share_http_state_and_writes_are_separately_opt_in(tmp_pat
                 {"project_id": project_id, "session_id": session_id, "run_id": started_id},
             )
             assert report.structured_content["report"]["outcome"] == "insufficient_evidence"
+
+            real_started = await client.call_tool(
+                "start_session_run",
+                {
+                    "project_id": project_id,
+                    "session_id": session_id,
+                    "index_id": index_id,
+                    "issue_id": "mcp-real-disabled",
+                    "title": "real disabled",
+                    "body": "This request must not reach a provider.",
+                    "mode": "real",
+                },
+            )
+            assert real_started.structured_content["ok"] is False
+            assert real_started.structured_content["error"]["code"] == "forbidden"
+
+        async with Client(parameters(run_write=True, real_run=True), read_timeout_seconds=10) as client:
+            real_started = await client.call_tool(
+                "start_session_run",
+                {
+                    "project_id": project_id,
+                    "session_id": session_id,
+                    "index_id": index_id,
+                    "issue_id": "mcp-real-no-key",
+                    "title": "real without key",
+                    "body": "The configured provider is intentionally absent.",
+                    "mode": "real",
+                },
+            )
+            assert real_started.structured_content["ok"] is True
+            real_run_id = real_started.structured_content["result"]["run_id"]
+            for _ in range(100):
+                current = await client.call_tool(
+                    "get_session_run",
+                    {"project_id": project_id, "session_id": session_id, "run_id": real_run_id},
+                )
+                current_run = current.structured_content["result"]["run"]["status"]
+                if current_run not in {"queued", "running"}:
+                    break
+                await asyncio.sleep(0.025)
+            assert current_run == "failed"
+            events = await client.call_tool(
+                "list_run_events",
+                {"project_id": project_id, "session_id": session_id, "run_id": real_run_id},
+            )
+            assert events.structured_content["result"]["events"][-1]["payload"]["error"]["code"] == "model_unavailable"
 
     asyncio.run(exercise())

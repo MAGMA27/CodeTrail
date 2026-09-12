@@ -208,6 +208,7 @@ export type SessionMessagesResponse = {
 };
 
 export type RunStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
+export type RunMode = "fixture" | "real";
 export type RunScenario =
   | "success-timeout-missing"
   | "insufficient-external-service"
@@ -215,16 +216,26 @@ export type RunScenario =
 
 export type RunBudget = {
   max_tool_calls: number;
+  max_model_calls: number;
+  max_repair_calls: number;
   max_seconds: number;
   max_source_lines: number;
   max_total_source_lines: number;
   max_input_chars: number;
+  max_model_input_chars: number;
   max_output_chars: number;
+  max_model_output_chars: number;
   max_events: number;
   tool_calls_used: number;
+  model_calls_used: number;
+  repair_calls_used: number;
   source_lines_used: number;
   input_chars_used: number;
+  model_input_chars_used: number;
   output_chars_used: number;
+  model_output_chars_used: number;
+  model_input_tokens_used: number | null;
+  model_output_tokens_used: number | null;
   events_used: number;
 };
 
@@ -249,8 +260,9 @@ export type RunRecord = {
   index_id: string;
   feature_generation_id: string | null;
   issue: { schema_version: typeof SCHEMA_VERSION; id: string; title: string; body: string; stacktrace: string | null; mentioned_paths: string[] };
-  mode: "fixture" | "real";
+  mode: RunMode;
   fixture_scenario: RunScenario | null;
+  model_provider: string | null;
   model: string | null;
   prompt_version: string | null;
   execution_version: string;
@@ -397,7 +409,8 @@ export type CreateRunInput = {
   issueId: string;
   title: string;
   body: string;
-  scenario: RunScenario;
+  mode: RunMode;
+  scenario?: RunScenario;
   messageEndSequence?: number;
   featureGenerationId?: string;
   idempotencyKey?: string;
@@ -1008,18 +1021,28 @@ function isRunBudget(value: unknown): value is RunBudget {
   }
   return [
     "max_tool_calls",
+    "max_model_calls",
+    "max_repair_calls",
     "max_seconds",
     "max_source_lines",
     "max_total_source_lines",
     "max_input_chars",
+    "max_model_input_chars",
     "max_output_chars",
+    "max_model_output_chars",
     "max_events",
     "tool_calls_used",
+    "model_calls_used",
+    "repair_calls_used",
     "source_lines_used",
     "input_chars_used",
+    "model_input_chars_used",
     "output_chars_used",
+    "model_output_chars_used",
     "events_used",
-  ].every((key) => isNonNegativeInteger(value[key]));
+  ].every((key) => isNonNegativeInteger(value[key])) &&
+    (value.model_input_tokens_used === null || isNonNegativeInteger(value.model_input_tokens_used)) &&
+    (value.model_output_tokens_used === null || isNonNegativeInteger(value.model_output_tokens_used));
 }
 
 function isRunRecord(value: unknown): value is RunRecord {
@@ -1047,6 +1070,7 @@ function isRunRecord(value: unknown): value is RunRecord {
     isStringArray(issue.mentioned_paths) &&
     ["fixture", "real"].includes(String(record.mode)) &&
     (record.fixture_scenario === null || isRunScenario(record.fixture_scenario)) &&
+    isNullableString(record.model_provider) &&
     isNullableString(record.model) &&
     isNullableString(record.prompt_version) &&
     isString(record.execution_version) &&
@@ -2129,8 +2153,8 @@ export function createProjectSessionRun(
           title: input.title,
           body: input.body,
         },
-        mode: "fixture",
-        fixture_scenario: input.scenario,
+        mode: input.mode,
+        ...(input.mode === "fixture" && input.scenario ? { fixture_scenario: input.scenario } : {}),
         ...(input.featureGenerationId ? { feature_generation_id: input.featureGenerationId } : {}),
         ...(input.messageEndSequence ? { message_end_sequence: input.messageEndSequence } : {}),
         ...(input.idempotencyKey ? { idempotency_key: input.idempotencyKey } : {}),

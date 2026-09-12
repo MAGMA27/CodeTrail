@@ -321,11 +321,39 @@
               "title": "Max Input Chars",
               "type": "integer"
             },
+            "max_model_calls": {
+              "default": 4,
+              "exclusiveMinimum": 0,
+              "maximum": 6,
+              "title": "Max Model Calls",
+              "type": "integer"
+            },
+            "max_model_input_chars": {
+              "default": 80000,
+              "exclusiveMinimum": 0,
+              "maximum": 100000,
+              "title": "Max Model Input Chars",
+              "type": "integer"
+            },
+            "max_model_output_chars": {
+              "default": 20000,
+              "exclusiveMinimum": 0,
+              "maximum": 50000,
+              "title": "Max Model Output Chars",
+              "type": "integer"
+            },
             "max_output_chars": {
               "default": 50000,
               "exclusiveMinimum": 0,
               "maximum": 100000,
               "title": "Max Output Chars",
+              "type": "integer"
+            },
+            "max_repair_calls": {
+              "default": 1,
+              "maximum": 2,
+              "minimum": 0,
+              "title": "Max Repair Calls",
               "type": "integer"
             },
             "max_seconds": {
@@ -356,10 +384,60 @@
               "title": "Max Total Source Lines",
               "type": "integer"
             },
+            "model_calls_used": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Model Calls Used",
+              "type": "integer"
+            },
+            "model_input_chars_used": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Model Input Chars Used",
+              "type": "integer"
+            },
+            "model_input_tokens_used": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Model Input Tokens Used"
+            },
+            "model_output_chars_used": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Model Output Chars Used",
+              "type": "integer"
+            },
+            "model_output_tokens_used": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Model Output Tokens Used"
+            },
             "output_chars_used": {
               "default": 0,
               "minimum": 0,
               "title": "Output Chars Used",
+              "type": "integer"
+            },
+            "repair_calls_used": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Repair Calls Used",
               "type": "integer"
             },
             "source_lines_used": {
@@ -380,7 +458,7 @@
         }
       },
       "additionalProperties": false,
-      "description": "Start one explicit fixture Run from a saved Session cutoff.",
+      "description": "Start one explicit fixture or real Run from a saved Session cutoff.",
       "properties": {
         "budget": {
           "$ref": "#/$defs/RunBudget"
@@ -1404,11 +1482,39 @@
               "title": "Max Input Chars",
               "type": "integer"
             },
+            "max_model_calls": {
+              "default": 4,
+              "exclusiveMinimum": 0,
+              "maximum": 6,
+              "title": "Max Model Calls",
+              "type": "integer"
+            },
+            "max_model_input_chars": {
+              "default": 80000,
+              "exclusiveMinimum": 0,
+              "maximum": 100000,
+              "title": "Max Model Input Chars",
+              "type": "integer"
+            },
+            "max_model_output_chars": {
+              "default": 20000,
+              "exclusiveMinimum": 0,
+              "maximum": 50000,
+              "title": "Max Model Output Chars",
+              "type": "integer"
+            },
             "max_output_chars": {
               "default": 50000,
               "exclusiveMinimum": 0,
               "maximum": 100000,
               "title": "Max Output Chars",
+              "type": "integer"
+            },
+            "max_repair_calls": {
+              "default": 1,
+              "maximum": 2,
+              "minimum": 0,
+              "title": "Max Repair Calls",
               "type": "integer"
             },
             "max_seconds": {
@@ -1439,10 +1545,60 @@
               "title": "Max Total Source Lines",
               "type": "integer"
             },
+            "model_calls_used": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Model Calls Used",
+              "type": "integer"
+            },
+            "model_input_chars_used": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Model Input Chars Used",
+              "type": "integer"
+            },
+            "model_input_tokens_used": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Model Input Tokens Used"
+            },
+            "model_output_chars_used": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Model Output Chars Used",
+              "type": "integer"
+            },
+            "model_output_tokens_used": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Model Output Tokens Used"
+            },
             "output_chars_used": {
               "default": 0,
               "minimum": 0,
               "title": "Output Chars Used",
+              "type": "integer"
+            },
+            "repair_calls_used": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Repair Calls Used",
               "type": "integer"
             },
             "source_lines_used": {
@@ -1597,6 +1753,9 @@
               "enum": [
                 "tool_failed",
                 "budget_exceeded",
+                "model_unavailable",
+                "model_failed",
+                "invalid_model_output",
                 "internal_error"
               ],
               "title": "Code",
@@ -3374,11 +3533,39 @@
               "title": "Max Input Chars",
               "type": "integer"
             },
+            "max_model_calls": {
+              "default": 4,
+              "exclusiveMinimum": 0,
+              "maximum": 6,
+              "title": "Max Model Calls",
+              "type": "integer"
+            },
+            "max_model_input_chars": {
+              "default": 80000,
+              "exclusiveMinimum": 0,
+              "maximum": 100000,
+              "title": "Max Model Input Chars",
+              "type": "integer"
+            },
+            "max_model_output_chars": {
+              "default": 20000,
+              "exclusiveMinimum": 0,
+              "maximum": 50000,
+              "title": "Max Model Output Chars",
+              "type": "integer"
+            },
             "max_output_chars": {
               "default": 50000,
               "exclusiveMinimum": 0,
               "maximum": 100000,
               "title": "Max Output Chars",
+              "type": "integer"
+            },
+            "max_repair_calls": {
+              "default": 1,
+              "maximum": 2,
+              "minimum": 0,
+              "title": "Max Repair Calls",
               "type": "integer"
             },
             "max_seconds": {
@@ -3409,10 +3596,60 @@
               "title": "Max Total Source Lines",
               "type": "integer"
             },
+            "model_calls_used": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Model Calls Used",
+              "type": "integer"
+            },
+            "model_input_chars_used": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Model Input Chars Used",
+              "type": "integer"
+            },
+            "model_input_tokens_used": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Model Input Tokens Used"
+            },
+            "model_output_chars_used": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Model Output Chars Used",
+              "type": "integer"
+            },
+            "model_output_tokens_used": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Model Output Tokens Used"
+            },
             "output_chars_used": {
               "default": 0,
               "minimum": 0,
               "title": "Output Chars Used",
+              "type": "integer"
+            },
+            "repair_calls_used": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Repair Calls Used",
               "type": "integer"
             },
             "source_lines_used": {
@@ -3567,6 +3804,9 @@
               "enum": [
                 "tool_failed",
                 "budget_exceeded",
+                "model_unavailable",
+                "model_failed",
+                "invalid_model_output",
                 "internal_error"
               ],
               "title": "Code",
@@ -10152,6 +10392,19 @@
               "default": null,
               "title": "Model"
             },
+            "model_provider": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Model Provider"
+            },
             "project_id": {
               "maxLength": 200,
               "minLength": 1,
@@ -10277,11 +10530,39 @@
               "title": "Max Input Chars",
               "type": "integer"
             },
+            "max_model_calls": {
+              "default": 4,
+              "exclusiveMinimum": 0,
+              "maximum": 6,
+              "title": "Max Model Calls",
+              "type": "integer"
+            },
+            "max_model_input_chars": {
+              "default": 80000,
+              "exclusiveMinimum": 0,
+              "maximum": 100000,
+              "title": "Max Model Input Chars",
+              "type": "integer"
+            },
+            "max_model_output_chars": {
+              "default": 20000,
+              "exclusiveMinimum": 0,
+              "maximum": 50000,
+              "title": "Max Model Output Chars",
+              "type": "integer"
+            },
             "max_output_chars": {
               "default": 50000,
               "exclusiveMinimum": 0,
               "maximum": 100000,
               "title": "Max Output Chars",
+              "type": "integer"
+            },
+            "max_repair_calls": {
+              "default": 1,
+              "maximum": 2,
+              "minimum": 0,
+              "title": "Max Repair Calls",
               "type": "integer"
             },
             "max_seconds": {
@@ -10312,10 +10593,60 @@
               "title": "Max Total Source Lines",
               "type": "integer"
             },
+            "model_calls_used": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Model Calls Used",
+              "type": "integer"
+            },
+            "model_input_chars_used": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Model Input Chars Used",
+              "type": "integer"
+            },
+            "model_input_tokens_used": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Model Input Tokens Used"
+            },
+            "model_output_chars_used": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Model Output Chars Used",
+              "type": "integer"
+            },
+            "model_output_tokens_used": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Model Output Tokens Used"
+            },
             "output_chars_used": {
               "default": 0,
               "minimum": 0,
               "title": "Output Chars Used",
+              "type": "integer"
+            },
+            "repair_calls_used": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Repair Calls Used",
               "type": "integer"
             },
             "source_lines_used": {
@@ -10470,6 +10801,9 @@
               "enum": [
                 "tool_failed",
                 "budget_exceeded",
+                "model_unavailable",
+                "model_failed",
+                "invalid_model_output",
                 "internal_error"
               ],
               "title": "Code",
@@ -13768,6 +14102,721 @@
         "body"
       ],
       "title": "Issue",
+      "type": "object"
+    },
+    "IssueModelFinal": {
+      "$defs": {
+        "CandidateLink": {
+          "additionalProperties": false,
+          "properties": {
+            "candidate_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Candidate Id",
+              "type": "string"
+            },
+            "evidence_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "minItems": 1,
+              "title": "Evidence Ids",
+              "type": "array"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "relation": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Relation",
+              "type": "string"
+            },
+            "source_symbol_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Source Symbol Id",
+              "type": "string"
+            },
+            "target_symbol_id": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Target Symbol Id"
+            }
+          },
+          "required": [
+            "candidate_id",
+            "index_id",
+            "source_symbol_id",
+            "relation",
+            "evidence_ids"
+          ],
+          "title": "CandidateLink",
+          "type": "object"
+        },
+        "Finding": {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "title": "Evidence Ids",
+              "type": "array"
+            },
+            "finding_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Finding Id",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "observation",
+                "hypothesis",
+                "suggestion"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "symbol_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "title": "Symbol Ids",
+              "type": "array"
+            },
+            "text": {
+              "maxLength": 5000,
+              "minLength": 1,
+              "title": "Text",
+              "type": "string"
+            }
+          },
+          "required": [
+            "finding_id",
+            "kind",
+            "text"
+          ],
+          "title": "Finding",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "A structured Issue conclusion before server-side reference validation.",
+      "properties": {
+        "candidate_links": {
+          "items": {
+            "$ref": "#/$defs/CandidateLink"
+          },
+          "maxItems": 20,
+          "title": "Candidate Links",
+          "type": "array"
+        },
+        "evidence_ids": {
+          "items": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 200,
+          "title": "Evidence Ids",
+          "type": "array"
+        },
+        "findings": {
+          "items": {
+            "$ref": "#/$defs/Finding"
+          },
+          "maxItems": 20,
+          "title": "Findings",
+          "type": "array"
+        },
+        "index_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Index Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "final",
+          "default": "final",
+          "title": "Kind",
+          "type": "string"
+        },
+        "limitations": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 30,
+          "title": "Limitations",
+          "type": "array"
+        },
+        "outcome": {
+          "enum": [
+            "candidate_found",
+            "insufficient_evidence"
+          ],
+          "title": "Outcome",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "0.1.0",
+          "default": "0.1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "summary": {
+          "maxLength": 5000,
+          "minLength": 1,
+          "title": "Summary",
+          "type": "string"
+        }
+      },
+      "required": [
+        "index_id",
+        "outcome",
+        "summary"
+      ],
+      "title": "IssueModelFinal",
+      "type": "object"
+    },
+    "IssueModelOutput": {
+      "$defs": {
+        "CandidateLink": {
+          "additionalProperties": false,
+          "properties": {
+            "candidate_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Candidate Id",
+              "type": "string"
+            },
+            "evidence_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "minItems": 1,
+              "title": "Evidence Ids",
+              "type": "array"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "relation": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Relation",
+              "type": "string"
+            },
+            "source_symbol_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Source Symbol Id",
+              "type": "string"
+            },
+            "target_symbol_id": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Target Symbol Id"
+            }
+          },
+          "required": [
+            "candidate_id",
+            "index_id",
+            "source_symbol_id",
+            "relation",
+            "evidence_ids"
+          ],
+          "title": "CandidateLink",
+          "type": "object"
+        },
+        "Finding": {
+          "additionalProperties": false,
+          "properties": {
+            "evidence_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "title": "Evidence Ids",
+              "type": "array"
+            },
+            "finding_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Finding Id",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "observation",
+                "hypothesis",
+                "suggestion"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "symbol_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "title": "Symbol Ids",
+              "type": "array"
+            },
+            "text": {
+              "maxLength": 5000,
+              "minLength": 1,
+              "title": "Text",
+              "type": "string"
+            }
+          },
+          "required": [
+            "finding_id",
+            "kind",
+            "text"
+          ],
+          "title": "Finding",
+          "type": "object"
+        },
+        "GetNeighborsParams": {
+          "additionalProperties": false,
+          "properties": {
+            "depth": {
+              "exclusiveMinimum": 0,
+              "maximum": 2,
+              "title": "Depth",
+              "type": "integer"
+            },
+            "direction": {
+              "enum": [
+                "callers",
+                "callees",
+                "both"
+              ],
+              "title": "Direction",
+              "type": "string"
+            },
+            "limit": {
+              "exclusiveMinimum": 0,
+              "maximum": 40,
+              "title": "Limit",
+              "type": "integer"
+            },
+            "symbol_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Symbol Id",
+              "type": "string"
+            },
+            "tool": {
+              "const": "get_neighbors",
+              "default": "get_neighbors",
+              "title": "Tool",
+              "type": "string"
+            }
+          },
+          "required": [
+            "symbol_id",
+            "direction",
+            "depth",
+            "limit"
+          ],
+          "title": "GetNeighborsParams",
+          "type": "object"
+        },
+        "IssueModelFinal": {
+          "additionalProperties": false,
+          "description": "A structured Issue conclusion before server-side reference validation.",
+          "properties": {
+            "candidate_links": {
+              "items": {
+                "$ref": "#/$defs/CandidateLink"
+              },
+              "maxItems": 20,
+              "title": "Candidate Links",
+              "type": "array"
+            },
+            "evidence_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 200,
+              "title": "Evidence Ids",
+              "type": "array"
+            },
+            "findings": {
+              "items": {
+                "$ref": "#/$defs/Finding"
+              },
+              "maxItems": 20,
+              "title": "Findings",
+              "type": "array"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "kind": {
+              "const": "final",
+              "default": "final",
+              "title": "Kind",
+              "type": "string"
+            },
+            "limitations": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 30,
+              "title": "Limitations",
+              "type": "array"
+            },
+            "outcome": {
+              "enum": [
+                "candidate_found",
+                "insufficient_evidence"
+              ],
+              "title": "Outcome",
+              "type": "string"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            },
+            "summary": {
+              "maxLength": 5000,
+              "minLength": 1,
+              "title": "Summary",
+              "type": "string"
+            }
+          },
+          "required": [
+            "index_id",
+            "outcome",
+            "summary"
+          ],
+          "title": "IssueModelFinal",
+          "type": "object"
+        },
+        "IssueModelToolCall": {
+          "additionalProperties": false,
+          "description": "One allow-listed tool decision returned by the Issue analysis model.",
+          "properties": {
+            "kind": {
+              "const": "tool_call",
+              "default": "tool_call",
+              "title": "Kind",
+              "type": "string"
+            },
+            "params": {
+              "discriminator": {
+                "mapping": {
+                  "get_neighbors": "#/$defs/GetNeighborsParams",
+                  "read_source": "#/$defs/ReadSourceParams",
+                  "search_code": "#/$defs/SearchCodeParams"
+                },
+                "propertyName": "tool"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/SearchCodeParams"
+                },
+                {
+                  "$ref": "#/$defs/ReadSourceParams"
+                },
+                {
+                  "$ref": "#/$defs/GetNeighborsParams"
+                }
+              ],
+              "title": "Params"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            }
+          },
+          "required": [
+            "params"
+          ],
+          "title": "IssueModelToolCall",
+          "type": "object"
+        },
+        "ReadSourceParams": {
+          "additionalProperties": false,
+          "properties": {
+            "end_line": {
+              "exclusiveMinimum": 0,
+              "title": "End Line",
+              "type": "integer"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Start Line",
+              "type": "integer"
+            },
+            "tool": {
+              "const": "read_source",
+              "default": "read_source",
+              "title": "Tool",
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "start_line",
+            "end_line"
+          ],
+          "title": "ReadSourceParams",
+          "type": "object"
+        },
+        "SearchCodeParams": {
+          "additionalProperties": false,
+          "properties": {
+            "limit": {
+              "exclusiveMinimum": 0,
+              "maximum": 40,
+              "title": "Limit",
+              "type": "integer"
+            },
+            "query": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Query",
+              "type": "string"
+            },
+            "tool": {
+              "const": "search_code",
+              "default": "search_code",
+              "title": "Tool",
+              "type": "string"
+            }
+          },
+          "required": [
+            "query",
+            "limit"
+          ],
+          "title": "SearchCodeParams",
+          "type": "object"
+        }
+      },
+      "discriminator": {
+        "mapping": {
+          "final": "#/$defs/IssueModelFinal",
+          "tool_call": "#/$defs/IssueModelToolCall"
+        },
+        "propertyName": "kind"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/IssueModelToolCall"
+        },
+        {
+          "$ref": "#/$defs/IssueModelFinal"
+        }
+      ]
+    },
+    "IssueModelToolCall": {
+      "$defs": {
+        "GetNeighborsParams": {
+          "additionalProperties": false,
+          "properties": {
+            "depth": {
+              "exclusiveMinimum": 0,
+              "maximum": 2,
+              "title": "Depth",
+              "type": "integer"
+            },
+            "direction": {
+              "enum": [
+                "callers",
+                "callees",
+                "both"
+              ],
+              "title": "Direction",
+              "type": "string"
+            },
+            "limit": {
+              "exclusiveMinimum": 0,
+              "maximum": 40,
+              "title": "Limit",
+              "type": "integer"
+            },
+            "symbol_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Symbol Id",
+              "type": "string"
+            },
+            "tool": {
+              "const": "get_neighbors",
+              "default": "get_neighbors",
+              "title": "Tool",
+              "type": "string"
+            }
+          },
+          "required": [
+            "symbol_id",
+            "direction",
+            "depth",
+            "limit"
+          ],
+          "title": "GetNeighborsParams",
+          "type": "object"
+        },
+        "ReadSourceParams": {
+          "additionalProperties": false,
+          "properties": {
+            "end_line": {
+              "exclusiveMinimum": 0,
+              "title": "End Line",
+              "type": "integer"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Start Line",
+              "type": "integer"
+            },
+            "tool": {
+              "const": "read_source",
+              "default": "read_source",
+              "title": "Tool",
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "start_line",
+            "end_line"
+          ],
+          "title": "ReadSourceParams",
+          "type": "object"
+        },
+        "SearchCodeParams": {
+          "additionalProperties": false,
+          "properties": {
+            "limit": {
+              "exclusiveMinimum": 0,
+              "maximum": 40,
+              "title": "Limit",
+              "type": "integer"
+            },
+            "query": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Query",
+              "type": "string"
+            },
+            "tool": {
+              "const": "search_code",
+              "default": "search_code",
+              "title": "Tool",
+              "type": "string"
+            }
+          },
+          "required": [
+            "query",
+            "limit"
+          ],
+          "title": "SearchCodeParams",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "One allow-listed tool decision returned by the Issue analysis model.",
+      "properties": {
+        "kind": {
+          "const": "tool_call",
+          "default": "tool_call",
+          "title": "Kind",
+          "type": "string"
+        },
+        "params": {
+          "discriminator": {
+            "mapping": {
+              "get_neighbors": "#/$defs/GetNeighborsParams",
+              "read_source": "#/$defs/ReadSourceParams",
+              "search_code": "#/$defs/SearchCodeParams"
+            },
+            "propertyName": "tool"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/SearchCodeParams"
+            },
+            {
+              "$ref": "#/$defs/ReadSourceParams"
+            },
+            {
+              "$ref": "#/$defs/GetNeighborsParams"
+            }
+          ],
+          "title": "Params"
+        },
+        "schema_version": {
+          "const": "0.1.0",
+          "default": "0.1.0",
+          "title": "Schema Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "params"
+      ],
+      "title": "IssueModelToolCall",
       "type": "object"
     },
     "LocalImportRequest": {
@@ -20509,11 +21558,39 @@
               "title": "Max Input Chars",
               "type": "integer"
             },
+            "max_model_calls": {
+              "default": 4,
+              "exclusiveMinimum": 0,
+              "maximum": 6,
+              "title": "Max Model Calls",
+              "type": "integer"
+            },
+            "max_model_input_chars": {
+              "default": 80000,
+              "exclusiveMinimum": 0,
+              "maximum": 100000,
+              "title": "Max Model Input Chars",
+              "type": "integer"
+            },
+            "max_model_output_chars": {
+              "default": 20000,
+              "exclusiveMinimum": 0,
+              "maximum": 50000,
+              "title": "Max Model Output Chars",
+              "type": "integer"
+            },
             "max_output_chars": {
               "default": 50000,
               "exclusiveMinimum": 0,
               "maximum": 100000,
               "title": "Max Output Chars",
+              "type": "integer"
+            },
+            "max_repair_calls": {
+              "default": 1,
+              "maximum": 2,
+              "minimum": 0,
+              "title": "Max Repair Calls",
               "type": "integer"
             },
             "max_seconds": {
@@ -20544,10 +21621,60 @@
               "title": "Max Total Source Lines",
               "type": "integer"
             },
+            "model_calls_used": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Model Calls Used",
+              "type": "integer"
+            },
+            "model_input_chars_used": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Model Input Chars Used",
+              "type": "integer"
+            },
+            "model_input_tokens_used": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Model Input Tokens Used"
+            },
+            "model_output_chars_used": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Model Output Chars Used",
+              "type": "integer"
+            },
+            "model_output_tokens_used": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Model Output Tokens Used"
+            },
             "output_chars_used": {
               "default": 0,
               "minimum": 0,
               "title": "Output Chars Used",
+              "type": "integer"
+            },
+            "repair_calls_used": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Repair Calls Used",
               "type": "integer"
             },
             "source_lines_used": {
@@ -20702,6 +21829,9 @@
               "enum": [
                 "tool_failed",
                 "budget_exceeded",
+                "model_unavailable",
+                "model_failed",
+                "invalid_model_output",
                 "internal_error"
               ],
               "title": "Code",
@@ -22008,6 +23138,19 @@
               "default": null,
               "title": "Model"
             },
+            "model_provider": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Model Provider"
+            },
             "project_id": {
               "maxLength": 200,
               "minLength": 1,
@@ -22133,11 +23276,39 @@
               "title": "Max Input Chars",
               "type": "integer"
             },
+            "max_model_calls": {
+              "default": 4,
+              "exclusiveMinimum": 0,
+              "maximum": 6,
+              "title": "Max Model Calls",
+              "type": "integer"
+            },
+            "max_model_input_chars": {
+              "default": 80000,
+              "exclusiveMinimum": 0,
+              "maximum": 100000,
+              "title": "Max Model Input Chars",
+              "type": "integer"
+            },
+            "max_model_output_chars": {
+              "default": 20000,
+              "exclusiveMinimum": 0,
+              "maximum": 50000,
+              "title": "Max Model Output Chars",
+              "type": "integer"
+            },
             "max_output_chars": {
               "default": 50000,
               "exclusiveMinimum": 0,
               "maximum": 100000,
               "title": "Max Output Chars",
+              "type": "integer"
+            },
+            "max_repair_calls": {
+              "default": 1,
+              "maximum": 2,
+              "minimum": 0,
+              "title": "Max Repair Calls",
               "type": "integer"
             },
             "max_seconds": {
@@ -22168,10 +23339,60 @@
               "title": "Max Total Source Lines",
               "type": "integer"
             },
+            "model_calls_used": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Model Calls Used",
+              "type": "integer"
+            },
+            "model_input_chars_used": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Model Input Chars Used",
+              "type": "integer"
+            },
+            "model_input_tokens_used": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Model Input Tokens Used"
+            },
+            "model_output_chars_used": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Model Output Chars Used",
+              "type": "integer"
+            },
+            "model_output_tokens_used": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Model Output Tokens Used"
+            },
             "output_chars_used": {
               "default": 0,
               "minimum": 0,
               "title": "Output Chars Used",
+              "type": "integer"
+            },
+            "repair_calls_used": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Repair Calls Used",
               "type": "integer"
             },
             "source_lines_used": {
@@ -23161,6 +24382,19 @@
               "default": null,
               "title": "Model"
             },
+            "model_provider": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Model Provider"
+            },
             "project_id": {
               "maxLength": 200,
               "minLength": 1,
@@ -23286,11 +24520,39 @@
               "title": "Max Input Chars",
               "type": "integer"
             },
+            "max_model_calls": {
+              "default": 4,
+              "exclusiveMinimum": 0,
+              "maximum": 6,
+              "title": "Max Model Calls",
+              "type": "integer"
+            },
+            "max_model_input_chars": {
+              "default": 80000,
+              "exclusiveMinimum": 0,
+              "maximum": 100000,
+              "title": "Max Model Input Chars",
+              "type": "integer"
+            },
+            "max_model_output_chars": {
+              "default": 20000,
+              "exclusiveMinimum": 0,
+              "maximum": 50000,
+              "title": "Max Model Output Chars",
+              "type": "integer"
+            },
             "max_output_chars": {
               "default": 50000,
               "exclusiveMinimum": 0,
               "maximum": 100000,
               "title": "Max Output Chars",
+              "type": "integer"
+            },
+            "max_repair_calls": {
+              "default": 1,
+              "maximum": 2,
+              "minimum": 0,
+              "title": "Max Repair Calls",
               "type": "integer"
             },
             "max_seconds": {
@@ -23321,10 +24583,60 @@
               "title": "Max Total Source Lines",
               "type": "integer"
             },
+            "model_calls_used": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Model Calls Used",
+              "type": "integer"
+            },
+            "model_input_chars_used": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Model Input Chars Used",
+              "type": "integer"
+            },
+            "model_input_tokens_used": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Model Input Tokens Used"
+            },
+            "model_output_chars_used": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Model Output Chars Used",
+              "type": "integer"
+            },
+            "model_output_tokens_used": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Model Output Tokens Used"
+            },
             "output_chars_used": {
               "default": 0,
               "minimum": 0,
               "title": "Output Chars Used",
+              "type": "integer"
+            },
+            "repair_calls_used": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Repair Calls Used",
               "type": "integer"
             },
             "source_lines_used": {
@@ -28730,11 +30042,39 @@
               "title": "Max Input Chars",
               "type": "integer"
             },
+            "max_model_calls": {
+              "default": 4,
+              "exclusiveMinimum": 0,
+              "maximum": 6,
+              "title": "Max Model Calls",
+              "type": "integer"
+            },
+            "max_model_input_chars": {
+              "default": 80000,
+              "exclusiveMinimum": 0,
+              "maximum": 100000,
+              "title": "Max Model Input Chars",
+              "type": "integer"
+            },
+            "max_model_output_chars": {
+              "default": 20000,
+              "exclusiveMinimum": 0,
+              "maximum": 50000,
+              "title": "Max Model Output Chars",
+              "type": "integer"
+            },
             "max_output_chars": {
               "default": 50000,
               "exclusiveMinimum": 0,
               "maximum": 100000,
               "title": "Max Output Chars",
+              "type": "integer"
+            },
+            "max_repair_calls": {
+              "default": 1,
+              "maximum": 2,
+              "minimum": 0,
+              "title": "Max Repair Calls",
               "type": "integer"
             },
             "max_seconds": {
@@ -28765,10 +30105,60 @@
               "title": "Max Total Source Lines",
               "type": "integer"
             },
+            "model_calls_used": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Model Calls Used",
+              "type": "integer"
+            },
+            "model_input_chars_used": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Model Input Chars Used",
+              "type": "integer"
+            },
+            "model_input_tokens_used": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Model Input Tokens Used"
+            },
+            "model_output_chars_used": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Model Output Chars Used",
+              "type": "integer"
+            },
+            "model_output_tokens_used": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Model Output Tokens Used"
+            },
             "output_chars_used": {
               "default": 0,
               "minimum": 0,
               "title": "Output Chars Used",
+              "type": "integer"
+            },
+            "repair_calls_used": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Repair Calls Used",
               "type": "integer"
             },
             "source_lines_used": {
@@ -28893,6 +30283,19 @@
           ],
           "default": null,
           "title": "Model"
+        },
+        "model_provider": {
+          "anyOf": [
+            {
+              "maxLength": 100,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model Provider"
         },
         "project_id": {
           "maxLength": 200,
@@ -29770,11 +31173,39 @@
               "title": "Max Input Chars",
               "type": "integer"
             },
+            "max_model_calls": {
+              "default": 4,
+              "exclusiveMinimum": 0,
+              "maximum": 6,
+              "title": "Max Model Calls",
+              "type": "integer"
+            },
+            "max_model_input_chars": {
+              "default": 80000,
+              "exclusiveMinimum": 0,
+              "maximum": 100000,
+              "title": "Max Model Input Chars",
+              "type": "integer"
+            },
+            "max_model_output_chars": {
+              "default": 20000,
+              "exclusiveMinimum": 0,
+              "maximum": 50000,
+              "title": "Max Model Output Chars",
+              "type": "integer"
+            },
             "max_output_chars": {
               "default": 50000,
               "exclusiveMinimum": 0,
               "maximum": 100000,
               "title": "Max Output Chars",
+              "type": "integer"
+            },
+            "max_repair_calls": {
+              "default": 1,
+              "maximum": 2,
+              "minimum": 0,
+              "title": "Max Repair Calls",
               "type": "integer"
             },
             "max_seconds": {
@@ -29805,10 +31236,60 @@
               "title": "Max Total Source Lines",
               "type": "integer"
             },
+            "model_calls_used": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Model Calls Used",
+              "type": "integer"
+            },
+            "model_input_chars_used": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Model Input Chars Used",
+              "type": "integer"
+            },
+            "model_input_tokens_used": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Model Input Tokens Used"
+            },
+            "model_output_chars_used": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Model Output Chars Used",
+              "type": "integer"
+            },
+            "model_output_tokens_used": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Model Output Tokens Used"
+            },
             "output_chars_used": {
               "default": 0,
               "minimum": 0,
               "title": "Output Chars Used",
+              "type": "integer"
+            },
+            "repair_calls_used": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Repair Calls Used",
               "type": "integer"
             },
             "source_lines_used": {
@@ -29963,6 +31444,9 @@
               "enum": [
                 "tool_failed",
                 "budget_exceeded",
+                "model_unavailable",
+                "model_failed",
+                "invalid_model_output",
                 "internal_error"
               ],
               "title": "Code",
@@ -31330,6 +32814,19 @@
               "default": null,
               "title": "Model"
             },
+            "model_provider": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Model Provider"
+            },
             "project_id": {
               "maxLength": 200,
               "minLength": 1,
@@ -31455,11 +32952,39 @@
               "title": "Max Input Chars",
               "type": "integer"
             },
+            "max_model_calls": {
+              "default": 4,
+              "exclusiveMinimum": 0,
+              "maximum": 6,
+              "title": "Max Model Calls",
+              "type": "integer"
+            },
+            "max_model_input_chars": {
+              "default": 80000,
+              "exclusiveMinimum": 0,
+              "maximum": 100000,
+              "title": "Max Model Input Chars",
+              "type": "integer"
+            },
+            "max_model_output_chars": {
+              "default": 20000,
+              "exclusiveMinimum": 0,
+              "maximum": 50000,
+              "title": "Max Model Output Chars",
+              "type": "integer"
+            },
             "max_output_chars": {
               "default": 50000,
               "exclusiveMinimum": 0,
               "maximum": 100000,
               "title": "Max Output Chars",
+              "type": "integer"
+            },
+            "max_repair_calls": {
+              "default": 1,
+              "maximum": 2,
+              "minimum": 0,
+              "title": "Max Repair Calls",
               "type": "integer"
             },
             "max_seconds": {
@@ -31490,10 +33015,60 @@
               "title": "Max Total Source Lines",
               "type": "integer"
             },
+            "model_calls_used": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Model Calls Used",
+              "type": "integer"
+            },
+            "model_input_chars_used": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Model Input Chars Used",
+              "type": "integer"
+            },
+            "model_input_tokens_used": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Model Input Tokens Used"
+            },
+            "model_output_chars_used": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Model Output Chars Used",
+              "type": "integer"
+            },
+            "model_output_tokens_used": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Model Output Tokens Used"
+            },
             "output_chars_used": {
               "default": 0,
               "minimum": 0,
               "title": "Output Chars Used",
+              "type": "integer"
+            },
+            "repair_calls_used": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Repair Calls Used",
               "type": "integer"
             },
             "source_lines_used": {
@@ -31735,6 +33310,19 @@
               "default": null,
               "title": "Model"
             },
+            "model_provider": {
+              "anyOf": [
+                {
+                  "maxLength": 100,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Model Provider"
+            },
             "project_id": {
               "maxLength": 200,
               "minLength": 1,
@@ -31860,11 +33448,39 @@
               "title": "Max Input Chars",
               "type": "integer"
             },
+            "max_model_calls": {
+              "default": 4,
+              "exclusiveMinimum": 0,
+              "maximum": 6,
+              "title": "Max Model Calls",
+              "type": "integer"
+            },
+            "max_model_input_chars": {
+              "default": 80000,
+              "exclusiveMinimum": 0,
+              "maximum": 100000,
+              "title": "Max Model Input Chars",
+              "type": "integer"
+            },
+            "max_model_output_chars": {
+              "default": 20000,
+              "exclusiveMinimum": 0,
+              "maximum": 50000,
+              "title": "Max Model Output Chars",
+              "type": "integer"
+            },
             "max_output_chars": {
               "default": 50000,
               "exclusiveMinimum": 0,
               "maximum": 100000,
               "title": "Max Output Chars",
+              "type": "integer"
+            },
+            "max_repair_calls": {
+              "default": 1,
+              "maximum": 2,
+              "minimum": 0,
+              "title": "Max Repair Calls",
               "type": "integer"
             },
             "max_seconds": {
@@ -31895,10 +33511,60 @@
               "title": "Max Total Source Lines",
               "type": "integer"
             },
+            "model_calls_used": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Model Calls Used",
+              "type": "integer"
+            },
+            "model_input_chars_used": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Model Input Chars Used",
+              "type": "integer"
+            },
+            "model_input_tokens_used": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Model Input Tokens Used"
+            },
+            "model_output_chars_used": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Model Output Chars Used",
+              "type": "integer"
+            },
+            "model_output_tokens_used": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Model Output Tokens Used"
+            },
             "output_chars_used": {
               "default": 0,
               "minimum": 0,
               "title": "Output Chars Used",
+              "type": "integer"
+            },
+            "repair_calls_used": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Repair Calls Used",
               "type": "integer"
             },
             "source_lines_used": {
@@ -34382,11 +36048,39 @@
               "title": "Max Input Chars",
               "type": "integer"
             },
+            "max_model_calls": {
+              "default": 4,
+              "exclusiveMinimum": 0,
+              "maximum": 6,
+              "title": "Max Model Calls",
+              "type": "integer"
+            },
+            "max_model_input_chars": {
+              "default": 80000,
+              "exclusiveMinimum": 0,
+              "maximum": 100000,
+              "title": "Max Model Input Chars",
+              "type": "integer"
+            },
+            "max_model_output_chars": {
+              "default": 20000,
+              "exclusiveMinimum": 0,
+              "maximum": 50000,
+              "title": "Max Model Output Chars",
+              "type": "integer"
+            },
             "max_output_chars": {
               "default": 50000,
               "exclusiveMinimum": 0,
               "maximum": 100000,
               "title": "Max Output Chars",
+              "type": "integer"
+            },
+            "max_repair_calls": {
+              "default": 1,
+              "maximum": 2,
+              "minimum": 0,
+              "title": "Max Repair Calls",
               "type": "integer"
             },
             "max_seconds": {
@@ -34417,10 +36111,60 @@
               "title": "Max Total Source Lines",
               "type": "integer"
             },
+            "model_calls_used": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Model Calls Used",
+              "type": "integer"
+            },
+            "model_input_chars_used": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Model Input Chars Used",
+              "type": "integer"
+            },
+            "model_input_tokens_used": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Model Input Tokens Used"
+            },
+            "model_output_chars_used": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Model Output Chars Used",
+              "type": "integer"
+            },
+            "model_output_tokens_used": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Model Output Tokens Used"
+            },
             "output_chars_used": {
               "default": 0,
               "minimum": 0,
               "title": "Output Chars Used",
+              "type": "integer"
+            },
+            "repair_calls_used": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Repair Calls Used",
               "type": "integer"
             },
             "source_lines_used": {
@@ -34575,6 +36319,9 @@
               "enum": [
                 "tool_failed",
                 "budget_exceeded",
+                "model_unavailable",
+                "model_failed",
+                "invalid_model_output",
                 "internal_error"
               ],
               "title": "Code",

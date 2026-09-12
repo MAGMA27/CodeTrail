@@ -126,7 +126,8 @@ def create_mcp_server(
     run_write_enabled = service.registry.mcp_run_write_enabled
     server_description = (
         "Discover CodeTrail projects and query one explicitly selected immutable index. "
-        "Default tools are read-only. Explicitly enabled session writes, fixture Run start/cancel, local/GitHub import/status/retry, and feature generation are bounded."
+        "Default tools are read-only. Explicitly enabled session writes, bounded fixture/real Run start/cancel, "
+        "local/GitHub import/status/retry, and feature generation are separately gated."
         if local_import_enabled or github_import_enabled or feature_generation_enabled or session_write_enabled or run_write_enabled
         else "Discover CodeTrail projects and query one explicitly selected immutable index. "
         "All tools are read-only and never execute repository code."
@@ -699,12 +700,14 @@ def create_mcp_server(
 
         @server.tool(
             name="start_session_run",
-            title="Start a fixture session Run",
+            title="Start a bounded session Run",
             description=(
-                "Explicitly start one bounded fixture analysis for a saved project session. "
+                "Explicitly start one bounded fixture or real analysis for a saved project session. "
                 "The server freezes all saved messages through message_end_sequence (or the current saved cutoff), "
-                "uses only search_code/get_neighbors/read_source, and never invokes a real provider. "
-                "This write switch is independent from session-write permission."
+                "uses only search_code/get_neighbors/read_source. Real mode is separately gated by "
+                "CODETRAIL_MCP_REAL_RUN_ENABLED, may send the frozen Issue/messages and bounded source evidence "
+                "to the configured provider, and can incur cost; fixture mode never invokes a provider. "
+                "Both modes share the Run write switch, capacity, and budget boundaries."
             ),
             structured_output=True,
         )
@@ -723,11 +726,15 @@ def create_mcp_server(
             prompt_version: Annotated[str | None, Field(min_length=1, max_length=200)] = None,
             idempotency_key: Annotated[str | None, Field(min_length=1, max_length=200)] = None,
             max_tool_calls: Annotated[int, Field(ge=1, le=12)] = 8,
+            max_model_calls: Annotated[int, Field(ge=1, le=6)] = 4,
+            max_repair_calls: Annotated[int, Field(ge=0, le=2)] = 1,
             max_seconds: Annotated[int, Field(ge=1, le=120)] = 30,
             max_source_lines: Annotated[int, Field(ge=1, le=200)] = 200,
             max_total_source_lines: Annotated[int, Field(ge=1, le=2_000)] = 800,
             max_input_chars: Annotated[int, Field(ge=1, le=100_000)] = 60_000,
+            max_model_input_chars: Annotated[int, Field(ge=1, le=100_000)] = 80_000,
             max_output_chars: Annotated[int, Field(ge=1, le=100_000)] = 50_000,
+            max_model_output_chars: Annotated[int, Field(ge=1, le=50_000)] = 20_000,
             max_events: Annotated[int, Field(ge=2, le=200)] = 100,
         ) -> McpRunStartResponse:
             try:
@@ -748,14 +755,19 @@ def create_mcp_server(
                         idempotency_key=idempotency_key,
                         budget=RunBudget(
                             max_tool_calls=max_tool_calls,
+                            max_model_calls=max_model_calls,
+                            max_repair_calls=max_repair_calls,
                             max_seconds=max_seconds,
                             max_source_lines=max_source_lines,
                             max_total_source_lines=max_total_source_lines,
                             max_input_chars=max_input_chars,
+                            max_model_input_chars=max_model_input_chars,
                             max_output_chars=max_output_chars,
+                            max_model_output_chars=max_model_output_chars,
                             max_events=max_events,
                         ),
                     ),
+                    via_mcp=True,
                 )
                 return McpRunStartResponse(ok=True, result=result)
             except ServiceError as exc:

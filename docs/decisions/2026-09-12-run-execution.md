@@ -1,6 +1,8 @@
-# 决策：P2-R1 单进程 Run 与 fixture 执行
+# 决策：P2-R1 单进程 Run 与 fixture 执行（历史基线）
 
 Status: implemented
+
+本记录保留 P2-R1 的生命周期与 fixture 边界。P2-R2 在其上接入有界 real 模型循环，当前模型行为与验收见[模型驱动 Issue 分析决策](2026-09-12-run-model-analysis.md)。
 
 ## 问题
 

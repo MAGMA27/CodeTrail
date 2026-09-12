@@ -1,9 +1,9 @@
-"""Bounded, fixture-only Run execution for the local CodeTrail workspace.
+"""Bounded Run execution for the local CodeTrail workspace.
 
 This module deliberately keeps execution small: one daemon thread per submitted
 Run, a bounded semaphore, and the same IndexService used by HTTP and MCP.  It
-does not execute repository code, invoke a shell, call a provider, or maintain a
-second tool implementation.
+does not execute repository code, invoke a shell, or maintain a second tool
+implementation. Real Runs use one bounded model/tool loop.
 """
 
 from __future__ import annotations
@@ -51,6 +51,15 @@ from .contracts import (
     ToolResult,
     ToolStartedEvent,
     ToolStartedPayload,
+    ToolParams,
+)
+from .feature_generation import FeatureGenerationErrorBase, ModelCall
+from .issue_analysis import (
+    IssueAnalysisContext,
+    IssueAnalysisEngine,
+    IssueAnalysisFailure,
+    IssueModelAdapter,
+    default_issue_adapter,
 )
 from .storage import (
     IndexStore,
@@ -103,7 +112,7 @@ class RunExecutorState:
 
 
 class RunExecutor:
-    """Run explicit fixture analyses with bounded admission and no wait queue."""
+    """Run explicit fixture or real analyses with bounded admission and no wait queue."""
 
     def __init__(
         self,
@@ -111,6 +120,7 @@ class RunExecutor:
         *,
         max_concurrent_runs: int = 2,
         thread_factory: Callable[..., threading.Thread] = threading.Thread,
+        model_adapter_factory: Callable[[str], IssueModelAdapter] | None = None,
     ) -> None:
         if max_concurrent_runs < 1:
             raise ValueError("max_concurrent_runs must be positive")
@@ -121,6 +131,9 @@ class RunExecutor:
         self._threads_lock = threading.RLock()
         self._reserved_count = 0
         self.thread_factory = thread_factory
+        self.model_adapter_factory = model_adapter_factory or (
+            lambda mode: default_issue_adapter(mode, model_config=workspace.registry.model_config)
+        )
         self._cancel_events: dict[str, threading.Event] = {}
         # Tests and local demos may use this to make cancellation observable.
         # It is intentionally not part of the public request contract.
@@ -167,7 +180,7 @@ class RunExecutor:
                 self._finish_failure(
                     run,
                     code="internal_error",
-                    message="fixture Run worker could not start",
+                    message=f"{run.mode} Run worker could not start",
                     evidence=(),
                     symbols=(),
                     static_edges=(),
@@ -223,7 +236,7 @@ class RunExecutor:
             self._finish_failure(
                 run,
                 code=code,
-                message=message if code == "budget_exceeded" else "fixture Run execution received invalid input",
+                message=message if code == "budget_exceeded" else f"{run.mode} Run execution received invalid input",
                 evidence=(),
                 symbols=(),
                 static_edges=(),
@@ -272,6 +285,10 @@ class RunExecutor:
         evidence: list[Any] = []
         static_edges: list[Any] = []
         candidate_links: list[CandidateLink] = []
+
+        if record.run.mode == "real":
+            self._execute_real(record, deadline)
+            return
 
         self._append_stage(record, "retrieval", deadline=deadline)
         search_query = (
@@ -420,6 +437,139 @@ class RunExecutor:
             finding_text=finding.text,
             findings=[finding],
         )
+
+    def _execute_real(self, record: RunRecord, deadline: float) -> None:
+        context = IssueAnalysisContext(
+            project_id=record.run.project_id,
+            index_id=record.run.index_id,
+            issue=record.run.issue,
+            run_input=record.input,
+        )
+
+        def ensure_running() -> None:
+            self._ensure_running(self._load(record.run), deadline)
+
+        def current_budget():
+            return self._load(record.run).run.budget
+
+        def reserve_model_call(input_chars: int, repair: bool) -> None:
+            current = self._load(record.run)
+            self._ensure_running(current, deadline)
+            self._with_store(
+                current,
+                lambda store: store.reserve_run_model_call(
+                    current.run.run_id,
+                    input_chars=input_chars,
+                    repair=repair,
+                ),
+            )
+
+        def record_model_output(call: ModelCall) -> bool:
+            current = self._load(record.run)
+            if current.run.status not in {"queued", "running"}:
+                return False
+            updated = self._with_store(
+                current,
+                lambda store: store.record_run_model_output(
+                    current.run.run_id,
+                    output_chars=len(call.raw_output),
+                    input_tokens=call.input_tokens,
+                    output_tokens=call.output_tokens,
+                ),
+            )
+            return updated.run.status in {"queued", "running"}
+
+        try:
+            self._append_stage(record, "retrieval", deadline=deadline)
+            adapter = self.model_adapter_factory("real")
+            result = IssueAnalysisEngine(adapter).run(
+                context,
+                model=record.run.model or "",
+                budget=record.run.budget,
+                started=deadline - float(record.run.budget.max_seconds),
+                ensure_running=ensure_running,
+                current_budget=current_budget,
+                reserve_model_call=reserve_model_call,
+                record_model_output=record_model_output,
+                call_tool=lambda params: self._call_tool(record, params, deadline=deadline),
+            )
+        except IssueAnalysisFailure as exc:
+            if exc.code == "cancelled":
+                return
+            self._finish_failure(
+                record.run,
+                code=exc.code,
+                message=exc.message,
+                evidence=list(exc.context.evidence.values()),
+                symbols=tuple(exc.context.observed_symbols.values()),
+                static_edges=list(exc.context.static_edges),
+                candidate_links=(),
+            )
+            return
+        except FeatureGenerationErrorBase as exc:
+            self._finish_failure(
+                record.run,
+                code=exc.kind,
+                message=exc.message,
+                evidence=list(context.evidence.values()),
+                symbols=tuple(context.observed_symbols.values()),
+                static_edges=list(context.static_edges),
+                candidate_links=(),
+            )
+            return
+        except StorageInputError as exc:
+            self._finish_failure(
+                record.run,
+                code="budget_exceeded" if _is_budget_error(str(exc)) else "internal_error",
+                message=str(exc),
+                evidence=list(context.evidence.values()),
+                symbols=tuple(context.observed_symbols.values()),
+                static_edges=list(context.static_edges),
+                candidate_links=(),
+            )
+            return
+        except StorageConflictError:
+            return
+        except Exception:
+            self._finish_failure(
+                record.run,
+                code="internal_error",
+                message="real Run execution failed unexpectedly",
+                evidence=list(context.evidence.values()),
+                symbols=tuple(context.observed_symbols.values()),
+                static_edges=list(context.static_edges),
+                candidate_links=(),
+            )
+            return
+
+        try:
+            self._append_stage(record, "analysis", deadline=deadline)
+            for finding in result.final.findings:
+                self._append_finding(record, finding, deadline=deadline)
+            self._finish_success(
+                record.run,
+                outcome=result.final.outcome,
+                summary=result.final.summary,
+                evidence=list(result.context.evidence.values()),
+                symbols=tuple(result.context.observed_symbols.values()),
+                static_edges=list(result.context.static_edges),
+                candidate_links=list(result.final.candidate_links),
+                deadline=deadline,
+                finding_text=result.final.summary,
+                findings=list(result.final.findings),
+            )
+        except StorageConflictError:
+            return
+        except StorageInputError as exc:
+            self._finish_failure(
+                record.run,
+                code="budget_exceeded" if _is_budget_error(str(exc)) else "internal_error",
+                message=str(exc),
+                evidence=list(result.context.evidence.values()),
+                symbols=tuple(result.context.observed_symbols.values()),
+                static_edges=list(result.context.static_edges),
+                candidate_links=(),
+            )
 
     def _call_tool(
         self,
@@ -576,7 +726,11 @@ class RunExecutor:
                 current.run,
                 status="failed",
                 outcome="failed",
-                summary="Fixture analysis failed before a complete evidence-backed conclusion.",
+                summary=(
+                    "Fixture analysis failed before a complete evidence-backed conclusion."
+                    if current.run.mode == "fixture"
+                    else "Real model analysis failed before a complete evidence-backed conclusion."
+                ),
                 graph=GraphSnapshot(
                     index_id=current.run.index_id,
                     nodes=list(symbols),
@@ -617,7 +771,7 @@ class RunExecutor:
             index_id=current.run.index_id,
             status=status,  # type: ignore[arg-type]
             outcome=outcome,  # type: ignore[arg-type]
-            fixture_mode=True,
+            fixture_mode=current.run.mode == "fixture",
             summary=summary,
             graph=graph,
             evidence=evidence,

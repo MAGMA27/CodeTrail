@@ -378,19 +378,13 @@ class OpenAICompatibleFeatureAdapter:
         max_input_chars: int,
         context: FeatureContext,
     ) -> ModelCall:
-        return self._request(
-            {
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": MODEL_SYSTEM_PROMPT},
-                    {"role": "user", "content": prompt},
-                ],
-                "temperature": 0,
-                "max_tokens": _model_output_tokens(context),
-                "response_format": {"type": "json_object"},
-            },
+        return self.request_json(
+            system_prompt=MODEL_SYSTEM_PROMPT,
+            user_prompt=prompt,
+            model=model,
             timeout_seconds=timeout_seconds,
             max_input_chars=max_input_chars,
+            max_output_chars=context.max_output_chars,
         )
 
     def repair(
@@ -405,15 +399,38 @@ class OpenAICompatibleFeatureAdapter:
         context: FeatureContext,
     ) -> ModelCall:
         repair_prompt = _build_repair_prompt(prompt, invalid_output, validation_error)
+        return self.request_json(
+            system_prompt=MODEL_SYSTEM_PROMPT,
+            user_prompt=repair_prompt,
+            model=model,
+            timeout_seconds=timeout_seconds,
+            max_input_chars=max_input_chars,
+            max_output_chars=context.max_output_chars,
+        )
+
+    def request_json(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        model: str,
+        timeout_seconds: float,
+        max_input_chars: int,
+        max_output_chars: int,
+    ) -> ModelCall:
+        """Send one bounded JSON chat request for any compatible domain adapter."""
+
+        if max_output_chars < 1:
+            raise FeatureGenerationErrorBase("budget_exceeded", "模型输出预算已耗尽")
         return self._request(
             {
                 "model": model,
                 "messages": [
-                    {"role": "system", "content": MODEL_SYSTEM_PROMPT},
-                    {"role": "user", "content": repair_prompt},
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
                 ],
                 "temperature": 0,
-                "max_tokens": _model_output_tokens(context),
+                "max_tokens": _model_output_tokens_for_chars(max_output_chars),
                 "response_format": {"type": "json_object"},
             },
             timeout_seconds=timeout_seconds,
@@ -1057,7 +1074,11 @@ def resolve_model(
 
 
 def _model_output_tokens(context: FeatureContext) -> int:
-    estimated_tokens = (context.max_output_chars + CHARS_PER_MODEL_TOKEN - 1) // CHARS_PER_MODEL_TOKEN
+    return _model_output_tokens_for_chars(context.max_output_chars)
+
+
+def _model_output_tokens_for_chars(max_output_chars: int) -> int:
+    estimated_tokens = (max_output_chars + CHARS_PER_MODEL_TOKEN - 1) // CHARS_PER_MODEL_TOKEN
     return max(MIN_MODEL_OUTPUT_TOKENS, min(MAX_MODEL_OUTPUT_TOKENS, estimated_tokens))
 
 

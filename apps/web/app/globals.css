@@ -279,6 +279,7 @@ code { font-family: var(--ct-mono); }
 .ct-run-heading h3 { margin: 4px 0 0; font-size: 16px; letter-spacing: -.02em; }
 .ct-run-lede { margin: 0; color: var(--ct-muted); font-size: 11px; line-height: 1.6; }
 .ct-run-draft-warning { margin: 0; padding: 7px 9px; border-left: 2px solid var(--ct-warn, #c58c42); background: #fff8eb; color: #76521f; font-size: 10px; line-height: 1.5; }
+.ct-run-real-warning { margin: 0; padding: 7px 9px; border-left: 2px solid var(--ct-blue); background: var(--ct-blue-soft); color: var(--ct-muted); font-size: 10px; line-height: 1.5; }
 .ct-run-start-row { align-items: end; }
 .ct-run-start-row label { display: grid; flex: 1; gap: 5px; color: var(--ct-muted); font-size: 10px; }
 .ct-run-start-row select { min-height: 34px; padding: 7px 9px; border: 1px solid var(--ct-border-strong); border-radius: 6px; background: var(--ct-bg); color: var(--ct-text); }

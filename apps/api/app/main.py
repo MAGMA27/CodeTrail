@@ -55,6 +55,7 @@ from .contracts import (
 )
 from .github import GitHubClient
 from .feature_generation import FeatureModelAdapter
+from .issue_analysis import IssueModelAdapter
 from .service import IndexService, RepositoryRegistry, ServiceError, WorkspaceService, is_loopback_host
 from .storage import StorageError
 
@@ -97,8 +98,11 @@ def create_app(
     mcp_feature_generation_enabled: bool | None = None,
     mcp_session_write_enabled: bool | None = None,
     mcp_run_write_enabled: bool | None = None,
+    real_run_enabled: bool | None = None,
+    mcp_real_run_enabled: bool | None = None,
     github_client: GitHubClient | None = None,
     feature_adapter_factory: Callable[[str], FeatureModelAdapter] | None = None,
+    run_model_adapter_factory: Callable[[str], IssueModelAdapter] | None = None,
     run_max_concurrent_runs: int | None = None,
 ) -> FastAPI:
     """Create an API with a server-owned repository allow-list."""
@@ -110,6 +114,8 @@ def create_app(
             mcp_feature_generation_enabled=mcp_feature_generation_enabled,
             mcp_session_write_enabled=mcp_session_write_enabled,
             mcp_run_write_enabled=mcp_run_write_enabled,
+            real_run_enabled=real_run_enabled,
+            mcp_real_run_enabled=mcp_real_run_enabled,
         )
         if repository_roots is None
         else RepositoryRegistry(
@@ -121,6 +127,8 @@ def create_app(
             mcp_feature_generation_enabled=mcp_feature_generation_enabled,
             mcp_session_write_enabled=mcp_session_write_enabled,
             mcp_run_write_enabled=mcp_run_write_enabled,
+            real_run_enabled=real_run_enabled,
+            mcp_real_run_enabled=mcp_real_run_enabled,
         )
     )
     index_service = IndexService(registry)
@@ -129,6 +137,7 @@ def create_app(
         index_service,
         github_client=github_client,
         feature_adapter_factory=feature_adapter_factory,
+        run_model_adapter_factory=run_model_adapter_factory,
         run_max_concurrent_runs=run_max_concurrent_runs,
     )
     application = FastAPI(title="CodeTrail API", version="0.1.0")

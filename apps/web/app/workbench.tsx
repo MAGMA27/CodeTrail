@@ -72,6 +72,7 @@ import {
   type ProjectOverview,
   type ProjectRecord,
   type RunEvent,
+  type RunMode,
   type RunReport,
   type RunScenario,
   type RunStatusResponse,
@@ -611,6 +612,7 @@ export default function Workbench() {
   const runCreateRequest = useRef<{
     projectId: string;
     sessionId: string;
+    mode: RunMode;
     scenario: RunScenario;
     key: string;
   } | null>(null);
@@ -1284,7 +1286,7 @@ export default function Workbench() {
     void loadRunDetails(selectedProjectId, selectedSessionId, runId);
   }, [loadRunDetails, selectedProjectId, selectedSessionId]);
 
-  const startSessionRun = useCallback(async (scenario: RunScenario) => {
+  const startSessionRun = useCallback(async (mode: RunMode, scenario: RunScenario) => {
     if (!selectedProjectId || !selectedSessionId) {
       setRunWriteStatus("error");
       setRunWriteError("请先选择一个会话。");
@@ -1308,10 +1310,10 @@ export default function Workbench() {
       return;
     }
     const previous = runCreateRequest.current;
-    const key = previous?.projectId === selectedProjectId && previous.sessionId === selectedSessionId && previous.scenario === scenario
+    const key = previous?.projectId === selectedProjectId && previous.sessionId === selectedSessionId && previous.mode === mode && previous.scenario === scenario
       ? previous.key
       : newSessionIdempotencyKey();
-    runCreateRequest.current = { projectId: selectedProjectId, sessionId: selectedSessionId, scenario, key };
+    runCreateRequest.current = { projectId: selectedProjectId, sessionId: selectedSessionId, mode, scenario, key };
     runWriteController.current?.abort();
     const controller = new AbortController();
     runWriteController.current = controller;
@@ -1328,7 +1330,8 @@ export default function Workbench() {
           issueId: `session-${selectedSessionId}`,
           title: selectedSession.topic,
           body: (savedContext || selectedSession.topic).slice(0, 20_000),
-          scenario,
+          mode,
+          ...(mode === "fixture" ? { scenario } : {}),
           idempotencyKey: key,
         },
         controller.signal,

@@ -545,32 +545,54 @@ class RunBudget(ContractModel):
     """Server-enforced limits and usage counters for one Run."""
 
     max_tool_calls: PositiveInt = Field(default=8, le=12)
+    max_model_calls: PositiveInt = Field(default=4, le=6)
+    max_repair_calls: NonNegativeInt = Field(default=1, le=2)
     max_seconds: PositiveInt = Field(default=30, le=120)
     max_source_lines: PositiveInt = Field(default=200, le=200)
     max_total_source_lines: PositiveInt = Field(default=800, le=2_000)
     max_input_chars: PositiveInt = Field(default=60_000, le=100_000)
+    max_model_input_chars: PositiveInt = Field(default=80_000, le=100_000)
     max_output_chars: PositiveInt = Field(default=50_000, le=100_000)
+    max_model_output_chars: PositiveInt = Field(default=20_000, le=50_000)
     max_events: PositiveInt = Field(default=100, ge=2, le=200)
     tool_calls_used: NonNegativeInt = 0
+    model_calls_used: NonNegativeInt = 0
+    repair_calls_used: NonNegativeInt = 0
     source_lines_used: NonNegativeInt = 0
     input_chars_used: NonNegativeInt = 0
+    model_input_chars_used: NonNegativeInt = 0
     output_chars_used: NonNegativeInt = 0
+    model_output_chars_used: NonNegativeInt = 0
+    model_input_tokens_used: NonNegativeInt | None = None
+    model_output_tokens_used: NonNegativeInt | None = None
     events_used: NonNegativeInt = 0
 
     @model_validator(mode="after")
     def validate_budget_usage(self) -> RunBudget:
         if self.tool_calls_used > self.max_tool_calls:
             raise ValueError("tool_calls_used cannot exceed max_tool_calls")
+        if self.model_calls_used > self.max_model_calls:
+            raise ValueError("model_calls_used cannot exceed max_model_calls")
+        if self.repair_calls_used > self.max_repair_calls:
+            raise ValueError("repair_calls_used cannot exceed max_repair_calls")
+        if self.repair_calls_used > self.model_calls_used:
+            raise ValueError("repair_calls_used cannot exceed model_calls_used")
         if self.source_lines_used > self.max_total_source_lines:
             raise ValueError("source_lines_used cannot exceed max_total_source_lines")
         if self.input_chars_used > self.max_input_chars:
             raise ValueError("input_chars_used cannot exceed max_input_chars")
+        if self.model_input_chars_used > self.max_model_input_chars:
+            raise ValueError("model_input_chars_used cannot exceed max_model_input_chars")
         if self.output_chars_used > self.max_output_chars:
             raise ValueError("output_chars_used cannot exceed max_output_chars")
+        if self.model_output_chars_used > self.max_model_output_chars:
+            raise ValueError("model_output_chars_used cannot exceed max_model_output_chars")
         if self.events_used > self.max_events:
             raise ValueError("events_used cannot exceed max_events")
         if self.max_total_source_lines < self.max_source_lines:
             raise ValueError("total source line budget must cover one source read")
+        if self.max_model_output_chars > self.max_output_chars:
+            raise ValueError("model output budget cannot exceed total output budget")
         return self
 
 
@@ -628,6 +650,7 @@ class Run(VersionedModel):
     issue: Issue
     mode: RunMode
     fixture_scenario: FixtureScenario | None = None
+    model_provider: str | None = Field(default=None, max_length=100)
     model: str | None = Field(default=None, max_length=200)
     prompt_version: str | None = Field(default=None, max_length=200)
     execution_version: Identifier = "run-fixture-v1"
@@ -755,6 +778,55 @@ class GetNeighborsParams(ContractModel):
 ToolParams: TypeAlias = Annotated[
     SearchCodeParams | ReadSourceParams | GetNeighborsParams,
     Field(discriminator="tool"),
+]
+
+
+class IssueModelToolCall(VersionedModel):
+    """One allow-listed tool decision returned by the Issue analysis model."""
+
+    kind: Literal["tool_call"] = "tool_call"
+    params: ToolParams
+
+
+class IssueModelFinal(VersionedModel):
+    """A structured Issue conclusion before server-side reference validation."""
+
+    kind: Literal["final"] = "final"
+    index_id: Identifier
+    outcome: Literal["candidate_found", "insufficient_evidence"]
+    summary: str = Field(min_length=1, max_length=5_000)
+    findings: list[Finding] = Field(default_factory=list, max_length=20)
+    candidate_links: list[CandidateLink] = Field(default_factory=list, max_length=20)
+    evidence_ids: list[Identifier] = Field(default_factory=list, max_length=200)
+    limitations: list[str] = Field(default_factory=list, max_length=30)
+
+    @model_validator(mode="after")
+    def validate_issue_output(self) -> IssueModelFinal:
+        if self.outcome == "candidate_found" and not self.candidate_links:
+            raise ValueError("candidate_found Issue output must include candidate links")
+        if self.outcome == "insufficient_evidence" and self.candidate_links:
+            raise ValueError("insufficient_evidence Issue output cannot include candidate links")
+        if len(set(self.evidence_ids)) != len(self.evidence_ids):
+            raise ValueError("Issue output evidence IDs must be unique")
+        finding_ids = {finding.finding_id for finding in self.findings}
+        if len(finding_ids) != len(self.findings):
+            raise ValueError("Issue output finding IDs must be unique")
+        candidate_ids = {link.candidate_id for link in self.candidate_links}
+        if len(candidate_ids) != len(self.candidate_links):
+            raise ValueError("Issue output candidate IDs must be unique")
+        referenced_evidence = set(self.evidence_ids)
+        for finding in self.findings:
+            if not set(finding.evidence_ids).issubset(referenced_evidence):
+                raise ValueError("Issue finding references evidence absent from output")
+        for link in self.candidate_links:
+            if not set(link.evidence_ids).issubset(referenced_evidence):
+                raise ValueError("Issue candidate link references evidence absent from output")
+        return self
+
+
+IssueModelOutput: TypeAlias = Annotated[
+    IssueModelToolCall | IssueModelFinal,
+    Field(discriminator="kind"),
 ]
 
 
@@ -2068,7 +2140,14 @@ class RunCompletedPayload(ContractModel):
 
 
 class RunError(ContractModel):
-    code: Literal["tool_failed", "budget_exceeded", "internal_error"]
+    code: Literal[
+        "tool_failed",
+        "budget_exceeded",
+        "model_unavailable",
+        "model_failed",
+        "invalid_model_output",
+        "internal_error",
+    ]
     message: str = Field(min_length=1, max_length=2_000)
 
 
@@ -2215,7 +2294,7 @@ class SseEventFrame(VersionedModel):
 
 
 class CreateRunRequest(VersionedModel):
-    """Start one explicit fixture Run from a saved Session cutoff."""
+    """Start one explicit fixture or real Run from a saved Session cutoff."""
 
     index_id: Identifier
     issue: Issue
@@ -2239,9 +2318,13 @@ class CreateRunRequest(VersionedModel):
             value
             for value in (
                 self.budget.tool_calls_used,
+                self.budget.model_calls_used,
+                self.budget.repair_calls_used,
                 self.budget.source_lines_used,
                 self.budget.input_chars_used,
+                self.budget.model_input_chars_used,
                 self.budget.output_chars_used,
+                self.budget.model_output_chars_used,
                 self.budget.events_used,
             )
         ):

@@ -30,6 +30,7 @@ import type {
   ProjectOverview,
   ProjectRecord,
   RunEvent,
+  RunMode,
   RunRecord,
   RunReport,
   RunScenario,
@@ -144,7 +145,7 @@ type SessionUi = {
   runWriteStatus: UiAsyncStatus;
   runWriteError: string | null;
   onSelectRun: (runId: string) => void;
-  onStartRun: (scenario: RunScenario) => void | Promise<void>;
+  onStartRun: (mode: RunMode, scenario: RunScenario) => void | Promise<void>;
   onCancelRun: Action;
   onSelectRunEvidence: (evidence: Evidence) => void;
 };
@@ -940,26 +941,29 @@ function runEventLabel(event: RunEvent): string {
 }
 
 function RunPanel({ session }: { session: SessionUi }) {
+  const [mode, setMode] = useState<RunMode>("fixture");
   const [scenario, setScenario] = useState<RunScenario>("success-timeout-missing");
   const selectedRun = session.runs.find((run) => run.run_id === session.selectedRunId) ?? null;
   const currentRun = session.runStatusResponse?.run ?? selectedRun;
   const active = currentRun?.status === "queued" || currentRun?.status === "running";
   const draftPending = session.draft.trim().length > 0;
   return (
-    <section className="ct-run-panel" aria-label="显式离线 Run">
+    <section className="ct-run-panel" aria-label="显式 Issue Run">
       <div className="ct-run-heading">
-        <div><p className="ct-overline">R1 / EXPLICIT RUN</p><h3>离线分析</h3></div>
+        <div><p className="ct-overline">R2 / EXPLICIT RUN</p><h3>Issue 分析</h3></div>
         <span className="ct-count-label">{session.runs.length} 次</span>
       </div>
       <p className="ct-run-lede">显式启动后，服务端只冻结当前已保存消息到一个不可变快照；当前草稿不会进入本次 Run，也不会隐式触发分析。</p>
       {draftPending ? <p className="ct-run-draft-warning" role="status">当前有未保存草稿：启动 Run 不会包含它，请先保存消息。</p> : null}
       <div className="ct-run-start-row">
-        <label htmlFor="run-scenario">fixture 场景<select id="run-scenario" value={scenario} onChange={(event) => setScenario(event.target.value as RunScenario)} disabled={active || session.runWriteStatus === "loading"}><option value="success-timeout-missing">{runScenarioLabel("success-timeout-missing")}</option><option value="insufficient-external-service">{runScenarioLabel("insufficient-external-service")}</option><option value="tool-failure-read-source">{runScenarioLabel("tool-failure-read-source")}</option></select></label>
-        <button type="button" className="ct-button ct-button-primary" onClick={() => void session.onStartRun(scenario)} disabled={active || session.runWriteStatus === "loading" || session.messagesStatus === "loading"}>{session.runWriteStatus === "loading" ? "处理中…" : "启动离线分析"}</button>
+        <label htmlFor="run-mode">模式<select id="run-mode" value={mode} onChange={(event) => setMode(event.target.value as RunMode)} disabled={active || session.runWriteStatus === "loading"}><option value="fixture">fixture / 离线演示</option><option value="real">real / 模型分析</option></select></label>
+        {mode === "fixture" ? <label htmlFor="run-scenario">fixture 场景<select id="run-scenario" value={scenario} onChange={(event) => setScenario(event.target.value as RunScenario)} disabled={active || session.runWriteStatus === "loading"}><option value="success-timeout-missing">{runScenarioLabel("success-timeout-missing")}</option><option value="insufficient-external-service">{runScenarioLabel("insufficient-external-service")}</option><option value="tool-failure-read-source">{runScenarioLabel("tool-failure-read-source")}</option></select></label> : null}
+        <button type="button" className="ct-button ct-button-primary" onClick={() => void session.onStartRun(mode, scenario)} disabled={active || session.runWriteStatus === "loading" || session.messagesStatus === "loading"}>{session.runWriteStatus === "loading" ? "处理中…" : mode === "real" ? "启动真实分析" : "启动离线分析"}</button>
       </div>
+      {mode === "real" ? <p className="ct-run-real-warning" role="note">真实模式会把冻结的 Issue、已保存消息和有界源码证据发送到服务端配置的模型，可能产生费用；未配置或失败时不会回退到 fixture。</p> : null}
       {session.runWriteError ? <p className="ct-inline-error" role="alert">{session.runWriteError}</p> : null}
       {session.runsError ? <div className="ct-error-block compact" role="alert"><span>{session.runsError}</span></div> : null}
-      {session.runs.length > 0 ? <div className="ct-run-history" aria-label="Run 历史">{session.runs.map((run) => <button type="button" key={run.run_id} className={`ct-run-history-item${run.run_id === session.selectedRunId ? " is-selected" : ""}`} onClick={() => session.onSelectRun(run.run_id)}><span><strong>{runStatusLabel(run.status)}</strong><small>{run.fixture_scenario ? runScenarioLabel(run.fixture_scenario) : run.mode}</small></span><code>{run.run_id}</code><small>消息 1–{run.message_end_sequence} · {run.execution_version}</small></button>)}</div> : session.runsStatus === "loading" ? <LoadingNote>正在读取 Run 历史…</LoadingNote> : <div className="ct-run-empty">还没有 Run。选择一个 fixture 场景后显式启动。</div>}
+      {session.runs.length > 0 ? <div className="ct-run-history" aria-label="Run 历史">{session.runs.map((run) => <button type="button" key={run.run_id} className={`ct-run-history-item${run.run_id === session.selectedRunId ? " is-selected" : ""}`} onClick={() => session.onSelectRun(run.run_id)}><span><strong>{runStatusLabel(run.status)}</strong><small>{run.fixture_scenario ? runScenarioLabel(run.fixture_scenario) : run.mode === "real" ? "REAL / 模型分析" : "FIXTURE / 离线"}</small></span><code>{run.run_id}</code><small>消息 1–{run.message_end_sequence} · {run.execution_version}</small></button>)}</div> : session.runsStatus === "loading" ? <LoadingNote>正在读取 Run 历史…</LoadingNote> : <div className="ct-run-empty">还没有 Run。选择 fixture 或 real 模式后显式启动。</div>}
       {currentRun ? <div className="ct-run-detail">
         <div className="ct-run-detail-heading"><div><strong>{runStatusLabel(currentRun.status)}</strong><span data-state={session.runStatus}>{session.runStatus === "loading" ? "状态同步中" : session.runStatus === "error" ? "状态请求失败" : "已载入"}</span></div>{active ? <button type="button" className="ct-button ct-button-danger" onClick={() => void session.onCancelRun()} disabled={session.runWriteStatus === "loading"}>取消 Run</button> : null}</div>
         {session.runStatusResponse ? <>
@@ -1147,7 +1151,7 @@ export default function WorkbenchUi(props: WorkbenchUiProps) {
         {props.panelMode === "source" ? <EvidencePanel evidence={props.evidence} /> : props.panelMode === "graph" || props.panelMode === "feature_graph" ? <GraphPanel graph={props.graph} /> : null}
       </div>
       {props.panelMode !== "none" ? <div className="ct-panel-width-control"><label htmlFor="panel-width">面板宽度</label><input id="panel-width" type="range" min="300" max="440" step="10" value={panelWidth} onChange={(event) => setPanelWidth(Number(event.target.value))} /><output>{panelWidth}px</output></div> : null}
-      <footer className="ct-footer"><span>STATIC FACTS / FIXED EVIDENCE</span><span>Run：显式 fixture 分析 · Agent / SSE 尚未接入</span><span>{props.index.response ? `${props.graph.codeSymbolCount} nodes · ${props.graph.codeEdgeCount} edges` : "No snapshot loaded"}</span></footer>
+      <footer className="ct-footer"><span>STATIC FACTS / FIXED EVIDENCE</span><span>Run：显式 fixture / real 分析 · 有界工具循环 · SSE 尚未接入</span><span>{props.index.response ? `${props.graph.codeSymbolCount} nodes · ${props.graph.codeEdgeCount} edges` : "No snapshot loaded"}</span></footer>
     </main>
   );
 }

@@ -2263,6 +2263,114 @@ class IndexStore:
                 pass
             raise StorageError(f"could not persist Run tool result: {exc}") from exc
 
+    def reserve_run_model_call(
+        self,
+        run_id: str,
+        *,
+        input_chars: int,
+        repair: bool = False,
+    ) -> RunRecord:
+        """Reserve one model request and its complete prompt before sending it."""
+
+        if input_chars < 1:
+            raise StorageInputError("Run model input must contain at least one character")
+        try:
+            self._connection.execute("BEGIN IMMEDIATE")
+            record = self.load_run_record(run_id)
+            if record.run.status not in {"queued", "running"}:
+                self._connection.execute("COMMIT")
+                return record
+            if record.run.status != "running":
+                raise StorageConflictError("Run model calls require a running Run")
+            budget = record.run.budget
+            updated_budget = budget.model_copy(
+                update={
+                    "model_calls_used": budget.model_calls_used + 1,
+                    "repair_calls_used": budget.repair_calls_used + (1 if repair else 0),
+                    "model_input_chars_used": budget.model_input_chars_used + input_chars,
+                }
+            )
+            if updated_budget.model_calls_used > budget.max_model_calls:
+                raise StorageInputError("Run model-call budget is exhausted")
+            if updated_budget.repair_calls_used > budget.max_repair_calls:
+                raise StorageInputError("Run model repair budget is exhausted")
+            if updated_budget.model_input_chars_used > budget.max_model_input_chars:
+                raise StorageInputError("Run model input budget is exhausted")
+            updated_run = _validated_run(record.run, budget=updated_budget)
+            self._update_run_row(updated_run)
+            self._connection.execute("COMMIT")
+            return self.load_run_record(run_id)
+        except StorageError:
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise
+        except sqlite3.Error as exc:
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise StorageError(f"could not reserve Run model call: {exc}") from exc
+
+    def record_run_model_output(
+        self,
+        run_id: str,
+        *,
+        output_chars: int,
+        input_tokens: int | None,
+        output_tokens: int | None,
+    ) -> RunRecord:
+        """Persist bounded model output usage without persisting provider text."""
+
+        if output_chars < 0:
+            raise StorageInputError("Run model output usage is invalid")
+        try:
+            self._connection.execute("BEGIN IMMEDIATE")
+            record = self.load_run_record(run_id)
+            if record.run.status not in {"queued", "running"}:
+                self._connection.execute("COMMIT")
+                return record
+            if record.run.status != "running":
+                raise StorageConflictError("Run model output requires a running Run")
+            budget = record.run.budget
+            updated_budget = budget.model_copy(
+                update={
+                    "model_output_chars_used": budget.model_output_chars_used + output_chars,
+                    "output_chars_used": budget.output_chars_used + output_chars,
+                    "model_input_tokens_used": _accumulate_model_tokens(
+                        budget.model_input_tokens_used,
+                        input_tokens,
+                        budget.model_calls_used,
+                    ),
+                    "model_output_tokens_used": _accumulate_model_tokens(
+                        budget.model_output_tokens_used,
+                        output_tokens,
+                        budget.model_calls_used,
+                    ),
+                }
+            )
+            if updated_budget.model_output_chars_used > budget.max_model_output_chars:
+                raise StorageInputError("Run model output budget is exhausted")
+            if updated_budget.output_chars_used > budget.max_output_chars:
+                raise StorageInputError("Run output budget is exhausted")
+            updated_run = _validated_run(record.run, budget=updated_budget)
+            self._update_run_row(updated_run)
+            self._connection.execute("COMMIT")
+            return self.load_run_record(run_id)
+        except StorageError:
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise
+        except sqlite3.Error as exc:
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise StorageError(f"could not record Run model output: {exc}") from exc
+
     def finish_run(
         self,
         run: Run,
@@ -3430,6 +3538,18 @@ def _validated_run(run: Run, **updates: object) -> Run:
     return Run.model_validate(run.model_copy(update=updates))
 
 
+def _accumulate_model_tokens(
+    existing: int | None,
+    current: int | None,
+    attempted_calls: int,
+) -> int | None:
+    """Keep token usage unknown once any provider response omits usage."""
+
+    if current is None or existing is None and attempted_calls > 1:
+        return None
+    return current if existing is None else existing + current
+
+
 def _terminal_run_report(
     run: Run,
     *,
@@ -3447,7 +3567,7 @@ def _terminal_run_report(
         index_id=run.index_id,
         status=status,
         outcome=status,
-        fixture_mode=True,
+        fixture_mode=run.mode == "fixture",
         summary=summary,
         graph=GraphSnapshot(index_id=run.index_id),
         terminal_sequence=terminal_sequence,

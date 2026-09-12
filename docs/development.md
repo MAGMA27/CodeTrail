@@ -62,4 +62,4 @@ docs:check 验证本仓库约定的内联文件链接、栏目、状态、源码
 
 ## 双入口设计约定
 
-HTTP 与 MCP 复用应用服务和领域契约，界面状态不充当 Agent 的隐式上下文；同一 project_id/index_id 的领域结果与错误语义已完成 A1/O1/O2 对照验证，W2 本地导入也复用同一项目/索引服务。O1 规则概览与 O2 有证据功能生成已实施，Issue 分析仍需单独实施，范围见 [统一接口决策](decisions/2026-09-11-agent-native-interfaces.md)。
+HTTP 与 MCP 复用应用服务和领域契约，界面状态不充当 Agent 的隐式上下文；同一 project_id/index_id 的领域结果与错误语义已完成 A1/O1/O2 对照验证，W2 本地导入也复用同一项目/索引服务。O1 规则概览、O2 有证据功能生成和 P2-R2 有界 Issue 分析已实施，SSE 与完整影响高亮仍属后续范围，见 [统一接口决策](decisions/2026-09-11-agent-native-interfaces.md) 和 [P2-R2 决策](decisions/2026-09-12-run-model-analysis.md)。
