@@ -1,6 +1,6 @@
 # CodeTrail 工作区 UI 规范
 
-状态：UI-S1 目标设计规范。本文描述可评审的目标界面，不宣称当前生产工作台已经符合；可浏览原型位于 [apps/web/app/prototype/page.tsx](../../apps/web/app/prototype/page.tsx)，真实 `/` 页面仍由 UI-S2 重构。
+状态：UI-S2 已实现的工作区规范与验收记录。本文保留 UI-S1 的设计基线，同时记录生产 `/` 的迁移结果；可浏览原型位于 [apps/web/app/prototype/page.tsx](../../apps/web/app/prototype/page.tsx)，生产组件位于 [apps/web/app/workbench-ui.tsx](../../apps/web/app/workbench-ui.tsx)。
 
 ## 设计读法
 
@@ -8,9 +8,9 @@
 
 本轮设计取值为 `DESIGN_VARIANCE 5`、`MOTION_INTENSITY 3`、`VISUAL_DENSITY 5`。动效只用于按钮按下、面板开关和状态反馈，必须在 `prefers-reduced-motion: reduce` 下退化为即时变化。设计借鉴 Codex 式的项目与会话层级，不复制品牌资产、版本标识或未核实的像素细节。
 
-## 审视基线与入口映射
+## 迁移前基线与入口映射
 
-现有生产页是单页纵向工作台，顶部为 `CODETRAIL / INDEX LAB` 和“关系勘验台”，项目、导入、索引、搜索、概览、图和源码证据按纵向区块排列，背景使用深色网格和渐变。它已经承载真实项目、固定索引、导入重试、概览、历史、功能图、代码关系、源码证据和 Session 消息能力，但主导航没有把项目知识与会话分成稳定的空间。
+UI-S1 迁移前的生产页是单页纵向工作台，顶部为 `CODETRAIL / INDEX LAB` 和“关系勘验台”，项目、导入、索引、搜索、概览、图和源码证据按纵向区块排列，背景使用深色网格和渐变。它已经承载真实项目、固定索引、导入重试、概览、历史、功能图、代码关系、源码证据和 Session 消息能力，但主导航没有把项目知识与会话分成稳定的空间；UI-S2 已保留这些 API 行为并迁移外壳与信息架构。
 
 | 现有入口或控件 | 目标入口 | 保留的行为 |
 | --- | --- | --- |
@@ -24,7 +24,7 @@
 | 符号搜索 | 知识页工具栏的“搜索”入口 | 搜索仍限定当前 `project_id/index_id`，结果可打开证据 |
 | Session 消息追加 | 中央会话页底部输入区 | 当前只保存 human 消息，不展示假助手回复或可用的分析按钮 |
 
-UI-S1 不删除任何现有 API 能力；映射是目标信息架构，生产页面迁移属于 UI-S2。
+UI-S1 不删除任何现有 API 能力；映射是目标信息架构，UI-S2 已完成生产页面迁移，未改变 HTTP/MCP 契约。
 
 ## 应用外壳
 
@@ -85,7 +85,7 @@ UI-S1 不删除任何现有 API 能力；映射是目标信息架构，生产页
 | 保存中 | 保留 textarea 内容，提交按钮禁用，状态显示“保存中”；不插入本地假消息 |
 | 保存成功 | 使用服务端 sequence 和时间追加 human 消息，清空当前草稿，显示“已保存” |
 | 保存失败 | 错误紧邻输入区或消息区，保留草稿和幂等键，提供“重试保存”；不显示成功或助手状态 |
-| 分页 | 消息超过一页时在消息顶部提供“加载更早消息”；追加新消息不跳到旧消息中间，用户已向上阅读时保留滚动位置 |
+| 分页 | 当前 API 按 `sequence` 递增返回，消息超过一页时在消息尾部提供“加载后续消息”；空会话不显示无效分页入口，追加新消息不跳到旧消息中间 |
 
 ### 证据面板
 
@@ -123,15 +123,29 @@ UI-S1 不删除任何现有 API 能力；映射是目标信息架构，生产页
 
 独立原型是 `apps/web/app/prototype/` 下的 `/prototype` 路由，使用本地常量和 React 本地状态，故意不导入 `lib/api.ts`，不访问网络、不读取 SQLite、不读取宿主路径、不调用模型、不创建项目或 Session。右上角“预览状态”明确标记仅为设计评审；状态切换和保存延迟是视觉行为演示，不能当作真实 API 验收。
 
-生产 `/` 页面仍由 `apps/web/app/workbench.tsx` 拥有，现有 API、HTTP/MCP 契约、项目归属、固定索引、证据和 Session 消息规则继续有效。UI-S2 才迁移真实页面；迁移过程中必须逐项复用 [Web 工作台 README](../../apps/web/README.md) 的入口和限制，不能因原型截图把 Run、Agent、SSE 或 Issue 分析标为已实现。
+生产 `/` 页面由 `apps/web/app/workbench.tsx` 编排，并由 `apps/web/app/workbench-ui.tsx` 提供视图。现有 API、HTTP/MCP 契约、项目归属、固定索引、证据和 Session 消息规则继续有效；UI-S2 已完成真实页面迁移。迁移后的生产页与原型继续分开验收，不能因任一截图把 Run、Agent、SSE 或 Issue 分析标为已实现。
 
 ## 截图验收矩阵
 
-截图由实际浏览器在指定视口生成，放在 [workspace-ui-prototype/screenshots/](workspace-ui-prototype/screenshots/)。截图文件是 UI-S1 的视觉证据，不是功能测试替代品。
+截图由实际浏览器在指定视口生成。生产 `/` 的 UI-S2 证据放在 [workspace-ui-production/screenshots/](workspace-ui-production/screenshots/)，独立原型的 UI-S1 证据放在 [workspace-ui-prototype/screenshots/](workspace-ui-prototype/screenshots/)。截图文件是视觉证据，不是功能测试替代品。
+
+### 生产 `/`（UI-S2）
+
+| 文件 | 视口 | 状态 | 覆盖内容 |
+| --- | --- | --- | --- |
+| [desktop-empty-1440.png](workspace-ui-production/screenshots/desktop-empty-1440.png) | `1440x900` | 真实空工作区 | 空项目列表、创建项目入口、无索引知识空态 |
+| [desktop-knowledge-1440.png](workspace-ui-production/screenshots/desktop-knowledge-1440.png) | `1440x900` | 真实项目知识页 | 项目/Session 导航、固定索引、概览、搜索和功能历史 |
+| [desktop-session-1440.png](workspace-ui-production/screenshots/desktop-session-1440.png) | `1440x900` | 真实有消息 Session | Session 身份、固定 revision/snapshot、服务端消息序号、底部输入区 |
+| [desktop-evidence-1440.png](workspace-ui-production/screenshots/desktop-evidence-1440.png) | `1440x900` | 真实源码证据 | 右侧证据上下文、源码行号/hash、合成证据关系按钮禁用 |
+| [tablet-feature-graph-1024.png](workspace-ui-production/screenshots/tablet-feature-graph-1024.png) | `1024x768` | 真实功能图面板 | 平板三栏尺寸、语义/静态图例、面板宽度控制 |
+| [mobile-knowledge-390.png](workspace-ui-production/screenshots/mobile-knowledge-390.png) | `390x844` | 真实移动知识页 | 单列内容、移动项目入口、操作按钮和搜索不越界 |
+
+### `/prototype`（UI-S1）
 
 | 文件 | 视口 | 状态 | 覆盖内容 |
 | --- | --- | --- | --- |
 | [baseline-current.png](workspace-ui-prototype/screenshots/baseline-current.png) | `1440x900` | 当前生产页 | 旧纵向 Index Lab 基线，记录 UI-S1 前的网格/实验室布局 |
+| [empty-workspace-1440.png](workspace-ui-prototype/screenshots/empty-workspace-1440.png) | `1440x900` | 原型空工作区 | 无项目导航、空态说明和演示入口 |
 | [desktop-knowledge-1440.png](workspace-ui-prototype/screenshots/desktop-knowledge-1440.png) | `1440x900` | 项目知识页 | 项目/会话主导航、中央知识内容、版本详情和低频项目操作 |
 | [desktop-messages-1440.png](workspace-ui-prototype/screenshots/desktop-messages-1440.png) | `1440x900` | 有消息会话 | 固定版本标题、human 消息、中央底部输入区和草稿提示 |
 | [desktop-evidence-1440.png](workspace-ui-prototype/screenshots/desktop-evidence-1440.png) | `1440x900` | 证据面板 | 右侧打开、固定上下文、源码行号、中央内容保留 |
@@ -140,15 +154,15 @@ UI-S1 不删除任何现有 API 能力；映射是目标信息架构，生产页
 | [mobile-390.png](workspace-ui-prototype/screenshots/mobile-390.png) | `390x844` | 空会话 | 单列布局、移动项目抽屉入口、输入区不遮挡内容 |
 | [mobile-evidence-390.png](workspace-ui-prototype/screenshots/mobile-evidence-390.png) | `390x844` | 证据面板 | 全宽 sheet、关闭入口和证据上下文不越界 |
 
-截图验收只证明布局和视觉状态可浏览；真实 API 的导入、索引、Session 持久化、归属拒绝、证据 hash 和 Run 生命周期仍需 UI-S2/P2-R1 的独立流程证据。
+截图验收只证明布局和视觉状态可浏览；生产截图使用真实 API 数据，仍不能替代导入、索引、Session 持久化、归属拒绝、证据 hash 和 Run 生命周期的独立流程证据。
 
-## 验收清单
+## 验收清单（UI-S2 本轮）
 
-- [ ] 在 `1440x900`、`1024x768` 和 `390x844` 实际打开原型，页面没有横向溢出。
-- [ ] 项目列表、会话列表、新建会话、项目知识入口和索引/导入入口均可找到。
-- [ ] 可从知识页打开和关闭功能图、源码证据，并调整桌面面板宽度；中央滚动和草稿不丢失。
-- [ ] 可切换空会话、有消息会话和保存失败状态；失败状态可重试，不能出现助手假回复或可用 Run 按钮。
-- [ ] Enter、Shift+Enter、输入法组合输入和消息草稿隔离有明确实现约定；真实持久化仍需生产验收。
-- [ ] 证据面板显示 `project_id/index_id/generation_id` 上下文，图筛选位于图工具栏。
-- [ ] 视觉使用中性背景、单一强调色、明确焦点和错误状态；无旧网格、装饰渐变、假终端和假精确产品宣传。
-- [ ] 原型截图与生产页面分开标记，任何未实现 Run、Agent、SSE 和真实模型能力仍保持未实现状态。
+- [x] 生产 `/` 已在 `1440x900`、`1024x768` 和 `390x844` 实际打开并生成截图，页面没有横向溢出。
+- [x] 项目列表、会话列表、新建会话、项目知识入口和索引/导入入口均可找到；真实项目/Session 可切换并刷新恢复。
+- [x] 可从知识页打开和关闭功能图、源码证据，并调整桌面面板宽度；中央滚动、Session 身份和草稿不丢失。
+- [x] 已验证空 Session 不显示无效分页、已有消息显示后续分页入口；空工作区有真实 `/` 截图，原型另有空态截图。
+- [x] 已验证 Enter、Shift+Enter、输入法组合期间不提交、按 Session 隔离草稿，以及 API 离线后的写失败保留草稿与恢复后重试。
+- [x] 证据面板显示 `project_id/index_id/generation_id` 上下文，图筛选位于图工具栏；合成证据不发起无效关系请求。
+- [x] 视觉使用中性背景、单一强调色、明确焦点和错误状态；无旧网格、装饰渐变、假终端和假精确产品宣传。
+- [x] 原型截图与生产页面分开标记，任何未实现 Run、Agent、SSE 和真实模型能力仍保持未实现状态。

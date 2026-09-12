@@ -80,10 +80,12 @@ import {
   unresolvedForSymbol,
   type GraphState,
 } from "../lib/graph";
+import WorkbenchUi from "./workbench-ui";
 
 type IndexUiStatus = "unindexed" | "creating" | "loading" | "ready" | "partial" | "error";
 type AsyncStatus = "idle" | "loading" | "success" | "empty" | "error";
-type WorkbenchView = "overview" | "feature_graph" | "graph" | "session";
+type WorkbenchView = "overview" | "session";
+type WorkbenchPanel = "none" | "source" | "graph" | "feature_graph";
 
 type SymbolNodeData = {
   symbol: SymbolRecord;
@@ -338,6 +340,29 @@ function sessionSelectionStorageKey(projectId: string): string {
   return `codetrail.selectedSessionId:${projectId}`;
 }
 
+function sessionDraftStorageKey(projectId: string, sessionId: string): string {
+  return `${projectId}:${sessionId}`;
+}
+
+function readSessionDrafts(): Record<string, string> {
+  if (typeof window === "undefined") {
+    return {};
+  }
+  try {
+    const value: unknown = JSON.parse(window.localStorage.getItem("codetrail.sessionDrafts") ?? "{}");
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return {};
+    }
+    return Object.fromEntries(
+      Object.entries(value).filter((entry): entry is [string, string] => (
+        typeof entry[0] === "string" && typeof entry[1] === "string" && entry[1].length <= 20_000
+      )),
+    );
+  } catch {
+    return {};
+  }
+}
+
 type EvidenceLink = {
   projectId: string;
   indexId: string;
@@ -436,11 +461,13 @@ export default function Workbench() {
   const [sourceStatus, setSourceStatus] = useState<AsyncStatus>("idle");
   const [sourceResponse, setSourceResponse] = useState<SourceResponse | null>(null);
   const [sourceError, setSourceError] = useState<string | null>(null);
+  const [sourceGenerationId, setSourceGenerationId] = useState<string | null>(null);
   const [sourceWindowStart, setSourceWindowStart] = useState(1);
   const [graphStatus, setGraphStatus] = useState<AsyncStatus>("idle");
   const [graphError, setGraphError] = useState<string | null>(null);
   const [graph, setGraph] = useState<GraphState>(emptyGraphState);
   const [viewMode, setViewMode] = useState<WorkbenchView>("overview");
+  const [panelMode, setPanelMode] = useState<WorkbenchPanel>("none");
   const [overviewStatus, setOverviewStatus] = useState<AsyncStatus>("idle");
   const [overview, setOverview] = useState<ProjectOverview | null>(null);
   const [overviewError, setOverviewError] = useState<string | null>(null);
@@ -471,14 +498,37 @@ export default function Workbench() {
   const [sessionMessagesStatus, setSessionMessagesStatus] = useState<AsyncStatus>("idle");
   const [sessionMessagesError, setSessionMessagesError] = useState<string | null>(null);
   const [sessionTopic, setSessionTopic] = useState("");
-  const [sessionDraft, setSessionDraft] = useState("");
+  const [sessionDrafts, setSessionDrafts] = useState<Record<string, string>>(readSessionDrafts);
   const [sessionWriteStatus, setSessionWriteStatus] = useState<AsyncStatus>("idle");
   const [sessionWriteError, setSessionWriteError] = useState<string | null>(null);
   const [direction, setDirection] = useState<NeighborDirection>("both");
   const [edgeKinds, setEdgeKinds] = useState<EdgeKind[]>(["calls", "imports"]);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
-  const [flowInstance, setFlowInstance] = useState<ReactFlowInstance<FlowNode, FlowEdge> | null>(null);
-  const [featureFlowInstance, setFeatureFlowInstance] = useState<ReactFlowInstance<FeatureFlowNode, FeatureFlowEdge> | null>(null);
+  const [flowInstance, setFlowInstance] = useState<ReactFlowInstance<Node, Edge> | null>(null);
+  const [featureFlowInstance, setFeatureFlowInstance] = useState<ReactFlowInstance<Node, Edge> | null>(null);
+
+  const activeSessionDraftKey = selectedProjectId && selectedSessionId
+    ? sessionDraftStorageKey(selectedProjectId, selectedSessionId)
+    : null;
+  const sessionDraft = activeSessionDraftKey ? sessionDrafts[activeSessionDraftKey] ?? "" : "";
+  const updateSessionDraft = useCallback((value: string) => {
+    if (!activeSessionDraftKey) {
+      return;
+    }
+    setSessionDrafts((previous) => {
+      const next = { ...previous };
+      if (value) {
+        next[activeSessionDraftKey] = value;
+      } else {
+        delete next[activeSessionDraftKey];
+      }
+      return next;
+    });
+  }, [activeSessionDraftKey]);
+
+  useEffect(() => {
+    window.localStorage.setItem("codetrail.sessionDrafts", JSON.stringify(sessionDrafts));
+  }, [sessionDrafts]);
 
   const healthController = useRef<AbortController | null>(null);
   const projectController = useRef<AbortController | null>(null);
@@ -638,10 +688,12 @@ export default function Workbench() {
     setSourceStatus("idle");
     setSourceResponse(null);
     setSourceError(null);
+    setSourceGenerationId(null);
     setGraphStatus("idle");
     setGraphError(null);
     setGraph(emptyGraphState);
     setViewMode("overview");
+    setPanelMode("none");
     setOverviewStatus("idle");
     setOverview(null);
     setOverviewError(null);
@@ -665,7 +717,7 @@ export default function Workbench() {
   }, []);
 
   const loadLinkedEvidence = useCallback(
-    async (link: EvidenceLink, response: IndexResponse) => {
+    async (link: EvidenceLink, response: IndexResponse, generationId: string | null = null) => {
       sourceController.current?.abort();
       const controller = new AbortController();
       sourceController.current = controller;
@@ -681,6 +733,8 @@ export default function Workbench() {
       } satisfies SymbolRecord;
       setLinkedSymbol(linked);
       setSelectedId(linked.symbol_id);
+      setPanelMode("source");
+      setSourceGenerationId(generationId);
       setSourceWindowStart(link.startLine);
       setSourceStatus("loading");
       setSourceError(null);
@@ -998,7 +1052,6 @@ export default function Workbench() {
     setSessionMessagesStatus("idle");
     setSessionMessagesError(null);
     setSessionTopic("");
-    setSessionDraft("");
     setSessionWriteStatus("idle");
     setSessionWriteError(null);
   }, []);
@@ -1071,7 +1124,7 @@ export default function Workbench() {
         ]);
         setSelectedSessionId(sessionId);
         setViewMode("session");
-        setSessionDraft("");
+        setPanelMode("none");
         setSessionWriteStatus("idle");
         setSessionWriteError(null);
         sessionMessageRequest.current = null;
@@ -1138,21 +1191,6 @@ export default function Workbench() {
         setSessionCursor(response.next_cursor);
         setSessionHasMore(response.has_more);
         setSessionStatus(response.sessions.length === 0 && !append ? "empty" : "success");
-        if (!append) {
-          const requested = !sessionLinkApplied.current && sessionLink.current?.projectId === projectId
-            ? sessionLink.current.sessionId
-            : null;
-          const saved = window.localStorage.getItem(sessionSelectionStorageKey(projectId));
-          const candidateId = requested ?? saved;
-          const candidate = candidateId
-            ? response.sessions.find((session) => session.session_id === candidateId)
-            : undefined;
-          if (candidate) {
-            void openSession(projectId, candidate.session_id, candidate);
-          } else if (requested) {
-            void openSession(projectId, requested);
-          }
-        }
       } catch (error) {
         if (isAbortError(error) || !isLatestRequest(requestId, sessionRequestId.current)) {
           return;
@@ -1161,7 +1199,7 @@ export default function Workbench() {
         setSessionError(errorMessage(error));
       }
     },
-    [openSession],
+    [],
   );
 
   const createSession = useCallback(
@@ -1273,7 +1311,7 @@ export default function Workbench() {
             ? { ...session, message_count: Math.max(session.message_count, message.sequence), updated_at: message.created_at }
             : session
         )));
-        setSessionDraft("");
+        updateSessionDraft("");
         setSessionWriteStatus("success");
         setSessionWriteError(null);
         sessionMessageRequest.current = null;
@@ -1285,7 +1323,7 @@ export default function Workbench() {
         setSessionWriteError(errorMessage(error));
       }
     },
-    [selectedProjectId, selectedSessionId, sessionDraft],
+    [selectedProjectId, selectedSessionId, sessionDraft, updateSessionDraft],
   );
 
   const selectFeatureEvidence = useCallback(
@@ -1304,9 +1342,10 @@ export default function Workbench() {
           evidenceId: evidence.evidence_id,
         },
         indexResponse,
+        selectedFeatureGenerationId,
       );
     },
-    [indexResponse, loadLinkedEvidence, selectedProjectId],
+    [indexResponse, loadLinkedEvidence, selectedFeatureGenerationId, selectedProjectId],
   );
 
   const applyIndexResponse = useCallback(
@@ -1397,6 +1436,32 @@ export default function Workbench() {
   }, [loadProjects]);
 
   useEffect(() => {
+    if (!selectedProjectId || sessionStatus !== "success") {
+      return;
+    }
+    const requested = sessionLink.current?.projectId === selectedProjectId
+      ? sessionLink.current.sessionId
+      : null;
+    const saved = requested ? null : window.localStorage.getItem(sessionSelectionStorageKey(selectedProjectId));
+    const target = requested ?? saved;
+    if (!target) {
+      sessionLinkApplied.current = true;
+      return;
+    }
+    if (selectedSessionId === target) {
+      sessionLinkApplied.current = true;
+      setViewMode("session");
+      return;
+    }
+    if (sessionLinkApplied.current) {
+      return;
+    }
+    sessionLinkApplied.current = true;
+    const knownSession = sessions.find((session) => session.session_id === target);
+    void openSession(selectedProjectId, target, knownSession);
+  }, [indexResponse?.index.index_id, openSession, selectedProjectId, selectedSessionId, sessionStatus, sessions]);
+
+  useEffect(() => {
     if (!selectedProjectId) {
       indexController.current?.abort();
       indexRequestId.current += 1;
@@ -1416,6 +1481,7 @@ export default function Workbench() {
     setProjectName(project.name);
     setRepositoryId(project.repository_id);
     window.localStorage.setItem("codetrail.selectedProjectId", project.project_id);
+    sessionLinkApplied.current = false;
     resetSessions();
     void loadSessions(project.project_id);
     void loadSelectedProject(project.project_id);
@@ -1780,6 +1846,7 @@ export default function Workbench() {
       const requestId = ++sourceRequestId.current;
       const endLine = Math.min(symbol.end_line, startLine + 199);
       setSourceWindowStart(startLine);
+      setSourceGenerationId(null);
       setSourceStatus("loading");
       setSourceError(null);
       try {
@@ -1811,6 +1878,7 @@ export default function Workbench() {
   const selectSymbol = useCallback(
     (symbol: SymbolRecord) => {
       setSelectedId(symbol.symbol_id);
+      setPanelMode("source");
       void loadSource(symbol);
     },
     [loadSource],
@@ -1875,8 +1943,10 @@ export default function Workbench() {
         setSelectedId(null);
         setLinkedSymbol(null);
         setSourceResponse(null);
+        setSourceGenerationId(null);
         setSourceStatus(entry.evidence_error ? "error" : "idle");
         setSourceError(entry.evidence_error);
+        setPanelMode("source");
         return;
       }
       const evidence = entry.evidence;
@@ -1905,8 +1975,9 @@ export default function Workbench() {
       if (!module) {
         return;
       }
-      setViewMode("graph");
       selectSymbol(module.symbol);
+      setViewMode("overview");
+      setPanelMode("graph");
       void loadNeighborhood(indexResponse.index.index_id, module.symbol.symbol_id, true);
     },
     [indexResponse, loadNeighborhood, overview, selectSymbol],
@@ -1917,8 +1988,9 @@ export default function Workbench() {
       if (!indexResponse) {
         return;
       }
-      setViewMode("graph");
       selectSymbol(module.symbol);
+      setViewMode("overview");
+      setPanelMode("graph");
       void loadNeighborhood(indexResponse.index.index_id, module.symbol.symbol_id, true);
     },
     [indexResponse, loadNeighborhood, selectSymbol],
@@ -2253,830 +2325,236 @@ export default function Workbench() {
   };
 
   return (
-    <main className="workbench-shell">
-      <header className="workbench-header">
-        <div className="brand-lockup">
-          <span className="brand-mark">CT</span>
-          <div>
-            <p className="eyebrow">CODETRAIL / INDEX LAB</p>
-            <h1>关系勘验台</h1>
-          </div>
-        </div>
-        <div className="header-signal" data-state={connectionState} aria-live="polite">
-          <span className="signal-dot" aria-hidden="true" />
-          <span>{connectionState === "connected" ? "API ONLINE" : connectionState === "checking" ? "API CHECKING" : "API OFFLINE"}</span>
-          {health ? <small>v{health.version}</small> : null}
-        </div>
-      </header>
-
-      <section className="project-bar panel-surface" aria-label="工作区项目">
-        <div className="project-bar-heading">
-          <div>
-            <p className="section-index">00 / WORKSPACE</p>
-            <h2>项目工作区</h2>
-          </div>
-          <span className="status-pill" data-state={projectStatus}>
-            {projectStatus === "loading" ? "同步中" : projectStatus === "error" ? "加载失败" : `${projects.length} 个项目`}
-          </span>
-        </div>
-        <div className="project-bar-body">
-          <div className="project-list" aria-label="项目列表">
-            {projects.length > 0 ? projects.map((project) => (
-              <button
-                type="button"
-                className={`project-card${project.project_id === selectedProjectId ? " is-selected" : ""}`}
-                key={project.project_id}
-                onClick={() => setSelectedProjectId(project.project_id)}
-                aria-label={`切换项目 ${project.name}`}
-              >
-                <span className="project-card-mark" aria-hidden="true">{project.name.slice(0, 1).toUpperCase()}</span>
-                <span className="project-card-copy">
-                  <strong>{project.name}</strong>
-                  <small>{project.repository_id} · {project.available_index_ids.length > 0 ? `${project.available_index_ids.length} 个快照` : "未索引"}</small>
-                </span>
-                <span className="project-card-state">{project.project_id === selectedProjectId ? "当前" : "切换"}</span>
-              </button>
-            )) : (
-              <div className="project-empty"><span>∅</span><p>还没有项目，先创建一个服务端仓库项目。</p></div>
-            )}
-          </div>
-          <div className="session-rail" aria-label="当前项目会话">
-            <div className="session-rail-heading">
-              <div>
-                <span className="section-index">ISSUE SESSION</span>
-                <strong>继续排查</strong>
-              </div>
-              <span className="graph-status" data-state={sessionStatus}>
-                {sessionStatus === "loading" ? "载入中" : sessionStatus === "error" ? "失败" : `${sessions.length} 个会话`}
-              </span>
-            </div>
-            <form className="session-create-form" onSubmit={(event) => void createSession(event)}>
-              <label htmlFor="session-topic">新会话主题</label>
-              <div className="session-create-row">
-                <input
-                  id="session-topic"
-                  value={sessionTopic}
-                  onChange={(event) => {
-                    setSessionTopic(event.target.value);
-                    setSessionError(null);
-                  }}
-                  placeholder="例如：timeout 配置为什么会失败？"
-                  maxLength={500}
-                />
-                <button type="submit" className="primary-button" disabled={!selectedProjectId || sessionWriteStatus === "loading"}>
-                  {sessionWriteStatus === "loading" ? "保存中…" : "新建会话"}
-                </button>
-              </div>
-            </form>
-            {sessionError ? <p className="inline-error" role="alert">{sessionError}</p> : null}
-            {sessions.length > 0 ? (
-              <div className="session-list" aria-live="polite">
-                {sessions.map((session) => (
-                  <button
-                    type="button"
-                    className={`session-card${selectedSessionId === session.session_id ? " is-selected" : ""}`}
-                    key={session.session_id}
-                    onClick={() => selectSession(session.session_id)}
-                    aria-pressed={selectedSessionId === session.session_id}
-                  >
-                    <span className="session-card-copy">
-                      <strong>{session.topic}</strong>
-                      <small>{session.message_count} 条消息 · {session.index.revision} · {session.index.snapshot_hash.slice(0, 10)}</small>
-                    </span>
-                    <span className="session-card-time">{formatFeatureCreatedAt(session.updated_at)}</span>
-                  </button>
-                ))}
-              </div>
-            ) : sessionStatus === "empty" ? (
-              <p className="session-empty">当前项目还没有会话；创建后会固定到当前可用快照。</p>
-            ) : null}
-            {sessionHasMore ? (
-              <button
-                type="button"
-                className="text-button session-more"
-                onClick={() => selectedProjectId && void loadSessions(selectedProjectId, sessionCursor, true)}
-                disabled={sessionStatus === "loading"}
-              >
-                加载更多会话
-              </button>
-            ) : null}
-          </div>
-          <div className="project-forms">
-            <form className="project-create-form" onSubmit={(event) => void createNewProject(event)}>
-              <label htmlFor="project-name">新项目名称</label>
-              <input
-                id="project-name"
-                value={projectName}
-                onChange={(event) => setProjectName(event.target.value)}
-                placeholder="Timeout Demo"
-                spellCheck={false}
-              />
-              <label htmlFor="project-repository">来源 repository_id</label>
-              <input
-                id="project-repository"
-                value={repositoryId}
-                onChange={(event) => setRepositoryId(event.target.value)}
-                placeholder="timeout-demo"
-                spellCheck={false}
-              />
-              <button type="submit" className="primary-button" disabled={projectStatus === "loading"}>
-                {projectStatus === "loading" ? "保存中…" : "创建项目"}
-              </button>
-            </form>
-            <form className="project-create-form project-import-form" onSubmit={(event) => void importLocalProject(event)}>
-              <label htmlFor="import-name">导入本地目录 / 项目名称</label>
-              <input
-                id="import-name"
-                value={importName}
-                onChange={(event) => setImportName(event.target.value)}
-                placeholder="Local project"
-                spellCheck={false}
-              />
-              <label htmlFor="local-path">API 服务端绝对路径</label>
-              <input
-                id="local-path"
-                value={localPath}
-                onChange={(event) => setLocalPath(event.target.value)}
-                placeholder="D:\\projects\\my-repo"
-                spellCheck={false}
-              />
-              <small className="form-help">路径由 API 服务端读取，不是浏览器本机路径；来源目录保持只读。</small>
-              <button type="submit" className="primary-button" disabled={importStatus === "queued" || importStatus === "acquiring" || importStatus === "indexing"}>
-                {importStatus === "indexing" ? "建立中…" : "导入并建立索引"}
-              </button>
-              {importAttempt ? (
-                <div className="import-status" data-state={importAttempt.status}>
-                  <span>{importStatusLabel(importAttempt.status)}</span>
-                  <code>{importAttempt.attempt_id}</code>
-                  {importAttempt.status === "failed" || importAttempt.status === "interrupted" ? (
-                    <button type="button" className="text-button" onClick={() => void retryLocalProjectImport()}>
-                      重试
-                    </button>
-                  ) : null}
-                </div>
-              ) : null}
-            </form>
-            <form className="project-create-form project-import-form" onSubmit={(event) => void importGitHubProject(event)}>
-              <label htmlFor="github-import-name">导入 GitHub 仓库 / 项目名称</label>
-              <input
-                id="github-import-name"
-                value={githubImportName}
-                onChange={(event) => setGithubImportName(event.target.value)}
-                placeholder="GitHub Python project"
-                spellCheck={false}
-              />
-              <label htmlFor="github-url">公开 GitHub HTTPS 地址</label>
-              <input
-                id="github-url"
-                value={githubUrl}
-                onChange={(event) => setGithubUrl(event.target.value)}
-                placeholder="https://github.com/owner/repository"
-                spellCheck={false}
-                inputMode="url"
-              />
-              <label htmlFor="github-ref">分支 / tag / commit（可选）</label>
-              <input
-                id="github-ref"
-                value={githubRef}
-                onChange={(event) => setGithubRef(event.target.value)}
-                placeholder="留空使用默认分支"
-                spellCheck={false}
-              />
-              <small className="form-help">只获取 GitHub 官方 archive，并固定到解析出的 commit；仅索引 Python 文件。</small>
-              <button type="submit" className="primary-button" disabled={githubImportStatus === "queued" || githubImportStatus === "acquiring" || githubImportStatus === "indexing"}>
-                {githubImportStatus === "acquiring" ? "获取中…" : githubImportStatus === "indexing" ? "建立中…" : "导入 GitHub 仓库"}
-              </button>
-              {githubImportAttempt ? (
-                <div className="import-status" data-state={githubImportAttempt.status}>
-                  <span>{importStatusLabel(githubImportAttempt.status)}</span>
-                  <code>{githubImportAttempt.resolved_commit?.slice(0, 12) ?? githubImportAttempt.attempt_id}</code>
-                  {githubImportAttempt.status === "failed" || githubImportAttempt.status === "interrupted" ? (
-                    <button type="button" className="text-button" onClick={() => void retryGitHubProjectImport()}>
-                      重试
-                    </button>
-                  ) : null}
-                  {githubImportAttempt.cleanup_status === "failed" ? (
-                    <button type="button" className="text-button" onClick={() => void retryGitHubCleanup()}>
-                      清理临时目录
-                    </button>
-                  ) : null}
-                  {githubImportAttempt.status === "ready" ? (
-                    <small>commit {githubImportAttempt.resolved_commit?.slice(0, 12)} · snapshot {githubImportAttempt.content_hash?.slice(0, 12)}{githubImportAttempt.cleanup_status === "failed" ? " · 清理待重试" : ""}</small>
-                  ) : null}
-                </div>
-              ) : null}
-            </form>
-          </div>
-        </div>
-      </section>
-
-      <section className="command-bar" aria-label="索引控制">
-        <form className="command-group" onSubmit={(event) => void createNewIndex(event)}>
-          <label>当前项目 / 服务端仓库</label>
-          <div className="command-input-row">
-            <div className="project-context-readout">
-              <strong>{selectedProject?.name ?? "未选择项目"}</strong>
-              <code>{selectedProject?.repository_id ?? "—"}</code>
-            </div>
-            <input
-              aria-label="索引 revision"
-              value={revision}
-              onChange={(event) => setRevision(event.target.value)}
-              placeholder="working-tree"
-              spellCheck={false}
-            />
-            <label className="toggle-field">
-              <input type="checkbox" checked={dirty} onChange={(event) => setDirty(event.target.checked)} />
-              <span>dirty</span>
-            </label>
-            <button type="submit" className="primary-button" disabled={!selectedProjectId || indexStatus === "creating"}>
-              {indexStatus === "creating" ? "建立中…" : "创建索引"}
-            </button>
-          </div>
-        </form>
-        <form className="command-group command-open" onSubmit={(event) => void openExistingIndex(event)}>
-          <label htmlFor="index-id">打开当前项目已有 index_id · {projectIndexes.length} 个快照</label>
-          <div className="command-input-row">
-            <input
-              id="index-id"
-              value={indexIdInput}
-              onChange={(event) => setIndexIdInput(event.target.value)}
-              placeholder="index-timeout-demo-…"
-              spellCheck={false}
-            />
-            <button type="submit" className="secondary-button" disabled={!selectedProjectId || indexStatus === "loading"}>
-              {indexStatus === "loading" ? "载入中…" : "打开"}
-            </button>
-          </div>
-        </form>
-        <button type="button" className="health-button" onClick={() => void checkHealth()} disabled={connectionState === "checking"}>
-          {connectionState === "checking" ? "连接检查中" : "重试 API"}
-        </button>
-      </section>
-
-      {indexError || connectionError || projectError || importError || githubImportError ? (
-        <div className="global-alert" role="alert">
-          <span>{indexError ?? projectError ?? importError ?? githubImportError ?? connectionError}</span>
-          {connectionState === "error" ? (
-            <button type="button" onClick={() => void checkHealth()}>
-              重新检查
-            </button>
-          ) : null}
-        </div>
-      ) : null}
-
-      <section className="index-ribbon" aria-label="当前索引状态">
-        <div className="ribbon-status" data-state={indexStatus}>
-          <span className="ribbon-dot" aria-hidden="true" />
-          <strong>{indexStatusLabel(indexStatus)}</strong>
-        </div>
-        {indexIdentity ? (
-          <>
-            <span className="ribbon-item"><small>REPOSITORY</small><code>{indexIdentity.repository_id}</code></span>
-            <span className="ribbon-item"><small>INDEX</small><code>{indexIdentity.index_id}</code></span>
-            <span className="ribbon-item"><small>REVISION</small><code>{indexIdentity.revision}</code></span>
-            <span className="ribbon-item"><small>WORKTREE</small><code>{indexIdentity.dirty ? "DIRTY" : "CLEAN"}</code></span>
-            <span className="ribbon-item"><small>SNAPSHOT</small><code>{indexIdentity.snapshot_hash.slice(0, 12)}</code></span>
-          </>
-        ) : (
-          <span className="ribbon-empty">创建或打开一个服务端允许的索引，开始浏览固定快照。</span>
-        )}
-      </section>
-
-      <div className="workbench-grid">
-        <aside className="search-panel panel-surface" aria-label="符号搜索">
-          <div className="panel-heading">
-            <div>
-              <p className="section-index">01 / TRACE</p>
-              <h2>符号检索</h2>
-            </div>
-            <span className="status-pill" data-state={searchStatus}>{queryStatusLabel(searchStatus)}</span>
-          </div>
-          <form className="search-form" onSubmit={(event) => void runSearch(event)}>
-            <label htmlFor="symbol-search">符号名或源码关键词</label>
-            <div className="search-input-row">
-              <input
-                id="symbol-search"
-                value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
-                placeholder="例如 load_settings"
-                spellCheck={false}
-              />
-              <button type="submit" aria-label="执行搜索" disabled={!indexResponse || searchStatus === "loading"}>
-                ↗
-              </button>
-            </div>
-          </form>
-          {searchError ? <p className="inline-error">{searchError}</p> : null}
-          {searchStatus === "empty" ? <div className="empty-state compact"><span>∅</span><p>没有找到匹配符号。</p></div> : null}
-          {searchResults.length > 0 ? (
-            <div className="result-list" aria-live="polite">
-              <div className="result-list-meta"><span>{searchResults.length} 个候选</span><span>按相关性</span></div>
-              {searchResults.map((match) => (
-                <button
-                  type="button"
-                  className={`result-item${selectedId === match.symbol.symbol_id ? " is-selected" : ""}`}
-                  key={match.symbol.symbol_id}
-                  onClick={() => handleSearchResult(match)}
-                >
-                  <span className="result-rank">{String(match.rank).padStart(2, "0")}</span>
-                  <span className="result-copy">
-                    <strong>{match.symbol.qualified_name}</strong>
-                    <small>{match.symbol.path}:{match.symbol.start_line} · {match.symbol.kind}</small>
-                  </span>
-                  <span className="result-arrow">↗</span>
-                </button>
-              ))}
-            </div>
-          ) : null}
-          {searchStatus === "loading" ? <div className="loading-note"><span className="loader" /> 正在读取索引命中…</div> : null}
-          <div className="search-footnote">搜索只返回当前 index_id 的符号与源码命中，不等于已确认影响。</div>
-        </aside>
-
-        <section className="graph-panel panel-surface" aria-label={viewMode === "overview" ? "项目知识页" : viewMode === "feature_graph" ? "功能关系图" : viewMode === "session" ? "Issue 会话" : "代码关系图"}>
-          <div className="panel-heading graph-heading">
-            <div>
-              <p className="section-index">02 / TOPOLOGY</p>
-              <h2>{viewMode === "overview" ? "项目知识页" : viewMode === "feature_graph" ? "功能关系图" : viewMode === "session" ? "Issue Session" : "关系图谱"} <span>{viewMode === "overview" ? `${overview?.coverage.visible_modules ?? 0} modules` : viewMode === "feature_graph" ? `${featureGraph?.nodes.length ?? 0}/40` : viewMode === "session" ? `${sessionMessages.length} messages` : `${graph.symbols.length}/40`}</span></h2>
-            </div>
-            <div className="graph-actions">
-              <div className="view-toggle" role="tablist" aria-label="工作台视图">
-                <button type="button" role="tab" aria-selected={viewMode === "overview"} className={viewMode === "overview" ? "is-active" : ""} onClick={() => setViewMode("overview")}>知识页</button>
-                <button type="button" role="tab" aria-selected={viewMode === "feature_graph"} className={viewMode === "feature_graph" ? "is-active" : ""} onClick={() => setViewMode("feature_graph")} disabled={!featureGeneration}>功能图</button>
-                <button type="button" role="tab" aria-selected={viewMode === "graph"} className={viewMode === "graph" ? "is-active" : ""} onClick={() => setViewMode("graph")}>代码关系</button>
-                <button type="button" role="tab" aria-selected={viewMode === "session"} className={viewMode === "session" ? "is-active" : ""} onClick={() => selectedSessionId && setViewMode("session")} disabled={!selectedSessionId}>会话</button>
-              </div>
-              {viewMode === "feature_graph" ? (
-                <button type="button" className="focus-button" onClick={() => featureFlowInstance?.fitView({ padding: 0.18, duration: 320 })} disabled={!featureFlowModel.nodes.length}>聚焦</button>
-              ) : viewMode === "graph" ? (
-                <>
-                  <label className="compact-select-label">方向
-                    <select value={direction} onChange={(event) => changeDirection(event.target.value as NeighborDirection)} disabled={!selectedId}>
-                      <option value="both">双向</option>
-                      <option value="callers">调用方</option>
-                      <option value="callees">被调用方</option>
-                    </select>
-                  </label>
-                  <label className="filter-toggle"><input type="checkbox" checked={edgeKinds.includes("calls")} onChange={() => toggleEdgeKind("calls")} disabled={!selectedId} /><span>calls</span></label>
-                  <label className="filter-toggle"><input type="checkbox" checked={edgeKinds.includes("imports")} onChange={() => toggleEdgeKind("imports")} disabled={!selectedId} /><span>imports</span></label>
-                  <button type="button" className="focus-button" onClick={() => flowInstance?.fitView({ padding: 0.18, duration: 320 })} disabled={!flowModel.nodes.length}>聚焦</button>
-                </>
-              ) : viewMode === "session" ? (
-                <button type="button" className="focus-button" onClick={() => setViewMode("overview")}>返回知识页</button>
-              ) : null}
-            </div>
-          </div>
-          {viewMode === "overview" ? (
-            <div className="graph-status-row">
-              <span className="graph-status" data-state={overviewStatus}>{overviewStatusLabel(overviewStatus, overview)}</span>
-              {overview?.truncated ? <span className="truncated-badge">已截断 · {overview.truncation_reason}</span> : null}
-              {overviewError ? <span className="inline-error">{overviewError}</span> : null}
-            </div>
-          ) : viewMode === "feature_graph" ? (
-            <div className="graph-status-row">
-              <span className="graph-status" data-state={featureGraphStatus}>{featureGraphStatus === "loading" ? "功能图载入中" : featureGraphStatus === "error" ? "功能图请求失败" : featureGraphStatus === "empty" ? "当前版本没有可展开节点" : featureGraphStatus === "success" ? "语义 / 静态关系已分开" : "选择一个已保存版本载入功能图"}</span>
-              {featureGraph?.truncated ? <span className="truncated-badge">已截断 · {featureGraph.truncation_reason}</span> : null}
-              {featureGraphError ? <span className="inline-error">{featureGraphError}</span> : null}
-            </div>
-          ) : viewMode === "session" ? (
-            <div className="graph-status-row">
-              <span className="graph-status" data-state={sessionMessagesStatus}>
-                {sessionMessagesStatus === "loading" ? "消息载入中" : sessionMessagesStatus === "error" ? "消息载入失败" : sessionMessagesStatus === "empty" ? "暂无消息" : "仅保存消息"}
-              </span>
-              <span className="session-boundary-note">不启动 Run，不调用模型；消息会作为不可信输入保存。</span>
-              {sessionMessagesError ? <span className="inline-error">{sessionMessagesError}</span> : null}
-            </div>
-          ) : (
-            <div className="graph-status-row">
-              <span className="graph-status" data-state={graphStatus}>{graphStatus === "loading" ? "载入关系中" : graphStatus === "error" ? "关系请求失败" : graphStatus === "empty" ? "当前方向没有静态边" : graphStatus === "success" ? "当前为已加载局部图" : "选择搜索命中后载入关系"}</span>
-              {graph.truncated ? <span className="truncated-badge">已截断 · {graph.truncationReason}</span> : null}
-              {graphError ? <span className="inline-error">{graphError}</span> : null}
-            </div>
-          )}
-          {viewMode === "overview" ? (
-            <div className="overview-stage">
-              {overviewStatus === "loading" ? (
-                <div className="loading-note"><span className="loader" /> 正在从当前不可变快照生成概览…</div>
-              ) : overviewStatus === "error" ? (
-                <div className="graph-empty"><div className="graph-crosshair" aria-hidden="true"><span /><span /></div><p>项目概览请求失败。</p><small>{overviewError ?? "请重试或切换到其他索引。"}</small><button type="button" className="secondary-button" onClick={() => indexResponse && selectedProjectId && void loadOverview(selectedProjectId, indexResponse.index.index_id)}>重试</button></div>
-              ) : overview ? (
-                <div className="overview-content">
-                  <div className="overview-summary">
-                    <div><span className="overview-kicker">RULES / {overview.rules_version}</span><strong>{overview.entry_status === "not_identified" ? "没有命中当前入口规则" : `${overview.entries.length} 个入口候选`}</strong><small>只展示当前 index_id 的静态事实；未识别不等于项目没有入口。</small></div>
-                    <div className="overview-metrics"><span><b>{overview.coverage.reachable_modules}</b> reachable</span><span><b>{overview.coverage.unreachable_modules}</b> other modules</span><span><b>{overview.paths.length}</b> paths</span><span><b>{overview.unresolved.length}</b> unresolved</span></div>
-                  </div>
-                  <section className="feature-generation-section" aria-label="主要功能语义识别">
-                    <div className="subsection-heading"><span>O2 / FEATURE SEMANTICS</span><em>{featureGeneration?.features.length ?? "—"}</em></div>
-                    <div className="feature-generation-intro">
-                      <p>根据当前不可变快照中实际返回的入口、模块、符号和源码证据，生成有边界的主要功能描述。</p>
-                      <small>生成是显式操作；fixture 不需要密钥，real 使用 API 服务端配置并可能产生模型费用。</small>
-                    </div>
-                    <div className="feature-history" aria-label="已保存功能版本">
-                      <div className="feature-history-heading">
-                        <span>已保存版本 · 当前快照</span>
-                        <span className="graph-status" data-state={featureHistoryStatus}>
-                          {featureHistoryStatus === "loading" ? "历史载入中" : featureHistoryStatus === "error" ? "历史失败" : `${featureHistory.length} 个版本`}
-                        </span>
-                      </div>
-                      {featureHistoryError ? <div className="feature-error" role="alert">{featureHistoryError}<button type="button" className="text-button" onClick={() => indexResponse && selectedProjectId && void loadFeatureHistory(selectedProjectId, indexResponse.index.index_id)}>重试</button></div> : null}
-                      {featureHistory.length > 0 ? (
-                        <div className="feature-history-list">
-                          {featureHistory.map((generation) => (
-                            <button
-                              type="button"
-                              className={`feature-history-card${selectedFeatureGenerationId === generation.generation_id ? " is-selected" : ""}`}
-                              key={generation.generation_id}
-                              onClick={() => selectFeatureGeneration(generation.generation_id)}
-                              aria-pressed={selectedFeatureGenerationId === generation.generation_id}
-                            >
-                              <span className="feature-history-card-top">
-                                <strong>{savedFeatureStatusLabel(generation.status)}</strong>
-                                <span>{generation.mode === "fixture" ? "FIXTURE" : "REAL"} · {formatFeatureCreatedAt(generation.created_at)}</span>
-                              </span>
-                              <span className="feature-history-card-id"><code>{generation.generation_id}</code><code>{generation.index.revision} · {generation.index.snapshot_hash.slice(0, 12)}</code></span>
-                              <span className="feature-history-card-stats">{generation.feature_count} 功能 · {generation.evidence_count} 证据 · {generation.rules_version}</span>
-                              <span className="feature-history-card-summary">{generation.summary}</span>
-                              {generation.error ? <span className="feature-history-card-error">{generation.error.message}</span> : null}
-                            </button>
-                          ))}
-                        </div>
-                      ) : featureHistoryStatus === "empty" ? (
-                        <p className="feature-history-empty">当前 index_id 没有已保存版本；点击下方按钮显式生成。</p>
-                      ) : null}
-                      {featureHistoryHasMore ? <button type="button" className="secondary-button feature-history-more" onClick={() => indexResponse && selectedProjectId && void loadFeatureHistory(selectedProjectId, indexResponse.index.index_id, featureHistoryCursor, true)} disabled={featureHistoryStatus === "loading"}>加载更多版本</button> : null}
-                    </div>
-                    <div className="feature-generation-controls">
-                      <label className="feature-control">模式
-                        <select
-                          value={featureMode}
-                          onChange={(event) => resetFeatureRequest(() => setFeatureMode(event.target.value as FeatureGenerationMode))}
-                          disabled={featureStatus === "loading"}
-                        >
-                          <option value="fixture">fixture / 离线</option>
-                          <option value="real">real / 服务端模型</option>
-                        </select>
-                      </label>
-                      <label className="feature-control">源码范围
-                        <select
-                          value={featureSourceScope}
-                          onChange={(event) => resetFeatureRequest(() => setFeatureSourceScope(event.target.value as FeatureSourceScope))}
-                          disabled={featureStatus === "loading"}
-                        >
-                          <option value="entry_reachable">入口可达模块</option>
-                          <option value="visible_modules">当前可见模块</option>
-                        </select>
-                      </label>
-                      <div className="feature-generation-actions">
-                        <button
-                          type="button"
-                          className="primary-button"
-                          onClick={() => void runFeatureGeneration()}
-                          disabled={!indexResponse || featureStatus === "loading"}
-                        >
-                          {featureStatus === "loading" ? "生成中…" : "识别主要功能"}
-                        </button>
-                        {featureGeneration ? (
-                          <button type="button" className="secondary-button" onClick={loadSavedFeatureGeneration} disabled={featureStatus === "loading"}>
-                            重读已保存结果
-                          </button>
-                        ) : null}
-                      </div>
-                    </div>
-                    <div className="feature-scope-note">
-                      <span className="graph-status" data-state={featureStatus}>{featureStatusLabel(featureStatus, featureGeneration)}</span>
-                      <span>{featureSourceScope === "entry_reachable" ? "只查询入口可达模块；未查询模块不会被当作不存在。" : "在当前可见模块内查询，但仍受工具、源码、输入和输出预算限制。"}</span>
-                    </div>
-                    {featureStatus === "loading" ? <div className="loading-note"><span className="loader" /> 正在收集有界证据并生成语义摘要…</div> : null}
-                    {featureError && !featureGeneration ? (
-                      <div className="feature-error" role="alert">
-                        <span>{featureError}</span>
-                        <button type="button" className="text-button" onClick={() => void runFeatureGeneration()}>重试</button>
-                      </div>
-                    ) : null}
-                    {featureGeneration ? (
-                      <div className="feature-generation-result">
-                        <div className="feature-generation-meta">
-                          <span className="feature-status-badge" data-state={featureGeneration.status}>{featureGeneration.status}</span>
-                          {featureGeneration.mode === "fixture" ? <span className="fixture-badge">FIXTURE / OFFLINE</span> : <span className="real-badge">REAL / SERVER CONFIG</span>}
-                          <code title={featureGeneration.model ?? "未配置模型"}>{featureGeneration.model ?? "未配置模型"}</code>
-                          <small>{featureGeneration.source_paths.length} 个源码文件 · {featureGeneration.usage.tool_calls} 次工具 · {featureGeneration.usage.model_calls} 次模型 · {featureGeneration.usage.elapsed_ms} ms</small>
-                        </div>
-                        <p className="feature-generation-summary">{featureGeneration.summary}</p>
-                        {featureGeneration.error ? (
-                          <div className="feature-error" role="alert">
-                            <span>{featureGeneration.error.message}</span>
-                            <button type="button" className="text-button" onClick={() => void runFeatureGeneration(true)}>重试</button>
-                          </div>
-                        ) : null}
-                        {featureGeneration.truncated ? <p className="feature-warning">上下文已截断：{featureGeneration.truncation_reason}</p> : null}
-                        {featureGeneration.omitted_module_ids.length > 0 ? <p className="feature-warning">未查询模块 {featureGeneration.omitted_module_ids.length} 个；它们未被当作没有功能。</p> : null}
-                        {featureGeneration.features.length > 0 ? (
-                          <div className="feature-list">
-                            {featureGeneration.features.map((feature) => (
-                              <article className="feature-card" key={feature.feature_id}>
-                                <div className="feature-card-heading">
-                                  <strong>{feature.name}</strong>
-                                  <span>{feature.symbol_ids.length} symbols · {feature.evidence_ids.length} evidence</span>
-                                </div>
-                                <p>{feature.description}</p>
-                                <div className="feature-ref-row">
-                                  <span>入口 {feature.entry_point_ids.length}</span>
-                                  <span>模块 {feature.module_ids.length}</span>
-                                  <span>静态符号 {feature.symbol_ids.length}</span>
-                                </div>
-                                <div className="feature-evidence-list">
-                                  {feature.evidence_ids.map((evidenceId) => {
-                                    const evidence = featureGeneration.evidence.find((item) => item.evidence_id === evidenceId);
-                                    return evidence ? (
-                                      <button type="button" className="feature-evidence-button" key={evidenceId} onClick={() => selectFeatureEvidence(evidence)}>
-                                        {evidence.path}:L{evidence.start_line}–L{evidence.end_line}
-                                      </button>
-                                    ) : <span className="feature-missing-evidence" key={evidenceId}>缺少证据 {evidenceId}</span>;
-                                  })}
-                                </div>
-                                {feature.limitations.length > 0 ? <small className="feature-card-limitations">{feature.limitations.join(" · ")}</small> : null}
-                              </article>
-                            ))}
-                          </div>
-                        ) : (
-                          <p className="feature-empty">{featureGeneration.status === "insufficient_evidence" ? "当前快照没有收集到足够的入口或源码证据，未生成功能结论。" : "本次没有返回可展示的功能。"}</p>
-                        )}
-                        {featureGeneration.associations.length > 0 ? (
-                          <details className="feature-associations">
-                            <summary>查看 {featureGeneration.associations.length} 条功能关联（与静态 CodeEdge 分开）</summary>
-                            {featureGeneration.associations.map((association) => (
-                              <div className="feature-association" key={association.association_id}>
-                                <code>{association.relation}</code>
-                                <span>{association.target_kind}:{association.target_id}</span>
-                                <small>{association.evidence_ids.length} 条证据</small>
-                              </div>
-                            ))}
-                          </details>
-                        ) : null}
-                        {featureGeneration.limitations.length > 0 ? (
-                          <div className="feature-limitations">
-                            <span>边界与限制</span>
-                            {featureGeneration.limitations.map((limitation) => <p key={limitation}>{limitation}</p>)}
-                          </div>
-                        ) : null}
-                      </div>
-                    ) : null}
-                  </section>
-                  <div className="overview-section">
-                    <div className="subsection-heading"><span>ENTRY CANDIDATES</span><em>{overview.entries.length}</em></div>
-                    {overview.entries.length > 0 ? overview.entries.map((entry) => (
-                      <div className={`overview-entry-row${selectedOverviewEntryId === entry.entry_point_id ? " is-selected" : ""}`} key={entry.entry_point_id}>
-                        <button type="button" className="overview-entry-button" onClick={() => selectOverviewEntry(entry)}>
-                          <span className="overview-entry-kind">{entry.kind === "python_main_module" ? "MODULE" : "GUARD"}</span>
-                          <span className="overview-entry-copy"><strong>{entry.label}</strong><small>{entry.path}:L{entry.start_line}–L{entry.end_line} · {entry.rule_id}</small></span>
-                          <span className="result-arrow">↗</span>
-                        </button>
-                        <button type="button" className="overview-link-button" onClick={() => openOverviewEntryGraph(entry)} disabled={!entry.symbol_id}>关系图</button>
-                      </div>
-                    )) : <p className="overview-note">{overview.notes[0] ?? "当前规则没有识别到入口。"}</p>}
-                  </div>
-                  <div className="overview-section">
-                    <div className="subsection-heading"><span>MODULE COVERAGE</span><em>{overview.modules.length}/{overview.coverage.total_modules}</em></div>
-                    <div className="overview-module-list">
-                      {overview.modules.map((module) => (
-                        <button type="button" className="overview-module-button" key={module.module_id} onClick={() => openOverviewModule(module)}>
-                          <span className={`overview-reachability${module.entry_reachable ? " is-reachable" : ""}`}>{module.entry_reachable ? "REACHABLE" : "OTHER"}</span>
-                          <span className="overview-entry-copy"><strong>{module.symbol.qualified_name}</strong><small>{module.symbol.path} · {module.entry_point_ids.length > 0 ? `${module.entry_point_ids.length} 个入口` : "未从入口路径到达"}</small></span>
-                          <span className="result-arrow">↗</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="overview-notes">
-                    <div className="subsection-heading"><span>BOUNDARIES</span><em>{overview.notes.length}</em></div>
-                    {overview.notes.map((note) => <p key={note}>{note}</p>)}
-                  </div>
-                </div>
-              ) : (
-                <div className="graph-empty"><div className="graph-crosshair" aria-hidden="true"><span /><span /></div><p>{indexResponse ? "等待项目概览。" : "建立或打开索引后，这里会显示项目概览。"}</p><small>概览绑定同一 project_id 与 index_id，不执行仓库代码。</small></div>
-              )}
-            </div>
-          ) : viewMode === "feature_graph" ? (
-            <div className="graph-stage feature-graph-stage">
-              {featureGraphStatus === "loading" ? (
-                <div className="loading-note"><span className="loader" /> 正在从已保存版本组装功能图…</div>
-              ) : featureGraphStatus === "error" ? (
-                <div className="graph-empty"><div className="graph-crosshair" aria-hidden="true"><span /><span /></div><p>功能图请求失败。</p><small>{featureGraphError ?? "请重试或重新选择已保存版本。"}</small><button type="button" className="secondary-button" onClick={() => selectedProjectId && indexResponse && featureGeneration && void loadFeatureGraph(selectedProjectId, indexResponse.index.index_id, featureGeneration.generation_id)}>重试</button></div>
-              ) : featureGraph ? (
-                <>
-                  <div className="feature-graph-legend" aria-label="功能图关系图例"><span><i data-origin="semantic" />语义关联</span><span><i data-origin="static" />静态 CodeEdge</span></div>
-                  {featureGraph.nodes.length > 0 ? (
-                    <ReactFlow<FeatureFlowNode, FeatureFlowEdge>
-                      nodes={featureFlowModel.nodes}
-                      edges={featureFlowModel.edges}
-                      nodeTypes={featureNodeTypes}
-                      onInit={setFeatureFlowInstance}
-                      onNodeClick={(_event, node) => {
-                        const graphNode = featureGraph.nodes.find((candidate) => candidate.node_id === node.id);
-                        if (graphNode) {
-                          selectFeatureGraphNode(graphNode);
-                        }
-                      }}
-                      fitView
-                      fitViewOptions={{ padding: 0.18 }}
-                      nodesConnectable={false}
-                      nodesDraggable={false}
-                      elementsSelectable
-                      minZoom={0.25}
-                      maxZoom={1.8}
-                    >
-                      <Background color="#2a413d" gap={24} size={1} />
-                      <Controls showInteractive={false} position="bottom-left" />
-                      <MiniMap pannable zoomable nodeColor={(node) => node.type === "feature" ? "#f3a65b" : "#79c8c2"} maskColor="rgba(10, 20, 18, 0.72)" position="bottom-right" />
-                    </ReactFlow>
-                  ) : (
-                    <div className="graph-empty"><div className="graph-crosshair" aria-hidden="true"><span /><span /></div><p>当前版本没有可展开功能节点。</p><small>失败或证据不足版本仍保留在历史中，但不会伪装成当前成功结论。</small></div>
-                  )}
-                  {featureGraph.limitations.length > 0 || featureGraph.unavailable_target_ids.length > 0 ? (
-                    <div className="feature-graph-limitations"><strong>图边界</strong>{featureGraph.limitations.map((limitation) => <span key={limitation}>{limitation}</span>)}{featureGraph.unavailable_target_ids.length > 0 ? <span>未映射目标 {featureGraph.unavailable_target_ids.length} 个：{featureGraph.unavailable_target_ids.join(", ")}</span> : null}</div>
-                  ) : null}
-                </>
-              ) : (
-                <div className="graph-empty"><div className="graph-crosshair" aria-hidden="true"><span /><span /></div><p>选择一个已保存功能版本。</p><small>功能图只读取保存的功能结果和同一 index_id 的静态关系，不会再次调用模型。</small></div>
-              )}
-            </div>
-          ) : viewMode === "session" ? (
-            <div className="session-stage">
-              {selectedSessionId ? (
-                <>
-                  {sessions.find((session) => session.session_id === selectedSessionId) ? (
-                    <div className="session-stage-heading">
-                      <div>
-                        <span className="overview-kicker">SESSION / FIXED SNAPSHOT</span>
-                        <h3>{sessions.find((session) => session.session_id === selectedSessionId)?.topic}</h3>
-                      </div>
-                      <div className="session-stage-meta">
-                        <code>{sessions.find((session) => session.session_id === selectedSessionId)?.index.revision}</code>
-                        <small>{sessions.find((session) => session.session_id === selectedSessionId)?.index.snapshot_hash.slice(0, 12)}</small>
-                      </div>
-                    </div>
-                  ) : null}
-                  {sessionMessagesStatus === "loading" && sessionMessages.length === 0 ? (
-                    <div className="loading-note"><span className="loader" /> 正在读取这个会话的消息…</div>
-                  ) : sessionMessagesStatus === "error" && sessionMessages.length === 0 ? (
-                    <div className="graph-empty"><div className="graph-crosshair" aria-hidden="true"><span /><span /></div><p>会话消息请求失败。</p><small>{sessionMessagesError ?? "请重试。"}</small><button type="button" className="secondary-button" onClick={() => selectedProjectId && void loadSessionMessages(selectedProjectId, selectedSessionId)}>重试</button></div>
-                  ) : (
-                    <div className="session-message-list" aria-live="polite">
-                      {sessionMessages.length > 0 ? sessionMessages.map((message) => (
-                        <article className={`session-message session-message-${message.source}`} key={message.message_id}>
-                          <div className="session-message-heading"><strong>{message.source === "human" ? "人" : "Agent"}</strong><span>#{message.sequence} · {formatFeatureCreatedAt(message.created_at)}</span></div>
-                          <p>{message.content}</p>
-                        </article>
-                      )) : <p className="session-empty">还没有消息。先写下问题或下一步，当前版本只会保存它。</p>}
-                    </div>
-                  )}
-                  {sessionMessagesHasMore ? <button type="button" className="secondary-button session-messages-more" onClick={() => selectedProjectId && void loadSessionMessages(selectedProjectId, selectedSessionId, sessionMessagesCursor, true)} disabled={sessionMessagesStatus === "loading"}>加载更多消息</button> : null}
-                  <form className="session-message-form" onSubmit={(event) => void sendSessionMessage(event)}>
-                    <label htmlFor="session-message">追加消息</label>
-                    <textarea
-                      id="session-message"
-                      value={sessionDraft}
-                      onChange={(event) => {
-                        setSessionDraft(event.target.value);
-                        setSessionWriteError(null);
-                        const pending = sessionMessageRequest.current;
-                        if (pending && pending.content !== event.target.value.trim()) {
-                          sessionMessageRequest.current = null;
-                        }
-                      }}
-                      placeholder="输入要交给下一步人或 Agent 的问题、约束或补充…"
-                      maxLength={20_000}
-                      rows={5}
-                    />
-                    <div className="session-message-actions">
-                      <small>保存后不会生成回复，也不会产生模型费用。</small>
-                      <button type="submit" className="primary-button" disabled={sessionWriteStatus === "loading" || !selectedSessionId}>{sessionWriteStatus === "loading" ? "保存中…" : "保存消息"}</button>
-                    </div>
-                    {sessionWriteError ? <p className="inline-error" role="alert">{sessionWriteError}<button type="button" className="text-button" onClick={() => void sendSessionMessage()}>重试</button></p> : null}
-                  </form>
-                </>
-              ) : <div className="graph-empty"><div className="graph-crosshair" aria-hidden="true"><span /><span /></div><p>从左侧选择一个会话。</p><small>每个会话只属于一个项目，并固定到创建时的不可变快照。</small></div>}
-            </div>
-          ) : (
-            <div className="graph-stage">
-              {flowModel.nodes.length > 0 ? (
-                <ReactFlow<FlowNode, FlowEdge>
-                  nodes={flowModel.nodes}
-                  edges={flowModel.edges}
-                  nodeTypes={nodeTypes}
-                  onInit={setFlowInstance}
-                  onNodeClick={(_event, node) => {
-                    if (node.type !== "symbol") {
-                      return;
-                    }
-                    const symbol = graph.symbols.find((candidate) => candidate.symbol_id === node.id);
-                    if (symbol) {
-                      selectSymbol(symbol);
-                    }
-                  }}
-                  fitView
-                  fitViewOptions={{ padding: 0.18 }}
-                  nodesConnectable={false}
-                  nodesDraggable={false}
-                  elementsSelectable
-                  minZoom={0.25}
-                  maxZoom={1.8}
-                >
-                  <Background color="#2a413d" gap={24} size={1} />
-                  <Controls showInteractive={false} position="bottom-left" />
-                  <MiniMap
-                    pannable
-                    zoomable
-                    nodeColor={(node) => node.type === "group" ? "#426963" : node.id === selectedId ? "#f3a65b" : "#79c8c2"}
-                    maskColor="rgba(10, 20, 18, 0.72)"
-                    position="bottom-right"
-                  />
-                </ReactFlow>
-              ) : (
-                <div className="graph-empty">
-                  <div className="graph-crosshair" aria-hidden="true"><span /><span /></div>
-                  <p>{indexResponse ? "搜索一个符号，关系会从它向外展开。" : "建立或打开索引后，这里会显示关系图。"}</p>
-                  <small>图中只表示当前已加载的静态子图，不代表全仓架构。</small>
-                </div>
-              )}
-            </div>
-          )}
-        </section>
-
-        <aside className="inspector-panel panel-surface" aria-label="源码检查器">
-          <div className="panel-heading">
-            <div>
-              <p className="section-index">03 / EVIDENCE</p>
-              <h2>源码证据</h2>
-            </div>
-            {selectedSymbol ? <span className="status-pill" data-state={sourceStatus}>{sourceStatus === "loading" ? "读取中" : sourceStatus === "error" ? "读取失败" : "已绑定快照"}</span> : null}
-          </div>
-          {selectedSymbol ? (
-            <div className="inspector-content">
-              <div className="selected-symbol-heading">
-                <span className="kind-chip">{selectedSymbol.kind}</span>
-                <h3 title={selectedSymbol.qualified_name}>{selectedSymbol.qualified_name}</h3>
-                <p>{selectedSymbol.path} · L{selectedSymbol.start_line}–L{selectedSymbol.end_line}</p>
-              </div>
-              <div className="inspector-actions">
-                <button type="button" className="secondary-button" onClick={() => void loadNeighborhood(selectedSymbol.index_id, selectedSymbol.symbol_id, false)}>
-                  展开关系 ↗
-                </button>
-                <span>{connectedEdges.length} 条静态边</span>
-              </div>
-              {sourceError ? <div className="source-error" role="alert">{sourceError}<button type="button" onClick={() => void loadSource(selectedSymbol, sourceWindowStart)}>重试</button></div> : null}
-              {sourceStatus === "loading" ? <div className="source-loading"><span className="loader" /> 正在从不可变快照读取…</div> : null}
-              {sourceResponse ? (
-                <>
-                  <div className="evidence-meta">
-                    <span>SNAPSHOT EVIDENCE</span>
-                    <code title={sourceResponse.evidence.content_hash}>{sourceResponse.evidence.content_hash.slice(0, 12)}</code>
-                  </div>
-                  <div className="source-window">
-                    {evidenceLines(sourceResponse.evidence).map((line) => (
-                      <div className={`source-line${line.number >= selectedSymbol.start_line && line.number <= selectedSymbol.end_line ? " is-definition" : ""}`} key={line.number}>
-                        <span>{String(line.number).padStart(3, "0")}</span>
-                        <code>{line.text || " "}</code>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="source-pager">
-                    <button type="button" onClick={() => void loadSource(selectedSymbol, Math.max(selectedSymbol.start_line, sourceWindowStart - 200))} disabled={!sourceHasPrevious}>上一段</button>
-                    <span>{sourceResponse.evidence.start_line}–{sourceResponse.evidence.end_line} / {selectedSymbol.end_line}</span>
-                    <button type="button" onClick={() => void loadSource(selectedSymbol, sourceResponse.evidence.end_line + 1)} disabled={!sourceHasNext}>下一段</button>
-                  </div>
-                </>
-              ) : null}
-              {selectedUnresolved.length > 0 ? (
-                <div className="unresolved-panel">
-                  <div className="subsection-heading"><span>UNRESOLVED</span><em>{selectedUnresolved.length}</em></div>
-                  {selectedUnresolved.map((reference) => (
-                    <div className="unresolved-item" key={reference.unresolved_id}>
-                      <code>{reference.expression}</code>
-                      <p>{reference.reason} · L{reference.start_line}</p>
-                      <small>保留为未解析关系，不绘制确定调用边。</small>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          ) : (
-            <div className="inspector-empty">
-              <span className="empty-number">03</span>
-              <p>选择一个符号节点查看路径、定义行和快照证据。</p>
-              <small>源码始终来自同一 index_id 的不可变快照。</small>
-            </div>
-          )}
-        </aside>
-      </div>
-
-      <footer className="workbench-footer">
-        <span>STATIC RELATIONS ONLY</span>
-        <span>·</span>
-        <span>Issue 分析 / Run / Agent 尚未接入</span>
-        <span className="footer-spacer" />
-        <span>{indexResponse ? `${graph.symbols.length} nodes · ${graph.edges.length} edges loaded` : "No snapshot loaded"}</span>
-      </footer>
-    </main>
+    <WorkbenchUi
+      connection={{
+        state: connectionState,
+        health,
+        error: connectionError,
+        onCheck: checkHealth,
+      }}
+      project={{
+        projects,
+        selectedProjectId,
+        selectedProject,
+        status: projectStatus,
+        error: projectError,
+        name: projectName,
+        repositoryId,
+        onNameChange: setProjectName,
+        onRepositoryIdChange: setRepositoryId,
+        onSelectProject: (projectId) => setSelectedProjectId(projectId),
+        onCreate: createNewProject,
+      }}
+      localImport={{
+        name: importName,
+        path: localPath,
+        status: importStatus,
+        attempt: importAttempt,
+        error: importError,
+        onNameChange: setImportName,
+        onPathChange: setLocalPath,
+        onSubmit: importLocalProject,
+        onRetry: retryLocalProjectImport,
+      }}
+      githubImport={{
+        name: githubImportName,
+        url: githubUrl,
+        ref: githubRef,
+        status: githubImportStatus,
+        attempt: githubImportAttempt,
+        error: githubImportError,
+        onNameChange: setGithubImportName,
+        onUrlChange: setGithubUrl,
+        onRefChange: setGithubRef,
+        onSubmit: importGitHubProject,
+        onRetry: retryGitHubProjectImport,
+        onRetryCleanup: retryGitHubCleanup,
+      }}
+      index={{
+        response: indexResponse,
+        indexes: projectIndexes,
+        status: indexStatus,
+        error: indexError,
+        revision,
+        dirty,
+        indexIdInput,
+        onRevisionChange: setRevision,
+        onDirtyChange: setDirty,
+        onIndexIdChange: setIndexIdInput,
+        onCreate: createNewIndex,
+        onOpen: openExistingIndex,
+      }}
+      session={{
+        sessions,
+        cursor: sessionCursor,
+        hasMore: sessionHasMore,
+        status: sessionStatus,
+        error: sessionError,
+        selectedSessionId,
+        onSelectSession: selectSession,
+        onLoadMore: () => {
+          if (selectedProjectId) {
+            void loadSessions(selectedProjectId, sessionCursor, true);
+          }
+        },
+        topic: sessionTopic,
+        onTopicChange: (value) => {
+          setSessionTopic(value);
+          setSessionError(null);
+        },
+        writeStatus: sessionWriteStatus,
+        onCreate: createSession,
+        messages: sessionMessages,
+        messageCursor: sessionMessagesCursor,
+        messagesHasMore: sessionMessagesHasMore,
+        messagesStatus: sessionMessagesStatus,
+        messagesError: sessionMessagesError,
+        onLoadMoreMessages: () => {
+          if (selectedProjectId && selectedSessionId) {
+            void loadSessionMessages(selectedProjectId, selectedSessionId, sessionMessagesCursor, true);
+          }
+        },
+        onRetryMessages: () => {
+          if (selectedProjectId && selectedSessionId) {
+            void loadSessionMessages(selectedProjectId, selectedSessionId);
+          }
+        },
+        draft: sessionDraft,
+        onDraftChange: (value) => {
+          updateSessionDraft(value);
+          setSessionWriteError(null);
+          const pending = sessionMessageRequest.current;
+          if (pending && pending.content !== value.trim()) {
+            sessionMessageRequest.current = null;
+          }
+        },
+        onSendMessage: () => sendSessionMessage(),
+      }}
+      knowledge={{
+        searchQuery,
+        searchStatus,
+        searchResults,
+        searchError,
+        onSearchQueryChange: setSearchQuery,
+        onSearch: runSearch,
+        onSelectSearchResult: handleSearchResult,
+        overviewStatus,
+        overview,
+        overviewError,
+        selectedOverviewEntryId,
+        onSelectOverviewEntry: selectOverviewEntry,
+        onOpenOverviewGraph: openOverviewEntryGraph,
+        onOpenOverviewModule: openOverviewModule,
+        onRetryOverview: () => {
+          if (selectedProjectId && indexResponse) {
+            void loadOverview(selectedProjectId, indexResponse.index.index_id);
+          }
+        },
+        featureStatus,
+        featureGeneration,
+        featureError,
+        featureHistory,
+        featureHistoryStatus,
+        featureHistoryError,
+        featureHistoryHasMore,
+        onLoadMoreFeatureHistory: () => {
+          if (selectedProjectId && indexResponse && featureHistoryCursor) {
+            void loadFeatureHistory(selectedProjectId, indexResponse.index.index_id, featureHistoryCursor, true);
+          }
+        },
+        onRetryFeatureHistory: () => {
+          if (selectedProjectId && indexResponse) {
+            void loadFeatureHistory(selectedProjectId, indexResponse.index.index_id);
+          }
+        },
+        selectedFeatureGenerationId,
+        onSelectFeatureGeneration: selectFeatureGeneration,
+        featureMode,
+        featureSourceScope,
+        onFeatureModeChange: (mode) => resetFeatureRequest(() => setFeatureMode(mode)),
+        onFeatureSourceScopeChange: (scope) => resetFeatureRequest(() => setFeatureSourceScope(scope)),
+        onRunFeatureGeneration: runFeatureGeneration,
+        onReloadFeatureGeneration: loadSavedFeatureGeneration,
+        onOpenFeatureGraph: () => {
+          if (featureGeneration) {
+            setViewMode("overview");
+            setPanelMode("feature_graph");
+          }
+        },
+        onSelectFeatureEvidence: selectFeatureEvidence,
+      }}
+      evidence={{
+        projectId: selectedProjectId,
+        index: indexIdentity ?? null,
+        generationId: sourceGenerationId,
+        selectedSymbol,
+        sourceStatus,
+        sourceResponse,
+        sourceError,
+        sourceWindowStart,
+        sourceHasPrevious: Boolean(sourceHasPrevious),
+        sourceHasNext: Boolean(sourceHasNext),
+        connectedEdges,
+        selectedUnresolved,
+        onLoadSource: loadSource,
+        onRetrySource: () => {
+          if (selectedSymbol) {
+            void loadSource(selectedSymbol, sourceWindowStart);
+          }
+        },
+        onExpandRelation: () => {
+          if (selectedSymbol) {
+            setViewMode("overview");
+            setPanelMode("graph");
+            void loadNeighborhood(selectedSymbol.index_id, selectedSymbol.symbol_id, false);
+          }
+        },
+        onClose: () => setPanelMode("none"),
+      }}
+      graph={{
+        panelMode: panelMode === "feature_graph" ? "feature_graph" : "graph",
+        codeModel: flowModel,
+        codeStatus: graphStatus,
+        codeError: graphError,
+        codeTruncated: graph.truncated,
+        codeTruncationReason: graph.truncationReason,
+        codeSymbolCount: graph.symbols.length,
+        codeEdgeCount: graph.edges.length,
+        featureModel: featureFlowModel,
+        featureStatus: featureGraphStatus,
+        featureError: featureGraphError,
+        featureGraph,
+        featureGeneration,
+        direction,
+        edgeKinds,
+        onToggleEdgeKind: toggleEdgeKind,
+        onChangeDirection: changeDirection,
+        onCodeNodeClick: (nodeId) => {
+          const symbol = graph.symbols.find((candidate) => candidate.symbol_id === nodeId);
+          if (symbol) {
+            selectSymbol(symbol);
+          }
+        },
+        onFeatureNodeClick: (nodeId) => {
+          const node = featureGraph?.nodes.find((candidate) => candidate.node_id === nodeId);
+          if (node) {
+            selectFeatureGraphNode(node);
+          }
+        },
+        onCodeInit: setFlowInstance,
+        onFeatureInit: setFeatureFlowInstance,
+        codeNodeTypes: nodeTypes,
+        featureNodeTypes,
+        flowInstance,
+        featureFlowInstance,
+        selectedId,
+        onPanelModeChange: setPanelMode,
+        onClose: () => setPanelMode("none"),
+      }}
+      viewMode={viewMode}
+      onViewModeChange={setViewMode}
+      panelMode={panelMode}
+      onPanelModeChange={setPanelMode}
+    />
   );
 }

@@ -867,11 +867,14 @@
 }
 
 .sessionPage {
+  display: flex;
+  flex-direction: column;
   min-height: 100%;
 }
 
 .sessionContent {
   display: flex;
+  flex: 1;
   min-height: 100%;
   flex-direction: column;
 }
@@ -920,6 +923,7 @@
 }
 
 .messageList {
+  flex: 1;
   min-height: 240px;
   padding: 22px 0 26px;
 }

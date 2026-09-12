@@ -25,13 +25,15 @@ type Message = {
   createdAt: string;
 };
 
-const sessionDetails: Record<SessionId, { title: string; updatedAt: string; description: string }> = {
+const sessionDetails: Record<SessionId, { sessionId: string; title: string; updatedAt: string; description: string }> = {
   timeout: {
+    sessionId: "session_timeout_01",
     title: "读取配置时的超时",
     updatedAt: "刚刚",
     description: "确认启动路径和环境变量读取的关系。",
   },
   imports: {
+    sessionId: "session_imports_01",
     title: "导入后的模块边界",
     updatedAt: "昨天",
     description: "梳理导入入口与配置模块的连接。",
@@ -608,15 +610,17 @@ function SessionPage({
           <span className={styles.snapshotDivider} />
           <code>fixture-v1</code>
           <span className={styles.snapshotDivider} />
-          <span>Session session_timeout_01</span>
+          <span>Session {currentSession.sessionId}</span>
         </div>
 
         <div className={styles.sessionRule} />
 
         <div className={styles.messageList} aria-live="polite">
-          <button type="button" className={styles.olderMessages}>
-            加载更早消息
-          </button>
+          {currentMessages.length > 0 ? (
+            <button type="button" className={styles.olderMessages}>
+              加载后续消息
+            </button>
+          ) : null}
           {currentMessages.length === 0 ? (
             <div className={styles.emptySession}>
               <span className={styles.emptySessionMark}>+</span>
