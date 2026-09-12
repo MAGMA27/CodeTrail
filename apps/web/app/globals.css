@@ -252,9 +252,18 @@ code { font-family: var(--ct-mono); }
 .ct-session-header { align-items: start; padding-bottom: 18px; border-bottom: 1px solid var(--ct-border); }
 .ct-back-button { display: block; margin-bottom: 17px; padding: 0; border: 0; background: transparent; color: var(--ct-blue); font-size: 11px; text-align: left; }
 .ct-back-button:hover { text-decoration: underline; }
-.ct-session-identity { display: grid; min-width: 220px; gap: 7px; padding: 11px; border: 1px solid var(--ct-border); border-radius: 7px; background: var(--ct-surface); }
+.ct-session-fixed-version { display: inline-block; margin-left: 8px; color: var(--ct-blue); font-family: var(--ct-mono); font-size: 10px; }
+.ct-session-details { min-width: 230px; }
+.ct-session-details > summary { display: flex; min-height: 34px; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; border: 1px solid var(--ct-border-strong); border-radius: 7px; background: var(--ct-surface); color: var(--ct-muted); cursor: pointer; font-family: var(--ct-mono); font-size: 9px; list-style: none; }
+.ct-session-details > summary::-webkit-details-marker { display: none; }
+.ct-session-details > summary::after { color: var(--ct-blue); content: "+"; font-size: 14px; line-height: 1; }
+.ct-session-details[open] > summary { border-radius: 7px 7px 0 0; }
+.ct-session-details[open] > summary::after { content: "−"; }
+.ct-session-details > summary:hover { border-color: var(--ct-blue); color: var(--ct-blue); }
+.ct-session-identity { display: grid; min-width: 220px; gap: 7px; padding: 11px; border: 1px solid var(--ct-border); border-top: 0; border-radius: 0 0 7px 7px; background: var(--ct-surface); }
 .ct-session-identity span { display: grid; min-width: 0; gap: 1px; }
 .ct-session-identity code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ct-session-details .ct-session-identity code { overflow-wrap: anywhere; white-space: normal; }
 .ct-message-area { display: grid; min-height: 210px; align-content: start; gap: 12px; padding-bottom: 10px; }
 .ct-message { max-width: 86%; padding: 12px 14px; border: 1px solid var(--ct-border); border-radius: 8px; background: var(--ct-surface); }
 .ct-message.is-human { margin-left: auto; border-color: #cbd6fa; background: var(--ct-blue-soft); }

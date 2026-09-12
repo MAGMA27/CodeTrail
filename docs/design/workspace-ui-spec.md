@@ -72,7 +72,7 @@ UI-S1 不删除任何现有 API 能力；映射是目标信息架构，UI-S2 已
 
 ### 会话页
 
-会话页标题栏显示“返回项目知识”、主题、固定版本标签、项目名、revision/snapshot 和 Session 身份。固定版本是当前会话的上下文说明，不允许自动跟随项目最新索引。中央消息区只展示已保存消息、来源、序号和时间；在 Run 尚未实现前，不展示假执行事件、假助手回复、费用或可用的“分析”按钮。
+会话页标题栏显示“返回项目知识”、主题和简短固定版本标签；Session ID、Project ID、完整 revision/snapshot 身份收入可展开的详情层。固定版本是当前会话的上下文说明，不允许自动跟随项目最新索引。中央消息区只展示已保存消息、来源、序号和时间；在 Run 尚未实现前，不展示假执行事件、假助手回复、费用或可用的“分析”按钮。
 
 输入区固定在中央底部，textarea 最小高 `86px`，支持垂直调整大小。具体行为如下：
 
@@ -82,9 +82,9 @@ UI-S1 不删除任何现有 API 能力；映射是目标信息架构，UI-S2 已
 | `Shift+Enter` | 插入换行，不提交 |
 | 输入法 | composition 期间 Enter 不提交；composition 完成后用户再次按 Enter 才提交 |
 | 草稿 | 以 `project_id/session_id` 为键隔离；切换项目或 Session 不带入旧草稿，刷新恢复策略由生产实现决定 |
-| 保存中 | 保留 textarea 内容，提交按钮禁用，状态显示“保存中”；不插入本地假消息 |
-| 保存成功 | 使用服务端 sequence 和时间追加 human 消息，清空当前草稿，显示“已保存” |
-| 保存失败 | 错误紧邻输入区或消息区，保留草稿和幂等键，提供“重试保存”；不显示成功或助手状态 |
+| 保存中 | 保留 textarea 内容，允许编辑后续草稿；提交按钮和 Enter 禁用重复提交，状态显示“保存中”；不插入本地假消息 |
+| 保存成功 | 使用服务端 sequence 和时间追加 human 消息；只有提交时的 project/session/request 和草稿修订仍匹配时才清空当前草稿，否则保留后续文字并回到待保存状态 |
+| 保存失败 | 错误紧邻输入区或消息区，未变更草稿保留原幂等键并提供“重试保存”；后续编辑使用新的提交身份，不显示成功或助手状态 |
 | 分页 | 当前 API 按 `sequence` 递增返回，消息超过一页时在消息尾部提供“加载后续消息”；空会话不显示无效分页入口，追加新消息不跳到旧消息中间 |
 
 ### 证据面板
@@ -135,7 +135,7 @@ UI-S1 不删除任何现有 API 能力；映射是目标信息架构，UI-S2 已
 | --- | --- | --- | --- |
 | [desktop-empty-1440.png](workspace-ui-production/screenshots/desktop-empty-1440.png) | `1440x900` | 真实空工作区 | 空项目列表、创建项目入口、无索引知识空态 |
 | [desktop-knowledge-1440.png](workspace-ui-production/screenshots/desktop-knowledge-1440.png) | `1440x900` | 真实项目知识页 | 项目/Session 导航、固定索引、概览、搜索和功能历史 |
-| [desktop-session-1440.png](workspace-ui-production/screenshots/desktop-session-1440.png) | `1440x900` | 真实有消息 Session | Session 身份、固定 revision/snapshot、服务端消息序号、底部输入区 |
+| [desktop-session-1440.png](workspace-ui-production/screenshots/desktop-session-1440.png) | `1440x900` | 真实有消息 Session | 主题、简短固定版本、可展开 Session 身份、服务端消息序号、底部输入区 |
 | [desktop-evidence-1440.png](workspace-ui-production/screenshots/desktop-evidence-1440.png) | `1440x900` | 真实源码证据 | 右侧证据上下文、源码行号/hash、合成证据关系按钮禁用 |
 | [tablet-feature-graph-1024.png](workspace-ui-production/screenshots/tablet-feature-graph-1024.png) | `1024x768` | 真实功能图面板 | 平板三栏尺寸、语义/静态图例、面板宽度控制 |
 | [mobile-knowledge-390.png](workspace-ui-production/screenshots/mobile-knowledge-390.png) | `390x844` | 真实移动知识页 | 单列内容、移动项目入口、操作按钮和搜索不越界 |
@@ -163,6 +163,8 @@ UI-S1 不删除任何现有 API 能力；映射是目标信息架构，UI-S2 已
 - [x] 可从知识页打开和关闭功能图、源码证据，并调整桌面面板宽度；中央滚动、Session 身份和草稿不丢失。
 - [x] 已验证空 Session 不显示无效分页、已有消息显示后续分页入口；空工作区有真实 `/` 截图，原型另有空态截图。
 - [x] 已验证 Enter、Shift+Enter、输入法组合期间不提交、按 Session 隔离草稿，以及 API 离线后的写失败保留草稿与恢复后重试。
+- [x] 已验证保存响应延迟期间编辑草稿不会被旧成功回调清空；切换 Session 会使旧写请求失效，未变更内容仍按原幂等键重试。
+- [x] Session 标题优先主题与简短固定版本，Session ID、Project ID 和完整 snapshot hash 可在展开详情中访问。
 - [x] 证据面板显示 `project_id/index_id/generation_id` 上下文，图筛选位于图工具栏；合成证据不发起无效关系请求。
 - [x] 视觉使用中性背景、单一强调色、明确焦点和错误状态；无旧网格、装饰渐变、假终端和假精确产品宣传。
 - [x] 原型截图与生产页面分开标记，任何未实现 Run、Agent、SSE 和真实模型能力仍保持未实现状态。

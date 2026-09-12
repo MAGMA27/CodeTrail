@@ -443,6 +443,7 @@ function ProjectRail({
                     type="button"
                     key={item.session_id}
                     className={`ct-session-item${item.session_id === session.selectedSessionId ? " is-selected" : ""}`}
+                    data-session-id={item.session_id}
                     onClick={() => session.onSelectSession(item.session_id)}
                     aria-current={item.session_id === session.selectedSessionId ? "page" : undefined}
                   >
@@ -872,7 +873,7 @@ function OverviewSections({ overview, knowledge }: { overview: ProjectOverview; 
   );
 }
 
-function SessionView({ projectId, session }: { projectId: string | null; session: SessionUi }) {
+function SessionView({ session, onBack }: { session: SessionUi; onBack: () => void }) {
   const selected = session.sessions.find((item) => item.session_id === session.selectedSessionId) ?? null;
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
@@ -886,8 +887,11 @@ function SessionView({ projectId, session }: { projectId: string | null; session
   return (
     <div className="ct-page ct-session-page">
       <div className="ct-session-header">
-        <div><button type="button" className="ct-back-button" onClick={() => session.onSelectSession("")}>← 返回项目知识</button><p className="ct-overline">SESSION / FIXED SNAPSHOT</p><h2>{selected.topic}</h2><p>当前版本只保存消息，不展示假助手回复、不启动 Run。</p></div>
-        <div className="ct-session-identity"><span><small>SESSION ID</small><code title={selected.session_id}>{selected.session_id}</code></span><span><small>PROJECT</small><code>{projectId ?? selected.project_id}</code></span><span><small>REVISION</small><code>{selected.index.revision}</code></span><span><small>SNAPSHOT</small><code title={selected.index.snapshot_hash}>{shortHash(selected.index.snapshot_hash)}</code></span></div>
+        <div><button type="button" className="ct-back-button" onClick={onBack}>← 返回项目知识</button><p className="ct-overline">SESSION / FIXED SNAPSHOT</p><h2>{selected.topic}</h2><p>当前版本只保存消息，不展示假助手回复、不启动 Run。<span className="ct-session-fixed-version">固定版本 · {selected.index.revision} · {shortHash(selected.index.snapshot_hash, 10)}</span></p></div>
+        <details className="ct-session-details">
+          <summary>查看会话身份</summary>
+          <div className="ct-session-identity"><span><small>SESSION ID</small><code>{selected.session_id}</code></span><span><small>PROJECT ID</small><code>{selected.project_id}</code></span><span><small>REVISION</small><code>{selected.index.revision}</code></span><span><small>SNAPSHOT HASH</small><code>{selected.index.snapshot_hash}</code></span></div>
+        </details>
       </div>
       <div className="ct-message-area" aria-live="polite">
         {session.messagesStatus === "loading" && session.messages.length === 0 ? <LoadingNote>正在读取这个会话的消息…</LoadingNote> : session.messagesStatus === "error" && session.messages.length === 0 ? <div className="ct-error-block"><div><strong>会话消息请求失败</strong><span>{session.messagesError ?? "请重试。"}</span></div><button type="button" className="ct-button ct-button-secondary" onClick={() => void session.onRetryMessages()}>重试</button></div> : session.messages.length > 0 ? <>{session.messages.map((message) => <article className={`ct-message is-${message.source}`} key={message.message_id}><div className="ct-message-heading"><strong>{message.source === "human" ? "你" : "Agent"}</strong><span>#{message.sequence} · {formatDate(message.created_at)}</span></div><p>{message.content}</p></article>)}{session.messagesHasMore ? <div className="ct-message-pager"><span>当前按服务端 sequence 递增读取</span><button type="button" className="ct-button ct-button-secondary" onClick={() => void session.onLoadMoreMessages()} disabled={session.messagesStatus === "loading"}>{session.messagesStatus === "loading" ? "载入中…" : "加载后续消息"}</button></div> : null}</> : <div className="ct-message-empty"><strong>还没有消息</strong><span>先写下问题、约束或补充；保存后仍不会生成回复。</span></div>}
@@ -1036,7 +1040,7 @@ export default function WorkbenchUi(props: WorkbenchUiProps) {
         <section className="ct-center-column" aria-label={props.viewMode === "session" ? "Issue 会话" : "项目知识页"}>
           <ContextHeader project={props.project} index={props.index} viewMode={props.viewMode} onOpenOperation={setOperationPanel} />
           {alert ? <div className="ct-global-alert" role="alert"><span>{alert}</span>{props.connection.state === "error" ? <button type="button" className="ct-link-button" onClick={() => void props.connection.onCheck()}>重新检查</button> : null}</div> : null}
-          {operationPanel ? <OperationPanel mode={operationPanel} onClose={closeOperation} project={props.project} localImport={props.localImport} githubImport={props.githubImport} index={props.index} /> : props.viewMode === "session" ? <SessionView projectId={props.project.selectedProjectId} session={props.session} /> : <KnowledgeView project={props.project} index={props.index} knowledge={props.knowledge} onOpenOperation={setOperationPanel} />}
+          {operationPanel ? <OperationPanel mode={operationPanel} onClose={closeOperation} project={props.project} localImport={props.localImport} githubImport={props.githubImport} index={props.index} /> : props.viewMode === "session" ? <SessionView session={props.session} onBack={openKnowledge} /> : <KnowledgeView project={props.project} index={props.index} knowledge={props.knowledge} onOpenOperation={setOperationPanel} />}
         </section>
         {props.panelMode === "source" ? <EvidencePanel evidence={props.evidence} /> : props.panelMode === "graph" || props.panelMode === "feature_graph" ? <GraphPanel graph={props.graph} /> : null}
       </div>

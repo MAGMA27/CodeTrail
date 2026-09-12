@@ -80,6 +80,11 @@ import {
   unresolvedForSymbol,
   type GraphState,
 } from "../lib/graph";
+import {
+  nextSessionDraftRevision,
+  shouldClearSubmittedSessionDraft,
+  type SessionDraftSubmission,
+} from "../lib/session-draft";
 import WorkbenchUi from "./workbench-ui";
 
 type IndexUiStatus = "unindexed" | "creating" | "loading" | "ready" | "partial" | "error";
@@ -510,11 +515,15 @@ export default function Workbench() {
   const activeSessionDraftKey = selectedProjectId && selectedSessionId
     ? sessionDraftStorageKey(selectedProjectId, selectedSessionId)
     : null;
+  const sessionDraftRevisions = useRef<Record<string, number>>({});
   const sessionDraft = activeSessionDraftKey ? sessionDrafts[activeSessionDraftKey] ?? "" : "";
   const updateSessionDraft = useCallback((value: string) => {
     if (!activeSessionDraftKey) {
       return;
     }
+    sessionDraftRevisions.current[activeSessionDraftKey] = nextSessionDraftRevision(
+      sessionDraftRevisions.current[activeSessionDraftKey],
+    );
     setSessionDrafts((previous) => {
       const next = { ...previous };
       if (value) {
@@ -566,6 +575,7 @@ export default function Workbench() {
     sessionId: string;
     content: string;
     key: string;
+    draftRevision: number;
   } | null>(null);
   const knownGroupKeys = useRef<Set<string>>(new Set());
   const evidenceLink = useRef<EvidenceLink | null>(null);
@@ -1102,6 +1112,9 @@ export default function Workbench() {
 
   const openSession = useCallback(
     async (projectId: string, sessionId: string, knownSession?: Session) => {
+      sessionWriteController.current?.abort();
+      sessionWriteRequestId.current += 1;
+      sessionMessageRequest.current = null;
       let session = knownSession;
       const requestId = ++sessionOpenRequestId.current;
       try {
@@ -1261,6 +1274,9 @@ export default function Workbench() {
   const sendSessionMessage = useCallback(
     async (event?: React.FormEvent<HTMLFormElement>) => {
       event?.preventDefault();
+      if (sessionWriteStatus === "loading") {
+        return;
+      }
       if (!selectedProjectId || !selectedSessionId) {
         setSessionWriteError("请先选择一个会话。");
         return;
@@ -1276,11 +1292,20 @@ export default function Workbench() {
         previous.content === content
         ? previous.key
         : newSessionIdempotencyKey();
+      const draftRevision = activeSessionDraftKey
+        ? sessionDraftRevisions.current[activeSessionDraftKey] ?? 0
+        : 0;
+      const submission: SessionDraftSubmission = {
+        projectId: selectedProjectId,
+        sessionId: selectedSessionId,
+        draftRevision,
+      };
       sessionMessageRequest.current = {
         projectId: selectedProjectId,
         sessionId: selectedSessionId,
         content,
         key,
+        draftRevision,
       };
       sessionWriteController.current?.abort();
       const controller = new AbortController();
@@ -1311,8 +1336,20 @@ export default function Workbench() {
             ? { ...session, message_count: Math.max(session.message_count, message.sequence), updated_at: message.created_at }
             : session
         )));
-        updateSessionDraft("");
-        setSessionWriteStatus("success");
+        const shouldClearDraft = shouldClearSubmittedSessionDraft(
+          {
+            projectId: selectedProjectId,
+            sessionId: selectedSessionId,
+            draftRevision: activeSessionDraftKey
+              ? sessionDraftRevisions.current[activeSessionDraftKey]
+              : undefined,
+          },
+          submission,
+        );
+        if (shouldClearDraft) {
+          updateSessionDraft("");
+        }
+        setSessionWriteStatus(shouldClearDraft ? "success" : "idle");
         setSessionWriteError(null);
         sessionMessageRequest.current = null;
       } catch (error) {
@@ -1323,7 +1360,7 @@ export default function Workbench() {
         setSessionWriteError(errorMessage(error));
       }
     },
-    [selectedProjectId, selectedSessionId, sessionDraft, updateSessionDraft],
+    [activeSessionDraftKey, selectedProjectId, selectedSessionId, sessionDraft, sessionWriteStatus, updateSessionDraft],
   );
 
   const selectFeatureEvidence = useCallback(

@@ -18,7 +18,7 @@ UI-S1 的目标布局、尺寸、状态和截图验收见 [工作区 UI 规范](
 
 ## 数据与生命周期
 
-项目状态覆盖列表载入、空列表、就绪和错误；导入状态显示 queued/acquiring/indexing/ready/failed/interrupted 并提供失败/中断重试；索引状态覆盖未打开、创建中、载入中、就绪、部分完成和错误。切换 project_id 会取消或忽略旧请求，清空旧 index_id、图、源码、Session 列表/消息/当前选择和历史，再恢复该项目最新可用索引；Session 草稿不随旧项目状态混入，而是以 `project_id/session_id` 为键保存在浏览器 localStorage。浏览器另保存最近项目 ID、按 project_id 分隔的 selectedSessionId，以及按 project_id/index_id 分隔的明确 generation_id，项目、Session、消息与索引数据从服务端持久化恢复。Session 创建/消息追加使用稳定幂等键，写入失败保留草稿并可重试；切换 Session 不带入旧消息。消息接口按服务端 sequence 递增返回，后续页在消息尾部追加，空会话不显示无效分页入口。历史失败版本仍可打开，但默认选择只取最新 succeeded/partial；功能图不单独持久化，按需读取保存生成结果并从同一静态索引组装。
+项目状态覆盖列表载入、空列表、就绪和错误；导入状态显示 queued/acquiring/indexing/ready/failed/interrupted 并提供失败/中断重试；索引状态覆盖未打开、创建中、载入中、就绪、部分完成和错误。切换 project_id 会取消或忽略旧请求，清空旧 index_id、图、源码、Session 列表/消息/当前选择和历史，再恢复该项目最新可用索引；Session 草稿不随旧项目状态混入，而是以 `project_id/session_id` 为键保存在浏览器 localStorage。浏览器另保存最近项目 ID、按 project_id 分隔的 selectedSessionId，以及按 project_id/index_id 分隔的明确 generation_id，项目、Session、消息与索引数据从服务端持久化恢复。Session 创建/消息追加使用稳定幂等键，保存期间允许编辑但以 project/session/request 和草稿修订号判断旧响应是否仍可清空当前草稿；保存中按钮和 Enter 不重复提交，写入失败保留草稿并可重试；切换 Session 会使旧写请求失效且不带入旧消息。消息接口按服务端 sequence 递增返回，后续页在消息尾部追加，空会话不显示无效分页入口。历史失败版本仍可打开，但默认选择只取最新 succeeded/partial；功能图不单独持久化，按需读取保存生成结果并从同一静态索引组装。
 
 证据链接携带 project_id、index_id、路径、行范围、content_hash 和 evidence_id；Session 链接携带 project_id、session_id。工作台先检查 project_id 存在且 index_id/Session 属于该项目，再读取项目作用域的固定快照或 Session；任何返回的 index、路径、行范围、hash、evidence_id 或 Session 身份不一致都会显示错误，不会回退到当前 latest index。概览入口只接受 `python-entry-v1` 的 `__main__.py`/顶层 main guard 结果；O2 功能只展示同一生成结果实际返回的 symbol/evidence，明确显示 fixture/real、用量、未查询模块、局限和 partial/insufficient/failed 状态；功能图区分 semantic 与 static 关系，节点点击可回到同一快照的功能/源码证据，入口映射规则版本不一致时显示 unavailable；入口/功能证据进入既有源码检查器，模块选择进入同一快照的关系图，所有概览/生成功能、Session 消息、历史分页、路径/模块请求都有显式上限。
 
@@ -26,11 +26,11 @@ Session 使用同一幂等键重试时，工作台继续使用服务端返回的
 
 ## 错误与限制
 
-前端可以提交服务端 API 可见的绝对路径，但不读取或解析浏览器本机目录；服务端负责允许根目录、符号链接/junction 和 loopback 写边界。项目作用域端点拒绝不属于当前 project_id 的 index_id 或 Session。Session 主题/消息受长度限制，切换项目或 Session 不会带入其他范围的草稿或消息；保存失败保留当前草稿和原幂等键并允许重试，当前版本不显示模型回复、不启动 Run。概览未识别入口时明确标记未知，不把目录或名为 `main` 的函数冒充入口；动态调用保留 unresolved。功能生成显式触发，real 未配置模型时显示失败且不回退 fixture；切换项目/索引、模式/范围变化和重试都会取消或忽略过期请求。历史和功能图响应经过运行时形状校验，API 停止或返回错误时保留明确失败状态；Session 最多按页读取 40 个，消息最多按页读取 100 条，历史最多按页读取 40 个版本，功能图最多渲染 40 个节点和 120 条边，跨项目/索引/Session/生成版本及错误 evidence 引用均拒绝显示。
+前端可以提交服务端 API 可见的绝对路径，但不读取或解析浏览器本机目录；服务端负责允许根目录、符号链接/junction 和 loopback 写边界。项目作用域端点拒绝不属于当前 project_id 的 index_id 或 Session。Session 主题/消息受长度限制，切换项目或 Session 不会带入其他范围的草稿或消息；保存期间允许编辑，重复提交被阻止，旧 project/session/request 或旧草稿修订响应不会覆盖当前输入；保存失败保留当前草稿和原幂等键并允许重试，当前版本不显示模型回复、不启动 Run。概览未识别入口时明确标记未知，不把目录或名为 `main` 的函数冒充入口；动态调用保留 unresolved。功能生成显式触发，real 未配置模型时显示失败且不回退 fixture；切换项目/索引、模式/范围变化和重试都会取消或忽略过期请求。历史和功能图响应经过运行时形状校验，API 停止或返回错误时保留明确失败状态；Session 最多按页读取 40 个，消息最多按页读取 100 条，历史最多按页读取 40 个版本，功能图最多渲染 40 个节点和 120 条边，跨项目/索引/Session/生成版本及错误 evidence 引用均拒绝显示。
 
 ## 验证
 
-pnpm --dir apps/web test、pnpm web:typecheck 和 pnpm web:build；UI-S2 本轮另以实际浏览器核对生产 `/` 的桌面/平板/移动知识页、真实 Session 创建/切换/消息保存、Enter/Shift+Enter、空消息状态、草稿隔离、证据侧栏、合成证据边界、功能图侧栏和各视口无横向溢出，并生成 [生产截图](../design/workspace-ui-production/screenshots/)。既有流程继续核对本地路径导入、索引/项目切换、刷新恢复、历史版本选择/分页、功能图 semantic/static 图例与节点证据钻取、概览入口/模块跳转、fixture 功能生成、功能证据和 Session URL 打开、real 未配置失败/重试、导入错误状态、MCP 证据 URL 打开与 hash/归属校验，以及搜索、关系方向、分组折叠、源码证据、unresolved、API 停止和恢复重试。
+pnpm --dir apps/web test、pnpm web:typecheck 和 pnpm web:build；UI-S2 本轮另以实际浏览器核对生产 `/` 的桌面/平板/移动知识页、真实 Session 创建/切换/消息保存、延迟响应期间编辑草稿、成功/失败/重试、Enter/Shift+Enter、输入法 composition、空消息状态、草稿隔离、可展开身份详情、证据侧栏、合成证据边界、功能图侧栏和各视口无横向溢出，并生成 [生产截图](../design/workspace-ui-production/screenshots/)。既有流程继续核对本地路径导入、索引/项目切换、刷新恢复、历史版本选择/分页、功能图 semantic/static 图例与节点证据钻取、概览入口/模块跳转、fixture 功能生成、功能证据和 Session URL 打开、real 未配置失败/重试、导入错误状态、MCP 证据 URL 打开与 hash/归属校验，以及搜索、关系方向、分组折叠、源码证据、unresolved、API 停止和恢复重试。
 
 ## 相关决策
 

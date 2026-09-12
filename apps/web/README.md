@@ -20,7 +20,7 @@
 
 ## 数据与生命周期
 
-当前项目由 `project_id` 选择，项目内索引由 `index_id` 选择。切换项目会取消在途请求、清除旧图/源码/错误和当前 Session 选择，并载入该项目最新可用索引；Session 草稿按 `project_id/session_id` 隔离并持久化在浏览器 localStorage，不会带入其他项目或 Session。浏览器另保存最近项目 ID、按 project_id 分隔的 Session ID，以及按 project_id/index_id 分隔的明确 generation_id，刷新时优先恢复这些选择；没有明确选择时取当前索引最新 succeeded/partial，失败版本仍可从历史查看但不会替换旧成功结果。Session 列表按项目隔离，创建时由 API 固定快照；消息按服务端 sequence 递增读取和追加保存，当前分页按钮加载后续消息，失败重试保留草稿和同一幂等键。历史通过稳定 cursor 分页，功能图按需从保存结果和同一不可变快照组装，不另存一份图。GitHub 表单显示固定 commit、snapshot hash 与临时清理失败状态，失败/中断可重试，清理失败可单独重试。旧响应通过 AbortController 和请求序号忽略。
+当前项目由 `project_id` 选择，项目内索引由 `index_id` 选择。切换项目会取消在途请求、清除旧图/源码/错误和当前 Session 选择，并载入该项目最新可用索引；Session 草稿按 `project_id/session_id` 隔离并持久化在浏览器 localStorage，不会带入其他项目或 Session。浏览器另保存最近项目 ID、按 project_id 分隔的 Session ID，以及按 project_id/index_id 分隔的明确 generation_id，刷新时优先恢复这些选择；没有明确选择时取当前索引最新 succeeded/partial，失败版本仍可从历史查看但不会替换旧成功结果。Session 列表按项目隔离，创建时由 API 固定快照；消息按服务端 sequence 递增读取和追加保存，当前分页按钮加载后续消息。保存期间允许编辑草稿，但每次编辑递增本地修订号，成功响应只有在 project/session/request 和修订号仍匹配时才清空草稿；按钮和 Enter 在保存中不重复提交，失败重试保留未变更草稿和同一幂等键。历史通过稳定 cursor 分页，功能图按需从保存结果和同一不可变快照组装，不另存一份图。GitHub 表单显示固定 commit、snapshot hash 与临时清理失败状态，失败/中断可重试，清理失败可单独重试。旧响应通过 AbortController 和请求序号忽略。
 
 MCP `read_source`、`get_overview` 和功能读取工具返回的工作台引用使用 `project_id`、`index_id`、路径、行范围、`evidence_id` 和 `content_hash` 查询参数；Session MCP 工具返回的引用使用 `project_id` 和 `session_id`，工作台可直接打开。工作台打开引用时先验证项目和索引/Session 归属，再从固定快照或 Session 读取，并拒绝返回证据与链接不一致的响应；不依赖全局当前项目。打开索引后默认载入 `python-entry-v1` 概览和当前快照的功能历史，可在“知识页/Session/功能图/代码关系”之间切换；Session 面板显示主题、固定 revision/snapshot、消息序号和来源，追加消息只保存内容，不伪造助手回复、不启动 Run。历史卡片显示版本身份、模式、状态、时间、用量和限制，入口/功能/代码节点可打开同一 `index_id` 的源码证据。O2 功能生成不会自动触发，用户显式选择 `fixture/real` 模式和 `entry_reachable/visible_modules` 范围后才请求；结果展示功能、入口/模块/符号关联、证据钻取、fixture 标识、预算用量、未查询模块和局限，已保存结果、历史、功能图和 Session 读取不调用模型。导入状态在表单中显示，失败或重启中断的 attempt 可从同一入口重试。
 
@@ -44,7 +44,7 @@ UI-S1 评审原型打开 `http://localhost:3000/prototype`；右上角可切换�
 
 从仓库根目录执行 `pnpm --dir apps/web test`、`pnpm web:typecheck` 和 `pnpm web:build`，并用浏览器验证本地目录/GitHub 导入、固定 commit 显示、项目知识页自动载入、Session 创建/切换/消息保存/刷新恢复和项目隔离、历史版本选择/分页/刷新恢复、显式 fixture 功能生成、功能图 semantic/static 图例与节点证据钻取、real 未配置失败/重试、入口证据与代码关系联动、导入失败/重试、项目切换及同名源码隔离。
 
-UI-S2 的真实页面截图保存在 [docs/design/workspace-ui-production/screenshots](../../docs/design/workspace-ui-production/screenshots)；本轮已在 `1440x900`、`1024x768` 和 `390x844` 浏览器视口验证知识页、Session、证据/功能图面板、空工作区和横向尺寸，也验证了故障注入下的写失败重试与输入法 composition 保护。Run/Agent/SSE 仍不在本轮生产验收范围内。
+UI-S2 的真实页面截图保存在 [docs/design/workspace-ui-production/screenshots](../../docs/design/workspace-ui-production/screenshots)；本轮已在 `1440x900`、`1024x768` 和 `390x844` 浏览器视口验证知识页、Session、证据/功能图面板、空工作区和横向尺寸，也验证了延迟保存期间编辑草稿、成功/失败响应、会话切换、故障注入重试、输入法 composition 保护和可展开的 Session 身份详情。Run/Agent/SSE 仍不在本轮生产验收范围内。
 
 ## 关联文档
 
