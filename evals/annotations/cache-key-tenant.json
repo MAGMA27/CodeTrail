@@ -1,0 +1,12 @@
+{
+  "schema_version": "p4-e1",
+  "case_id": "cache-key-tenant",
+  "applicable": true,
+  "defect_category": "state_isolation",
+  "expected_files": ["service.py"],
+  "expected_symbols": ["service.get_profile"],
+  "expected_locations": [
+    {"path": "service.py", "start_line": 6, "end_line": 7}
+  ],
+  "basis": "get_profile receives tenant_id but constructs the cache key only from user_id before loading tenant-scoped data."
+}

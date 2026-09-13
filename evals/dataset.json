@@ -1,0 +1,56 @@
+{
+  "schema_version": "p4-e1",
+  "dataset_id": "codetrail-p4-e1",
+  "version": "p4-e1-v1",
+  "description": "独立于开发 fixture 的小型 Python Issue 检索评测集。",
+  "cases": [
+    {
+      "case_id": "csv-import-validation",
+      "split": "calibration",
+      "source": "cases/csv-import-validation/source",
+      "issue": "issues/csv-import-validation.json",
+      "manifest": "manifests/csv-import-validation.json",
+      "annotation": "annotations/csv-import-validation.json"
+    },
+    {
+      "case_id": "cache-key-tenant",
+      "split": "calibration",
+      "source": "cases/cache-key-tenant/source",
+      "issue": "issues/cache-key-tenant.json",
+      "manifest": "manifests/cache-key-tenant.json",
+      "annotation": "annotations/cache-key-tenant.json"
+    },
+    {
+      "case_id": "partner-billing-outage",
+      "split": "calibration",
+      "source": "cases/partner-billing-outage/source",
+      "issue": "issues/partner-billing-outage.json",
+      "manifest": "manifests/partner-billing-outage.json",
+      "annotation": "annotations/partner-billing-outage.json"
+    },
+    {
+      "case_id": "redirect-query-encoding",
+      "split": "holdout",
+      "source": "cases/redirect-query-encoding/source",
+      "issue": "issues/redirect-query-encoding.json",
+      "manifest": "manifests/redirect-query-encoding.json",
+      "annotation": "annotations/redirect-query-encoding.json"
+    },
+    {
+      "case_id": "retry-control-flow",
+      "split": "holdout",
+      "source": "cases/retry-control-flow/source",
+      "issue": "issues/retry-control-flow.json",
+      "manifest": "manifests/retry-control-flow.json",
+      "annotation": "annotations/retry-control-flow.json"
+    },
+    {
+      "case_id": "remote-rollout-config",
+      "split": "holdout",
+      "source": "cases/remote-rollout-config/source",
+      "issue": "issues/remote-rollout-config.json",
+      "manifest": "manifests/remote-rollout-config.json",
+      "annotation": "annotations/remote-rollout-config.json"
+    }
+  ]
+}

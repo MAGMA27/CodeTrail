@@ -1,0 +1,7 @@
+{
+  "schema_version": "0.1.0",
+  "id": "eval-issue-cache-key-tenant",
+  "title": "Profiles from different tenants cross in the cache",
+  "body": "Profiles from two organizations sometimes cross. The cache lookup must include tenant_id in the key before loading a user profile.",
+  "mentioned_paths": ["service.py", "cache.py"]
+}

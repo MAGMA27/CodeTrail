@@ -1,0 +1,7 @@
+{
+  "schema_version": "0.1.0",
+  "id": "eval-issue-remote-rollout-config",
+  "title": "Users in one region do not see the feature",
+  "body": "Users in one region do not see the feature. Determine whether the local gate or the remote rollout configuration is wrong, but no rollout response or production configuration snapshot is available.",
+  "mentioned_paths": ["rollout/flags.py"]
+}

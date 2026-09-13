@@ -1,0 +1,17 @@
+{
+  "schema_version": "p4-e1",
+  "case_id": "retry-control-flow",
+  "files": [
+    {
+      "path": "dynamic.py",
+      "size": 200,
+      "sha256": "239d619dccd463db374d09b1511e22cb04e5527a10ee46109355146f2aa0855b"
+    },
+    {
+      "path": "worker.py",
+      "size": 205,
+      "sha256": "34f78f9aa8902f516f548251712d9fe7e7a8ef75e34707aaea7f7608298ea218"
+    }
+  ],
+  "snapshot_hash": "2033251b411e241b44b310b8850bcb79cede9a26b91cf4e1ca9389af4739647d"
+}

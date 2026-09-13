@@ -1,6 +1,6 @@
 # 子系统索引
 
-本目录维护当前行为；计划与历史分别留在本地计划和决策记录。owners 为检查器读取的源码归属，新增源码需更新归属或补充子系统。Run 已有独立执行页面；完整评测仍属后续阶段。
+本目录维护当前行为；计划与历史分别留在本地计划和决策记录。owners 为检查器读取的源码归属，新增源码需更新归属或补充子系统。Run 已有独立执行页面；独立评测已建立离线关键词基线，真实模型对比仍属后续阶段。
 
 | 子系统 | 文档 | owners |
 | --- | --- | --- |
@@ -11,3 +11,4 @@
 | Run 执行 | [Run 执行](execution.md) | apps/api/app/run_execution.py, apps/api/app/issue_analysis.py, apps/api/app/run_sse.py |
 | 工作台 | [工作台](workbench.md) | apps/web/README.md, apps/web/app/, apps/web/lib/ |
 | 演示样本 | [演示样本](fixtures.md) | fixtures/ |
+| 独立评测 | [独立评测](evals.md) | evals/ |

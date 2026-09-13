@@ -1,0 +1,7 @@
+{
+  "schema_version": "0.1.0",
+  "id": "eval-issue-redirect-query-encoding",
+  "title": "Login redirect loses query parameters",
+  "body": "The login redirect loses query parameters when the original URL contains an ampersand. Encode next_path before building the redirect query.",
+  "mentioned_paths": ["auth.py", "router.py"]
+}

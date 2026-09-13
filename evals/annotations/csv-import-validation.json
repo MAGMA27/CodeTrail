@@ -1,0 +1,12 @@
+{
+  "schema_version": "p4-e1",
+  "case_id": "csv-import-validation",
+  "applicable": true,
+  "defect_category": "input_validation",
+  "expected_files": ["reader.py"],
+  "expected_symbols": ["reader.normalize_row", "reader.load_rows"],
+  "expected_locations": [
+    {"path": "reader.py", "start_line": 6, "end_line": 6}
+  ],
+  "basis": "normalize_row indexes the required name field directly; the surrounding reader path is the intended localization range."
+}

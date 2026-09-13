@@ -1,0 +1,7 @@
+{
+  "schema_version": "0.1.0",
+  "id": "eval-issue-retry-control-flow",
+  "title": "Worker stops after the first transient failure",
+  "body": "The worker aborts after the first transient failure. It should retry up to attempts before raising the final error.",
+  "mentioned_paths": ["worker.py"]
+}

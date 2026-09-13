@@ -1,0 +1,7 @@
+{
+  "schema_version": "0.1.0",
+  "id": "eval-issue-csv-import-validation",
+  "title": "CSV import needs validation for rows without a name",
+  "body": "CSV import fails with KeyError when a row has no name. The reader should validate malformed rows before formatting.",
+  "mentioned_paths": ["reader.py"]
+}

@@ -1,0 +1,22 @@
+{
+  "schema_version": "p4-e1",
+  "case_id": "remote-rollout-config",
+  "files": [
+    {
+      "path": "rollout/client.py",
+      "size": 79,
+      "sha256": "582a3989c3f1542dbbaea4676cf8d31c9c39ac8fe30ce46a4e4596152052df5e"
+    },
+    {
+      "path": "rollout/flags.py",
+      "size": 321,
+      "sha256": "f136ad17f6c05ccdc4131300582a0d7e1a7dc4f8851f91ee4d88a8acf12e98bd"
+    },
+    {
+      "path": "rollout/region.py",
+      "size": 63,
+      "sha256": "6a75c1ea1dc944def814db69ad62f942c5cf0f446ece47892d1496b8926dfda1"
+    }
+  ],
+  "snapshot_hash": "ddddb739e050a2fc3f3c7281eba59a25b9d5f17b1ccf00ae8d8b18afcf2be78f"
+}

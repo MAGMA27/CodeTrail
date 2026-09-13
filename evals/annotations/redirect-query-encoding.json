@@ -1,0 +1,12 @@
+{
+  "schema_version": "p4-e1",
+  "case_id": "redirect-query-encoding",
+  "applicable": true,
+  "defect_category": "data_flow_encoding",
+  "expected_files": ["auth.py"],
+  "expected_symbols": ["auth.build_login_redirect"],
+  "expected_locations": [
+    {"path": "auth.py", "start_line": 2, "end_line": 2}
+  ],
+  "basis": "build_login_redirect interpolates next_path into a query string without URL encoding."
+}

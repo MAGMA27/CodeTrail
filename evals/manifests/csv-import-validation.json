@@ -1,0 +1,27 @@
+{
+  "schema_version": "p4-e1",
+  "case_id": "csv-import-validation",
+  "files": [
+    {
+      "path": "app.py",
+      "size": 153,
+      "sha256": "dea996654238d8c8de60ddcd76d787c1463ded81ec05621f745cf82c3cf7e695"
+    },
+    {
+      "path": "formatter.py",
+      "size": 95,
+      "sha256": "1a0006a3bb1d070c8cae948b43442d9d718304ae1622fc69f5b945d43d6fcc24"
+    },
+    {
+      "path": "other.py",
+      "size": 74,
+      "sha256": "deb2c228c65947449aa49ae3e5dbca39fcbc5f4a1aedc0fb93600ba07ab41772"
+    },
+    {
+      "path": "reader.py",
+      "size": 181,
+      "sha256": "345357baf7ab8e77d5d69755fa54523e48eeeec10a6e7f614e037184e6f86db2"
+    }
+  ],
+  "snapshot_hash": "cd81783813b21b440c4f4e795b0e1a367b50e4c876deca3a1b17036dc2fa5027"
+}

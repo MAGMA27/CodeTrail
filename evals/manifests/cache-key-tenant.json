@@ -1,0 +1,22 @@
+{
+  "schema_version": "p4-e1",
+  "case_id": "cache-key-tenant",
+  "files": [
+    {
+      "path": "cache.py",
+      "size": 216,
+      "sha256": "eae67cb664e60dc04f6667e7810ece999b2de177bcb95347d06caa11aee9ee65"
+    },
+    {
+      "path": "repository.py",
+      "size": 91,
+      "sha256": "9471663a303717fc5dded7d10e44f4fee974bf36d3ff45b2b6aafafb625c4c68"
+    },
+    {
+      "path": "service.py",
+      "size": 237,
+      "sha256": "679f75986aaed19c069ebc4d0b1b622513df0e8bd17d727a8fba34c8d16f6722"
+    }
+  ],
+  "snapshot_hash": "4aa1b67e0201bd5da6c24579556c3adeaf053a5e7fa235fac58940c1cf9c15dd"
+}

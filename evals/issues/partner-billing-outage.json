@@ -1,0 +1,7 @@
+{
+  "schema_version": "0.1.0",
+  "id": "eval-issue-partner-billing-outage",
+  "title": "Partner billing endpoint intermittently returns 503",
+  "body": "The partner billing endpoint intermittently returns 503. Determine whether the outage or the local client is responsible, but the partner response and deployment logs are not available here.",
+  "mentioned_paths": ["billing/client.py"]
+}

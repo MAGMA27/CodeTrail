@@ -1,0 +1,22 @@
+{
+  "schema_version": "p4-e1",
+  "case_id": "partner-billing-outage",
+  "files": [
+    {
+      "path": "billing/client.py",
+      "size": 120,
+      "sha256": "3cb35dc1f59aa6d621fd85212cb4a7d942a90c9d0d337e52913b34c4406ec3d4"
+    },
+    {
+      "path": "billing/config.py",
+      "size": 72,
+      "sha256": "ae6f44ce47c20af99ee823f4c5f862ce850825627041c97811190bbf17f3b823"
+    },
+    {
+      "path": "billing/handlers.py",
+      "size": 70,
+      "sha256": "72268a460d91b035e9e4d2fb4ac96f2a2e1dda42e00f1ce54e7e80e8a01e8023"
+    }
+  ],
+  "snapshot_hash": "b03e176f68ba3f46df1f3ed33ffc41d5d75d5d061e4f1b38a2f86c56c3436d34"
+}

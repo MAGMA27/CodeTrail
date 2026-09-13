@@ -1,0 +1,22 @@
+{
+  "schema_version": "p4-e1",
+  "case_id": "redirect-query-encoding",
+  "files": [
+    {
+      "path": "auth.py",
+      "size": 113,
+      "sha256": "719ec0997e476d390d8cdce2d65ebf7be07cd2260c0a5afac5d284367597c3d9"
+    },
+    {
+      "path": "router.py",
+      "size": 118,
+      "sha256": "a424bdb5ac108fba09baa235c24b74f9a64b8bbaae43972f8d7e22abfa1f18cb"
+    },
+    {
+      "path": "urls.py",
+      "size": 44,
+      "sha256": "0e1b53f137eb4b0c42f92280d33f7b6306e1c5ccafcf6af16485931f0d05c33d"
+    }
+  ],
+  "snapshot_hash": "83b6daed08a499b1a5981032b461312d5e10d137f8a1af833c9b703d43cded6b"
+}

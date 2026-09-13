@@ -1,0 +1,12 @@
+{
+  "schema_version": "p4-e1",
+  "case_id": "retry-control-flow",
+  "applicable": true,
+  "defect_category": "retry_control_flow",
+  "expected_files": ["worker.py"],
+  "expected_symbols": ["worker.retry_request"],
+  "expected_locations": [
+    {"path": "worker.py", "start_line": 9, "end_line": 10}
+  ],
+  "basis": "The transient-error handler raises on the first attempt instead of continuing until the bounded retry count is exhausted."
+}
