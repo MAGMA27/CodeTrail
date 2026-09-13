@@ -271,6 +271,7 @@ class RunExecutor:
                 index_id=record.run.index_id,
                 issue_id=record.run.issue.issue_id,
                 mode=record.run.mode,
+                execution_source=record.run.execution_source,
                 message_end_sequence=record.run.message_end_sequence,
                 input_hash=record.run.input_hash,
                 feature_generation_id=record.run.feature_generation_id,

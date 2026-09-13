@@ -63,4 +63,4 @@ docs:check 验证本仓库约定的内联文件链接、栏目、状态、源码
 
 ## 双入口设计约定
 
-HTTP 与 MCP 复用应用服务和领域契约，界面状态不充当 Agent 的隐式上下文；同一 project_id/index_id 的领域结果与错误语义已完成 A1/O1/O2/P3-I1 对照验证，W2 本地导入也复用同一项目/索引服务。O1 规则概览、O2 有证据功能生成、P2-R2 有界 Issue 分析、P3-S1 持久化 Run SSE 和 P3-I1 报告候选的有界静态影响查询已实施；静态可达仍不等于确认影响，真实供应商语义质量仍待独立评测，见 [统一接口决策](decisions/2026-09-11-agent-native-interfaces.md)、[P2-R2 决策](decisions/2026-09-12-run-model-analysis.md)、[Run SSE 决策](decisions/2026-09-12-run-sse.md) 和 [Run 影响查询决策](decisions/2026-09-13-run-impact.md)。
+HTTP 与 MCP 复用应用服务和领域契约，界面状态不充当 Agent 的隐式上下文；同一 project_id/index_id 的领域结果与错误语义已完成 A1/O1/O2/P3-I1 对照验证，W2 本地导入也复用同一项目/索引服务。O1 规则概览、O2 有证据功能生成、P2-R2 有界 Issue 分析、P3-S1 持久化 Run SSE、P3-I1 报告候选的有界静态影响查询和 Codex external Run 绑定已实施；静态可达仍不等于确认影响，真实供应商语义质量仍待独立评测，见 [统一接口决策](decisions/2026-09-11-agent-native-interfaces.md)、[P2-R2 决策](decisions/2026-09-12-run-model-analysis.md)、[Run SSE 决策](decisions/2026-09-12-run-sse.md)、[Run 影响查询决策](decisions/2026-09-13-run-impact.md) 和 [Codex 外部 Agent Run 决策](decisions/2026-09-13-external-agent-run.md)。

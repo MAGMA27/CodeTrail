@@ -1,6 +1,6 @@
 # CodeTrail 工作区 UI 规范
 
-状态：UI-S2 已实现的工作区规范与验收记录，已包含 P3-I1 Run 报告候选位置与有界静态影响面板。本文保留 UI-S1 的设计基线，同时记录生产 `/` 的迁移结果；可浏览原型位于 [apps/web/app/prototype/page.tsx](../../apps/web/app/prototype/page.tsx)，生产组件位于 [apps/web/app/workbench-ui.tsx](../../apps/web/app/workbench-ui.tsx)。
+状态：UI-S2 已实现的工作区规范与验收记录，已包含 P3-I1 Run 报告候选位置与有界静态影响面板，以及 Codex external Run 的自动发现与实时展示边界。本文保留 UI-S1 的设计基线，同时记录生产 `/` 的迁移结果；可浏览原型位于 [apps/web/app/prototype/page.tsx](../../apps/web/app/prototype/page.tsx)，生产组件位于 [apps/web/app/workbench-ui.tsx](../../apps/web/app/workbench-ui.tsx)。
 
 ## 设计读法
 
@@ -125,7 +125,7 @@ Run 报告中的 candidate link 或唯一 symbol finding 提供“查看影响�
 
 独立原型是 `apps/web/app/prototype/` 下的 `/prototype` 路由，使用本地常量和 React 本地状态，故意不导入 `lib/api.ts`，不访问网络、不读取 SQLite、不读取宿主路径、不调用模型、不创建项目或 Session。右上角“预览状态”明确标记仅为设计评审；状态切换和保存延迟是视觉行为演示，不能当作真实 API 验收。
 
-生产 `/` 页面由 `apps/web/app/workbench.tsx` 编排，并由 `apps/web/app/workbench-ui.tsx` 提供视图。现有 API、HTTP/MCP 契约、项目归属、固定索引、证据和 Session 消息规则继续有效；UI-S2 已完成真实页面迁移。生产 Run 面板的 SSE 状态由可测试订阅状态机驱动：有效前进事件才重置重连预算，终态事件或四类终态控制帧结束订阅，有限失败后回退到单一有界轮询；Project/Session/Run 切换、刷新和卸载不得让旧回调写入当前范围。P3-I1 影响面板是 Run 报告的只读派生视图，按需请求固定 snapshot 的静态 `calls`，方向/深度改变会取消旧请求并重新读取，不改变 Run、报告或模型状态。迁移后的生产页与原型继续分开验收，截图不能把静态可达、Agent 或真实模型质量标为已确认。
+生产 `/` 页面由 `apps/web/app/workbench.tsx` 编排，并由 `apps/web/app/workbench-ui.tsx` 提供视图。现有 API、HTTP/MCP 契约、项目归属、固定索引、证据和 Session 消息规则继续有效；UI-S2 已完成真实页面迁移。生产 Run 面板的 SSE 状态由可测试订阅状态机驱动：有效前进事件才重置重连预算，终态事件或四类终态控制帧结束订阅，有限失败后回退到单一有界轮询；Project/Session/Run 切换、刷新和卸载不得让旧回调写入当前范围。Session history 在外部 MCP 写入后通过有界轮询发现 Codex external queued/running Run，自动载入同一 Run 详情并复用 SSE，不创建第二个 Run 或显示隐藏思维链。P3-I1 影响面板是 Run 报告的只读派生视图，按需请求固定 snapshot 的静态 `calls`，方向/深度改变会取消旧请求并重新读取，不改变 Run、报告或模型状态。迁移后的生产页与原型继续分开验收，截图不能把静态可达、Agent 或真实模型质量标为已确认。
 
 ## 截图验收矩阵
 

@@ -599,7 +599,8 @@ class RunBudget(ContractModel):
         return self
 
 
-RunMode: TypeAlias = Literal["fixture", "real"]
+RunMode: TypeAlias = Literal["fixture", "real", "external"]
+RunExecutionSource: TypeAlias = Literal["internal", "codex"]
 FixtureScenario: TypeAlias = Literal[
     "success-timeout-missing",
     "insufficient-external-service",
@@ -653,6 +654,7 @@ class Run(VersionedModel):
     feature_generation_id: Identifier | None = None
     issue: Issue
     mode: RunMode
+    execution_source: RunExecutionSource = "internal"
     fixture_scenario: FixtureScenario | None = None
     model_provider: str | None = Field(default=None, max_length=100)
     model: str | None = Field(default=None, max_length=200)
@@ -676,6 +678,12 @@ class Run(VersionedModel):
             raise ValueError("fixture runs must declare a fixture scenario")
         if self.mode == "real" and self.fixture_scenario is not None:
             raise ValueError("real runs cannot declare a fixture scenario")
+        if self.mode == "external" and self.fixture_scenario is not None:
+            raise ValueError("external Runs cannot declare a fixture scenario")
+        if self.mode == "external" and self.execution_source != "codex":
+            raise ValueError("external Runs must use the Codex execution source")
+        if self.mode != "external" and self.execution_source != "internal":
+            raise ValueError("fixture and real Runs must use the internal execution source")
         if self.input_chars != self.budget.input_chars_used:
             raise ValueError("run input usage must be reflected in the run budget")
         if self.input_chars > self.budget.max_input_chars:
@@ -714,6 +722,7 @@ class Report(VersionedModel):
     evidence: list[Evidence] = Field(default_factory=list)
     findings: list[Finding] = Field(default_factory=list)
     candidate_links: list[CandidateLink] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list, max_length=30)
     terminal_sequence: PositiveInt
 
     @model_validator(mode="after")
@@ -911,6 +920,7 @@ class GetNeighborsSuccess(ToolResultBase):
     root: Symbol | None = None
     nodes: list[Symbol] = Field(default_factory=list, max_length=40)
     neighbors: list[Neighbor]
+    unresolved: list[UnresolvedReference] = Field(default_factory=list, max_length=40)
     truncated: bool = False
     truncation_reason: str | None = Field(default=None, max_length=1_000)
 
@@ -2139,6 +2149,68 @@ class McpRunCancelResponse(McpResultBase):
         return self
 
 
+class McpExternalToolResponse(McpResultBase):
+    """Structured response for one tool call bound to an external Run."""
+
+    result: ToolResult | None = None
+    references: list[EvidenceReference] = Field(default_factory=list, max_length=40)
+
+    @model_validator(mode="after")
+    def validate_external_tool_result(self) -> McpExternalToolResponse:
+        if self.ok:
+            if self.result is None:
+                raise ValueError("successful external tool calls require a result")
+            if self.result.kind != "read_source.succeeded" and self.references:
+                raise ValueError("only successful source reads may return evidence references")
+            if self.result.kind == "read_source.succeeded":
+                evidence = self.result.evidence
+                for reference in self.references:
+                    if (
+                        reference.index_id != evidence.index_id
+                        or reference.evidence_id != evidence.evidence_id
+                        or reference.path != evidence.path
+                        or reference.start_line != evidence.start_line
+                        or reference.end_line != evidence.end_line
+                        or reference.content_hash != evidence.content_hash
+                    ):
+                        raise ValueError("external tool references must match returned source evidence")
+        elif self.result is not None or self.references:
+            raise ValueError("failed external tool calls cannot include tool data")
+        return self
+
+
+class McpExternalCompleteResponse(McpResultBase):
+    """Structured response for a completed external Run and its report."""
+
+    result: RunStatusResponse | None = None
+    report: Report | None = None
+    references: list[EvidenceReference] = Field(default_factory=list, max_length=40)
+
+    @model_validator(mode="after")
+    def validate_external_completion(self) -> McpExternalCompleteResponse:
+        if self.ok:
+            if self.result is None or self.report is None:
+                raise ValueError("successful external completion requires Run status and report")
+            if (
+                self.result.run.run_id != self.report.run_id
+                or self.result.run.project_id != self.report.project_id
+                or self.result.run.session_id != self.report.session_id
+                or self.result.run.index_id != self.report.index_id
+                or self.result.run.status != "succeeded"
+                or self.report.status != "succeeded"
+            ):
+                raise ValueError("external completion status and report must share one succeeded Run")
+            evidence_ids = {evidence.evidence_id for evidence in self.report.evidence}
+            if any(
+                reference.index_id != self.report.index_id or reference.evidence_id not in evidence_ids
+                for reference in self.references
+            ):
+                raise ValueError("external completion references must match report evidence")
+        elif self.result is not None or self.report is not None or self.references:
+            raise ValueError("failed external completions cannot include Run data")
+        return self
+
+
 class McpImportResponse(McpResultBase):
     """Structured MCP result for an enabled local or GitHub import tool."""
 
@@ -2239,6 +2311,7 @@ class RunStartedPayload(ContractModel):
     index_id: Identifier
     issue_id: Identifier
     mode: RunMode
+    execution_source: RunExecutionSource = "internal"
     message_end_sequence: PositiveInt
     input_hash: Sha256
     feature_generation_id: Identifier | None = None
@@ -2466,6 +2539,7 @@ class CreateRunRequest(VersionedModel):
     index_id: Identifier
     issue: Issue
     mode: RunMode
+    execution_source: RunExecutionSource = "internal"
     fixture_scenario: FixtureScenario | None = None
     feature_generation_id: Identifier | None = None
     message_end_sequence: PositiveInt | None = None
@@ -2481,6 +2555,14 @@ class CreateRunRequest(VersionedModel):
             raise ValueError("fixture requests must declare a fixture scenario")
         if self.mode == "real" and self.fixture_scenario is not None:
             raise ValueError("real requests cannot declare a fixture scenario")
+        if self.mode == "external" and self.fixture_scenario is not None:
+            raise ValueError("external requests cannot declare a fixture scenario")
+        if self.mode == "external" and self.execution_source != "codex":
+            raise ValueError("external requests must use the Codex execution source")
+        if self.mode != "external" and self.execution_source != "internal":
+            raise ValueError("fixture and real requests must use the internal execution source")
+        if self.mode == "external" and self.model is not None:
+            raise ValueError("external requests cannot declare an internal model")
         if any(
             value
             for value in (

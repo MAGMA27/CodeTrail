@@ -12,12 +12,13 @@ import time
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, TypeVar
 from uuid import uuid4
 
 from .contracts import (
+    CandidateLink,
     CreateIndexRequest,
     CreateProjectIndexRequest,
     CreateProjectRequest,
@@ -27,6 +28,7 @@ from .contracts import (
     CreateRunResponse,
     CancelRunRequest,
     CancelRunResponse,
+    Event,
     FeatureGeneration,
     FeatureGenerationListResponse,
     FeatureGenerationRequest,
@@ -34,7 +36,12 @@ from .contracts import (
     FeatureGenerationSummary,
     FeatureGraphResponse,
     GetNeighborsParams,
+    GetNeighborsFailure,
     GetNeighborsSuccess,
+    GraphUpdatedEvent,
+    GraphUpdatedPayload,
+    GraphSnapshot,
+    Finding,
     ImpactDirection,
     ImportAttempt,
     ImportAttemptResponse,
@@ -43,6 +50,7 @@ from .contracts import (
     IndexIssue,
     IndexResponse,
     IndexSnapshot,
+    IssueModelFinal,
     LocalImportRequest,
     LocalImportResponse,
     NeighborsIndexResponse,
@@ -50,9 +58,11 @@ from .contracts import (
     Project,
     ProjectIndexListResponse,
     ProjectListResponse,
+    Report,
     RunImpactResponse,
     ReportResponse,
     ReadSourceParams,
+    ReadSourceFailure,
     ReadSourceSuccess,
     Run,
     RunBudget,
@@ -61,7 +71,19 @@ from .contracts import (
     RunListResponse,
     RunStatusResponse,
     RunToolResultsResponse,
+    RunStartedEvent,
+    RunStartedPayload,
+    RunCompletedEvent,
+    RunCompletedPayload,
+    ToolCompletedEvent,
+    ToolCompletedPayload,
+    ToolFailedEvent,
+    ToolFailedPayload,
+    ToolStartedEvent,
+    ToolStartedPayload,
+    ToolParams,
     SearchCodeParams,
+    SearchCodeFailure,
     SearchCodeSuccess,
     SearchIndexResponse,
     Session,
@@ -148,6 +170,7 @@ class RepositoryRegistry:
         mcp_feature_generation_enabled: bool | None = None,
         mcp_session_write_enabled: bool | None = None,
         mcp_run_write_enabled: bool | None = None,
+        mcp_external_run_enabled: bool | None = None,
         real_run_enabled: bool | None = None,
         mcp_real_run_enabled: bool | None = None,
         model_config: ModelProviderConfig | None = None,
@@ -214,6 +237,11 @@ class RepositoryRegistry:
             if mcp_run_write_enabled is None
             else mcp_run_write_enabled
         )
+        self._mcp_external_run_enabled = (
+            _env_flag("CODETRAIL_MCP_EXTERNAL_RUN_ENABLED")
+            if mcp_external_run_enabled is None
+            else mcp_external_run_enabled
+        )
         self._real_run_enabled = (
             _env_flag("CODETRAIL_REAL_RUN_ENABLED")
             if real_run_enabled is None
@@ -238,6 +266,7 @@ class RepositoryRegistry:
         mcp_feature_generation_enabled: bool | None = None,
         mcp_session_write_enabled: bool | None = None,
         mcp_run_write_enabled: bool | None = None,
+        mcp_external_run_enabled: bool | None = None,
         real_run_enabled: bool | None = None,
         mcp_real_run_enabled: bool | None = None,
         model_config: ModelProviderConfig | None = None,
@@ -270,6 +299,7 @@ class RepositoryRegistry:
             mcp_feature_generation_enabled=mcp_feature_generation_enabled,
             mcp_session_write_enabled=mcp_session_write_enabled,
             mcp_run_write_enabled=mcp_run_write_enabled,
+            mcp_external_run_enabled=mcp_external_run_enabled,
             real_run_enabled=real_run_enabled,
             mcp_real_run_enabled=mcp_real_run_enabled,
             model_config=model_config,
@@ -316,6 +346,10 @@ class RepositoryRegistry:
     @property
     def mcp_run_write_enabled(self) -> bool:
         return self._mcp_run_write_enabled
+
+    @property
+    def mcp_external_run_enabled(self) -> bool:
+        return self._mcp_external_run_enabled
 
     @property
     def real_run_enabled(self) -> bool:
@@ -666,6 +700,7 @@ class IndexService:
                     root=result.root,
                     nodes=list(result.nodes),
                     neighbors=result.neighbors,
+                    unresolved=list(result.unresolved),
                     truncated=result.truncated,
                     truncation_reason=result.truncation_reason,
                 )
@@ -989,7 +1024,14 @@ class WorkspaceService:
     ) -> CreateRunResponse:
         """Freeze a saved Session prefix and submit one explicit bounded Run."""
 
-        if request.mode == "real":
+        if request.mode == "external":
+            if not via_mcp or not self.registry.mcp_external_run_enabled:
+                raise ServiceError(
+                    "forbidden",
+                    403,
+                    "external Agent Runs require the explicit MCP external-run capability switch",
+                )
+        elif request.mode == "real":
             enabled = self.registry.mcp_real_run_enabled if via_mcp else self.registry.real_run_enabled
             if not enabled:
                 raise ServiceError(
@@ -1001,6 +1043,7 @@ class WorkspaceService:
         fingerprint = _run_creation_fingerprint(project_id, session_id, request)
         reservation: RunReservation | None = None
         handed_to_worker = False
+        created = False
         try:
             with self.registry.store_for_repository(project.repository_id) as store:
                 if request.idempotency_key is not None:
@@ -1072,6 +1115,7 @@ class WorkspaceService:
                     feature_generation_id=feature_generation_id,
                     issue=request.issue,
                     mode=request.mode,
+                    execution_source=request.execution_source,
                     fixture_scenario=request.fixture_scenario,
                     model_provider=(self.registry.model_config.provider if request.mode == "real" else None),
                     model=resolved_model,
@@ -1088,14 +1132,15 @@ class WorkspaceService:
                     input_chars=input_chars,
                     created_at=frozen_at,
                 )
-                try:
-                    reservation = self.run_executor.reserve()
-                except RunExecutorCapacityError as exc:
-                    raise ServiceError(
-                        "budget_exceeded",
-                        429,
-                        "Run executor capacity is full; retry this Run later",
-                    ) from exc
+                if request.mode != "external":
+                    try:
+                        reservation = self.run_executor.reserve()
+                    except RunExecutorCapacityError as exc:
+                        raise ServiceError(
+                            "budget_exceeded",
+                            429,
+                            "Run executor capacity is full; retry this Run later",
+                        ) from exc
                 try:
                     record, created = store.create_run(
                         run,
@@ -1112,11 +1157,11 @@ class WorkspaceService:
                             raise
                         return _run_create_response(existing.run)
                     finally:
-                        assert reservation is not None
-                        reservation.release()
+                        if reservation is not None:
+                            reservation.release()
                 except Exception:
-                    assert reservation is not None
-                    reservation.release()
+                    if reservation is not None:
+                        reservation.release()
                     raise
         except ServiceError:
             raise
@@ -1132,9 +1177,10 @@ class WorkspaceService:
             raise ServiceError("internal_error", 500, "local Run storage failed") from exc
         try:
             if created:
-                assert reservation is not None
-                self.run_executor.submit(record.run, reservation=reservation)
-                handed_to_worker = True
+                if request.mode != "external":
+                    assert reservation is not None
+                    self.run_executor.submit(record.run, reservation=reservation)
+                    handed_to_worker = True
             elif reservation is not None:
                 reservation.release()
             return _run_create_response(record.run)
@@ -1143,6 +1189,367 @@ class WorkspaceService:
         finally:
             if reservation is not None and not handed_to_worker:
                 reservation.release()
+
+    def execute_external_tool(
+        self,
+        project_id: str,
+        session_id: str,
+        run_id: str,
+        request_id: str,
+        index_id: str,
+        params: ToolParams,
+    ) -> ToolResult:
+        """Execute and persist one allow-listed tool call for a Codex-led Run."""
+
+        project = self._find_project(project_id)
+        request = ToolRequest(
+            request_id=request_id,
+            run_id=run_id,
+            index_id=index_id,
+            params=params,
+        )
+        try:
+            with self.registry.store_for_repository(project.repository_id) as store:
+                record = store._require_run_scope(project_id, session_id, run_id)
+                self._require_external_run(record)
+                if record.run.index_id != index_id:
+                    raise ServiceError(
+                        "conflict",
+                        409,
+                        "external tool index must match the Run's fixed snapshot",
+                    )
+                existing = store.load_run_tool_result(run_id, request_id)
+                if existing is not None:
+                    previous_request = store.load_run_tool_request(run_id, request_id)
+                    if previous_request is None or previous_request.params != params or previous_request.index_id != index_id:
+                        raise ServiceError(
+                            "conflict",
+                            409,
+                            "external tool request_id is already bound to different parameters",
+                        )
+                    return existing
+
+                previous_request = store.load_run_tool_request(run_id, request_id)
+                if previous_request is not None and (
+                    previous_request.params != params or previous_request.index_id != index_id
+                ):
+                    raise ServiceError(
+                        "conflict",
+                        409,
+                        "external tool request_id is already bound to different parameters",
+                    )
+                if record.run.status not in {"queued", "running"}:
+                    raise ServiceError("conflict", 409, "external Run is already terminal")
+
+                record = self._expire_external_run_if_needed(store, record)
+                if record.run.status not in {"queued", "running"}:
+                    raise ServiceError("budget_exceeded", 409, "external Run time budget is exhausted")
+                record = self._ensure_external_run_started(store, record)
+                record = self._expire_external_run_if_needed(store, record)
+                if record.run.status not in {"queued", "running"}:
+                    raise ServiceError("budget_exceeded", 409, "external Run time budget is exhausted")
+                if record.run.budget.tool_calls_used >= record.run.budget.max_tool_calls:
+                    raise ServiceError("budget_exceeded", 409, "Run tool-call budget is exhausted")
+                if record.run.budget.events_used + 3 > record.run.budget.max_events:
+                    raise ServiceError(
+                        "budget_exceeded",
+                        409,
+                        "Run event budget cannot fit a tool call and terminal conclusion",
+                    )
+
+                if previous_request is None:
+                    started_event = ToolStartedEvent(
+                        run_id=run_id,
+                        sequence=record.run.budget.events_used + 1,
+                        timestamp=datetime.now(timezone.utc),
+                        payload=ToolStartedPayload(request=request),
+                    )
+                    store.append_run_event(started_event)
+                    record = store.load_run_record(run_id)
+                completed_sequence = record.run.budget.events_used + 1
+                try:
+                    result = self.index_service.execute_tool(
+                        request,
+                        completed_sequence=completed_sequence,
+                    )
+                except Exception:
+                    result = _tool_failure(
+                        request,
+                        completed_sequence,
+                        "internal_error",
+                        "external tool execution failed unexpectedly",
+                    )
+                record = self._expire_external_run_if_needed(store, store.load_run_record(run_id))
+                if record.run.status not in {"queued", "running"}:
+                    raise ServiceError("budget_exceeded", 409, "external Run time budget is exhausted")
+                if isinstance(result, (SearchCodeFailure, ReadSourceFailure, GetNeighborsFailure)):
+                    event: Event = ToolFailedEvent(
+                        run_id=run_id,
+                        sequence=completed_sequence,
+                        timestamp=datetime.now(timezone.utc),
+                        payload=ToolFailedPayload(result=result),
+                    )
+                else:
+                    event = ToolCompletedEvent(
+                        run_id=run_id,
+                        sequence=completed_sequence,
+                        timestamp=datetime.now(timezone.utc),
+                        payload=ToolCompletedPayload(result=result),
+                    )
+                store.append_run_tool_result(event, result)
+                return result
+        except ServiceError:
+            raise
+        except StorageNotFoundError as exc:
+            raise ServiceError("not_found", 404, "external Run was not found") from exc
+        except StorageConflictError as exc:
+            raise ServiceError("conflict", 409, "external Run tool request conflicts with existing data") from exc
+        except StorageInputError as exc:
+            message = str(exc)
+            code = "budget_exceeded" if "budget" in message.lower() else "invalid_input"
+            raise ServiceError(code, 409 if code == "budget_exceeded" else 400, message) from exc
+        except StorageError as exc:
+            raise ServiceError("internal_error", 500, "local external Run storage failed") from exc
+
+    def complete_external_run(
+        self,
+        project_id: str,
+        session_id: str,
+        run_id: str,
+        final: IssueModelFinal,
+    ) -> tuple[RunStatusResponse, Report]:
+        """Validate and persist a structured Codex conclusion for one external Run."""
+
+        try:
+            validated_final = IssueModelFinal.model_validate(final)
+        except ValueError as exc:
+            raise ServiceError("invalid_input", 400, "external Run conclusion is invalid") from exc
+
+        project = self._find_project(project_id)
+        try:
+            with self.registry.store_for_repository(project.repository_id) as store:
+                record = store._require_run_scope(project_id, session_id, run_id)
+                self._require_external_run(record)
+                if validated_final.index_id != record.run.index_id:
+                    raise ServiceError(
+                        "conflict",
+                        409,
+                        "external conclusion index does not match the Run snapshot",
+                    )
+                if record.run.status in {"succeeded", "failed", "cancelled", "interrupted"}:
+                    if record.run.status != "succeeded":
+                        raise ServiceError("conflict", 409, "external Run is already terminal")
+                    report = store.load_run_report(project_id, session_id, run_id)
+                    if not _external_report_matches_final(report, validated_final):
+                        raise ServiceError(
+                            "conflict",
+                            409,
+                            "external Run already has a different conclusion",
+                        )
+                    return RunStatusResponse(run=record.run, input=record.input), report
+
+                record = self._expire_external_run_if_needed(store, record)
+                if record.run.status not in {"queued", "running"}:
+                    raise ServiceError("budget_exceeded", 409, "external Run time budget is exhausted")
+                record = self._ensure_external_run_started(store, record)
+                record = self._expire_external_run_if_needed(store, record)
+                if record.run.status not in {"queued", "running"}:
+                    raise ServiceError("budget_exceeded", 409, "external Run time budget is exhausted")
+                result_page = store.load_run_tool_results(
+                    project_id,
+                    session_id,
+                    run_id,
+                    limit=40,
+                )
+                tool_results = list(result_page.results)
+                nodes, static_edges, unresolved, evidence_by_id, truncated, truncation_reason = _external_graph_data(
+                    tool_results,
+                    run_id=run_id,
+                    index_id=record.run.index_id,
+                )
+                self._validate_external_final(
+                    validated_final,
+                    record.run,
+                    evidence_by_id=evidence_by_id,
+                    symbol_ids={symbol.symbol_id for symbol in nodes},
+                )
+                graph = GraphSnapshot(
+                    index_id=record.run.index_id,
+                    nodes=nodes,
+                    static_edges=static_edges,
+                    unresolved=unresolved,
+                    candidate_links=list(validated_final.candidate_links),
+                    truncated=truncated,
+                    truncation_reason=truncation_reason,
+                )
+                selected_evidence = [evidence_by_id[evidence_id] for evidence_id in validated_final.evidence_ids]
+
+                current = store.load_run_record(run_id)
+                if current.run.budget.events_used + 2 <= current.run.budget.max_events:
+                    graph_event = GraphUpdatedEvent(
+                        run_id=run_id,
+                        sequence=current.run.budget.events_used + 1,
+                        timestamp=datetime.now(timezone.utc),
+                        payload=GraphUpdatedPayload(graph=graph),
+                    )
+                    store.append_run_event(graph_event)
+                    current = store.load_run_record(run_id)
+                terminal_sequence = current.run.budget.events_used + 1
+                report_id = f"report-{run_id}"
+                report = Report(
+                    report_id=report_id,
+                    run_id=run_id,
+                    project_id=project_id,
+                    session_id=session_id,
+                    index_id=current.run.index_id,
+                    status="succeeded",
+                    outcome=validated_final.outcome,
+                    fixture_mode=False,
+                    summary=validated_final.summary,
+                    graph=graph,
+                    evidence=selected_evidence,
+                    findings=list(validated_final.findings),
+                    candidate_links=list(validated_final.candidate_links),
+                    limitations=list(validated_final.limitations),
+                    terminal_sequence=terminal_sequence,
+                )
+                event = RunCompletedEvent(
+                    run_id=run_id,
+                    sequence=terminal_sequence,
+                    timestamp=datetime.now(timezone.utc),
+                    payload=RunCompletedPayload(
+                        status="succeeded",
+                        outcome=validated_final.outcome,
+                        report_id=report_id,
+                    ),
+                )
+                updated_run = current.run.model_copy(
+                    update={
+                        "status": "succeeded",
+                        "ended_at": event.timestamp,
+                        "report_id": report_id,
+                    }
+                )
+                finished = store.finish_run(updated_run, event, report)
+                persisted_report = store.load_run_report(project_id, session_id, run_id)
+                if not _external_report_matches_final(persisted_report, validated_final):
+                    raise ServiceError(
+                        "conflict",
+                        409,
+                        "external Run completed concurrently with a different conclusion",
+                    )
+                return RunStatusResponse(run=finished.run, input=finished.input), persisted_report
+        except ServiceError:
+            raise
+        except StorageNotFoundError as exc:
+            raise ServiceError("not_found", 404, "external Run was not found") from exc
+        except StorageConflictError as exc:
+            raise ServiceError("conflict", 409, "external Run completion conflicts with existing data") from exc
+        except StorageInputError as exc:
+            message = str(exc)
+            code = "budget_exceeded" if "budget" in message.lower() else "invalid_input"
+            raise ServiceError(code, 409 if code == "budget_exceeded" else 400, message) from exc
+        except StorageError as exc:
+            raise ServiceError("internal_error", 500, "local external Run completion failed") from exc
+        except ValueError as exc:
+            raise ServiceError("invalid_input", 409, "external Run references are invalid") from exc
+
+    def cancel_external_run(
+        self,
+        project_id: str,
+        session_id: str,
+        run_id: str,
+        request: CancelRunRequest,
+    ) -> CancelRunResponse:
+        """Cancel only a Codex-owned external Run."""
+
+        record = self._load_run_record(project_id, session_id, run_id)
+        self._require_external_run(record)
+        return self.cancel_run(project_id, session_id, run_id, request)
+
+    @staticmethod
+    def _require_external_run(record: RunRecord) -> None:
+        if record.run.mode != "external" or record.run.execution_source != "codex":
+            raise ServiceError("conflict", 409, "Run is not a Codex external Run")
+
+    @staticmethod
+    def _ensure_external_run_started(store: IndexStore, record: RunRecord) -> RunRecord:
+        if record.run.status != "queued":
+            return record
+        started_at = datetime.now(timezone.utc)
+        event = RunStartedEvent(
+            run_id=record.run.run_id,
+            sequence=record.run.budget.events_used + 1,
+            timestamp=started_at,
+            payload=RunStartedPayload(
+                project_id=record.run.project_id,
+                session_id=record.run.session_id,
+                index_id=record.run.index_id,
+                issue_id=record.run.issue.issue_id,
+                mode=record.run.mode,
+                execution_source=record.run.execution_source,
+                message_end_sequence=record.run.message_end_sequence,
+                input_hash=record.run.input_hash,
+                feature_generation_id=record.run.feature_generation_id,
+                execution_version=record.run.execution_version,
+                budget=record.run.budget,
+            ),
+        )
+        started = store.start_run(record.run.run_id, started_at, event)
+        return started or store.load_run_record(record.run.run_id)
+
+    @staticmethod
+    def _expire_external_run_if_needed(store: IndexStore, record: RunRecord) -> RunRecord:
+        """Interrupt only this external Run once its wall-clock budget is exhausted."""
+
+        if record.run.status not in {"queued", "running"}:
+            return record
+        active_since = record.run.created_at
+        now = datetime.now(timezone.utc)
+        if now < active_since or now - active_since < timedelta(seconds=record.run.budget.max_seconds):
+            return record
+        store.interrupt_run(
+            record.run.run_id,
+            reason="external Run exceeded its wall-clock budget",
+            interrupted_at=now,
+        )
+        return store.load_run_record(record.run.run_id)
+
+    @staticmethod
+    def _validate_external_final(
+        final: IssueModelFinal,
+        run: Run,
+        *,
+        evidence_by_id: Mapping[str, object],
+        symbol_ids: set[str],
+    ) -> None:
+        if final.index_id != run.index_id:
+            raise ServiceError("conflict", 409, "external conclusion index does not match the Run snapshot")
+        returned_evidence_ids = set(evidence_by_id)
+        if not set(final.evidence_ids).issubset(returned_evidence_ids):
+            raise ServiceError(
+                "conflict",
+                409,
+                "external conclusion references evidence not returned by this Run",
+            )
+        for finding in final.findings:
+            if not set(finding.symbol_ids).issubset(symbol_ids):
+                raise ServiceError(
+                    "conflict",
+                    409,
+                    "external finding references a symbol not returned by this Run",
+                )
+        for link in final.candidate_links:
+            if link.index_id != run.index_id:
+                raise ServiceError("conflict", 409, "external candidate link uses a different index")
+            if link.source_symbol_id not in symbol_ids or (
+                link.target_symbol_id is not None and link.target_symbol_id not in symbol_ids
+            ):
+                raise ServiceError(
+                    "conflict",
+                    409,
+                    "external candidate link references a symbol not returned by this Run",
+                )
 
     def get_run(self, project_id: str, session_id: str, run_id: str) -> RunStatusResponse:
         record = self._load_run_record(project_id, session_id, run_id)
@@ -2708,3 +3115,73 @@ def _tool_failure(
     from .contracts import GetNeighborsFailure
 
     return GetNeighborsFailure(**base)
+
+
+def _external_graph_data(
+    results: list[ToolResult],
+    *,
+    run_id: str,
+    index_id: str,
+) -> tuple[list[object], list[object], list[object], dict[str, object], bool, str | None]:
+    """Collect only symbols, edges, unresolved references, and evidence returned by one Run."""
+
+    nodes: dict[str, object] = {}
+    static_edges: dict[str, object] = {}
+    unresolved: dict[str, object] = {}
+    evidence: dict[str, object] = {}
+    truncated = False
+    truncation_reason: str | None = None
+
+    def add_item(target: dict[str, object], key: str, value: object, label: str) -> None:
+        existing = target.get(key)
+        if existing is not None and existing != value:
+            raise ValueError(f"external {label} payload conflicts for {key}")
+        target[key] = value
+
+    for result in results:
+        if result.run_id != run_id or result.index_id != index_id:
+            raise ValueError("external tool result crossed the Run snapshot boundary")
+        if isinstance(result, SearchCodeSuccess):
+            for match in result.matches:
+                add_item(nodes, match.symbol.symbol_id, match.symbol, "symbol")
+            truncated = truncated or result.truncated
+            truncation_reason = truncation_reason or result.truncation_reason
+        elif isinstance(result, ReadSourceSuccess):
+            add_item(evidence, result.evidence.evidence_id, result.evidence, "evidence")
+        elif isinstance(result, GetNeighborsSuccess):
+            if result.root is not None:
+                add_item(nodes, result.root.symbol_id, result.root, "symbol")
+            for symbol in result.nodes:
+                add_item(nodes, symbol.symbol_id, symbol, "symbol")
+            for neighbor in result.neighbors:
+                add_item(nodes, neighbor.symbol.symbol_id, neighbor.symbol, "symbol")
+                add_item(static_edges, neighbor.edge.edge_id, neighbor.edge, "edge")
+            for item in result.unresolved:
+                add_item(unresolved, item.unresolved_id, item, "unresolved reference")
+            truncated = truncated or result.truncated
+            truncation_reason = truncation_reason or result.truncation_reason
+
+    if truncated and not truncation_reason:
+        truncation_reason = "one or more external tool results were truncated"
+    return (
+        list(nodes.values()),
+        list(static_edges.values()),
+        list(unresolved.values()),
+        evidence,
+        truncated,
+        truncation_reason,
+    )
+
+
+def _external_report_matches_final(report: Report, final: IssueModelFinal) -> bool:
+    """Compare the durable public conclusion for external completion idempotency."""
+
+    return (
+        report.status == "succeeded"
+        and report.outcome == final.outcome
+        and report.summary == final.summary
+        and report.findings == final.findings
+        and report.candidate_links == final.candidate_links
+        and report.limitations == final.limitations
+        and [evidence.evidence_id for evidence in report.evidence] == final.evidence_ids
+    )

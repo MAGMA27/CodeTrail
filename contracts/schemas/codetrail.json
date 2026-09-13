@@ -463,6 +463,15 @@
         "budget": {
           "$ref": "#/$defs/RunBudget"
         },
+        "execution_source": {
+          "default": "internal",
+          "enum": [
+            "internal",
+            "codex"
+          ],
+          "title": "Execution Source",
+          "type": "string"
+        },
         "execution_version": {
           "default": "run-fixture-v1",
           "maxLength": 200,
@@ -540,7 +549,8 @@
         "mode": {
           "enum": [
             "fixture",
-            "real"
+            "real",
+            "external"
           ],
           "title": "Mode",
           "type": "string"
@@ -1171,6 +1181,14 @@
               ],
               "default": null,
               "title": "Truncation Reason"
+            },
+            "unresolved": {
+              "items": {
+                "$ref": "#/$defs/UnresolvedReference"
+              },
+              "maxItems": 40,
+              "title": "Unresolved",
+              "type": "array"
             }
           },
           "required": [
@@ -1943,6 +1961,15 @@
             "budget": {
               "$ref": "#/$defs/RunBudget"
             },
+            "execution_source": {
+              "default": "internal",
+              "enum": [
+                "internal",
+                "codex"
+              ],
+              "title": "Execution Source",
+              "type": "string"
+            },
             "execution_version": {
               "maxLength": 200,
               "minLength": 1,
@@ -1988,7 +2015,8 @@
             "mode": {
               "enum": [
                 "fixture",
-                "real"
+                "real",
+                "external"
               ],
               "title": "Mode",
               "type": "string"
@@ -3222,6 +3250,14 @@
               ],
               "default": null,
               "title": "Truncation Reason"
+            },
+            "unresolved": {
+              "items": {
+                "$ref": "#/$defs/UnresolvedReference"
+              },
+              "maxItems": 40,
+              "title": "Unresolved",
+              "type": "array"
             }
           },
           "required": [
@@ -3994,6 +4030,15 @@
             "budget": {
               "$ref": "#/$defs/RunBudget"
             },
+            "execution_source": {
+              "default": "internal",
+              "enum": [
+                "internal",
+                "codex"
+              ],
+              "title": "Execution Source",
+              "type": "string"
+            },
             "execution_version": {
               "maxLength": 200,
               "minLength": 1,
@@ -4039,7 +4084,8 @@
             "mode": {
               "enum": [
                 "fixture",
-                "real"
+                "real",
+                "external"
               ],
               "title": "Mode",
               "type": "string"
@@ -9686,6 +9732,14 @@
               ],
               "default": null,
               "title": "Truncation Reason"
+            },
+            "unresolved": {
+              "items": {
+                "$ref": "#/$defs/UnresolvedReference"
+              },
+              "maxItems": 40,
+              "title": "Unresolved",
+              "type": "array"
             }
           },
           "required": [
@@ -10207,6 +10261,14 @@
               "title": "Index Id",
               "type": "string"
             },
+            "limitations": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 30,
+              "title": "Limitations",
+              "type": "array"
+            },
             "outcome": {
               "enum": [
                 "candidate_found",
@@ -10309,6 +10371,15 @@
               "default": null,
               "title": "Ended At"
             },
+            "execution_source": {
+              "default": "internal",
+              "enum": [
+                "internal",
+                "codex"
+              ],
+              "title": "Execution Source",
+              "type": "string"
+            },
             "execution_version": {
               "default": "run-fixture-v1",
               "maxLength": 200,
@@ -10374,7 +10445,8 @@
             "mode": {
               "enum": [
                 "fixture",
-                "real"
+                "real",
+                "external"
               ],
               "title": "Mode",
               "type": "string"
@@ -11076,6 +11148,15 @@
             "budget": {
               "$ref": "#/$defs/RunBudget"
             },
+            "execution_source": {
+              "default": "internal",
+              "enum": [
+                "internal",
+                "codex"
+              ],
+              "title": "Execution Source",
+              "type": "string"
+            },
             "execution_version": {
               "maxLength": 200,
               "minLength": 1,
@@ -11121,7 +11202,8 @@
             "mode": {
               "enum": [
                 "fixture",
-                "real"
+                "real",
+                "external"
               ],
               "title": "Mode",
               "type": "string"
@@ -21350,6 +21432,14 @@
               ],
               "default": null,
               "title": "Truncation Reason"
+            },
+            "unresolved": {
+              "items": {
+                "$ref": "#/$defs/UnresolvedReference"
+              },
+              "maxItems": 40,
+              "title": "Unresolved",
+              "type": "array"
             }
           },
           "required": [
@@ -22276,6 +22366,15 @@
             "budget": {
               "$ref": "#/$defs/RunBudget"
             },
+            "execution_source": {
+              "default": "internal",
+              "enum": [
+                "internal",
+                "codex"
+              ],
+              "title": "Execution Source",
+              "type": "string"
+            },
             "execution_version": {
               "maxLength": 200,
               "minLength": 1,
@@ -22321,7 +22420,8 @@
             "mode": {
               "enum": [
                 "fixture",
-                "real"
+                "real",
+                "external"
               ],
               "title": "Mode",
               "type": "string"
@@ -23751,6 +23851,15 @@
               "default": null,
               "title": "Ended At"
             },
+            "execution_source": {
+              "default": "internal",
+              "enum": [
+                "internal",
+                "codex"
+              ],
+              "title": "Execution Source",
+              "type": "string"
+            },
             "execution_version": {
               "default": "run-fixture-v1",
               "maxLength": 200,
@@ -23816,7 +23925,8 @@
             "mode": {
               "enum": [
                 "fixture",
-                "real"
+                "real",
+                "external"
               ],
               "title": "Mode",
               "type": "string"
@@ -24588,6 +24698,14 @@
               "title": "Index Id",
               "type": "string"
             },
+            "limitations": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 30,
+              "title": "Limitations",
+              "type": "array"
+            },
             "outcome": {
               "enum": [
                 "candidate_found",
@@ -24995,6 +25113,15 @@
               "default": null,
               "title": "Ended At"
             },
+            "execution_source": {
+              "default": "internal",
+              "enum": [
+                "internal",
+                "codex"
+              ],
+              "title": "Execution Source",
+              "type": "string"
+            },
             "execution_version": {
               "default": "run-fixture-v1",
               "maxLength": 200,
@@ -25060,7 +25187,8 @@
             "mode": {
               "enum": [
                 "fixture",
-                "real"
+                "real",
+                "external"
               ],
               "title": "Mode",
               "type": "string"
@@ -25956,6 +26084,14 @@
               ],
               "default": null,
               "title": "Truncation Reason"
+            },
+            "unresolved": {
+              "items": {
+                "$ref": "#/$defs/UnresolvedReference"
+              },
+              "maxItems": 40,
+              "title": "Unresolved",
+              "type": "array"
             }
           },
           "required": [
@@ -26497,6 +26633,78 @@
             "message"
           ],
           "title": "ToolError",
+          "type": "object"
+        },
+        "UnresolvedReference": {
+          "additionalProperties": false,
+          "properties": {
+            "end_line": {
+              "exclusiveMinimum": 0,
+              "title": "End Line",
+              "type": "integer"
+            },
+            "expression": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Expression",
+              "type": "string"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "possible_target_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "title": "Possible Target Ids",
+              "type": "array"
+            },
+            "reason": {
+              "maxLength": 1000,
+              "minLength": 1,
+              "title": "Reason",
+              "type": "string"
+            },
+            "source_symbol_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Source Symbol Id",
+              "type": "string"
+            },
+            "start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Start Line",
+              "type": "integer"
+            },
+            "unresolved_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Unresolved Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "start_line",
+            "end_line",
+            "unresolved_id",
+            "index_id",
+            "source_symbol_id",
+            "path",
+            "expression",
+            "reason"
+          ],
+          "title": "UnresolvedReference",
           "type": "object"
         }
       },
@@ -29970,6 +30178,14 @@
           "title": "Index Id",
           "type": "string"
         },
+        "limitations": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 30,
+          "title": "Limitations",
+          "type": "array"
+        },
         "outcome": {
           "enum": [
             "candidate_found",
@@ -30388,6 +30604,14 @@
               "minLength": 1,
               "title": "Index Id",
               "type": "string"
+            },
+            "limitations": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 30,
+              "title": "Limitations",
+              "type": "array"
             },
             "outcome": {
               "enum": [
@@ -30897,6 +31121,15 @@
           "default": null,
           "title": "Ended At"
         },
+        "execution_source": {
+          "default": "internal",
+          "enum": [
+            "internal",
+            "codex"
+          ],
+          "title": "Execution Source",
+          "type": "string"
+        },
         "execution_version": {
           "default": "run-fixture-v1",
           "maxLength": 200,
@@ -30962,7 +31195,8 @@
         "mode": {
           "enum": [
             "fixture",
-            "real"
+            "real",
+            "external"
           ],
           "title": "Mode",
           "type": "string"
@@ -31558,6 +31792,14 @@
               ],
               "default": null,
               "title": "Truncation Reason"
+            },
+            "unresolved": {
+              "items": {
+                "$ref": "#/$defs/UnresolvedReference"
+              },
+              "maxItems": 40,
+              "title": "Unresolved",
+              "type": "array"
             }
           },
           "required": [
@@ -32330,6 +32572,15 @@
             "budget": {
               "$ref": "#/$defs/RunBudget"
             },
+            "execution_source": {
+              "default": "internal",
+              "enum": [
+                "internal",
+                "codex"
+              ],
+              "title": "Execution Source",
+              "type": "string"
+            },
             "execution_version": {
               "maxLength": 200,
               "minLength": 1,
@@ -32375,7 +32626,8 @@
             "mode": {
               "enum": [
                 "fixture",
-                "real"
+                "real",
+                "external"
               ],
               "title": "Mode",
               "type": "string"
@@ -33895,6 +34147,15 @@
               "default": null,
               "title": "Ended At"
             },
+            "execution_source": {
+              "default": "internal",
+              "enum": [
+                "internal",
+                "codex"
+              ],
+              "title": "Execution Source",
+              "type": "string"
+            },
             "execution_version": {
               "default": "run-fixture-v1",
               "maxLength": 200,
@@ -33960,7 +34221,8 @@
             "mode": {
               "enum": [
                 "fixture",
-                "real"
+                "real",
+                "external"
               ],
               "title": "Mode",
               "type": "string"
@@ -34391,6 +34653,15 @@
               "default": null,
               "title": "Ended At"
             },
+            "execution_source": {
+              "default": "internal",
+              "enum": [
+                "internal",
+                "codex"
+              ],
+              "title": "Execution Source",
+              "type": "string"
+            },
             "execution_version": {
               "default": "run-fixture-v1",
               "maxLength": 200,
@@ -34456,7 +34727,8 @@
             "mode": {
               "enum": [
                 "fixture",
-                "real"
+                "real",
+                "external"
               ],
               "title": "Mode",
               "type": "string"
@@ -35174,6 +35446,14 @@
               ],
               "default": null,
               "title": "Truncation Reason"
+            },
+            "unresolved": {
+              "items": {
+                "$ref": "#/$defs/UnresolvedReference"
+              },
+              "maxItems": 40,
+              "title": "Unresolved",
+              "type": "array"
             }
           },
           "required": [
@@ -35581,6 +35861,78 @@
             "message"
           ],
           "title": "ToolError",
+          "type": "object"
+        },
+        "UnresolvedReference": {
+          "additionalProperties": false,
+          "properties": {
+            "end_line": {
+              "exclusiveMinimum": 0,
+              "title": "End Line",
+              "type": "integer"
+            },
+            "expression": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Expression",
+              "type": "string"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "possible_target_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "title": "Possible Target Ids",
+              "type": "array"
+            },
+            "reason": {
+              "maxLength": 1000,
+              "minLength": 1,
+              "title": "Reason",
+              "type": "string"
+            },
+            "source_symbol_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Source Symbol Id",
+              "type": "string"
+            },
+            "start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Start Line",
+              "type": "integer"
+            },
+            "unresolved_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Unresolved Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "start_line",
+            "end_line",
+            "unresolved_id",
+            "index_id",
+            "source_symbol_id",
+            "path",
+            "expression",
+            "reason"
+          ],
+          "title": "UnresolvedReference",
           "type": "object"
         }
       },
@@ -36901,6 +37253,14 @@
               ],
               "default": null,
               "title": "Truncation Reason"
+            },
+            "unresolved": {
+              "items": {
+                "$ref": "#/$defs/UnresolvedReference"
+              },
+              "maxItems": 40,
+              "title": "Unresolved",
+              "type": "array"
             }
           },
           "required": [
@@ -37673,6 +38033,15 @@
             "budget": {
               "$ref": "#/$defs/RunBudget"
             },
+            "execution_source": {
+              "default": "internal",
+              "enum": [
+                "internal",
+                "codex"
+              ],
+              "title": "Execution Source",
+              "type": "string"
+            },
             "execution_version": {
               "maxLength": 200,
               "minLength": 1,
@@ -37718,7 +38087,8 @@
             "mode": {
               "enum": [
                 "fixture",
-                "real"
+                "real",
+                "external"
               ],
               "title": "Mode",
               "type": "string"
@@ -39137,6 +39507,14 @@
               ],
               "default": null,
               "title": "Truncation Reason"
+            },
+            "unresolved": {
+              "items": {
+                "$ref": "#/$defs/UnresolvedReference"
+              },
+              "maxItems": 40,
+              "title": "Unresolved",
+              "type": "array"
             }
           },
           "required": [
@@ -39544,6 +39922,78 @@
             "message"
           ],
           "title": "ToolError",
+          "type": "object"
+        },
+        "UnresolvedReference": {
+          "additionalProperties": false,
+          "properties": {
+            "end_line": {
+              "exclusiveMinimum": 0,
+              "title": "End Line",
+              "type": "integer"
+            },
+            "expression": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Expression",
+              "type": "string"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "possible_target_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "title": "Possible Target Ids",
+              "type": "array"
+            },
+            "reason": {
+              "maxLength": 1000,
+              "minLength": 1,
+              "title": "Reason",
+              "type": "string"
+            },
+            "source_symbol_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Source Symbol Id",
+              "type": "string"
+            },
+            "start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Start Line",
+              "type": "integer"
+            },
+            "unresolved_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Unresolved Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "start_line",
+            "end_line",
+            "unresolved_id",
+            "index_id",
+            "source_symbol_id",
+            "path",
+            "expression",
+            "reason"
+          ],
+          "title": "UnresolvedReference",
           "type": "object"
         }
       },

@@ -1,4 +1,4 @@
-"""Protocol-level tests for the local read-only MCP adapter."""
+"""Protocol-level tests for the local MCP adapter and external Run boundary."""
 
 from __future__ import annotations
 
@@ -12,8 +12,11 @@ from urllib.parse import urlsplit
 
 from mcp import Client
 from mcp.client.stdio import StdioServerParameters
+import pytest
 
+from app.contracts import CreateRunRequest, Issue, RunBudget, SearchCodeParams
 from app.main import create_app
+from app.service import ServiceError
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -1061,3 +1064,467 @@ def test_mcp_run_reads_share_http_state_and_writes_are_separately_opt_in(tmp_pat
             assert events.structured_content["result"]["events"][-1]["payload"]["error"]["code"] == "model_unavailable"
 
     asyncio.run(exercise())
+
+
+def test_mcp_external_run_persists_actual_tools_and_report(tmp_path: Path) -> None:
+    repository = copy_fixture(tmp_path)
+    application = create_app(
+        {"timeout-demo": repository},
+        data_root=tmp_path / "data",
+        mcp_external_run_enabled=True,
+    )
+    status, project = request(
+        application,
+        "POST",
+        "/api/projects",
+        {"name": "External MCP", "repository_id": "timeout-demo"},
+    )
+    assert status == 200
+    project_id = project["project_id"]
+    status, index = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/indexes",
+        {"revision": "external-mcp-v1", "dirty": False},
+    )
+    assert status == 200
+    index_id = index["index"]["index_id"]
+    status, session = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/sessions",
+        {"topic": "External billing investigation", "index_id": index_id},
+    )
+    assert status == 200
+    session_id = session["session"]["session_id"]
+    status, _ = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/sessions/{session_id}/messages",
+        {"source": "human", "content": "Trace the timeout initialization path."},
+    )
+    assert status == 200
+
+    base_environment = {
+        "CODETRAIL_REPOSITORIES": json.dumps({"timeout-demo": str(repository)}),
+        "CODETRAIL_DATA_DIR": str(tmp_path / "data"),
+        "CODETRAIL_WORKBENCH_URL": "http://localhost:3000",
+    }
+    external_run_id: str | None = None
+
+    async def exercise() -> None:
+        nonlocal external_run_id
+        read_only_parameters = StdioServerParameters(
+            command=sys.executable,
+            args=["-m", "app.mcp_server"],
+            env=base_environment,
+            cwd=API_ROOT,
+        )
+        async with Client(read_only_parameters, read_timeout_seconds=10) as client:
+            tools = {tool.name for tool in (await client.list_tools()).tools}
+            assert "start_external_run" not in tools
+            assert "run_search_code" not in tools
+
+        environment = {**base_environment, "CODETRAIL_MCP_EXTERNAL_RUN_ENABLED": "1"}
+        parameters = StdioServerParameters(
+            command=sys.executable,
+            args=["-m", "app.mcp_server"],
+            env=environment,
+            cwd=API_ROOT,
+        )
+        async with Client(parameters, read_timeout_seconds=10) as client:
+            tools = {tool.name for tool in (await client.list_tools()).tools}
+            assert {
+                "start_external_run",
+                "run_search_code",
+                "run_read_source",
+                "run_get_neighbors",
+                "submit_external_run",
+                "cancel_external_run",
+            } <= tools
+
+            started = await client.call_tool(
+                "start_external_run",
+                {
+                    "project_id": project_id,
+                    "session_id": session_id,
+                    "index_id": index_id,
+                    "issue_id": "external-mcp-issue",
+                    "title": "timeout initialization",
+                    "body": "Trace the timeout initialization path and report only evidence-backed findings.",
+                    "idempotency_key": "external-mcp-start",
+                },
+            )
+            assert started.structured_content["ok"] is True
+            external_run_id = started.structured_content["result"]["run_id"]
+            run_id = external_run_id
+
+            searched = await client.call_tool(
+                "run_search_code",
+                {
+                    "project_id": project_id,
+                    "session_id": session_id,
+                    "run_id": run_id,
+                    "index_id": index_id,
+                    "request_id": "external-search-1",
+                    "query": "load_settings",
+                    "limit": 8,
+                },
+            )
+            assert searched.structured_content["ok"] is True
+            search_result = searched.structured_content["result"]
+            assert search_result["kind"] == "search_code.succeeded"
+            match = next(
+                item for item in search_result["matches"]
+                if item["symbol"]["qualified_name"] == "timeout_demo.config.load_settings"
+            )
+            symbol_id = match["symbol"]["symbol_id"]
+
+            repeated_search = await client.call_tool(
+                "run_search_code",
+                {
+                    "project_id": project_id,
+                    "session_id": session_id,
+                    "run_id": run_id,
+                    "index_id": index_id,
+                    "request_id": "external-search-1",
+                    "query": "load_settings",
+                    "limit": 8,
+                },
+            )
+            assert repeated_search.structured_content == searched.structured_content
+
+            source = await client.call_tool(
+                "run_read_source",
+                {
+                    "project_id": project_id,
+                    "session_id": session_id,
+                    "run_id": run_id,
+                    "index_id": index_id,
+                    "request_id": "external-source-1",
+                    "path": match["symbol"]["path"],
+                    "start_line": match["symbol"]["start_line"],
+                    "end_line": min(match["symbol"]["end_line"], match["symbol"]["start_line"] + 5),
+                },
+            )
+            assert source.structured_content["ok"] is True
+            source_result = source.structured_content["result"]
+            evidence_id = source_result["evidence"]["evidence_id"]
+            assert source.structured_content["references"][0]["project_id"] == project_id
+
+            neighbors = await client.call_tool(
+                "run_get_neighbors",
+                {
+                    "project_id": project_id,
+                    "session_id": session_id,
+                    "run_id": run_id,
+                    "index_id": index_id,
+                    "request_id": "external-neighbors-1",
+                    "symbol_id": symbol_id,
+                    "direction": "callers",
+                    "depth": 1,
+                    "limit": 40,
+                },
+            )
+            assert neighbors.structured_content["ok"] is True
+            assert neighbors.structured_content["result"]["run_id"] == run_id
+
+            rejected = await client.call_tool(
+                "submit_external_run",
+                {
+                    "project_id": project_id,
+                    "session_id": session_id,
+                    "run_id": run_id,
+                    "index_id": index_id,
+                    "outcome": "insufficient_evidence",
+                    "summary": "The evidence is intentionally invalid.",
+                    "evidence_ids": ["evidence-not-returned"],
+                },
+            )
+            assert rejected.structured_content["ok"] is False
+            assert rejected.structured_content["error"]["code"] == "conflict"
+
+            completed = await client.call_tool(
+                "submit_external_run",
+                {
+                    "project_id": project_id,
+                    "session_id": session_id,
+                    "run_id": run_id,
+                    "index_id": index_id,
+                    "outcome": "candidate_found",
+                    "summary": "The timeout initialization path has an evidence-backed candidate.",
+                    "findings": [
+                        {
+                            "finding_id": "finding-external-1",
+                            "kind": "hypothesis",
+                            "text": "The loaded configuration controls the timeout initialization path.",
+                            "symbol_ids": [symbol_id],
+                            "evidence_ids": [evidence_id],
+                        }
+                    ],
+                    "candidate_links": [
+                        {
+                            "candidate_id": "candidate-external-1",
+                            "index_id": index_id,
+                            "source_symbol_id": symbol_id,
+                            "relation": "controls timeout initialization",
+                            "evidence_ids": [evidence_id],
+                        }
+                    ],
+                    "evidence_ids": [evidence_id],
+                    "limitations": ["Static calls are not confirmed runtime impact."],
+                },
+            )
+            assert completed.structured_content["ok"] is True
+            report = completed.structured_content["report"]
+            assert report["fixture_mode"] is False
+            assert report["limitations"] == ["Static calls are not confirmed runtime impact."]
+            assert completed.structured_content["references"][0]["project_id"] == project_id
+
+            repeated_completion = await client.call_tool(
+                "submit_external_run",
+                {
+                    "project_id": project_id,
+                    "session_id": session_id,
+                    "run_id": run_id,
+                    "index_id": index_id,
+                    "outcome": "candidate_found",
+                    "summary": "The timeout initialization path has an evidence-backed candidate.",
+                    "findings": [
+                        {
+                            "finding_id": "finding-external-1",
+                            "kind": "hypothesis",
+                            "text": "The loaded configuration controls the timeout initialization path.",
+                            "symbol_ids": [symbol_id],
+                            "evidence_ids": [evidence_id],
+                        }
+                    ],
+                    "candidate_links": [
+                        {
+                            "candidate_id": "candidate-external-1",
+                            "index_id": index_id,
+                            "source_symbol_id": symbol_id,
+                            "relation": "controls timeout initialization",
+                            "evidence_ids": [evidence_id],
+                        }
+                    ],
+                    "evidence_ids": [evidence_id],
+                    "limitations": ["Static calls are not confirmed runtime impact."],
+                },
+            )
+            assert repeated_completion.structured_content == completed.structured_content
+
+            events = await client.call_tool(
+                "list_run_events",
+                {"project_id": project_id, "session_id": session_id, "run_id": run_id},
+            )
+            event_types = [event["type"] for event in events.structured_content["result"]["events"]]
+            assert event_types[0] == "run.started"
+            assert event_types.count("tool.started") == 3
+            assert event_types.count("tool.completed") == 3
+            assert event_types.count("graph.updated") == 1
+            assert event_types.count("run.completed") == 1
+
+    asyncio.run(exercise())
+    assert external_run_id is not None
+
+    status, http_status = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/sessions/{session_id}/runs/{external_run_id}",
+    )
+    assert status == 200
+    assert http_status["run"]["mode"] == "external"
+    assert http_status["run"]["execution_source"] == "codex"
+    status, http_report = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/sessions/{session_id}/runs/{external_run_id}/report",
+    )
+    assert status == 200
+    assert http_report["report"]["candidate_links"][0]["candidate_id"] == "candidate-external-1"
+
+    async def exercise_boundaries() -> None:
+        environment = {**base_environment, "CODETRAIL_MCP_EXTERNAL_RUN_ENABLED": "1"}
+        parameters = StdioServerParameters(
+            command=sys.executable,
+            args=["-m", "app.mcp_server"],
+            env=environment,
+            cwd=API_ROOT,
+        )
+        async with Client(parameters, read_timeout_seconds=10) as client:
+            timed_out = await client.call_tool(
+                "start_external_run",
+                {
+                    "project_id": project_id,
+                    "session_id": session_id,
+                    "index_id": index_id,
+                    "issue_id": "external-timeout-issue",
+                    "title": "bounded external Run",
+                    "body": "This external Run must expire before its first tool call.",
+                    "idempotency_key": "external-timeout-start",
+                    "max_seconds": 1,
+                },
+            )
+            assert timed_out.structured_content["ok"] is True
+            timed_out_id = timed_out.structured_content["result"]["run_id"]
+            await asyncio.sleep(1.1)
+            expired_tool = await client.call_tool(
+                "run_search_code",
+                {
+                    "project_id": project_id,
+                    "session_id": session_id,
+                    "run_id": timed_out_id,
+                    "index_id": index_id,
+                    "request_id": "external-timeout-tool",
+                    "query": "load_settings",
+                    "limit": 8,
+                },
+            )
+            assert expired_tool.structured_content["ok"] is False
+            assert expired_tool.structured_content["error"]["code"] == "budget_exceeded"
+            status, expired_status = await _request(
+                application,
+                "GET",
+                f"/api/projects/{project_id}/sessions/{session_id}/runs/{timed_out_id}",
+            )
+            assert status == 200
+            assert expired_status["run"]["status"] == "interrupted"
+
+            cancelled = await client.call_tool(
+                "start_external_run",
+                {
+                    "project_id": project_id,
+                    "session_id": session_id,
+                    "index_id": index_id,
+                    "issue_id": "external-cancel-issue",
+                    "title": "cancelled external Run",
+                    "body": "This external Run must not accept tools after cancellation.",
+                    "idempotency_key": "external-cancel-start",
+                },
+            )
+            assert cancelled.structured_content["ok"] is True
+            cancelled_id = cancelled.structured_content["result"]["run_id"]
+            cancel = await client.call_tool(
+                "cancel_external_run",
+                {
+                    "project_id": project_id,
+                    "session_id": session_id,
+                    "run_id": cancelled_id,
+                    "reason": "cancelled in boundary test",
+                },
+            )
+            repeated_cancel = await client.call_tool(
+                "cancel_external_run",
+                {
+                    "project_id": project_id,
+                    "session_id": session_id,
+                    "run_id": cancelled_id,
+                    "reason": "different reason is ignored after terminal state",
+                },
+            )
+            assert cancel.structured_content["ok"] is True
+            assert cancel.structured_content["result"]["status"] == "cancelled"
+            assert repeated_cancel.structured_content["ok"] is True
+            assert repeated_cancel.structured_content["result"]["run_id"] == cancelled_id
+            assert repeated_cancel.structured_content["result"]["status"] == "cancelled"
+            assert repeated_cancel.structured_content["result"]["cancel_event_sequence"] is None
+            late_tool = await client.call_tool(
+                "run_search_code",
+                {
+                    "project_id": project_id,
+                    "session_id": session_id,
+                    "run_id": cancelled_id,
+                    "index_id": index_id,
+                    "request_id": "external-late-tool",
+                    "query": "load_settings",
+                    "limit": 8,
+                },
+            )
+            assert late_tool.structured_content["ok"] is False
+            assert late_tool.structured_content["error"]["code"] == "conflict"
+            events = await client.call_tool(
+                "list_run_events",
+                {"project_id": project_id, "session_id": session_id, "run_id": cancelled_id},
+            )
+            event_types = [event["type"] for event in events.structured_content["result"]["events"]]
+            assert event_types == ["run.cancelled"]
+
+    asyncio.run(exercise_boundaries())
+
+
+def test_external_tool_expiry_interrupts_after_slow_bounded_call(tmp_path: Path) -> None:
+    repository = copy_fixture(tmp_path)
+    application = create_app(
+        {"timeout-demo": repository},
+        data_root=tmp_path / "data",
+        mcp_external_run_enabled=True,
+    )
+    status, project = request(
+        application,
+        "POST",
+        "/api/projects",
+        {"name": "External timeout", "repository_id": "timeout-demo"},
+    )
+    assert status == 200
+    project_id = project["project_id"]
+    status, index = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/indexes",
+        {"revision": "external-timeout-v1", "dirty": False},
+    )
+    assert status == 200
+    index_id = index["index"]["index_id"]
+    status, session = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/sessions",
+        {"topic": "External timeout", "index_id": index_id},
+    )
+    assert status == 200
+    session_id = session["session"]["session_id"]
+    status, _ = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/sessions/{session_id}/messages",
+        {"source": "human", "content": "Trace one bounded tool call."},
+    )
+    assert status == 200
+
+    service = application.state.workspace_service
+    created = service.create_run(
+        project_id,
+        session_id,
+        CreateRunRequest(
+            index_id=index_id,
+            issue=Issue(id="external-timeout", title="External timeout", body="Trace one bounded tool call."),
+            mode="external",
+            execution_source="codex",
+            execution_version="run-external-codex-v1",
+            budget=RunBudget(max_seconds=1),
+        ),
+        via_mcp=True,
+    )
+    original_execute_tool = service.index_service.execute_tool
+
+    def slow_execute_tool(request, completed_sequence=1):
+        time.sleep(1.1)
+        return original_execute_tool(request, completed_sequence)
+
+    service.index_service.execute_tool = slow_execute_tool
+    with pytest.raises(ServiceError) as error:
+        service.execute_external_tool(
+            project_id,
+            session_id,
+            created.run_id,
+            "external-slow-tool",
+            index_id,
+            SearchCodeParams(query="timeout", limit=8),
+        )
+    assert error.value.code == "budget_exceeded"
+    status_response = service.get_run(project_id, session_id, created.run_id)
+    assert status_response.run.status == "interrupted"
+    with service.registry.store_for_repository("timeout-demo") as store:
+        event_types = [event.type for event in store.load_run_events(project_id, session_id, created.run_id).events]
+    assert event_types == ["run.started", "tool.started", "run.interrupted"]

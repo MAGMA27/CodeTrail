@@ -604,6 +604,7 @@ export default function Workbench() {
   const sessionWriteController = useRef<AbortController | null>(null);
   const runController = useRef<AbortController | null>(null);
   const runHistoryController = useRef<AbortController | null>(null);
+  const runDiscoveryController = useRef<AbortController | null>(null);
   const runWriteController = useRef<AbortController | null>(null);
   const runImpactController = useRef<AbortController | null>(null);
   const indexRequestId = useRef(0);
@@ -622,6 +623,7 @@ export default function Workbench() {
   const sessionWriteRequestId = useRef(0);
   const runRequestId = useRef(0);
   const runHistoryRequestId = useRef(0);
+  const runDiscoveryRequestId = useRef(0);
   const runWriteRequestId = useRef(0);
   const runImpactRequestId = useRef(0);
   const featureIdempotencyKey = useRef<string | null>(null);
@@ -641,6 +643,7 @@ export default function Workbench() {
     key: string;
   } | null>(null);
   const runPollTimer = useRef<number | null>(null);
+  const runDiscoveryTimer = useRef<number | null>(null);
   const runEventStreamController = useRef<RunEventStreamController | null>(null);
   const runStreamRequestId = useRef(0);
   const runStreamLastSequence = useRef(0);
@@ -655,6 +658,16 @@ export default function Workbench() {
     runStreamRequestId.current += 1;
     runEventStreamController.current?.close();
     runEventStreamController.current = null;
+  }, []);
+
+  const stopExternalRunDiscovery = useCallback(() => {
+    runDiscoveryController.current?.abort();
+    runDiscoveryController.current = null;
+    runDiscoveryRequestId.current += 1;
+    if (runDiscoveryTimer.current !== null) {
+      window.clearTimeout(runDiscoveryTimer.current);
+      runDiscoveryTimer.current = null;
+    }
   }, []);
 
   const resetRunImpact = useCallback(() => {
@@ -758,14 +771,16 @@ export default function Workbench() {
       sessionWriteController.current?.abort();
       runController.current?.abort();
       runHistoryController.current?.abort();
+      stopExternalRunDiscovery();
       runWriteController.current?.abort();
       runImpactController.current?.abort();
       closeRunEventStream();
       if (runPollTimer.current !== null) {
         window.clearTimeout(runPollTimer.current);
       }
+      stopExternalRunDiscovery();
     };
-  }, [checkHealth, closeRunEventStream]);
+  }, [checkHealth, closeRunEventStream, stopExternalRunDiscovery]);
 
   const clearExploration = useCallback(() => {
     searchController.current?.abort();
@@ -1143,6 +1158,7 @@ export default function Workbench() {
     sessionWriteController.current?.abort();
     runController.current?.abort();
     runHistoryController.current?.abort();
+    stopExternalRunDiscovery();
     runWriteController.current?.abort();
     closeRunEventStream();
     if (runPollTimer.current !== null) {
@@ -1188,7 +1204,7 @@ export default function Workbench() {
     setRunWriteError(null);
     resetRunImpact();
     runCreateRequest.current = null;
-  }, [closeRunEventStream, resetRunImpact]);
+  }, [closeRunEventStream, resetRunImpact, stopExternalRunDiscovery]);
 
   const loadSessionMessages = useCallback(
     async (projectId: string, sessionId: string, cursor: string | null = null, append = false) => {
@@ -1530,6 +1546,73 @@ export default function Workbench() {
     }
   }, [closeRunEventStream, loadRunDetails, resetRunImpact]);
 
+  const discoverExternalRun = useCallback(async (projectId: string, sessionId: string) => {
+    runDiscoveryController.current?.abort();
+    const controller = new AbortController();
+    runDiscoveryController.current = controller;
+    const requestId = ++runDiscoveryRequestId.current;
+    try {
+      const response = await listProjectSessionRuns(projectId, sessionId, 40, undefined, controller.signal);
+      if (
+        !isLatestRequest(requestId, runDiscoveryRequestId.current) ||
+        response.project_id !== projectId ||
+        response.session_id !== sessionId
+      ) {
+        return;
+      }
+      setRunHistory(response.runs);
+      setRunHistoryStatus(response.runs.length > 0 ? "success" : "empty");
+      const activeExternalRun = response.runs.find(
+        (run) => run.execution_source === "codex" && (run.status === "queued" || run.status === "running"),
+      );
+      if (activeExternalRun && selectedRunId !== activeExternalRun.run_id) {
+        setSelectedRunId(activeExternalRun.run_id);
+        setRunStatusResponse(null);
+        setRunEvents([]);
+        setRunToolResults([]);
+        setRunReport(null);
+        setRunStatus("loading");
+        resetRunImpact();
+        void loadRunDetails(projectId, sessionId, activeExternalRun.run_id);
+        return;
+      }
+      runDiscoveryTimer.current = window.setTimeout(() => {
+        runDiscoveryTimer.current = null;
+        void discoverExternalRun(projectId, sessionId);
+      }, 1_000);
+    } catch (error) {
+      if (isAbortError(error) || !isLatestRequest(requestId, runDiscoveryRequestId.current)) {
+        return;
+      }
+      runDiscoveryTimer.current = window.setTimeout(() => {
+        runDiscoveryTimer.current = null;
+        void discoverExternalRun(projectId, sessionId);
+      }, 2_000);
+    }
+  }, [loadRunDetails, resetRunImpact, selectedRunId]);
+
+  useEffect(() => {
+    if (
+      viewMode !== "session" ||
+      !selectedProjectId ||
+      !selectedSessionId ||
+      (runHistoryStatus !== "success" && runHistoryStatus !== "empty")
+    ) {
+      return;
+    }
+    void discoverExternalRun(selectedProjectId, selectedSessionId);
+    return () => {
+      stopExternalRunDiscovery();
+    };
+  }, [
+    discoverExternalRun,
+    runHistoryStatus,
+    selectedProjectId,
+    selectedSessionId,
+    stopExternalRunDiscovery,
+    viewMode,
+  ]);
+
   const selectRun = useCallback((runId: string) => {
     if (!selectedProjectId || !selectedSessionId) {
       return;
@@ -1660,6 +1743,7 @@ export default function Workbench() {
       sessionWriteRequestId.current += 1;
       runController.current?.abort();
       runHistoryController.current?.abort();
+      stopExternalRunDiscovery();
       runWriteController.current?.abort();
       closeRunEventStream();
       runRequestId.current += 1;
@@ -1734,7 +1818,7 @@ export default function Workbench() {
         setSessionError(errorMessage(error));
       }
     },
-    [closeRunEventStream, loadRunHistory, loadSessionMessages, resetRunImpact],
+    [closeRunEventStream, loadRunHistory, loadSessionMessages, resetRunImpact, stopExternalRunDiscovery],
   );
 
   const selectSession = useCallback(

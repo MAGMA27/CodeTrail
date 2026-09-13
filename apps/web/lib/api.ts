@@ -209,7 +209,8 @@ export type SessionMessagesResponse = {
 
 export type RunStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
 export type RunTerminalStatus = "succeeded" | "failed" | "cancelled" | "interrupted";
-export type RunMode = "fixture" | "real";
+export type RunMode = "fixture" | "real" | "external";
+export type RunExecutionSource = "internal" | "codex";
 export type RunScenario =
   | "success-timeout-missing"
   | "insufficient-external-service"
@@ -262,6 +263,7 @@ export type RunRecord = {
   feature_generation_id: string | null;
   issue: { schema_version: typeof SCHEMA_VERSION; id: string; title: string; body: string; stacktrace: string | null; mentioned_paths: string[] };
   mode: RunMode;
+  execution_source: RunExecutionSource;
   fixture_scenario: RunScenario | null;
   model_provider: string | null;
   model: string | null;
@@ -388,6 +390,7 @@ export type RunReport = {
   evidence: Evidence[];
   findings: RunFinding[];
   candidate_links: RunCandidateLink[];
+  limitations: string[];
   terminal_sequence: number;
 };
 
@@ -1112,7 +1115,8 @@ function isRunRecord(value: unknown): value is RunRecord {
     isString(issue.body) &&
     isNullableString(issue.stacktrace) &&
     isStringArray(issue.mentioned_paths) &&
-    ["fixture", "real"].includes(String(record.mode)) &&
+    ["fixture", "real", "external"].includes(String(record.mode)) &&
+    ["internal", "codex"].includes(String(record.execution_source)) &&
     (record.fixture_scenario === null || isRunScenario(record.fixture_scenario)) &&
     isNullableString(record.model_provider) &&
     isNullableString(record.model) &&
@@ -1317,6 +1321,7 @@ function isRunReport(value: unknown): value is RunReport {
     value.findings.every(isRunFinding) &&
     Array.isArray(value.candidate_links) &&
     value.candidate_links.every(isRunCandidateLink) &&
+    isStringArray(value.limitations) &&
     isPositiveInteger(value.terminal_sequence)
   );
 }

@@ -13,7 +13,7 @@ import sqlite3
 import time
 from collections import Counter, deque
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Literal
 
@@ -43,6 +43,7 @@ from .contracts import (
     SessionMessage,
     SourceLocation,
     Symbol,
+    ToolRequest,
     UnresolvedReference,
     ToolResult,
 )
@@ -2150,6 +2151,36 @@ class IndexStore:
             has_more=has_more,
         )
 
+    def load_run_tool_result(self, run_id: str, request_id: str) -> ToolResult | None:
+        """Read one persisted tool result for external-call idempotency."""
+
+        row = self._connection.execute(
+            "SELECT result_json FROM run_tool_results WHERE run_id = ? AND request_id = ?",
+            (run_id, request_id),
+        ).fetchone()
+        if row is None:
+            return None
+        try:
+            return _TOOL_RESULT_ADAPTER.validate_json(row["result_json"])
+        except (TypeError, ValueError, ValidationError) as exc:
+            raise StorageError("persisted Run tool result is invalid") from exc
+
+    def load_run_tool_request(self, run_id: str, request_id: str) -> ToolRequest | None:
+        """Read the original request event for one persisted external tool call."""
+
+        rows = self._connection.execute(
+            "SELECT event_json FROM run_events WHERE run_id = ? AND type = 'tool.started' ORDER BY sequence ASC",
+            (run_id,),
+        ).fetchall()
+        try:
+            for row in rows:
+                event = _EVENT_ADAPTER.validate_json(row["event_json"])
+                if event.type == "tool.started" and event.payload.request.request_id == request_id:
+                    return event.payload.request
+        except (TypeError, ValueError, ValidationError) as exc:
+            raise StorageError("persisted Run tool request is invalid") from exc
+        return None
+
     def start_run(self, run_id: str, started_at: datetime, event: Event) -> RunRecord | None:
         """Atomically move a queued Run to running and append run.started."""
 
@@ -2538,8 +2569,60 @@ class IndexStore:
                 pass
             raise StorageError(f"could not cancel Run: {exc}") from exc
 
+    def interrupt_run(self, run_id: str, reason: str, interrupted_at: datetime) -> tuple[RunRecord, int | None]:
+        """Interrupt one queued/running Run once; repeated calls return its terminal state."""
+
+        try:
+            self._connection.execute("BEGIN IMMEDIATE")
+            record = self.load_run_record(run_id)
+            if record.run.status not in {"queued", "running"}:
+                self._connection.execute("COMMIT")
+                return record, None
+            next_sequence = self._next_run_sequence(run_id)
+            if record.run.budget.events_used + 1 > record.run.budget.max_events:
+                raise StorageInputError("Run event budget is exhausted")
+            event = RunInterruptedEvent(
+                run_id=run_id,
+                sequence=next_sequence,
+                timestamp=interrupted_at,
+                payload=RunInterruptedPayload(status="interrupted", reason=reason),
+            )
+            updated_budget = record.run.budget.model_copy(
+                update={"events_used": record.run.budget.events_used + 1}
+            )
+            updated_run = _validated_run(
+                record.run,
+                status="interrupted",
+                ended_at=interrupted_at,
+                report_id=f"report-{run_id}",
+                budget=updated_budget,
+            )
+            report = _terminal_run_report(
+                record.run,
+                status="interrupted",
+                terminal_sequence=next_sequence,
+                summary="Run was interrupted after its wall-clock budget was exhausted.",
+            )
+            self._insert_run_report(report)
+            self._insert_run_event(event)
+            self._update_run_row(updated_run)
+            self._connection.execute("COMMIT")
+            return self.load_run_record(run_id), next_sequence
+        except StorageError:
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise
+        except sqlite3.Error as exc:
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise StorageError(f"could not interrupt Run: {exc}") from exc
+
     def recover_incomplete_runs(self, interrupted_at: datetime) -> int:
-        """Mark queued/running Runs interrupted after a service restart."""
+        """Mark stale queued/running Runs interrupted after a service restart."""
 
         rows = self._connection.execute(
             "SELECT run_id FROM runs WHERE status IN ('queued', 'running') ORDER BY created_at, run_id"
@@ -2552,6 +2635,13 @@ class IndexStore:
                 if record.run.status not in {"queued", "running"}:
                     self._connection.execute("COMMIT")
                     continue
+                if record.run.mode == "external":
+                    active_since = record.run.created_at
+                    if interrupted_at >= active_since and interrupted_at - active_since < timedelta(
+                        seconds=record.run.budget.max_seconds
+                    ):
+                        self._connection.execute("COMMIT")
+                        continue
                 next_sequence = self._next_run_sequence(record.run.run_id)
                 if record.run.budget.events_used + 1 > record.run.budget.max_events:
                     raise StorageError("incomplete Run has no room for interruption event")

@@ -1,4 +1,4 @@
-"""Local read-only MCP adapter for the CodeTrail workspace service."""
+"""Local MCP adapter for the CodeTrail workspace service."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from mcp.server import MCPServer
 from pydantic import Field
 
 from .contracts import (
+    CandidateLink,
     EvidenceReference,
     CancelRunRequest,
     CreateRunRequest,
@@ -26,6 +27,8 @@ from .contracts import (
     GitHubImportResponse,
     Identifier,
     Issue,
+    IssueModelFinal,
+    Finding,
     AppendSessionMessageRequest,
     CreateSessionRequest,
     McpError,
@@ -55,6 +58,8 @@ from .contracts import (
     McpRunResponse,
     McpRunStartResponse,
     McpRunToolResultsResponse,
+    McpExternalCompleteResponse,
+    McpExternalToolResponse,
     LocalImportRequest,
     LocalImportResponse,
     ProjectIndexListResponse,
@@ -63,8 +68,13 @@ from .contracts import (
     RunEventsResponse,
     RunImpactResponse,
     RunListResponse,
+    ReadSourceParams,
+    ReadSourceSuccess,
     RunStatusResponse,
     RunToolResultsResponse,
+    SearchCodeParams,
+    GetNeighborsParams,
+    ToolResult,
     SessionListResponse,
     SessionMessage,
     SessionMessagesResponse,
@@ -111,6 +121,8 @@ _RunScenario = Literal[
     "insufficient-external-service",
     "tool-failure-read-source",
 ]
+_RunId = Annotated[Identifier, Field(description="Stable CodeTrail Run ID.")]
+_RequestId = Annotated[Identifier, Field(description="Idempotency key for one external tool request.")]
 McpResponse = TypeVar("McpResponse", bound=McpResultBase)
 
 
@@ -128,17 +140,19 @@ def create_mcp_server(
     feature_generation_enabled = service.registry.mcp_feature_generation_enabled
     session_write_enabled = service.registry.mcp_session_write_enabled
     run_write_enabled = service.registry.mcp_run_write_enabled
+    external_run_enabled = service.registry.mcp_external_run_enabled
     server_description = (
         "Discover CodeTrail projects and query one explicitly selected immutable index. "
         "Default tools are read-only. Explicitly enabled session writes, bounded fixture/real Run start/cancel, "
+        "Codex external-Agent Run tools, "
         "local/GitHub import/status/retry, and feature generation are separately gated."
-        if local_import_enabled or github_import_enabled or feature_generation_enabled or session_write_enabled or run_write_enabled
+        if local_import_enabled or github_import_enabled or feature_generation_enabled or session_write_enabled or run_write_enabled or external_run_enabled
         else "Discover CodeTrail projects and query one explicitly selected immutable index. "
         "All tools are read-only and never execute repository code."
     )
     server = MCPServer(
         name="codetrail",
-        title="CodeTrail workspace" if local_import_enabled or github_import_enabled or feature_generation_enabled or session_write_enabled or run_write_enabled else "CodeTrail read-only workspace",
+        title="CodeTrail workspace" if local_import_enabled or github_import_enabled or feature_generation_enabled or session_write_enabled or run_write_enabled or external_run_enabled else "CodeTrail read-only workspace",
         description=server_description,
         version="0.1.0",
         log_level="WARNING",
@@ -844,6 +858,269 @@ def create_mcp_server(
             except Exception:
                 return _unexpected_failure("cancel_session_run", McpRunCancelResponse)
 
+    if external_run_enabled:
+
+        @server.tool(
+            name="start_external_run",
+            title="Start a Codex external Run",
+            description=(
+                "Start one queued Run for a Codex-led investigation. The server freezes the selected Session's saved "
+                "messages and immutable index, but does not start the internal worker; the external Agent must call the "
+                "bound run_* tools and submit one structured conclusion."
+            ),
+            structured_output=True,
+        )
+        def start_external_run(
+            project_id: _ProjectId,
+            session_id: _SessionId,
+            index_id: _IndexId,
+            issue_id: Annotated[str, Field(min_length=1, max_length=200)],
+            title: Annotated[str, Field(min_length=1, max_length=500)],
+            body: Annotated[str, Field(min_length=1, max_length=20_000)],
+            stacktrace: Annotated[str | None, Field(max_length=20_000)] = None,
+            mentioned_paths: list[_Path] | None = None,
+            feature_generation_id: Annotated[str | None, Field(max_length=200)] = None,
+            message_end_sequence: Annotated[int | None, Field(ge=1)] = None,
+            idempotency_key: Annotated[str | None, Field(min_length=1, max_length=200)] = None,
+            max_tool_calls: Annotated[int, Field(ge=1, le=12)] = 8,
+            max_model_calls: Annotated[int, Field(ge=1, le=6)] = 4,
+            max_repair_calls: Annotated[int, Field(ge=0, le=2)] = 1,
+            max_seconds: Annotated[int, Field(ge=1, le=120)] = 30,
+            max_source_lines: Annotated[int, Field(ge=1, le=200)] = 200,
+            max_total_source_lines: Annotated[int, Field(ge=1, le=2_000)] = 800,
+            max_input_chars: Annotated[int, Field(ge=1, le=100_000)] = 60_000,
+            max_model_input_chars: Annotated[int, Field(ge=1, le=100_000)] = 80_000,
+            max_output_chars: Annotated[int, Field(ge=1, le=100_000)] = 50_000,
+            max_model_output_chars: Annotated[int, Field(ge=1, le=50_000)] = 20_000,
+            max_events: Annotated[int, Field(ge=2, le=200)] = 100,
+        ) -> McpRunStartResponse:
+            try:
+                from .contracts import RunBudget
+
+                result = service.create_run(
+                    project_id,
+                    session_id,
+                    CreateRunRequest(
+                        index_id=index_id,
+                        issue=Issue(
+                            id=issue_id,
+                            title=title,
+                            body=body,
+                            stacktrace=stacktrace,
+                            mentioned_paths=mentioned_paths or [],
+                        ),
+                        mode="external",
+                        execution_source="codex",
+                        fixture_scenario=None,
+                        feature_generation_id=feature_generation_id,
+                        message_end_sequence=message_end_sequence,
+                        execution_version="run-external-codex-v1",
+                        idempotency_key=idempotency_key,
+                        budget=RunBudget(
+                            max_tool_calls=max_tool_calls,
+                            max_model_calls=max_model_calls,
+                            max_repair_calls=max_repair_calls,
+                            max_seconds=max_seconds,
+                            max_source_lines=max_source_lines,
+                            max_total_source_lines=max_total_source_lines,
+                            max_input_chars=max_input_chars,
+                            max_model_input_chars=max_model_input_chars,
+                            max_output_chars=max_output_chars,
+                            max_model_output_chars=max_model_output_chars,
+                            max_events=max_events,
+                        ),
+                    ),
+                    via_mcp=True,
+                )
+                return McpRunStartResponse(ok=True, result=result)
+            except ServiceError as exc:
+                return _failure(McpRunStartResponse, exc)
+            except Exception:
+                return _unexpected_failure("start_external_run", McpRunStartResponse)
+
+        @server.tool(
+            name="run_search_code",
+            title="Search code inside an external Run",
+            description=(
+                "Execute search_code and persist its actual bounded result on one active Codex external Run. "
+                "Reuse the same request_id to receive the idempotent prior result."
+            ),
+            structured_output=True,
+        )
+        def run_search_code(
+            project_id: _ProjectId,
+            session_id: _SessionId,
+            run_id: _RunId,
+            index_id: _IndexId,
+            request_id: _RequestId,
+            query: _Query,
+            limit: _Limit = 40,
+        ) -> McpExternalToolResponse:
+            try:
+                result = service.execute_external_tool(
+                    project_id,
+                    session_id,
+                    run_id,
+                    request_id,
+                    index_id,
+                    SearchCodeParams(query=query, limit=limit),
+                )
+                return _mcp_external_tool_response(result, citation_url, project_id)
+            except ServiceError as exc:
+                return _failure(McpExternalToolResponse, exc)
+            except Exception:
+                return _unexpected_failure("run_search_code", McpExternalToolResponse)
+
+        @server.tool(
+            name="run_read_source",
+            title="Read source inside an external Run",
+            description=(
+                "Read immutable source evidence and persist the actual result on one active Codex external Run. "
+                "The response includes a same-snapshot citation when the read succeeds."
+            ),
+            structured_output=True,
+        )
+        def run_read_source(
+            project_id: _ProjectId,
+            session_id: _SessionId,
+            run_id: _RunId,
+            index_id: _IndexId,
+            request_id: _RequestId,
+            path: _Path,
+            start_line: _Line,
+            end_line: _Line,
+        ) -> McpExternalToolResponse:
+            try:
+                result = service.execute_external_tool(
+                    project_id,
+                    session_id,
+                    run_id,
+                    request_id,
+                    index_id,
+                    ReadSourceParams(path=path, start_line=start_line, end_line=end_line),
+                )
+                return _mcp_external_tool_response(result, citation_url, project_id)
+            except ServiceError as exc:
+                return _failure(McpExternalToolResponse, exc)
+            except Exception:
+                return _unexpected_failure("run_read_source", McpExternalToolResponse)
+
+        @server.tool(
+            name="run_get_neighbors",
+            title="Read neighbors inside an external Run",
+            description=(
+                "Traverse bounded static callers/callees and persist the actual result on one active Codex external Run. "
+                "Unresolved references remain explicit and are never promoted to confirmed impact."
+            ),
+            structured_output=True,
+        )
+        def run_get_neighbors(
+            project_id: _ProjectId,
+            session_id: _SessionId,
+            run_id: _RunId,
+            index_id: _IndexId,
+            request_id: _RequestId,
+            symbol_id: _IndexId,
+            direction: Literal["callers", "callees", "both"],
+            depth: _Depth = 2,
+            limit: _Limit = 40,
+        ) -> McpExternalToolResponse:
+            try:
+                result = service.execute_external_tool(
+                    project_id,
+                    session_id,
+                    run_id,
+                    request_id,
+                    index_id,
+                    GetNeighborsParams(
+                        symbol_id=symbol_id,
+                        direction=direction,
+                        depth=depth,
+                        limit=limit,
+                    ),
+                )
+                return _mcp_external_tool_response(result, citation_url, project_id)
+            except ServiceError as exc:
+                return _failure(McpExternalToolResponse, exc)
+            except Exception:
+                return _unexpected_failure("run_get_neighbors", McpExternalToolResponse)
+
+        @server.tool(
+            name="submit_external_run",
+            title="Submit a Codex Run conclusion",
+            description=(
+                "Submit one structured candidate_found or insufficient_evidence conclusion. The server verifies every "
+                "evidence, symbol, candidate, and index reference against results actually returned by this Run before "
+                "persisting the report. Repeating the same conclusion is idempotent."
+            ),
+            structured_output=True,
+        )
+        def submit_external_run(
+            project_id: _ProjectId,
+            session_id: _SessionId,
+            run_id: _RunId,
+            index_id: _IndexId,
+            outcome: Literal["candidate_found", "insufficient_evidence"],
+            summary: Annotated[str, Field(min_length=1, max_length=5_000)],
+            findings: list[Finding] | None = None,
+            candidate_links: list[CandidateLink] | None = None,
+            evidence_ids: list[Identifier] | None = None,
+            limitations: list[Annotated[str, Field(min_length=1, max_length=1_000)]] | None = None,
+        ) -> McpExternalCompleteResponse:
+            try:
+                status, report = service.complete_external_run(
+                    project_id,
+                    session_id,
+                    run_id,
+                    IssueModelFinal(
+                        index_id=index_id,
+                        outcome=outcome,
+                        summary=summary,
+                        findings=findings or [],
+                        candidate_links=candidate_links or [],
+                        evidence_ids=evidence_ids or [],
+                        limitations=limitations or [],
+                    ),
+                )
+                return McpExternalCompleteResponse(
+                    ok=True,
+                    result=status,
+                    report=report,
+                    references=_report_evidence_references(report, citation_url),
+                )
+            except ServiceError as exc:
+                return _failure(McpExternalCompleteResponse, exc)
+            except Exception:
+                return _unexpected_failure("submit_external_run", McpExternalCompleteResponse)
+
+        @server.tool(
+            name="cancel_external_run",
+            title="Cancel a Codex external Run",
+            description=(
+                "Cancel one queued or running Codex external Run. Cancellation is persisted as one terminal event and "
+                "repeated cancellation returns the existing terminal state."
+            ),
+            structured_output=True,
+        )
+        def cancel_external_run(
+            project_id: _ProjectId,
+            session_id: _SessionId,
+            run_id: _RunId,
+            reason: Annotated[str, Field(min_length=1, max_length=1_000)] = "cancelled by external Agent",
+        ) -> McpRunCancelResponse:
+            try:
+                result = service.cancel_external_run(
+                    project_id,
+                    session_id,
+                    run_id,
+                    CancelRunRequest(reason=reason),
+                )
+                return McpRunCancelResponse(ok=True, result=result)
+            except ServiceError as exc:
+                return _failure(McpRunCancelResponse, exc)
+            except Exception:
+                return _unexpected_failure("cancel_external_run", McpRunCancelResponse)
+
     if feature_generation_enabled:
 
         @server.tool(
@@ -1203,6 +1480,63 @@ def _mcp_feature_graph_response(
         for evidence in graph.evidence
     ]
     return McpFeatureGraphResponse(ok=True, graph=graph, references=references)
+
+
+def _mcp_external_tool_response(
+    result: ToolResult,
+    base_url: str,
+    project_id: str,
+) -> McpExternalToolResponse:
+    references: list[EvidenceReference] = []
+    if isinstance(result, ReadSourceSuccess):
+        evidence = result.evidence
+        references.append(
+            EvidenceReference(
+                project_id=project_id,
+                index_id=evidence.index_id,
+                path=evidence.path,
+                start_line=evidence.start_line,
+                end_line=evidence.end_line,
+                content_hash=evidence.content_hash,
+                evidence_id=evidence.evidence_id,
+                url=_citation_url(
+                    base_url,
+                    project_id=project_id,
+                    index_id=evidence.index_id,
+                    path=evidence.path,
+                    start_line=evidence.start_line,
+                    end_line=evidence.end_line,
+                    content_hash=evidence.content_hash,
+                    evidence_id=evidence.evidence_id,
+                ),
+            )
+        )
+    return McpExternalToolResponse(ok=True, result=result, references=references)
+
+
+def _report_evidence_references(report, base_url: str) -> list[EvidenceReference]:
+    return [
+        EvidenceReference(
+            project_id=report.project_id,
+            index_id=evidence.index_id,
+            path=evidence.path,
+            start_line=evidence.start_line,
+            end_line=evidence.end_line,
+            content_hash=evidence.content_hash,
+            evidence_id=evidence.evidence_id,
+            url=_citation_url(
+                base_url,
+                project_id=report.project_id,
+                index_id=evidence.index_id,
+                path=evidence.path,
+                start_line=evidence.start_line,
+                end_line=evidence.end_line,
+                content_hash=evidence.content_hash,
+                evidence_id=evidence.evidence_id,
+            ),
+        )
+        for evidence in report.evidence
+    ]
 
 
 def _session_url(base_url: str, project_id: str, session_id: str) -> str:
