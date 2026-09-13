@@ -99,6 +99,14 @@ class ValidatedDataset:
     annotations: Mapping[str, Annotation]
 
 
+@dataclass(frozen=True)
+class FrozenDataset:
+    """Validated Issue/source inputs that do not include independent labels."""
+
+    dataset: Dataset
+    cases: tuple[EvalCase, ...]
+
+
 def _canonical_json(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
@@ -230,8 +238,8 @@ def _validate_annotation(annotation: Annotation, manifest: SourceManifest, sourc
             )
 
 
-def load_validated_dataset(dataset_path: Path | None = None) -> ValidatedDataset:
-    """Load and validate frozen data, source hashes, and independent labels."""
+def load_frozen_dataset(dataset_path: Path | None = None) -> FrozenDataset:
+    """Load only frozen Issue/source inputs; do not read annotation files."""
 
     path = dataset_path or ROOT / "dataset.json"
     try:
@@ -240,7 +248,6 @@ def load_validated_dataset(dataset_path: Path | None = None) -> ValidatedDataset
         raise ValueError(f"invalid dataset {path}: {exc}") from exc
 
     cases: list[EvalCase] = []
-    annotations: dict[str, Annotation] = {}
     for entry in dataset.cases:
         source_root = _resolve_eval_path(entry.source)
         issue_path = _resolve_eval_path(entry.issue)
@@ -255,8 +262,7 @@ def load_validated_dataset(dataset_path: Path | None = None) -> ValidatedDataset
 
         issue = _load_issue(issue_path)
         manifest = _load_manifest(manifest_path)
-        annotation = _load_annotation(annotation_path)
-        if manifest.case_id != entry.case_id or annotation.case_id != entry.case_id:
+        if manifest.case_id != entry.case_id:
             raise ValueError(f"case metadata IDs do not match dataset entry {entry.case_id}")
         _validate_source_manifest(source_root, manifest)
         manifest_paths = {item.path for item in manifest.files}
@@ -268,7 +274,6 @@ def load_validated_dataset(dataset_path: Path | None = None) -> ValidatedDataset
                 f"Issue mentions paths absent from manifest for {entry.case_id}: "
                 f"{missing_mentioned_paths}"
             )
-        _validate_annotation(annotation, manifest, source_root)
         index_seed = f"{dataset.version}\0{entry.case_id}\0{manifest.snapshot_hash}"
         cases.append(
             EvalCase(
@@ -280,7 +285,6 @@ def load_validated_dataset(dataset_path: Path | None = None) -> ValidatedDataset
                 index_id=f"eval-index-{_sha256_bytes(index_seed.encode('utf-8'))[:32]}",
             )
         )
-        annotations[entry.case_id] = annotation
 
     if len(cases) != 6:
         raise ValueError("p4-e1-v1 must contain exactly six frozen cases")
@@ -288,15 +292,45 @@ def load_validated_dataset(dataset_path: Path | None = None) -> ValidatedDataset
         raise ValueError("p4-e1-v1 must contain exactly three calibration cases")
     if sum(item.entry.split == "holdout" for item in cases) != 3:
         raise ValueError("p4-e1-v1 must contain exactly three holdout cases")
-    applicable = [annotations[item.entry.case_id] for item in cases if annotations[item.entry.case_id].applicable]
-    if len(applicable) != 4 or len(cases) - len(applicable) != 2:
+
+    return FrozenDataset(dataset=dataset, cases=tuple(cases))
+
+
+def load_annotations_for_dataset(frozen: FrozenDataset) -> Mapping[str, Annotation]:
+    """Load and validate labels after an execution path has completed."""
+
+    annotations: dict[str, Annotation] = {}
+    for case in frozen.cases:
+        annotation_path = _resolve_eval_path(case.entry.annotation)
+        annotation = _load_annotation(annotation_path)
+        if annotation.case_id != case.entry.case_id:
+            raise ValueError(f"case metadata IDs do not match dataset entry {case.entry.case_id}")
+        _validate_annotation(annotation, case.manifest, case.source_root)
+        annotations[case.entry.case_id] = annotation
+    applicable = [
+        annotations[item.entry.case_id]
+        for item in frozen.cases
+        if annotations[item.entry.case_id].applicable
+    ]
+    if len(applicable) != 4 or len(frozen.cases) - len(applicable) != 2:
         raise ValueError("p4-e1-v1 must contain four applicable and two insufficient cases")
     if len({item.defect_category for item in applicable}) < 3:
         raise ValueError("applicable cases must cover at least three defect categories")
-    return ValidatedDataset(dataset=dataset, cases=tuple(cases), annotations=annotations)
+    return annotations
 
 
-def select_cases(validated: ValidatedDataset, split: str = "all") -> tuple[EvalCase, ...]:
+def load_validated_dataset(dataset_path: Path | None = None) -> ValidatedDataset:
+    """Load and validate frozen data, source hashes, and independent labels."""
+
+    frozen = load_frozen_dataset(dataset_path)
+    annotations = load_annotations_for_dataset(frozen)
+    return ValidatedDataset(dataset=frozen.dataset, cases=frozen.cases, annotations=annotations)
+
+
+def select_cases(
+    validated: FrozenDataset | ValidatedDataset,
+    split: str = "all",
+) -> tuple[EvalCase, ...]:
     if split not in {"all", "calibration", "holdout"}:
         raise ValueError(f"unsupported evaluation split: {split}")
     if split == "all":
@@ -716,8 +750,10 @@ def run_evaluation(
 
 
 def render_markdown(report: EvaluationReport) -> str:
-    def metric_text(metric: Metric) -> str:
-        return f"{metric.numerator}/{metric.denominator} ({metric.value if metric.value is not None else 'n/a'})"
+    def metric_text(metric: Metric) -> tuple[str, str]:
+        return f"{metric.numerator}/{metric.denominator}", (
+            "n/a" if metric.value is None else str(metric.value)
+        )
 
     lines = [
         "# P4-E1 离线关键词基线",
@@ -733,13 +769,18 @@ def render_markdown(report: EvaluationReport) -> str:
         "",
         "| 指标 | 分子/分母 | 值 |",
         "| --- | ---: | ---: |",
-        f"| file Hit@1 | {metric_text(report.summary.file_hit_at_1)} |",
-        f"| file Hit@3 | {metric_text(report.summary.file_hit_at_3)} |",
-        f"| symbol Hit@1 | {metric_text(report.summary.symbol_hit_at_1)} |",
-        f"| symbol Hit@3 | {metric_text(report.summary.symbol_hit_at_3)} |",
-        f"| 证据位置/hash/归属合法率 | {metric_text(report.summary.evidence_legal_rate)} |",
-        f"| 证据不足基线无候选率 | {metric_text(report.summary.insufficient_abstention_rate)} |",
-        f"| 证据不足基线误报率 | {metric_text(report.summary.insufficient_false_positive_rate)} |",
+        *[
+            f"| {label} | {metric_text(metric)[0]} | {metric_text(metric)[1]} |"
+            for label, metric in (
+                ("file Hit@1", report.summary.file_hit_at_1),
+                ("file Hit@3", report.summary.file_hit_at_3),
+                ("symbol Hit@1", report.summary.symbol_hit_at_1),
+                ("symbol Hit@3", report.summary.symbol_hit_at_3),
+                ("证据位置/hash/归属合法率", report.summary.evidence_legal_rate),
+                ("证据不足基线无候选率", report.summary.insufficient_abstention_rate),
+                ("证据不足基线误报率", report.summary.insufficient_false_positive_rate),
+            )
+        ],
         "",
         "## 逐例结果",
         "",
@@ -754,14 +795,20 @@ def render_markdown(report: EvaluationReport) -> str:
             f"{hit(case.symbol_hit_at_1)}/{hit(case.symbol_hit_at_3)} | "
             f"{hit(case.location_hit_at_1)}/{hit(case.location_hit_at_3)} | {len(case.candidates)} |"
         )
+    lines.extend(["", "## 候选与失败详情", ""])
+    for case in report.cases:
+        lines.append(f"### `{case.case_id}`")
+        if not case.candidates and not case.failure_reason:
+            lines.append("- 无候选或失败信息。")
         for candidate in case.candidates:
             evidence = "合法" if candidate.evidence.legal else f"非法：{candidate.evidence.reason}"
             lines.append(
-                f"  - #{candidate.rank} `{candidate.path}:{candidate.start_line}-{candidate.end_line}` "
+                f"- #{candidate.rank} `{candidate.path}:{candidate.start_line}-{candidate.end_line}` "
                 f"`{candidate.qualified_name}`；terms=`{','.join(candidate.matched_terms)}`；证据={evidence}"
             )
         if case.failure_reason:
-            lines.append(f"  - 失败：`{case.failure_stage}` — {case.failure_reason}")
+            lines.append(f"- 失败：`{case.failure_stage}` — {case.failure_reason}")
+        lines.append("")
     lines.extend(
         [
             "",
