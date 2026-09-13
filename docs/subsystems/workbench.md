@@ -30,7 +30,7 @@ Session 草稿按 project/session 保存到 localStorage，消息保存旧响应
 
 ## 验证
 
-本轮前端测试 19 passed、类型检查和生产构建通过，后端全量 123 passed，契约 21 passed，文档检查通过；工作台浏览器已验证 external Run 在三次工具调用期间自动发现，显示 9 条公开事件、3 项工具结果、同快照证据和候选报告，并重新打开同一 Session 恢复报告。已有浏览器 fixture 证据覆盖报告候选/finding 入口、callers/callees、方向/深度、源码/图联动、失败 Run 的无唯一映射提示、Run/Session 切换和刷新恢复；当前 Codex 主机尚未热加载本地 MCP，真实供应商语义质量仍为 UNVERIFIED。
+本轮前端测试 19 passed、类型检查和生产构建通过，后端全量 123 passed，契约 21 passed，文档检查通过；当前 Codex 主机已实际调用 external MCP，工作台自动发现并展示 `run-1648e725f3424dc590a5298e2baee1a0` 的 11 条公开事件、4 项工具结果、同快照证据和候选报告。浏览器还验证了证据源码面板、候选影响面板、历史完成 Run 打开、Session 切换回原 Run、刷新恢复和无重复 Run；真实供应商语义质量仍为 UNVERIFIED。
 
 ## 相关决策
 

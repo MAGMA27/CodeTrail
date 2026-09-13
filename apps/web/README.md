@@ -35,6 +35,8 @@ pnpm web:dev
 
 打开 `http://localhost:3000`，创建或打开项目、建立 ready 索引、创建 Session 并保存至少一条消息，在 Session 的“Issue 分析”面板选择 fixture 场景后点击“启动离线分析”，或选择 real 后点击“启动真实分析”。`success-timeout-missing` 展示候选结论和同快照 evidence；`insufficient-external-service` 展示证据不足；`tool-failure-read-source` 展示工具失败及失败前保留的 evidence。real 还要求 API 设置 `CODETRAIL_REAL_RUN_ENABLED=1` 并在服务数据目录配置 `config.json`。
 
+CodeTrail 作为自身仓库的 Codex external 验收流程见 [MVP 操作说明](../../docs/mvp-operation.md)；external Run 使用本地 MCP 和固定项目/Session，不需要真实供应商配置。
+
 ## 错误与限制
 
 API 离线、项目/Session/index 不属于当前范围、消息未保存、空 Session、Run 活动冲突、预算或执行容量拒绝、模型不可用/失败、结构化输出无效、取消和重启中断都会显示明确状态；容量满时服务端在落库前返回可重试错误，工作台不会伪造 queued Run；Run 失败不会伪造成功结论。工作台不显示隐藏思维链，只显示服务端公开事件、工具结果、证据、报告和限制；real Run 的能力开关和配置由服务端控制，fixture/real/external 都不会执行仓库源码或 shell。Run 历史、事件和工具结果使用服务端有界分页，影响查询最多返回 40 个节点、40 条解释路径和 40 个 unresolved；前端显式显示 mapped/unmapped、截断、静态 calls、未知边界和范围说明。报告 evidence 与影响节点必须和 Run 的固定 index_id 一致，否则拒绝载入；外部 Run 终态或超时后不会继续显示新工具活动。
@@ -43,7 +45,7 @@ API 离线、项目/Session/index 不属于当前范围、消息未保存、空 
 
 ## 验证
 
-从仓库根目录执行 `pnpm --dir apps/web test`、`pnpm web:typecheck` 和 `pnpm web:build`。本轮前端测试覆盖订阅状态机的四类终态控制帧、错误终态、去重/缺号、连续 open-error 上限、按最后 sequence 续接以及旧回调清理；Run 的 HTTP 生命周期、取消、终态报告/evidence 联动、固定快照影响查询、刷新/切换恢复和本地受限 SSE 生命周期断流后的浏览器续接已用假供应商复核。external 自动发现的请求代数、切换清理和服务端 MCP 闭环已通过代码/API 测试；实际浏览器 external 自动发现和真实供应商语义质量未验证。
+从仓库根目录执行 `pnpm --dir apps/web test`、`pnpm web:typecheck` 和 `pnpm web:build`。本轮前端测试覆盖订阅状态机的四类终态控制帧、错误终态、去重/缺号、连续 open-error 上限、按最后 sequence 续接以及旧回调清理；Run 的 HTTP 生命周期、取消、终态报告/evidence 联动、固定快照影响查询、刷新/切换恢复和本地受限 SSE 生命周期断流后的浏览器续接已用假供应商复核。当前 Codex 主机已实际调用 external MCP，工作台已自动发现并展示 `run-1648e725f3424dc590a5298e2baee1a0` 的 11 条公开事件、4 项工具结果和同快照报告，且已验证源码证据、影响面板、历史 Run、Session 切换和刷新恢复；真实供应商语义质量仍未验证。
 
 ## 关联文档
 

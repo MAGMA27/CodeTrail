@@ -29,7 +29,7 @@ fixture Run 继续接受三个场景：候选、证据不足和工具失败。re
 
 ## 使用与配置
 
-从仓库根目录准备服务端仓库映射后启动：
+从仓库根目录准备服务端仓库映射后启动；当前 Codex external 验收的完整步骤见 [MVP 操作说明](../../docs/mvp-operation.md)：
 
 ```powershell
 $env:CODETRAIL_REPOSITORIES = '{"timeout-demo":"D:\\Dev\\CodeTrail\\fixtures\\repos\\timeout-demo"}'
@@ -50,7 +50,7 @@ Run 拒绝未开启能力的 `mode=real` 或 `CODETRAIL_MCP_EXTERNAL_RUN_ENABLED
 
 ## 验证
 
-从 `apps/api` 执行 `uv run pytest -q` 和 `uv run python -m compileall -q app`。`tests/test_runs.py` 覆盖 fixture 生命周期和固定 Run 报告影响查询；`tests/test_storage.py` 覆盖静态路径、节点去重、环和输出边界；`tests/test_run_sse.py` 覆盖持久化逐帧回放、双游标续接、终态控制帧、未来/跨 Run 拒绝、断开释放容量和 health 并发；`tests/test_issue_runs.py` 覆盖 real 工具决策、证据不足、非法引用/工具、有限修复、预算、取消、持久化 config.json 和 OpenAI-compatible 请求；`tests/test_mcp.py` 覆盖 HTTP/MCP Run 与影响查询对照、默认只读、独立 Run 写开关和 real 能力开关，以及 external 的实际 stdio 工具、证据边界、幂等、时间预算、取消和终态拒写。其它项目/索引/导入/Session/O1/O2/O3 测试继续覆盖各自边界。离线协议、本地假供应商、本地 external MCP 和本地 SSE 流已验证；实际 Codex 主机热加载、浏览器 external 自动发现和真实 DeepSeek 语义质量仍未验证。
+从 `apps/api` 执行 `uv run pytest -q` 和 `uv run python -m compileall -q app`。`tests/test_runs.py` 覆盖 fixture 生命周期和固定 Run 报告影响查询；`tests/test_storage.py` 覆盖静态路径、节点去重、环和输出边界；`tests/test_run_sse.py` 覆盖持久化逐帧回放、双游标续接、终态控制帧、未来/跨 Run 拒绝、断开释放容量和 health 并发；`tests/test_issue_runs.py` 覆盖 real 工具决策、证据不足、非法引用/工具、有限修复、预算、取消、持久化 config.json 和 OpenAI-compatible 请求；`tests/test_mcp.py` 覆盖 HTTP/MCP Run 与影响查询对照、默认只读、独立 Run 写开关和 real 能力开关，以及 external 的实际 stdio 工具、证据边界、幂等、时间预算、取消和终态拒写。其它项目/索引/导入/Session/O1/O2/O3 测试继续覆盖各自边界。离线协议、本地假供应商、本地 external MCP 和本地 SSE 流已验证；本轮实际 Codex 主机已加载 26 项 CodeTrail MCP 工具，并完成 `run-1648e725f3424dc590a5298e2baee1a0` 的 11 条公开事件、4 项工具结果和结构化报告，真实 DeepSeek 语义质量仍未验证。
 
 ## 关联文档
 
@@ -61,6 +61,7 @@ Run 拒绝未开启能力的 `mode=real` 或 `CODETRAIL_MCP_EXTERNAL_RUN_ENABLED
 - [项目与会话决策](../../docs/decisions/2026-09-11-project-session-workspace.md)
 - [Run 决策](../../docs/decisions/2026-09-12-run-execution.md)
 - [P2-R2 模型驱动 Issue 分析决策](../../docs/decisions/2026-09-12-run-model-analysis.md)
+- [MVP 操作说明](../../docs/mvp-operation.md)
 - [Run SSE 决策](../../docs/decisions/2026-09-12-run-sse.md)
 
 ## 本地 MCP 入口

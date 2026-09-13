@@ -20,6 +20,7 @@
 | 导出 Schema | [生成器](../apps/api/app/export_schema.py) 产生的 JSON，禁止手改 |
 | 设计取舍与替代关系 | [决策记录](decisions/README.md) |
 | 工作区目标 UI 结构与截图验收 | [UI 规范](design/workspace-ui-spec.md)；当前实现仍以工作台子系统为准 |
+| MVP 本地操作流程 | [MVP 操作说明](mvp-operation.md) |
 | 本地产品计划与阶段进度 | memory-bank，保持现有 Git 忽略策略 |
 
 同一事实只在一处详细维护，其他位置链接。当前文档写当前行为；历史理由写决策，计划明确标为未实现。记录验证必须带实际范围，不把过去运行结果当作当前证据。

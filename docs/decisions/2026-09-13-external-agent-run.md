@@ -45,7 +45,7 @@ CodeTrail 已有本地 stdio MCP、工作区 Session/Run 持久化、只读代�
 3. 后端契约/存储回归覆盖归属、快照、证据、幂等、预算、取消、连接失效和终态拒写；HTTP/MCP/SSE 与前端类型检查、构建和文档检查通过。
 4. 明确区分协议/自动化验证、实际 Codex 连接、外部调查闭环和结论质量；真实供应商语义质量不因本次闭环而宣称已验证。
 
-本次验收证据（2026-09-13）：后端全量测试 `123 passed`，前端测试 `19 passed`，`pnpm web:typecheck`、`pnpm web:build`、`pnpm contracts:check`（21 passed）、`pnpm docs:check`、`pnpm docs:check:local` 和 `pnpm doc-sync` 通过；按 [Codex 本地配置](../../apps/api/README.md) 的同一 stdio 命令启动 MCP，发现六个 external 工具，并在共享 `D:/Dev/CodeTrail-runtime` 中读取目标项目、固定 index 和 Session。实际 external 闭环创建 `run-6ad1f71baf504d0e87592b39864346f5`，执行 `search_code`、`read_source`、`get_neighbors`，持久化 9 条公开事件、3 项工具结果、证据 hash 和结构化候选；工作台浏览器无需刷新自动发现并载入，重新打开同一 Session 后报告恢复。当前 Codex 主机工具列表尚未热加载 `codetrail`，因此“主机自动调用”仍为 UNVERIFIED；真实 DeepSeek 语义质量同样为 UNVERIFIED。
+本次验收证据（2026-09-13）：后端全量测试 `123 passed`，前端测试 `19 passed`，`pnpm web:typecheck`、`pnpm web:build`、`pnpm contracts:check`（21 passed）、`pnpm docs:check`、`pnpm docs:check:local` 和 `pnpm doc-sync` 通过；按 [Codex 本地配置](../../apps/api/README.md) 的同一 stdio 命令启动 MCP，当前 Codex 主机实际发现 26 项 CodeTrail 工具，并在共享 `D:/Dev/CodeTrail-runtime` 中读取目标项目、固定 index 和 Session。实际 external 闭环创建 `run-1648e725f3424dc590a5298e2baee1a0`，从未带候选位置的现象出发执行 `search_code`、`read_source`、`get_neighbors` 并提交结构化候选，持久化 11 条公开事件、4 项工具结果、证据 hash 和报告；工作台无需刷新自动发现并载入，源码证据和静态影响面板打开正确，历史 Run、Session 切换和刷新恢复均通过且没有重复 Run。当前结论通过的是 external 连接、调查闭环和证据一致性；真实 DeepSeek 语义质量和实际账单差异仍为 UNVERIFIED。
 
 ## 后果
 
