@@ -1,0 +1,116 @@
+{
+  "candidate_links": [
+    {
+      "candidate_id": "candidate-offline-fake",
+      "evidence_ids": [
+        "evidence-c16eb948a76e6d1af2b1ba5e1f321a23"
+      ],
+      "index_id": "index-eval-case-cd81783813b21b44",
+      "relation": "selected by the offline fake adapter",
+      "source_symbol_id": "sym-1495c4f22dc7ea58a12d865fa97bbf7b",
+      "target_symbol_id": null
+    }
+  ],
+  "evidence": [
+    {
+      "content_hash": "345357baf7ab8e77d5d69755fa54523e48eeeec10a6e7f614e037184e6f86db2",
+      "end_line": 2,
+      "evidence_id": "evidence-c16eb948a76e6d1af2b1ba5e1f321a23",
+      "excerpt": "def load_rows(payload):\n    return [normalize_row(row) for row in payload[\"rows\"]]",
+      "index_id": "index-eval-case-cd81783813b21b44",
+      "kind": "source",
+      "path": "reader.py",
+      "start_line": 1
+    }
+  ],
+  "findings": [
+    {
+      "evidence_ids": [
+        "evidence-c16eb948a76e6d1af2b1ba5e1f321a23"
+      ],
+      "finding_id": "finding-offline-fake",
+      "kind": "hypothesis",
+      "symbol_ids": [
+        "sym-1495c4f22dc7ea58a12d865fa97bbf7b"
+      ],
+      "text": "The selected source span is a bounded candidate for the Issue."
+    }
+  ],
+  "fixture_mode": false,
+  "graph": {
+    "candidate_links": [
+      {
+        "candidate_id": "candidate-offline-fake",
+        "evidence_ids": [
+          "evidence-c16eb948a76e6d1af2b1ba5e1f321a23"
+        ],
+        "index_id": "index-eval-case-cd81783813b21b44",
+        "relation": "selected by the offline fake adapter",
+        "source_symbol_id": "sym-1495c4f22dc7ea58a12d865fa97bbf7b",
+        "target_symbol_id": null
+      }
+    ],
+    "index_id": "index-eval-case-cd81783813b21b44",
+    "nodes": [
+      {
+        "end_line": 6,
+        "index_id": "index-eval-case-cd81783813b21b44",
+        "kind": "module",
+        "path": "reader.py",
+        "qualified_name": "reader",
+        "start_line": 1,
+        "symbol_id": "sym-943818b9ed03c77a413dcfd000d2c79a"
+      },
+      {
+        "end_line": 2,
+        "index_id": "index-eval-case-cd81783813b21b44",
+        "kind": "function",
+        "path": "reader.py",
+        "qualified_name": "reader.load_rows",
+        "start_line": 1,
+        "symbol_id": "sym-1495c4f22dc7ea58a12d865fa97bbf7b"
+      },
+      {
+        "end_line": 6,
+        "index_id": "index-eval-case-cd81783813b21b44",
+        "kind": "function",
+        "path": "reader.py",
+        "qualified_name": "reader.normalize_row",
+        "start_line": 5,
+        "symbol_id": "sym-37f8a7d180ad90867ae55ef650713025"
+      },
+      {
+        "end_line": 2,
+        "index_id": "index-eval-case-cd81783813b21b44",
+        "kind": "module",
+        "path": "formatter.py",
+        "qualified_name": "formatter",
+        "start_line": 1,
+        "symbol_id": "sym-7a6d946ff45000ea9e16e189e945455a"
+      },
+      {
+        "end_line": 2,
+        "index_id": "index-eval-case-cd81783813b21b44",
+        "kind": "function",
+        "path": "formatter.py",
+        "qualified_name": "formatter.format_rows",
+        "start_line": 1,
+        "symbol_id": "sym-03e2ebceead186d2b189639c634deb5b"
+      }
+    ],
+    "static_edges": [],
+    "truncated": false,
+    "truncation_reason": null,
+    "unresolved": []
+  },
+  "index_id": "index-eval-case-cd81783813b21b44",
+  "outcome": "candidate_found",
+  "project_id": "project-ab70b9db05084aca902a3028b092b6c2",
+  "report_id": "report-run-b028536bfec7496c82978a31b2fb2296",
+  "run_id": "run-b028536bfec7496c82978a31b2fb2296",
+  "schema_version": "0.1.0",
+  "session_id": "session-d432ecba70064199b0608a38ae2f5344",
+  "status": "succeeded",
+  "summary": "The bounded snapshot contains a candidate supported by same-snapshot source evidence.",
+  "terminal_sequence": 11
+}

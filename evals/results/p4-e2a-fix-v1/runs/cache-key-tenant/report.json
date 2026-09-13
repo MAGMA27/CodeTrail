@@ -1,0 +1,107 @@
+{
+  "candidate_links": [
+    {
+      "candidate_id": "candidate-offline-fake",
+      "evidence_ids": [
+        "evidence-f1ba6a6d3c1becf5e3ad0ef248b52953"
+      ],
+      "index_id": "index-eval-case-4aa1b67e0201bd5d",
+      "relation": "selected by the offline fake adapter",
+      "source_symbol_id": "sym-0cb6c1779c3e1d27260a862f6f8f4ebf",
+      "target_symbol_id": null
+    }
+  ],
+  "evidence": [
+    {
+      "content_hash": "9471663a303717fc5dded7d10e44f4fee974bf36d3ff45b2b6aafafb625c4c68",
+      "end_line": 2,
+      "evidence_id": "evidence-f1ba6a6d3c1becf5e3ad0ef248b52953",
+      "excerpt": "def load_user(tenant_id, user_id):\n    return {\"tenant_id\": tenant_id, \"user_id\": user_id}",
+      "index_id": "index-eval-case-4aa1b67e0201bd5d",
+      "kind": "source",
+      "path": "repository.py",
+      "start_line": 1
+    }
+  ],
+  "findings": [
+    {
+      "evidence_ids": [
+        "evidence-f1ba6a6d3c1becf5e3ad0ef248b52953"
+      ],
+      "finding_id": "finding-offline-fake",
+      "kind": "hypothesis",
+      "symbol_ids": [
+        "sym-0cb6c1779c3e1d27260a862f6f8f4ebf"
+      ],
+      "text": "The selected source span is a bounded candidate for the Issue."
+    }
+  ],
+  "fixture_mode": false,
+  "graph": {
+    "candidate_links": [
+      {
+        "candidate_id": "candidate-offline-fake",
+        "evidence_ids": [
+          "evidence-f1ba6a6d3c1becf5e3ad0ef248b52953"
+        ],
+        "index_id": "index-eval-case-4aa1b67e0201bd5d",
+        "relation": "selected by the offline fake adapter",
+        "source_symbol_id": "sym-0cb6c1779c3e1d27260a862f6f8f4ebf",
+        "target_symbol_id": null
+      }
+    ],
+    "index_id": "index-eval-case-4aa1b67e0201bd5d",
+    "nodes": [
+      {
+        "end_line": 2,
+        "index_id": "index-eval-case-4aa1b67e0201bd5d",
+        "kind": "module",
+        "path": "repository.py",
+        "qualified_name": "repository",
+        "start_line": 1,
+        "symbol_id": "sym-6815ac175f5a1f3952d8c5aab2d52c5a"
+      },
+      {
+        "end_line": 2,
+        "index_id": "index-eval-case-4aa1b67e0201bd5d",
+        "kind": "function",
+        "path": "repository.py",
+        "qualified_name": "repository.load_user",
+        "start_line": 1,
+        "symbol_id": "sym-0cb6c1779c3e1d27260a862f6f8f4ebf"
+      },
+      {
+        "end_line": 7,
+        "index_id": "index-eval-case-4aa1b67e0201bd5d",
+        "kind": "module",
+        "path": "service.py",
+        "qualified_name": "service",
+        "start_line": 1,
+        "symbol_id": "sym-e6dda9bbaa79ed3784a31b6c95875cbd"
+      },
+      {
+        "end_line": 7,
+        "index_id": "index-eval-case-4aa1b67e0201bd5d",
+        "kind": "function",
+        "path": "service.py",
+        "qualified_name": "service.get_profile",
+        "start_line": 5,
+        "symbol_id": "sym-d4aaada99e92ddf92b589578394b9eef"
+      }
+    ],
+    "static_edges": [],
+    "truncated": false,
+    "truncation_reason": null,
+    "unresolved": []
+  },
+  "index_id": "index-eval-case-4aa1b67e0201bd5d",
+  "outcome": "candidate_found",
+  "project_id": "project-75721c26de2f40959cfb6f7476cb69d4",
+  "report_id": "report-run-99d5981937a84ec3bfa9a6f4f09e2819",
+  "run_id": "run-99d5981937a84ec3bfa9a6f4f09e2819",
+  "schema_version": "0.1.0",
+  "session_id": "session-67d3573b77b84816a47b1a6f66ad951b",
+  "status": "succeeded",
+  "summary": "The bounded snapshot contains a candidate supported by same-snapshot source evidence.",
+  "terminal_sequence": 11
+}

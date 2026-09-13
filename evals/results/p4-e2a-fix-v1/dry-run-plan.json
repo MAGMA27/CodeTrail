@@ -1,0 +1,231 @@
+{
+  "cases": [
+    {
+      "case_id": "csv-import-validation",
+      "index_id": "eval-index-e3218aa8934b1e1451500f66a2c86fcc",
+      "input_construction_version": "p4-e2a-input-v2",
+      "issue_hash": "3e7ba9cc05f01ca45cdbd7d99e80683d050ca1842cc3cf7d840ebf2a9a54c140",
+      "issue_id": "eval-issue-csv-import-validation",
+      "issue_input": {
+        "body": "CSV import fails with KeyError when a row has no name. The reader should validate malformed rows before formatting.",
+        "id": "eval-issue-csv-import-validation",
+        "mentioned_paths": [
+          "reader.py"
+        ],
+        "schema_version": "0.1.0",
+        "stacktrace": null,
+        "title": "CSV import needs validation for rows without a name"
+      },
+      "method_fingerprint": "0688bb814145629f84117d249ca7e2dd7fbaac6f1ab6ced5a9da61df2e8ee18e",
+      "result_path": "runs/csv-import-validation/report.json",
+      "run_input_fields": [
+        "Issue JSON",
+        "complete saved Session message prefix"
+      ],
+      "source_files": [
+        "app.py",
+        "formatter.py",
+        "other.py",
+        "reader.py"
+      ],
+      "source_manifest_hash": "cd81783813b21b440c4f4e795b0e1a367b50e4c876deca3a1b17036dc2fa5027",
+      "split": "calibration"
+    },
+    {
+      "case_id": "cache-key-tenant",
+      "index_id": "eval-index-41cef4955fdaecc38dd5b411bb6ca5b2",
+      "input_construction_version": "p4-e2a-input-v2",
+      "issue_hash": "8eeae5a2c1f88b7844b7f4594bb1a95398a98bd07385f9517484c9e8c34179ff",
+      "issue_id": "eval-issue-cache-key-tenant",
+      "issue_input": {
+        "body": "Profiles from two organizations sometimes cross. The cache lookup must include tenant_id in the key before loading a user profile.",
+        "id": "eval-issue-cache-key-tenant",
+        "mentioned_paths": [
+          "service.py",
+          "cache.py"
+        ],
+        "schema_version": "0.1.0",
+        "stacktrace": null,
+        "title": "Profiles from different tenants cross in the cache"
+      },
+      "method_fingerprint": "0688bb814145629f84117d249ca7e2dd7fbaac6f1ab6ced5a9da61df2e8ee18e",
+      "result_path": "runs/cache-key-tenant/report.json",
+      "run_input_fields": [
+        "Issue JSON",
+        "complete saved Session message prefix"
+      ],
+      "source_files": [
+        "cache.py",
+        "repository.py",
+        "service.py"
+      ],
+      "source_manifest_hash": "4aa1b67e0201bd5da6c24579556c3adeaf053a5e7fa235fac58940c1cf9c15dd",
+      "split": "calibration"
+    },
+    {
+      "case_id": "partner-billing-outage",
+      "index_id": "eval-index-eb4a9ad120468f08a99ac8e8f21dc3af",
+      "input_construction_version": "p4-e2a-input-v2",
+      "issue_hash": "8196263f39d59c186a89edfc829c091737c0a09bef33887d8bd309bee446b2ae",
+      "issue_id": "eval-issue-partner-billing-outage",
+      "issue_input": {
+        "body": "The partner billing endpoint intermittently returns 503. Determine whether the outage or the local client is responsible, but the partner response and deployment logs are not available here.",
+        "id": "eval-issue-partner-billing-outage",
+        "mentioned_paths": [
+          "billing/client.py"
+        ],
+        "schema_version": "0.1.0",
+        "stacktrace": null,
+        "title": "Partner billing endpoint intermittently returns 503"
+      },
+      "method_fingerprint": "0688bb814145629f84117d249ca7e2dd7fbaac6f1ab6ced5a9da61df2e8ee18e",
+      "result_path": "runs/partner-billing-outage/report.json",
+      "run_input_fields": [
+        "Issue JSON",
+        "complete saved Session message prefix"
+      ],
+      "source_files": [
+        "billing/client.py",
+        "billing/config.py",
+        "billing/handlers.py"
+      ],
+      "source_manifest_hash": "b03e176f68ba3f46df1f3ed33ffc41d5d75d5d061e4f1b38a2f86c56c3436d34",
+      "split": "calibration"
+    },
+    {
+      "case_id": "redirect-query-encoding",
+      "index_id": "eval-index-153f7929219373fe60d3ea6061dd9e12",
+      "input_construction_version": "p4-e2a-input-v2",
+      "issue_hash": "b47173b1718b9806fa118f9931b1f9a20be2a0f984f3fe08ee28092b612218ce",
+      "issue_id": "eval-issue-redirect-query-encoding",
+      "issue_input": {
+        "body": "The login redirect loses query parameters when the original URL contains an ampersand. Encode next_path before building the redirect query.",
+        "id": "eval-issue-redirect-query-encoding",
+        "mentioned_paths": [
+          "auth.py",
+          "router.py"
+        ],
+        "schema_version": "0.1.0",
+        "stacktrace": null,
+        "title": "Login redirect loses query parameters"
+      },
+      "method_fingerprint": "0688bb814145629f84117d249ca7e2dd7fbaac6f1ab6ced5a9da61df2e8ee18e",
+      "result_path": "runs/redirect-query-encoding/report.json",
+      "run_input_fields": [
+        "Issue JSON",
+        "complete saved Session message prefix"
+      ],
+      "source_files": [
+        "auth.py",
+        "router.py",
+        "urls.py"
+      ],
+      "source_manifest_hash": "83b6daed08a499b1a5981032b461312d5e10d137f8a1af833c9b703d43cded6b",
+      "split": "holdout"
+    },
+    {
+      "case_id": "retry-control-flow",
+      "index_id": "eval-index-e18e9721a7ed762cf699cf249bcb8f75",
+      "input_construction_version": "p4-e2a-input-v2",
+      "issue_hash": "190b4ee73d82711df4714cc690c3155b39f7220291c7f37bf56f325c9531c221",
+      "issue_id": "eval-issue-retry-control-flow",
+      "issue_input": {
+        "body": "The worker aborts after the first transient failure. It should retry up to attempts before raising the final error.",
+        "id": "eval-issue-retry-control-flow",
+        "mentioned_paths": [
+          "worker.py"
+        ],
+        "schema_version": "0.1.0",
+        "stacktrace": null,
+        "title": "Worker stops after the first transient failure"
+      },
+      "method_fingerprint": "0688bb814145629f84117d249ca7e2dd7fbaac6f1ab6ced5a9da61df2e8ee18e",
+      "result_path": "runs/retry-control-flow/report.json",
+      "run_input_fields": [
+        "Issue JSON",
+        "complete saved Session message prefix"
+      ],
+      "source_files": [
+        "dynamic.py",
+        "worker.py"
+      ],
+      "source_manifest_hash": "2033251b411e241b44b310b8850bcb79cede9a26b91cf4e1ca9389af4739647d",
+      "split": "holdout"
+    },
+    {
+      "case_id": "remote-rollout-config",
+      "index_id": "eval-index-87769952035b8f034aee5ab77be27347",
+      "input_construction_version": "p4-e2a-input-v2",
+      "issue_hash": "aded6fe987550e9bc0f3150b71f69d5e9e213ebd5b8dccc81270c44969951c3e",
+      "issue_id": "eval-issue-remote-rollout-config",
+      "issue_input": {
+        "body": "Users in one region do not see the feature. Determine whether the local gate or the remote rollout configuration is wrong, but no rollout response or production configuration snapshot is available.",
+        "id": "eval-issue-remote-rollout-config",
+        "mentioned_paths": [
+          "rollout/flags.py"
+        ],
+        "schema_version": "0.1.0",
+        "stacktrace": null,
+        "title": "Users in one region do not see the feature"
+      },
+      "method_fingerprint": "0688bb814145629f84117d249ca7e2dd7fbaac6f1ab6ced5a9da61df2e8ee18e",
+      "result_path": "runs/remote-rollout-config/report.json",
+      "run_input_fields": [
+        "Issue JSON",
+        "complete saved Session message prefix"
+      ],
+      "source_files": [
+        "rollout/client.py",
+        "rollout/flags.py",
+        "rollout/region.py"
+      ],
+      "source_manifest_hash": "ddddb739e050a2fc3f3c7281eba59a25b9d5f17b1ccf00ae8d8b18afcf2be78f",
+      "split": "holdout"
+    }
+  ],
+  "dataset_id": "codetrail-p4-e1",
+  "dataset_version": "p4-e1-v1",
+  "evaluation_budget": {
+    "max_cases": 100,
+    "max_input_chars": 600000,
+    "max_model_calls": 24,
+    "max_model_input_chars": 800000,
+    "max_model_output_chars": 120000,
+    "max_output_chars": 300000,
+    "max_seconds": 180,
+    "token_usage_policy": "unknown_reported_not_counted"
+  },
+  "input_construction_version": "p4-e2a-input-v2",
+  "method": {
+    "budget": {
+      "max_events": 100,
+      "max_input_chars": 60000,
+      "max_model_calls": 4,
+      "max_model_input_chars": 80000,
+      "max_model_output_chars": 20000,
+      "max_output_chars": 50000,
+      "max_repair_calls": 1,
+      "max_seconds": 30,
+      "max_source_lines": 200,
+      "max_tool_calls": 8,
+      "max_total_source_lines": 800
+    },
+    "execution_mode": "offline_fake",
+    "execution_version": "p4-e2a-real-run-v1",
+    "method_id": "real-run-offline-fake-v1",
+    "method_version": "real-run-offline-fake-v1",
+    "model": "codetrail-eval-fake-v1",
+    "model_calls_expected": 24,
+    "model_provider": "offline-fake",
+    "network_calls": 0,
+    "prompt_version": "issue-analysis-v1",
+    "provider_kind": "offline_fake",
+    "source_scope": "case_manifest_only"
+  },
+  "output_dir": "evals\\results\\p4-e2a-fix-v1",
+  "plan_kind": "dry_run",
+  "raw_state_path": "evals\\results\\p4-e2a-fix-v1\\raw-state.json",
+  "schema_version": "p4-e2a",
+  "simulation_notice": "本报告使用本地确定性假供应商，目的是验证真实 Run/工具/预算/持久化/评分适配；它不代表任何真实模型的语义质量、根因判断或供应商表现。",
+  "split": "all"
+}

@@ -1,0 +1,806 @@
+{
+  "baseline_report_path": "evals/results/p4-e1-v1/baseline-all.json",
+  "cases": [
+    {
+      "execution": {
+        "candidates": [
+          {
+            "end_line": 2,
+            "evidence_content_hash": "345357baf7ab8e77d5d69755fa54523e48eeeec10a6e7f614e037184e6f86db2",
+            "evidence_ids": [
+              "evidence-c16eb948a76e6d1af2b1ba5e1f321a23"
+            ],
+            "evidence_legal": true,
+            "evidence_reason": null,
+            "index_id": "index-eval-case-cd81783813b21b44",
+            "kind": "function",
+            "origin": "candidate_link",
+            "path": "reader.py",
+            "qualified_name": "reader.load_rows",
+            "rank": 1,
+            "relation": "selected by the offline fake adapter",
+            "start_line": 1,
+            "symbol_id": "sym-1495c4f22dc7ea58a12d865fa97bbf7b"
+          }
+        ],
+        "case_id": "csv-import-validation",
+        "elapsed_ms": 1319,
+        "execution_status": "succeeded",
+        "execution_version": "p4-e2a-real-run-v1",
+        "failure_reason": null,
+        "failure_stage": null,
+        "index_id": "index-eval-case-cd81783813b21b44",
+        "input_construction_version": "p4-e2a-input-v2",
+        "input_hash": "3cda4170389a5e2be8ae8f2a3a2348aa7e0847adb1f1f0b992cf14900d339b04",
+        "issue_hash": "3e7ba9cc05f01ca45cdbd7d99e80683d050ca1842cc3cf7d840ebf2a9a54c140",
+        "issue_id": "eval-issue-csv-import-validation",
+        "method_fingerprint": "0688bb814145629f84117d249ca7e2dd7fbaac6f1ab6ced5a9da61df2e8ee18e",
+        "model": "codetrail-eval-fake-v1",
+        "model_provider": "offline-fake",
+        "project_id": "project-ab70b9db05084aca902a3028b092b6c2",
+        "prompt_version": "issue-analysis-v1",
+        "report_id": "report-run-b028536bfec7496c82978a31b2fb2296",
+        "report_path": "runs/csv-import-validation/report.json",
+        "run_id": "run-b028536bfec7496c82978a31b2fb2296",
+        "run_outcome": "candidate_found",
+        "run_status": "succeeded",
+        "session_id": "session-d432ecba70064199b0608a38ae2f5344",
+        "snapshot_hash": "cd81783813b21b440c4f4e795b0e1a367b50e4c876deca3a1b17036dc2fa5027",
+        "source_index_id": "eval-index-e3218aa8934b1e1451500f66a2c86fcc",
+        "source_manifest_hash": "cd81783813b21b440c4f4e795b0e1a367b50e4c876deca3a1b17036dc2fa5027",
+        "split": "calibration",
+        "usage": {
+          "input_chars": 167,
+          "input_tokens": null,
+          "model_calls": 3,
+          "model_input_chars": 23430,
+          "model_output_chars": 1125,
+          "output_chars": 3231,
+          "output_tokens": null,
+          "repair_calls": 0,
+          "source_lines": 2,
+          "tool_calls": 2
+        }
+      },
+      "score": {
+        "abstained": null,
+        "abstention_kind": null,
+        "applicable": true,
+        "candidates": [
+          {
+            "end_line": 2,
+            "evidence": {
+              "content_hash": "345357baf7ab8e77d5d69755fa54523e48eeeec10a6e7f614e037184e6f86db2",
+              "end_line": 2,
+              "evidence_id": "evidence-c16eb948a76e6d1af2b1ba5e1f321a23",
+              "index_id": "index-eval-case-cd81783813b21b44",
+              "legal": true,
+              "path": "reader.py",
+              "reason": null,
+              "start_line": 1
+            },
+            "index_id": "index-eval-case-cd81783813b21b44",
+            "kind": "function",
+            "matched_terms": [
+              "candidate_link"
+            ],
+            "path": "reader.py",
+            "qualified_name": "reader.load_rows",
+            "rank": 1,
+            "start_line": 1,
+            "symbol_id": "sym-1495c4f22dc7ea58a12d865fa97bbf7b"
+          }
+        ],
+        "case_id": "csv-import-validation",
+        "defect_category": "input_validation",
+        "elapsed_ms": 1319,
+        "expected_files": [
+          "reader.py"
+        ],
+        "expected_locations": [
+          {
+            "end_line": 6,
+            "path": "reader.py",
+            "start_line": 6
+          }
+        ],
+        "expected_symbols": [
+          "reader.normalize_row",
+          "reader.load_rows"
+        ],
+        "failure_reason": null,
+        "failure_stage": null,
+        "false_positive": null,
+        "file_hit_at_1": true,
+        "file_hit_at_3": true,
+        "index_id": "index-eval-case-cd81783813b21b44",
+        "issue_hash": "3e7ba9cc05f01ca45cdbd7d99e80683d050ca1842cc3cf7d840ebf2a9a54c140",
+        "issue_id": "eval-issue-csv-import-validation",
+        "location_hit_at_1": false,
+        "location_hit_at_3": false,
+        "query_terms": [],
+        "snapshot_hash": "cd81783813b21b440c4f4e795b0e1a367b50e4c876deca3a1b17036dc2fa5027",
+        "split": "calibration",
+        "status": "succeeded",
+        "symbol_hit_at_1": true,
+        "symbol_hit_at_3": true,
+        "usage": {
+          "evidence_checks": 1,
+          "evidence_legal": 1,
+          "keyword_count": 0,
+          "returned_matches": 0,
+          "search_calls": 0
+        }
+      }
+    },
+    {
+      "execution": {
+        "candidates": [
+          {
+            "end_line": 2,
+            "evidence_content_hash": "9471663a303717fc5dded7d10e44f4fee974bf36d3ff45b2b6aafafb625c4c68",
+            "evidence_ids": [
+              "evidence-f1ba6a6d3c1becf5e3ad0ef248b52953"
+            ],
+            "evidence_legal": true,
+            "evidence_reason": null,
+            "index_id": "index-eval-case-4aa1b67e0201bd5d",
+            "kind": "function",
+            "origin": "candidate_link",
+            "path": "repository.py",
+            "qualified_name": "repository.load_user",
+            "rank": 1,
+            "relation": "selected by the offline fake adapter",
+            "start_line": 1,
+            "symbol_id": "sym-0cb6c1779c3e1d27260a862f6f8f4ebf"
+          }
+        ],
+        "case_id": "cache-key-tenant",
+        "elapsed_ms": 1335,
+        "execution_status": "succeeded",
+        "execution_version": "p4-e2a-real-run-v1",
+        "failure_reason": null,
+        "failure_stage": null,
+        "index_id": "index-eval-case-4aa1b67e0201bd5d",
+        "input_construction_version": "p4-e2a-input-v2",
+        "input_hash": "879d4b1a5564755d77bdf8d85db9e57b90ce6fbcecade30935f5de2e5bbd7ebf",
+        "issue_hash": "8eeae5a2c1f88b7844b7f4594bb1a95398a98bd07385f9517484c9e8c34179ff",
+        "issue_id": "eval-issue-cache-key-tenant",
+        "method_fingerprint": "0688bb814145629f84117d249ca7e2dd7fbaac6f1ab6ced5a9da61df2e8ee18e",
+        "model": "codetrail-eval-fake-v1",
+        "model_provider": "offline-fake",
+        "project_id": "project-75721c26de2f40959cfb6f7476cb69d4",
+        "prompt_version": "issue-analysis-v1",
+        "report_id": "report-run-99d5981937a84ec3bfa9a6f4f09e2819",
+        "report_path": "runs/cache-key-tenant/report.json",
+        "run_id": "run-99d5981937a84ec3bfa9a6f4f09e2819",
+        "run_outcome": "candidate_found",
+        "run_status": "succeeded",
+        "session_id": "session-67d3573b77b84816a47b1a6f66ad951b",
+        "snapshot_hash": "4aa1b67e0201bd5da6c24579556c3adeaf053a5e7fa235fac58940c1cf9c15dd",
+        "source_index_id": "eval-index-41cef4955fdaecc38dd5b411bb6ca5b2",
+        "source_manifest_hash": "4aa1b67e0201bd5da6c24579556c3adeaf053a5e7fa235fac58940c1cf9c15dd",
+        "split": "calibration",
+        "usage": {
+          "input_chars": 181,
+          "input_tokens": null,
+          "model_calls": 3,
+          "model_input_chars": 23103,
+          "model_output_chars": 1134,
+          "output_chars": 3033,
+          "output_tokens": null,
+          "repair_calls": 0,
+          "source_lines": 2,
+          "tool_calls": 2
+        }
+      },
+      "score": {
+        "abstained": null,
+        "abstention_kind": null,
+        "applicable": true,
+        "candidates": [
+          {
+            "end_line": 2,
+            "evidence": {
+              "content_hash": "9471663a303717fc5dded7d10e44f4fee974bf36d3ff45b2b6aafafb625c4c68",
+              "end_line": 2,
+              "evidence_id": "evidence-f1ba6a6d3c1becf5e3ad0ef248b52953",
+              "index_id": "index-eval-case-4aa1b67e0201bd5d",
+              "legal": true,
+              "path": "repository.py",
+              "reason": null,
+              "start_line": 1
+            },
+            "index_id": "index-eval-case-4aa1b67e0201bd5d",
+            "kind": "function",
+            "matched_terms": [
+              "candidate_link"
+            ],
+            "path": "repository.py",
+            "qualified_name": "repository.load_user",
+            "rank": 1,
+            "start_line": 1,
+            "symbol_id": "sym-0cb6c1779c3e1d27260a862f6f8f4ebf"
+          }
+        ],
+        "case_id": "cache-key-tenant",
+        "defect_category": "state_isolation",
+        "elapsed_ms": 1335,
+        "expected_files": [
+          "service.py"
+        ],
+        "expected_locations": [
+          {
+            "end_line": 7,
+            "path": "service.py",
+            "start_line": 6
+          }
+        ],
+        "expected_symbols": [
+          "service.get_profile"
+        ],
+        "failure_reason": null,
+        "failure_stage": null,
+        "false_positive": null,
+        "file_hit_at_1": false,
+        "file_hit_at_3": false,
+        "index_id": "index-eval-case-4aa1b67e0201bd5d",
+        "issue_hash": "8eeae5a2c1f88b7844b7f4594bb1a95398a98bd07385f9517484c9e8c34179ff",
+        "issue_id": "eval-issue-cache-key-tenant",
+        "location_hit_at_1": false,
+        "location_hit_at_3": false,
+        "query_terms": [],
+        "snapshot_hash": "4aa1b67e0201bd5da6c24579556c3adeaf053a5e7fa235fac58940c1cf9c15dd",
+        "split": "calibration",
+        "status": "succeeded",
+        "symbol_hit_at_1": false,
+        "symbol_hit_at_3": false,
+        "usage": {
+          "evidence_checks": 1,
+          "evidence_legal": 1,
+          "keyword_count": 0,
+          "returned_matches": 0,
+          "search_calls": 0
+        }
+      }
+    },
+    {
+      "execution": {
+        "candidates": [],
+        "case_id": "partner-billing-outage",
+        "elapsed_ms": 614,
+        "execution_status": "succeeded",
+        "execution_version": "p4-e2a-real-run-v1",
+        "failure_reason": null,
+        "failure_stage": null,
+        "index_id": "index-eval-case-b03e176f68ba3f46",
+        "input_construction_version": "p4-e2a-input-v2",
+        "input_hash": "d4a614570c3be39c10e5e10b0ad7966d0370bc29463a74cadbc171d322437f58",
+        "issue_hash": "8196263f39d59c186a89edfc829c091737c0a09bef33887d8bd309bee446b2ae",
+        "issue_id": "eval-issue-partner-billing-outage",
+        "method_fingerprint": "0688bb814145629f84117d249ca7e2dd7fbaac6f1ab6ced5a9da61df2e8ee18e",
+        "model": "codetrail-eval-fake-v1",
+        "model_provider": "offline-fake",
+        "project_id": "project-93e43b774e90488f9ea26c13720fbb44",
+        "prompt_version": "issue-analysis-v1",
+        "report_id": "report-run-6f84719c815c4e698bbced21ab7a8301",
+        "report_path": "runs/partner-billing-outage/report.json",
+        "run_id": "run-6f84719c815c4e698bbced21ab7a8301",
+        "run_outcome": "insufficient_evidence",
+        "run_status": "succeeded",
+        "session_id": "session-86304cd016f147259d8cba1dc3fea346",
+        "snapshot_hash": "b03e176f68ba3f46df1f3ed33ffc41d5d75d5d061e4f1b38a2f86c56c3436d34",
+        "source_index_id": "eval-index-eb4a9ad120468f08a99ac8e8f21dc3af",
+        "source_manifest_hash": "b03e176f68ba3f46df1f3ed33ffc41d5d75d5d061e4f1b38a2f86c56c3436d34",
+        "split": "calibration",
+        "usage": {
+          "input_chars": 242,
+          "input_tokens": null,
+          "model_calls": 1,
+          "model_input_chars": 6962,
+          "model_output_chars": 314,
+          "output_chars": 314,
+          "output_tokens": null,
+          "repair_calls": 0,
+          "source_lines": 0,
+          "tool_calls": 0
+        }
+      },
+      "score": {
+        "abstained": true,
+        "abstention_kind": "model_insufficient_evidence",
+        "applicable": false,
+        "candidates": [],
+        "case_id": "partner-billing-outage",
+        "defect_category": "external_evidence_missing",
+        "elapsed_ms": 614,
+        "expected_files": [],
+        "expected_locations": [],
+        "expected_symbols": [],
+        "failure_reason": null,
+        "failure_stage": null,
+        "false_positive": false,
+        "file_hit_at_1": null,
+        "file_hit_at_3": null,
+        "index_id": "index-eval-case-b03e176f68ba3f46",
+        "issue_hash": "8196263f39d59c186a89edfc829c091737c0a09bef33887d8bd309bee446b2ae",
+        "issue_id": "eval-issue-partner-billing-outage",
+        "location_hit_at_1": null,
+        "location_hit_at_3": null,
+        "query_terms": [],
+        "snapshot_hash": "b03e176f68ba3f46df1f3ed33ffc41d5d75d5d061e4f1b38a2f86c56c3436d34",
+        "split": "calibration",
+        "status": "succeeded",
+        "symbol_hit_at_1": null,
+        "symbol_hit_at_3": null,
+        "usage": {
+          "evidence_checks": 0,
+          "evidence_legal": 0,
+          "keyword_count": 0,
+          "returned_matches": 0,
+          "search_calls": 0
+        }
+      }
+    },
+    {
+      "execution": {
+        "candidates": [
+          {
+            "end_line": 2,
+            "evidence_content_hash": "719ec0997e476d390d8cdce2d65ebf7be07cd2260c0a5afac5d284367597c3d9",
+            "evidence_ids": [
+              "evidence-e75277132e829b02bd54951256ac1dc7"
+            ],
+            "evidence_legal": true,
+            "evidence_reason": null,
+            "index_id": "index-eval-case-83b6daed08a499b1",
+            "kind": "function",
+            "origin": "candidate_link",
+            "path": "auth.py",
+            "qualified_name": "auth.build_login_redirect",
+            "rank": 1,
+            "relation": "selected by the offline fake adapter",
+            "start_line": 1,
+            "symbol_id": "sym-f0c740e0c38bd7b7b0ffd59e748adbfe"
+          }
+        ],
+        "case_id": "redirect-query-encoding",
+        "elapsed_ms": 1313,
+        "execution_status": "succeeded",
+        "execution_version": "p4-e2a-real-run-v1",
+        "failure_reason": null,
+        "failure_stage": null,
+        "index_id": "index-eval-case-83b6daed08a499b1",
+        "input_construction_version": "p4-e2a-input-v2",
+        "input_hash": "619b918032c764b1ec1c3cea2fa2d3480ff4e4723d3c5e8494ac4f3e082a66a2",
+        "issue_hash": "b47173b1718b9806fa118f9931b1f9a20be2a0f984f3fe08ee28092b612218ce",
+        "issue_id": "eval-issue-redirect-query-encoding",
+        "method_fingerprint": "0688bb814145629f84117d249ca7e2dd7fbaac6f1ab6ced5a9da61df2e8ee18e",
+        "model": "codetrail-eval-fake-v1",
+        "model_provider": "offline-fake",
+        "project_id": "project-0050502179234a4cb43993d917210b3e",
+        "prompt_version": "issue-analysis-v1",
+        "report_id": "report-run-29dd119e5ef243d99f6fffd088eab96a",
+        "report_path": "runs/redirect-query-encoding/report.json",
+        "run_id": "run-29dd119e5ef243d99f6fffd088eab96a",
+        "run_outcome": "candidate_found",
+        "run_status": "succeeded",
+        "session_id": "session-44e30815fe6944e09b5f52a81134a6fb",
+        "snapshot_hash": "83b6daed08a499b1a5981032b461312d5e10d137f8a1af833c9b703d43cded6b",
+        "source_index_id": "eval-index-153f7929219373fe60d3ea6061dd9e12",
+        "source_manifest_hash": "83b6daed08a499b1a5981032b461312d5e10d137f8a1af833c9b703d43cded6b",
+        "split": "holdout",
+        "usage": {
+          "input_chars": 177,
+          "input_tokens": null,
+          "model_calls": 3,
+          "model_input_chars": 22124,
+          "model_output_chars": 1128,
+          "output_chars": 2534,
+          "output_tokens": null,
+          "repair_calls": 0,
+          "source_lines": 2,
+          "tool_calls": 2
+        }
+      },
+      "score": {
+        "abstained": null,
+        "abstention_kind": null,
+        "applicable": true,
+        "candidates": [
+          {
+            "end_line": 2,
+            "evidence": {
+              "content_hash": "719ec0997e476d390d8cdce2d65ebf7be07cd2260c0a5afac5d284367597c3d9",
+              "end_line": 2,
+              "evidence_id": "evidence-e75277132e829b02bd54951256ac1dc7",
+              "index_id": "index-eval-case-83b6daed08a499b1",
+              "legal": true,
+              "path": "auth.py",
+              "reason": null,
+              "start_line": 1
+            },
+            "index_id": "index-eval-case-83b6daed08a499b1",
+            "kind": "function",
+            "matched_terms": [
+              "candidate_link"
+            ],
+            "path": "auth.py",
+            "qualified_name": "auth.build_login_redirect",
+            "rank": 1,
+            "start_line": 1,
+            "symbol_id": "sym-f0c740e0c38bd7b7b0ffd59e748adbfe"
+          }
+        ],
+        "case_id": "redirect-query-encoding",
+        "defect_category": "data_flow_encoding",
+        "elapsed_ms": 1313,
+        "expected_files": [
+          "auth.py"
+        ],
+        "expected_locations": [
+          {
+            "end_line": 2,
+            "path": "auth.py",
+            "start_line": 2
+          }
+        ],
+        "expected_symbols": [
+          "auth.build_login_redirect"
+        ],
+        "failure_reason": null,
+        "failure_stage": null,
+        "false_positive": null,
+        "file_hit_at_1": true,
+        "file_hit_at_3": true,
+        "index_id": "index-eval-case-83b6daed08a499b1",
+        "issue_hash": "b47173b1718b9806fa118f9931b1f9a20be2a0f984f3fe08ee28092b612218ce",
+        "issue_id": "eval-issue-redirect-query-encoding",
+        "location_hit_at_1": true,
+        "location_hit_at_3": true,
+        "query_terms": [],
+        "snapshot_hash": "83b6daed08a499b1a5981032b461312d5e10d137f8a1af833c9b703d43cded6b",
+        "split": "holdout",
+        "status": "succeeded",
+        "symbol_hit_at_1": true,
+        "symbol_hit_at_3": true,
+        "usage": {
+          "evidence_checks": 1,
+          "evidence_legal": 1,
+          "keyword_count": 0,
+          "returned_matches": 0,
+          "search_calls": 0
+        }
+      }
+    },
+    {
+      "execution": {
+        "candidates": [
+          {
+            "end_line": 10,
+            "evidence_content_hash": "34f78f9aa8902f516f548251712d9fe7e7a8ef75e34707aaea7f7608298ea218",
+            "evidence_ids": [
+              "evidence-50df6f2e03aa25b1a5d13dc4f4150bad"
+            ],
+            "evidence_legal": true,
+            "evidence_reason": null,
+            "index_id": "index-eval-case-2033251b411e241b",
+            "kind": "function",
+            "origin": "candidate_link",
+            "path": "worker.py",
+            "qualified_name": "worker.retry_request",
+            "rank": 1,
+            "relation": "selected by the offline fake adapter",
+            "start_line": 5,
+            "symbol_id": "sym-125606532bfb86f469d91793faa51997"
+          }
+        ],
+        "case_id": "retry-control-flow",
+        "elapsed_ms": 1295,
+        "execution_status": "succeeded",
+        "execution_version": "p4-e2a-real-run-v1",
+        "failure_reason": null,
+        "failure_stage": null,
+        "index_id": "index-eval-case-2033251b411e241b",
+        "input_construction_version": "p4-e2a-input-v2",
+        "input_hash": "4f43f5a12aa155e09b4b084f449fa3037299d611a1ad38f3ed03e5ce44c5cdd8",
+        "issue_hash": "190b4ee73d82711df4714cc690c3155b39f7220291c7f37bf56f325c9531c221",
+        "issue_id": "eval-issue-retry-control-flow",
+        "method_fingerprint": "0688bb814145629f84117d249ca7e2dd7fbaac6f1ab6ced5a9da61df2e8ee18e",
+        "model": "codetrail-eval-fake-v1",
+        "model_provider": "offline-fake",
+        "project_id": "project-eb4f4cb59dd04c84a1189b9e8f303ebd",
+        "prompt_version": "issue-analysis-v1",
+        "report_id": "report-run-e5710d24905549eb8d068af9bdfcdf55",
+        "report_path": "runs/retry-control-flow/report.json",
+        "run_id": "run-e5710d24905549eb8d068af9bdfcdf55",
+        "run_outcome": "candidate_found",
+        "run_status": "succeeded",
+        "session_id": "session-1992a57c796e43889241fafddcf2241b",
+        "snapshot_hash": "2033251b411e241b44b310b8850bcb79cede9a26b91cf4e1ca9389af4739647d",
+        "source_index_id": "eval-index-e18e9721a7ed762cf699cf249bcb8f75",
+        "source_manifest_hash": "2033251b411e241b44b310b8850bcb79cede9a26b91cf4e1ca9389af4739647d",
+        "split": "holdout",
+        "usage": {
+          "input_chars": 162,
+          "input_tokens": null,
+          "model_calls": 3,
+          "model_input_chars": 22545,
+          "model_output_chars": 1130,
+          "output_chars": 2841,
+          "output_tokens": null,
+          "repair_calls": 0,
+          "source_lines": 6,
+          "tool_calls": 2
+        }
+      },
+      "score": {
+        "abstained": null,
+        "abstention_kind": null,
+        "applicable": true,
+        "candidates": [
+          {
+            "end_line": 10,
+            "evidence": {
+              "content_hash": "34f78f9aa8902f516f548251712d9fe7e7a8ef75e34707aaea7f7608298ea218",
+              "end_line": 10,
+              "evidence_id": "evidence-50df6f2e03aa25b1a5d13dc4f4150bad",
+              "index_id": "index-eval-case-2033251b411e241b",
+              "legal": true,
+              "path": "worker.py",
+              "reason": null,
+              "start_line": 5
+            },
+            "index_id": "index-eval-case-2033251b411e241b",
+            "kind": "function",
+            "matched_terms": [
+              "candidate_link"
+            ],
+            "path": "worker.py",
+            "qualified_name": "worker.retry_request",
+            "rank": 1,
+            "start_line": 5,
+            "symbol_id": "sym-125606532bfb86f469d91793faa51997"
+          }
+        ],
+        "case_id": "retry-control-flow",
+        "defect_category": "retry_control_flow",
+        "elapsed_ms": 1295,
+        "expected_files": [
+          "worker.py"
+        ],
+        "expected_locations": [
+          {
+            "end_line": 10,
+            "path": "worker.py",
+            "start_line": 9
+          }
+        ],
+        "expected_symbols": [
+          "worker.retry_request"
+        ],
+        "failure_reason": null,
+        "failure_stage": null,
+        "false_positive": null,
+        "file_hit_at_1": true,
+        "file_hit_at_3": true,
+        "index_id": "index-eval-case-2033251b411e241b",
+        "issue_hash": "190b4ee73d82711df4714cc690c3155b39f7220291c7f37bf56f325c9531c221",
+        "issue_id": "eval-issue-retry-control-flow",
+        "location_hit_at_1": true,
+        "location_hit_at_3": true,
+        "query_terms": [],
+        "snapshot_hash": "2033251b411e241b44b310b8850bcb79cede9a26b91cf4e1ca9389af4739647d",
+        "split": "holdout",
+        "status": "succeeded",
+        "symbol_hit_at_1": true,
+        "symbol_hit_at_3": true,
+        "usage": {
+          "evidence_checks": 1,
+          "evidence_legal": 1,
+          "keyword_count": 0,
+          "returned_matches": 0,
+          "search_calls": 0
+        }
+      }
+    },
+    {
+      "execution": {
+        "candidates": [],
+        "case_id": "remote-rollout-config",
+        "elapsed_ms": 602,
+        "execution_status": "succeeded",
+        "execution_version": "p4-e2a-real-run-v1",
+        "failure_reason": null,
+        "failure_stage": null,
+        "index_id": "index-eval-case-ddddb739e050a2fc",
+        "input_construction_version": "p4-e2a-input-v2",
+        "input_hash": "6887dc10415f68b113b20619f5c77f200a6581cdf8ce212709fe4843abd1b2d0",
+        "issue_hash": "aded6fe987550e9bc0f3150b71f69d5e9e213ebd5b8dccc81270c44969951c3e",
+        "issue_id": "eval-issue-remote-rollout-config",
+        "method_fingerprint": "0688bb814145629f84117d249ca7e2dd7fbaac6f1ab6ced5a9da61df2e8ee18e",
+        "model": "codetrail-eval-fake-v1",
+        "model_provider": "offline-fake",
+        "project_id": "project-1f132389e88d49b1ac0f6aa1e85df3cf",
+        "prompt_version": "issue-analysis-v1",
+        "report_id": "report-run-58e61ee5aa3147e3bba0a192c7c55302",
+        "report_path": "runs/remote-rollout-config/report.json",
+        "run_id": "run-58e61ee5aa3147e3bba0a192c7c55302",
+        "run_outcome": "insufficient_evidence",
+        "run_status": "succeeded",
+        "session_id": "session-8599950b2f9d4f7ab13eaa955a0a18c6",
+        "snapshot_hash": "ddddb739e050a2fc3f3c7281eba59a25b9d5f17b1ccf00ae8d8b18afcf2be78f",
+        "source_index_id": "eval-index-87769952035b8f034aee5ab77be27347",
+        "source_manifest_hash": "ddddb739e050a2fc3f3c7281eba59a25b9d5f17b1ccf00ae8d8b18afcf2be78f",
+        "split": "holdout",
+        "usage": {
+          "input_chars": 240,
+          "input_tokens": null,
+          "model_calls": 1,
+          "model_input_chars": 6956,
+          "model_output_chars": 314,
+          "output_chars": 314,
+          "output_tokens": null,
+          "repair_calls": 0,
+          "source_lines": 0,
+          "tool_calls": 0
+        }
+      },
+      "score": {
+        "abstained": true,
+        "abstention_kind": "model_insufficient_evidence",
+        "applicable": false,
+        "candidates": [],
+        "case_id": "remote-rollout-config",
+        "defect_category": "external_evidence_missing",
+        "elapsed_ms": 602,
+        "expected_files": [],
+        "expected_locations": [],
+        "expected_symbols": [],
+        "failure_reason": null,
+        "failure_stage": null,
+        "false_positive": false,
+        "file_hit_at_1": null,
+        "file_hit_at_3": null,
+        "index_id": "index-eval-case-ddddb739e050a2fc",
+        "issue_hash": "aded6fe987550e9bc0f3150b71f69d5e9e213ebd5b8dccc81270c44969951c3e",
+        "issue_id": "eval-issue-remote-rollout-config",
+        "location_hit_at_1": null,
+        "location_hit_at_3": null,
+        "query_terms": [],
+        "snapshot_hash": "ddddb739e050a2fc3f3c7281eba59a25b9d5f17b1ccf00ae8d8b18afcf2be78f",
+        "split": "holdout",
+        "status": "succeeded",
+        "symbol_hit_at_1": null,
+        "symbol_hit_at_3": null,
+        "usage": {
+          "evidence_checks": 0,
+          "evidence_legal": 0,
+          "keyword_count": 0,
+          "returned_matches": 0,
+          "search_calls": 0
+        }
+      }
+    }
+  ],
+  "code_revision": "4df725f8d9715044c14da7f78d1851b8d42b5181",
+  "dataset_id": "codetrail-p4-e1",
+  "dataset_version": "p4-e1-v1",
+  "elapsed_ms": 8,
+  "evaluation_budget": {
+    "max_cases": 100,
+    "max_input_chars": 600000,
+    "max_model_calls": 24,
+    "max_model_input_chars": 800000,
+    "max_model_output_chars": 120000,
+    "max_output_chars": 300000,
+    "max_seconds": 180,
+    "token_usage_policy": "unknown_reported_not_counted"
+  },
+  "evaluation_reserved": {
+    "cases": 0,
+    "elapsed_ms": 0,
+    "events": 0,
+    "input_chars": 0,
+    "input_tokens": null,
+    "model_calls": 0,
+    "model_input_chars": 0,
+    "model_output_chars": 0,
+    "output_chars": 0,
+    "output_tokens": null,
+    "repair_calls": 0,
+    "source_lines": 0,
+    "tool_calls": 0
+  },
+  "evaluation_usage": {
+    "cases": 6,
+    "elapsed_ms": 6478,
+    "events": 0,
+    "input_chars": 1169,
+    "input_tokens": null,
+    "model_calls": 14,
+    "model_input_chars": 105120,
+    "model_output_chars": 5145,
+    "output_chars": 12267,
+    "output_tokens": null,
+    "repair_calls": 0,
+    "source_lines": 12,
+    "tool_calls": 8
+  },
+  "generated_at": "2026-09-13T05:12:29Z",
+  "method": {
+    "budget": {
+      "max_events": 100,
+      "max_input_chars": 60000,
+      "max_model_calls": 4,
+      "max_model_input_chars": 80000,
+      "max_model_output_chars": 20000,
+      "max_output_chars": 50000,
+      "max_repair_calls": 1,
+      "max_seconds": 30,
+      "max_source_lines": 200,
+      "max_tool_calls": 8,
+      "max_total_source_lines": 800
+    },
+    "execution_mode": "offline_fake",
+    "execution_version": "p4-e2a-real-run-v1",
+    "method_id": "real-run-offline-fake-v1",
+    "method_version": "real-run-offline-fake-v1",
+    "model": "codetrail-eval-fake-v1",
+    "model_calls_expected": 24,
+    "model_provider": "offline-fake",
+    "network_calls": 0,
+    "prompt_version": "issue-analysis-v1",
+    "provider_kind": "offline_fake",
+    "source_scope": "case_manifest_only"
+  },
+  "raw_state_path": "evals/results/p4-e2a-fix-v1/raw-state.json",
+  "repository_dirty": true,
+  "run_id": "eval-model-7e20ae4bbb54160c415eb6dfa189f191",
+  "schema_version": "p4-e2a",
+  "simulation_notice": "本报告使用本地确定性假供应商，目的是验证真实 Run/工具/预算/持久化/评分适配；它不代表任何真实模型的语义质量、根因判断或供应商表现。",
+  "split": "all",
+  "summary": {
+    "applicable_cases": 4,
+    "evidence_legal_rate": {
+      "denominator": 4,
+      "numerator": 4,
+      "value": 1.0
+    },
+    "failed_cases": 0,
+    "file_hit_at_1": {
+      "denominator": 4,
+      "numerator": 3,
+      "value": 0.75
+    },
+    "file_hit_at_3": {
+      "denominator": 4,
+      "numerator": 3,
+      "value": 0.75
+    },
+    "insufficient_abstention_rate": {
+      "denominator": 2,
+      "numerator": 2,
+      "value": 1.0
+    },
+    "insufficient_cases": 2,
+    "insufficient_false_positive_rate": {
+      "denominator": 2,
+      "numerator": 0,
+      "value": 0.0
+    },
+    "skipped_cases": 0,
+    "succeeded_cases": 6,
+    "symbol_hit_at_1": {
+      "denominator": 4,
+      "numerator": 3,
+      "value": 0.75
+    },
+    "symbol_hit_at_3": {
+      "denominator": 4,
+      "numerator": 3,
+      "value": 0.75
+    },
+    "total_cases": 6
+  }
+}
