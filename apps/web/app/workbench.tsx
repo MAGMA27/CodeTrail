@@ -140,6 +140,9 @@ type GroupFlowNode = Node<GroupNodeData, "group">;
 type FlowNode = SymbolFlowNode | GroupFlowNode;
 type FlowEdge = Edge<{ kind: EdgeKind }>;
 
+const AUTO_EXPAND_GROUP_SYMBOL_LIMIT = 12;
+const FOCUS_NODE_LIMIT = 8;
+
 type FeatureFlowNodeData = {
   node: FeatureGraphNode;
   onSelect: (node: FeatureGraphNode) => void;
@@ -2810,7 +2813,7 @@ export default function Workbench() {
         }
       }
       for (const group of groups) {
-        if (!knownGroupKeys.current.has(group.key) || previous.size === 0) {
+        if ((!knownGroupKeys.current.has(group.key) || previous.size === 0) && group.symbols.length <= AUTO_EXPAND_GROUP_SYMBOL_LIMIT) {
           next.add(group.key);
         }
       }
@@ -2897,6 +2900,24 @@ export default function Workbench() {
       }));
     return { nodes, edges };
   }, [expandedGroups, graph.edges, graph.symbols, groups, indexResponse, loadNeighborhood, selectedId, selectSymbol, toggleGroup]);
+
+  const codeFocusNodeIds = useMemo(() => {
+    if (!selectedId || !flowModel.nodes.some((node) => node.id === selectedId)) {
+      return [];
+    }
+    const focusIds = new Set([selectedId]);
+    for (const edge of flowModel.edges) {
+      if (focusIds.size >= FOCUS_NODE_LIMIT) {
+        break;
+      }
+      if (edge.source === selectedId) {
+        focusIds.add(edge.target);
+      } else if (edge.target === selectedId) {
+        focusIds.add(edge.source);
+      }
+    }
+    return [...focusIds];
+  }, [flowModel.edges, flowModel.nodes, selectedId]);
 
   const impactFlowModel = useMemo(() => {
     if (!runImpact || runImpact.mapping_status !== "mapped") {
@@ -3026,16 +3047,6 @@ export default function Workbench() {
       }));
     return { nodes, edges };
   }, [featureGraph, selectFeatureGraphNode]);
-
-  useEffect(() => {
-    if (flowInstance && flowModel.nodes.length > 0) {
-      const timer = window.setTimeout(() => {
-        flowInstance.fitView({ padding: 0.18, duration: 320 });
-      }, 50);
-      return () => window.clearTimeout(timer);
-    }
-    return undefined;
-  }, [flowInstance, flowModel.nodes.length]);
 
   useEffect(() => {
     if (panelMode === "impact" && flowInstance && impactFlowModel.nodes.length > 0) {
@@ -3315,6 +3326,9 @@ export default function Workbench() {
         codeError: graphError,
         codeTruncated: graph.truncated,
         codeTruncationReason: graph.truncationReason,
+        codeIndexTruncated: graph.indexTruncated,
+        codeIndexTruncationReason: graph.indexTruncationReason,
+        codeFocusNodeIds,
         codeSymbolCount: graph.symbols.length,
         codeEdgeCount: graph.edges.length,
         impactModel: impactFlowModel,

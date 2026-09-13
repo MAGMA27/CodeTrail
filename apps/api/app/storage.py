@@ -149,6 +149,8 @@ class NeighborQueryResult:
     unresolved: tuple[UnresolvedReference, ...]
     truncated: bool
     truncation_reason: str | None
+    index_truncated: bool
+    index_truncation_reason: str | None
 
 
 @dataclass(frozen=True)
@@ -2900,7 +2902,9 @@ class IndexStore:
         is reached.
         """
 
-        self._require_index(index_id)
+        index_row = self._require_index(index_id)
+        index_truncated = bool(index_row["truncated"])
+        index_truncation_reason = index_row["truncation_reason"]
         try:
             params = GetNeighborsParams(
                 symbol_id=symbol_id,
@@ -3005,6 +3009,8 @@ class IndexStore:
             unresolved=self._load_unresolved(index_id, tuple(nodes)),
             truncated=truncated,
             truncation_reason=truncation_reason,
+            index_truncated=index_truncated,
+            index_truncation_reason=index_truncation_reason,
         )
 
     def get_static_impact(

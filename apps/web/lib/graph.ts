@@ -11,6 +11,8 @@ export type GraphState = {
   unresolved: UnresolvedReference[];
   truncated: boolean;
   truncationReason: string | null;
+  indexTruncated: boolean;
+  indexTruncationReason: string | null;
 };
 
 export type SymbolGroup = {
@@ -25,6 +27,8 @@ export const emptyGraphState: GraphState = {
   unresolved: [],
   truncated: false,
   truncationReason: null,
+  indexTruncated: false,
+  indexTruncationReason: null,
 };
 
 export function mergeNeighborGraph(previous: GraphState, response: NeighborsResponse): GraphState {
@@ -52,6 +56,10 @@ export function mergeNeighborGraph(previous: GraphState, response: NeighborsResp
     truncationReason: response.truncated
       ? response.truncation_reason
       : previous.truncationReason,
+    indexTruncated: previous.indexTruncated || response.index_truncated,
+    indexTruncationReason: response.index_truncated
+      ? response.index_truncation_reason
+      : previous.indexTruncationReason,
   };
 }
 

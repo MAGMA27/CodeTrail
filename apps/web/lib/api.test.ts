@@ -5,6 +5,7 @@ import {
   isFeatureGenerationListResponse,
   isFeatureGenerationResponse,
   isFeatureGraphResponse,
+  isNeighborsResponse,
   isProjectOverviewResponse,
   isRunImpactResponse,
   isSessionListResponse,
@@ -128,6 +129,44 @@ test("project overview validator rejects broken path or evidence shape", () => {
   };
   brokenEvidence.entries[0].evidence.content_hash = 42;
   assert.equal(isProjectOverviewResponse(brokenEvidence), false);
+});
+
+test("neighbor validator keeps query and index truncation states separate", () => {
+  const symbol = {
+    symbol_id: "symbol-neighbor",
+    index_id: indexId,
+    path: "pkg/app.py",
+    qualified_name: "pkg.app.load",
+    kind: "function",
+    start_line: 4,
+    end_line: 7,
+  };
+  const value: Record<string, unknown> = {
+    schema_version: SCHEMA_VERSION,
+    index_id: indexId,
+    root: symbol,
+    nodes: [symbol],
+    neighbors: [],
+    unresolved: [],
+    truncated: false,
+    truncation_reason: null,
+    index_truncated: false,
+    index_truncation_reason: null,
+  };
+  assert.equal(isNeighborsResponse(value), true);
+
+  const incompleteIndex = structuredClone(value);
+  incompleteIndex.index_truncated = true;
+  incompleteIndex.index_truncation_reason = "max_unresolved reached";
+  assert.equal(isNeighborsResponse(incompleteIndex), true);
+
+  const missingReason = structuredClone(incompleteIndex);
+  missingReason.index_truncation_reason = null;
+  assert.equal(isNeighborsResponse(missingReason), false);
+
+  const strayReason = structuredClone(value);
+  strayReason.index_truncation_reason = "not-truncated";
+  assert.equal(isNeighborsResponse(strayReason), false);
 });
 
 function runImpact() {

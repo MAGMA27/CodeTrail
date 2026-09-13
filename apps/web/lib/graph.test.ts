@@ -52,6 +52,8 @@ const response: NeighborsResponse = {
   unresolved: [],
   truncated: true,
   truncation_reason: "max_nodes reached",
+  index_truncated: false,
+  index_truncation_reason: null,
 };
 
 test("mergeNeighborGraph deduplicates symbols and edges while preserving truncation", () => {
@@ -62,6 +64,8 @@ test("mergeNeighborGraph deduplicates symbols and edges while preserving truncat
   assert.equal(twice.edges.length, 1);
   assert.equal(twice.truncated, true);
   assert.equal(twice.truncationReason, "max_nodes reached");
+  assert.equal(twice.indexTruncated, false);
+  assert.equal(twice.indexTruncationReason, null);
 });
 
 test("groupSymbolsByDirectory keeps a deterministic directory/file hierarchy", () => {

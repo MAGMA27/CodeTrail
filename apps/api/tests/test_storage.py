@@ -173,6 +173,27 @@ def test_roundtrip_preserves_definition_issues_and_relation_truncation(tmp_path:
         assert store.load_index(truncated.snapshot.index.index_id) == truncated
 
 
+def test_neighbors_exposes_index_relation_truncation_separately(tmp_path: Path) -> None:
+    relation = fixture_relation(index_id="index-neighbor-coverage")
+    relation = replace(relation, truncated=True, truncation_reason="max_unresolved reached")
+    root = next(symbol for symbol in relation.symbols if symbol.qualified_name == "timeout_demo.app.start")
+
+    with IndexStore(tmp_path / "index.sqlite3") as store:
+        store.write_index(relation)
+        result = store.get_neighbors(
+            relation.snapshot.index.index_id,
+            root.symbol_id,
+            "both",
+            depth=1,
+            limit=40,
+        )
+
+    assert result.truncated is False
+    assert result.truncation_reason is None
+    assert result.index_truncated is True
+    assert result.index_truncation_reason == "max_unresolved reached"
+
+
 def test_search_is_snapshot_scoped_deterministic_and_safe_for_special_queries(tmp_path: Path) -> None:
     relation = fixture_relation()
     index_id = relation.snapshot.index.index_id

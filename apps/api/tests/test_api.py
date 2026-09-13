@@ -173,6 +173,8 @@ def test_http_index_query_and_snapshot_evidence_flow(tmp_path: Path) -> None:
         f"/api/indexes/{index_id}/neighbors?symbol_id={symbol_id}&direction=callers&depth=1&limit=40&edge_kinds=calls",
     )
     assert status == 200
+    assert neighbors["index_truncated"] is False
+    assert neighbors["index_truncation_reason"] is None
     assert any(
         neighbor["symbol"]["qualified_name"] == "timeout_demo.app.start"
         for neighbor in neighbors["neighbors"]
@@ -701,6 +703,8 @@ def test_tool_adapter_returns_contract_results_and_safe_failures(tmp_path: Path)
     )
     neighbors = service.execute_tool(neighbors_request, completed_sequence=6)
     assert isinstance(neighbors, GetNeighborsSuccess)
+    assert neighbors.index_truncated is False
+    assert neighbors.index_truncation_reason is None
     assert {
         item.symbol.qualified_name for item in neighbors.neighbors
     }.isdisjoint({"timeout_demo.handlers.handle", "timeout_demo.other_handlers.handle"})

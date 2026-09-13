@@ -923,6 +923,8 @@ class GetNeighborsSuccess(ToolResultBase):
     unresolved: list[UnresolvedReference] = Field(default_factory=list, max_length=40)
     truncated: bool = False
     truncation_reason: str | None = Field(default=None, max_length=1_000)
+    index_truncated: bool = False
+    index_truncation_reason: str | None = Field(default=None, max_length=1_000)
 
     @model_validator(mode="after")
     def validate_truncation(self) -> GetNeighborsSuccess:
@@ -930,6 +932,10 @@ class GetNeighborsSuccess(ToolResultBase):
             raise ValueError("truncated neighbor results must explain the truncation")
         if not self.truncated and self.truncation_reason:
             raise ValueError("non-truncated neighbor results cannot have a truncation reason")
+        if self.index_truncated and not self.index_truncation_reason:
+            raise ValueError("truncated neighbor indexes must explain the truncation")
+        if not self.index_truncated and self.index_truncation_reason:
+            raise ValueError("non-truncated neighbor indexes cannot have a truncation reason")
         return self
 
 
@@ -967,6 +973,8 @@ class NeighborsIndexResponse(VersionedModel):
     unresolved: list[UnresolvedReference] = Field(default_factory=list)
     truncated: bool = False
     truncation_reason: str | None = Field(default=None, max_length=1_000)
+    index_truncated: bool = False
+    index_truncation_reason: str | None = Field(default=None, max_length=1_000)
 
     @model_validator(mode="after")
     def validate_truncation(self) -> NeighborsIndexResponse:
@@ -994,6 +1002,10 @@ class NeighborsIndexResponse(VersionedModel):
             raise ValueError("truncated neighbor results must explain the truncation")
         if not self.truncated and self.truncation_reason:
             raise ValueError("non-truncated neighbor results cannot have a truncation reason")
+        if self.index_truncated and not self.index_truncation_reason:
+            raise ValueError("truncated neighbor indexes must explain the truncation")
+        if not self.index_truncated and self.index_truncation_reason:
+            raise ValueError("non-truncated neighbor indexes cannot have a truncation reason")
         return self
 
 

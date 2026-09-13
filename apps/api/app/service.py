@@ -651,6 +651,8 @@ class IndexService:
                 unresolved=list(result.unresolved),
                 truncated=result.truncated,
                 truncation_reason=result.truncation_reason,
+                index_truncated=result.index_truncated,
+                index_truncation_reason=result.index_truncation_reason,
             )
 
         return self._with_index(index_id, operation)
@@ -703,6 +705,8 @@ class IndexService:
                     unresolved=list(result.unresolved),
                     truncated=result.truncated,
                     truncation_reason=result.truncation_reason,
+                    index_truncated=result.index_truncated,
+                    index_truncation_reason=result.index_truncation_reason,
                 )
             raise ServiceError("invalid_input", 400, "unsupported tool parameters")
         except ServiceError as exc:

@@ -491,6 +491,8 @@ export type NeighborsResponse = {
   unresolved: UnresolvedReference[];
   truncated: boolean;
   truncation_reason: string | null;
+  index_truncated: boolean;
+  index_truncation_reason: string | null;
 };
 
 export type OverviewEntryPoint = {
@@ -800,6 +802,15 @@ function isTruncation(value: Record<string, unknown>): boolean {
   return (
     typeof value.truncated === "boolean" &&
     (value.truncation_reason === null || isString(value.truncation_reason))
+  );
+}
+
+function isIndexTruncation(value: Record<string, unknown>): boolean {
+  return (
+    typeof value.index_truncated === "boolean" &&
+    (value.index_truncated
+      ? isString(value.index_truncation_reason)
+      : value.index_truncation_reason === null)
   );
 }
 
@@ -1544,6 +1555,7 @@ export function isNeighborsResponse(value: unknown): value is NeighborsResponse 
     value.neighbors.every(isNeighbor) &&
     Array.isArray(value.unresolved) &&
     value.unresolved.every(isUnresolvedReference) &&
+    isIndexTruncation(value) &&
     isTruncation(value)
   );
 }
