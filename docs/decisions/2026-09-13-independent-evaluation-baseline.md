@@ -23,10 +23,11 @@ Status: implemented
 
 实现入口为 [evals README](../../evals/README.md)、[evals pipeline](../../evals/pipeline.py) 和 [评测子系统说明](../subsystems/evals.md)。本轮验收命令及结果补充在交付时同步到本记录和本地进度：
 
-- `pnpm evals:validate` 校验六例、源码集合、hash、划分和标注隔离。
-- `pnpm evals:test` 覆盖评分边界、失败/分母、预算、同名/跨快照和连续运行一致性。
-- `pnpm evals:baseline` 在无网络/密钥条件下生成 `evals/results/p4-e1-v1/baseline-all.json` 与 `.md`。
-- `pnpm docs:check`、`pnpm docs:check:local` 和必要的后端回归检查通过；本轮未修改共享产品契约。
+- `pnpm evals:validate` 通过，校验六例、源码集合、hash、划分和标注隔离。
+- `pnpm evals:test` 通过（9 passed），覆盖评分边界、失败/分母、预算、同名/跨快照、manifest 变化和连续运行一致性。
+- `pnpm evals:baseline` 在无网络/密钥条件下生成 `evals/results/p4-e1-v1/baseline-all.json` 与 `.md`；revision 为 `c2e7db1875bccca0c2dbfc5321d88f022d988f18`，6/6 成功。
+- 实际全量结果：file Hit@1 `2/4`、Hit@3 `4/4`；symbol Hit@1 `0/4`、Hit@3 `3/4`；证据位置/hash/归属合法 `17/17`；证据不足基线无候选 `0/2`、误报 `2/2`。失败数 `0/6`，模型/网络调用 `0/0`。
+- `pnpm docs:check`、`pnpm contracts:check`（21 passed）和后端完整回归（121 passed）通过；Python compileall 通过。本轮未修改共享产品契约。
 
 实际报告必须给出逐例 Issue hash、snapshot hash、候选证据、失败原因和分子/分母；耗时、运行标识与工作树状态标为运行元数据。当前报告只证明关键词排序基线，不声称真实模型质量。
 

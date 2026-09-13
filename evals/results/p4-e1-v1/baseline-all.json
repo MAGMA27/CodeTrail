@@ -1,0 +1,783 @@
+{
+  "baseline_version": "keyword-fts5-v1",
+  "cases": [
+    {
+      "abstained": null,
+      "abstention_kind": null,
+      "applicable": true,
+      "candidates": [
+        {
+          "end_line": 7,
+          "evidence": {
+            "content_hash": "dea996654238d8c8de60ddcd76d787c1463ded81ec05621f745cf82c3cf7e695",
+            "end_line": 7,
+            "evidence_id": "evidence-54b5d15e7ec56a1a238865ea189dda8d",
+            "index_id": "eval-index-e3218aa8934b1e1451500f66a2c86fcc",
+            "legal": true,
+            "path": "app.py",
+            "reason": null,
+            "start_line": 1
+          },
+          "index_id": "eval-index-e3218aa8934b1e1451500f66a2c86fcc",
+          "kind": "module",
+          "matched_terms": [
+            "import",
+            "rows"
+          ],
+          "path": "app.py",
+          "qualified_name": "app",
+          "rank": 1,
+          "start_line": 1,
+          "symbol_id": "sym-d23aeb8fb85314491e2f165d0a4b21b3"
+        },
+        {
+          "end_line": 7,
+          "evidence": {
+            "content_hash": "dea996654238d8c8de60ddcd76d787c1463ded81ec05621f745cf82c3cf7e695",
+            "end_line": 7,
+            "evidence_id": "evidence-387928bde84ada91ef2deaa33de15b79",
+            "index_id": "eval-index-e3218aa8934b1e1451500f66a2c86fcc",
+            "legal": true,
+            "path": "app.py",
+            "reason": null,
+            "start_line": 5
+          },
+          "index_id": "eval-index-e3218aa8934b1e1451500f66a2c86fcc",
+          "kind": "function",
+          "matched_terms": [
+            "import",
+            "rows"
+          ],
+          "path": "app.py",
+          "qualified_name": "app.import_records",
+          "rank": 2,
+          "start_line": 5,
+          "symbol_id": "sym-a4712150e0d7555c27999de44c1301f9"
+        },
+        {
+          "end_line": 6,
+          "evidence": {
+            "content_hash": "345357baf7ab8e77d5d69755fa54523e48eeeec10a6e7f614e037184e6f86db2",
+            "end_line": 6,
+            "evidence_id": "evidence-2a386423a8cc738f9684d1c34f6d0fc7",
+            "index_id": "eval-index-e3218aa8934b1e1451500f66a2c86fcc",
+            "legal": true,
+            "path": "reader.py",
+            "reason": null,
+            "start_line": 1
+          },
+          "index_id": "eval-index-e3218aa8934b1e1451500f66a2c86fcc",
+          "kind": "module",
+          "matched_terms": [
+            "rows",
+            "name"
+          ],
+          "path": "reader.py",
+          "qualified_name": "reader",
+          "rank": 3,
+          "start_line": 1,
+          "symbol_id": "sym-08fca6b84680b851c445a9e3dbfec6f9"
+        }
+      ],
+      "case_id": "csv-import-validation",
+      "defect_category": "input_validation",
+      "elapsed_ms": 6,
+      "expected_files": [
+        "reader.py"
+      ],
+      "expected_locations": [
+        {
+          "end_line": 6,
+          "path": "reader.py",
+          "start_line": 6
+        }
+      ],
+      "expected_symbols": [
+        "reader.normalize_row",
+        "reader.load_rows"
+      ],
+      "failure_reason": null,
+      "failure_stage": null,
+      "false_positive": null,
+      "file_hit_at_1": false,
+      "file_hit_at_3": true,
+      "index_id": "eval-index-e3218aa8934b1e1451500f66a2c86fcc",
+      "issue_hash": "3e7ba9cc05f01ca45cdbd7d99e80683d050ca1842cc3cf7d840ebf2a9a54c140",
+      "issue_id": "eval-issue-csv-import-validation",
+      "location_hit_at_1": false,
+      "location_hit_at_3": true,
+      "query_terms": [
+        "csv",
+        "import",
+        "needs",
+        "validation",
+        "rows",
+        "without",
+        "name",
+        "fails"
+      ],
+      "snapshot_hash": "cd81783813b21b440c4f4e795b0e1a367b50e4c876deca3a1b17036dc2fa5027",
+      "split": "calibration",
+      "status": "succeeded",
+      "symbol_hit_at_1": false,
+      "symbol_hit_at_3": false,
+      "usage": {
+        "evidence_checks": 3,
+        "evidence_legal": 3,
+        "keyword_count": 8,
+        "returned_matches": 15,
+        "search_calls": 8
+      }
+    },
+    {
+      "abstained": null,
+      "abstention_kind": null,
+      "applicable": true,
+      "candidates": [
+        {
+          "end_line": 7,
+          "evidence": {
+            "content_hash": "679f75986aaed19c069ebc4d0b1b622513df0e8bd17d727a8fba34c8d16f6722",
+            "end_line": 7,
+            "evidence_id": "evidence-491ece18f54c1affbf0bf3bda5252089",
+            "index_id": "eval-index-41cef4955fdaecc38dd5b411bb6ca5b2",
+            "legal": true,
+            "path": "service.py",
+            "reason": null,
+            "start_line": 1
+          },
+          "index_id": "eval-index-41cef4955fdaecc38dd5b411bb6ca5b2",
+          "kind": "module",
+          "matched_terms": [
+            "cache"
+          ],
+          "path": "service.py",
+          "qualified_name": "service",
+          "rank": 1,
+          "start_line": 1,
+          "symbol_id": "sym-6f8280f5453ace1e8c0bc9d0dd0180b3"
+        },
+        {
+          "end_line": 7,
+          "evidence": {
+            "content_hash": "679f75986aaed19c069ebc4d0b1b622513df0e8bd17d727a8fba34c8d16f6722",
+            "end_line": 7,
+            "evidence_id": "evidence-719bf769f5c4b2dc304ed89ec897ff40",
+            "index_id": "eval-index-41cef4955fdaecc38dd5b411bb6ca5b2",
+            "legal": true,
+            "path": "service.py",
+            "reason": null,
+            "start_line": 5
+          },
+          "index_id": "eval-index-41cef4955fdaecc38dd5b411bb6ca5b2",
+          "kind": "function",
+          "matched_terms": [
+            "cache"
+          ],
+          "path": "service.py",
+          "qualified_name": "service.get_profile",
+          "rank": 2,
+          "start_line": 5,
+          "symbol_id": "sym-20fc3995a7253104743c7cbee634798b"
+        },
+        {
+          "end_line": 8,
+          "evidence": {
+            "content_hash": "eae67cb664e60dc04f6667e7810ece999b2de177bcb95347d06caa11aee9ee65",
+            "end_line": 8,
+            "evidence_id": "evidence-34cefa82c66441cc8775a33a0760ab29",
+            "index_id": "eval-index-41cef4955fdaecc38dd5b411bb6ca5b2",
+            "legal": true,
+            "path": "cache.py",
+            "reason": null,
+            "start_line": 1
+          },
+          "index_id": "eval-index-41cef4955fdaecc38dd5b411bb6ca5b2",
+          "kind": "module",
+          "matched_terms": [
+            "cache"
+          ],
+          "path": "cache.py",
+          "qualified_name": "cache",
+          "rank": 3,
+          "start_line": 1,
+          "symbol_id": "sym-635a949d5b4eff0e06e0035cd5b5a07f"
+        }
+      ],
+      "case_id": "cache-key-tenant",
+      "defect_category": "state_isolation",
+      "elapsed_ms": 4,
+      "expected_files": [
+        "service.py"
+      ],
+      "expected_locations": [
+        {
+          "end_line": 7,
+          "path": "service.py",
+          "start_line": 6
+        }
+      ],
+      "expected_symbols": [
+        "service.get_profile"
+      ],
+      "failure_reason": null,
+      "failure_stage": null,
+      "false_positive": null,
+      "file_hit_at_1": true,
+      "file_hit_at_3": true,
+      "index_id": "eval-index-41cef4955fdaecc38dd5b411bb6ca5b2",
+      "issue_hash": "8eeae5a2c1f88b7844b7f4594bb1a95398a98bd07385f9517484c9e8c34179ff",
+      "issue_id": "eval-issue-cache-key-tenant",
+      "location_hit_at_1": true,
+      "location_hit_at_3": true,
+      "query_terms": [
+        "profiles",
+        "different",
+        "tenants",
+        "cross",
+        "cache",
+        "two",
+        "organizations",
+        "sometimes"
+      ],
+      "snapshot_hash": "4aa1b67e0201bd5da6c24579556c3adeaf053a5e7fa235fac58940c1cf9c15dd",
+      "split": "calibration",
+      "status": "succeeded",
+      "symbol_hit_at_1": false,
+      "symbol_hit_at_3": true,
+      "usage": {
+        "evidence_checks": 3,
+        "evidence_legal": 3,
+        "keyword_count": 8,
+        "returned_matches": 6,
+        "search_calls": 8
+      }
+    },
+    {
+      "abstained": false,
+      "abstention_kind": null,
+      "applicable": false,
+      "candidates": [
+        {
+          "end_line": 2,
+          "evidence": {
+            "content_hash": "ae6f44ce47c20af99ee823f4c5f862ce850825627041c97811190bbf17f3b823",
+            "end_line": 2,
+            "evidence_id": "evidence-557d49d6321cf9d6d9ad3e054bc546d6",
+            "index_id": "eval-index-eb4a9ad120468f08a99ac8e8f21dc3af",
+            "legal": true,
+            "path": "billing/config.py",
+            "reason": null,
+            "start_line": 1
+          },
+          "index_id": "eval-index-eb4a9ad120468f08a99ac8e8f21dc3af",
+          "kind": "function",
+          "matched_terms": [
+            "billing",
+            "endpoint"
+          ],
+          "path": "billing/config.py",
+          "qualified_name": "billing.config.billing_endpoint",
+          "rank": 1,
+          "start_line": 1,
+          "symbol_id": "sym-aa44e25b5e1f951ea09c6267ff44cb79"
+        },
+        {
+          "end_line": 2,
+          "evidence": {
+            "content_hash": "ae6f44ce47c20af99ee823f4c5f862ce850825627041c97811190bbf17f3b823",
+            "end_line": 2,
+            "evidence_id": "evidence-557d49d6321cf9d6d9ad3e054bc546d6",
+            "index_id": "eval-index-eb4a9ad120468f08a99ac8e8f21dc3af",
+            "legal": true,
+            "path": "billing/config.py",
+            "reason": null,
+            "start_line": 1
+          },
+          "index_id": "eval-index-eb4a9ad120468f08a99ac8e8f21dc3af",
+          "kind": "module",
+          "matched_terms": [
+            "billing",
+            "endpoint"
+          ],
+          "path": "billing/config.py",
+          "qualified_name": "billing.config",
+          "rank": 2,
+          "start_line": 1,
+          "symbol_id": "sym-34f01926bb52d8c7b19451960eba1661"
+        },
+        {
+          "end_line": 5,
+          "evidence": {
+            "content_hash": "3cb35dc1f59aa6d621fd85212cb4a7d942a90c9d0d337e52913b34c4406ec3d4",
+            "end_line": 5,
+            "evidence_id": "evidence-6be626bf17676096ae0ed35e0a1005cb",
+            "index_id": "eval-index-eb4a9ad120468f08a99ac8e8f21dc3af",
+            "legal": true,
+            "path": "billing/client.py",
+            "reason": null,
+            "start_line": 1
+          },
+          "index_id": "eval-index-eb4a9ad120468f08a99ac8e8f21dc3af",
+          "kind": "module",
+          "matched_terms": [
+            "billing",
+            "endpoint"
+          ],
+          "path": "billing/client.py",
+          "qualified_name": "billing.client",
+          "rank": 3,
+          "start_line": 1,
+          "symbol_id": "sym-a33c9c2796aabcaa131268295b14653f"
+        }
+      ],
+      "case_id": "partner-billing-outage",
+      "defect_category": "external_evidence_missing",
+      "elapsed_ms": 5,
+      "expected_files": [],
+      "expected_locations": [],
+      "expected_symbols": [],
+      "failure_reason": null,
+      "failure_stage": null,
+      "false_positive": true,
+      "file_hit_at_1": null,
+      "file_hit_at_3": null,
+      "index_id": "eval-index-eb4a9ad120468f08a99ac8e8f21dc3af",
+      "issue_hash": "8196263f39d59c186a89edfc829c091737c0a09bef33887d8bd309bee446b2ae",
+      "issue_id": "eval-issue-partner-billing-outage",
+      "location_hit_at_1": null,
+      "location_hit_at_3": null,
+      "query_terms": [
+        "partner",
+        "billing",
+        "endpoint",
+        "intermittently",
+        "returns",
+        "determine",
+        "whether",
+        "outage"
+      ],
+      "snapshot_hash": "b03e176f68ba3f46df1f3ed33ffc41d5d75d5d061e4f1b38a2f86c56c3436d34",
+      "split": "calibration",
+      "status": "succeeded",
+      "symbol_hit_at_1": null,
+      "symbol_hit_at_3": null,
+      "usage": {
+        "evidence_checks": 3,
+        "evidence_legal": 3,
+        "keyword_count": 8,
+        "returned_matches": 10,
+        "search_calls": 8
+      }
+    },
+    {
+      "abstained": null,
+      "abstention_kind": null,
+      "applicable": true,
+      "candidates": [
+        {
+          "end_line": 5,
+          "evidence": {
+            "content_hash": "a424bdb5ac108fba09baa235c24b74f9a64b8bbaae43972f8d7e22abfa1f18cb",
+            "end_line": 5,
+            "evidence_id": "evidence-34123a404bef69cf262f9322c72ef603",
+            "index_id": "eval-index-153f7929219373fe60d3ea6061dd9e12",
+            "legal": true,
+            "path": "router.py",
+            "reason": null,
+            "start_line": 4
+          },
+          "index_id": "eval-index-153f7929219373fe60d3ea6061dd9e12",
+          "kind": "function",
+          "matched_terms": [
+            "login",
+            "redirect"
+          ],
+          "path": "router.py",
+          "qualified_name": "router.redirect_to_login",
+          "rank": 1,
+          "start_line": 4,
+          "symbol_id": "sym-4d3cf3e604d79512fbc2d318cb7c6a1f"
+        },
+        {
+          "end_line": 5,
+          "evidence": {
+            "content_hash": "a424bdb5ac108fba09baa235c24b74f9a64b8bbaae43972f8d7e22abfa1f18cb",
+            "end_line": 5,
+            "evidence_id": "evidence-680262eedefdda18599995bf9a4ca2db",
+            "index_id": "eval-index-153f7929219373fe60d3ea6061dd9e12",
+            "legal": true,
+            "path": "router.py",
+            "reason": null,
+            "start_line": 1
+          },
+          "index_id": "eval-index-153f7929219373fe60d3ea6061dd9e12",
+          "kind": "module",
+          "matched_terms": [
+            "login",
+            "redirect"
+          ],
+          "path": "router.py",
+          "qualified_name": "router",
+          "rank": 2,
+          "start_line": 1,
+          "symbol_id": "sym-40a9672430999350ec268bc5c98ee3c5"
+        },
+        {
+          "end_line": 2,
+          "evidence": {
+            "content_hash": "719ec0997e476d390d8cdce2d65ebf7be07cd2260c0a5afac5d284367597c3d9",
+            "end_line": 2,
+            "evidence_id": "evidence-fbdf614f7110bae597c878e600362737",
+            "index_id": "eval-index-153f7929219373fe60d3ea6061dd9e12",
+            "legal": true,
+            "path": "auth.py",
+            "reason": null,
+            "start_line": 1
+          },
+          "index_id": "eval-index-153f7929219373fe60d3ea6061dd9e12",
+          "kind": "function",
+          "matched_terms": [
+            "login",
+            "redirect"
+          ],
+          "path": "auth.py",
+          "qualified_name": "auth.build_login_redirect",
+          "rank": 3,
+          "start_line": 1,
+          "symbol_id": "sym-5cde5d9fbdbc14af49d1a95d3ddbf3e0"
+        }
+      ],
+      "case_id": "redirect-query-encoding",
+      "defect_category": "data_flow_encoding",
+      "elapsed_ms": 5,
+      "expected_files": [
+        "auth.py"
+      ],
+      "expected_locations": [
+        {
+          "end_line": 2,
+          "path": "auth.py",
+          "start_line": 2
+        }
+      ],
+      "expected_symbols": [
+        "auth.build_login_redirect"
+      ],
+      "failure_reason": null,
+      "failure_stage": null,
+      "false_positive": null,
+      "file_hit_at_1": false,
+      "file_hit_at_3": true,
+      "index_id": "eval-index-153f7929219373fe60d3ea6061dd9e12",
+      "issue_hash": "b47173b1718b9806fa118f9931b1f9a20be2a0f984f3fe08ee28092b612218ce",
+      "issue_id": "eval-issue-redirect-query-encoding",
+      "location_hit_at_1": false,
+      "location_hit_at_3": true,
+      "query_terms": [
+        "login",
+        "redirect",
+        "loses",
+        "query",
+        "parameters",
+        "original",
+        "url",
+        "contains"
+      ],
+      "snapshot_hash": "83b6daed08a499b1a5981032b461312d5e10d137f8a1af833c9b703d43cded6b",
+      "split": "holdout",
+      "status": "succeeded",
+      "symbol_hit_at_1": false,
+      "symbol_hit_at_3": true,
+      "usage": {
+        "evidence_checks": 3,
+        "evidence_legal": 3,
+        "keyword_count": 8,
+        "returned_matches": 10,
+        "search_calls": 8
+      }
+    },
+    {
+      "abstained": null,
+      "abstention_kind": null,
+      "applicable": true,
+      "candidates": [
+        {
+          "end_line": 10,
+          "evidence": {
+            "content_hash": "34f78f9aa8902f516f548251712d9fe7e7a8ef75e34707aaea7f7608298ea218",
+            "end_line": 10,
+            "evidence_id": "evidence-050d5f23a83572e466f1b302b2fffeb2",
+            "index_id": "eval-index-e18e9721a7ed762cf699cf249bcb8f75",
+            "legal": true,
+            "path": "worker.py",
+            "reason": null,
+            "start_line": 1
+          },
+          "index_id": "eval-index-e18e9721a7ed762cf699cf249bcb8f75",
+          "kind": "module",
+          "matched_terms": [
+            "worker",
+            "retry",
+            "attempts"
+          ],
+          "path": "worker.py",
+          "qualified_name": "worker",
+          "rank": 1,
+          "start_line": 1,
+          "symbol_id": "sym-3da10ed24d9320d8399490498cb56b40"
+        },
+        {
+          "end_line": 10,
+          "evidence": {
+            "content_hash": "34f78f9aa8902f516f548251712d9fe7e7a8ef75e34707aaea7f7608298ea218",
+            "end_line": 10,
+            "evidence_id": "evidence-d5564fffcafdc4f11e9a0a57ba5dc25a",
+            "index_id": "eval-index-e18e9721a7ed762cf699cf249bcb8f75",
+            "legal": true,
+            "path": "worker.py",
+            "reason": null,
+            "start_line": 5
+          },
+          "index_id": "eval-index-e18e9721a7ed762cf699cf249bcb8f75",
+          "kind": "function",
+          "matched_terms": [
+            "worker",
+            "retry",
+            "attempts"
+          ],
+          "path": "worker.py",
+          "qualified_name": "worker.retry_request",
+          "rank": 2,
+          "start_line": 5,
+          "symbol_id": "sym-b24bffbebed222eb38cf473fcdc33352"
+        },
+        {
+          "end_line": 2,
+          "evidence": {
+            "content_hash": "34f78f9aa8902f516f548251712d9fe7e7a8ef75e34707aaea7f7608298ea218",
+            "end_line": 2,
+            "evidence_id": "evidence-4014697f5a67fc04ce52e20faaf04d60",
+            "index_id": "eval-index-e18e9721a7ed762cf699cf249bcb8f75",
+            "legal": true,
+            "path": "worker.py",
+            "reason": null,
+            "start_line": 1
+          },
+          "index_id": "eval-index-e18e9721a7ed762cf699cf249bcb8f75",
+          "kind": "class",
+          "matched_terms": [
+            "worker",
+            "retry",
+            "attempts"
+          ],
+          "path": "worker.py",
+          "qualified_name": "worker.TemporaryError",
+          "rank": 3,
+          "start_line": 1,
+          "symbol_id": "sym-4c9008924ed829a996345866cc62dfe8"
+        }
+      ],
+      "case_id": "retry-control-flow",
+      "defect_category": "retry_control_flow",
+      "elapsed_ms": 5,
+      "expected_files": [
+        "worker.py"
+      ],
+      "expected_locations": [
+        {
+          "end_line": 10,
+          "path": "worker.py",
+          "start_line": 9
+        }
+      ],
+      "expected_symbols": [
+        "worker.retry_request"
+      ],
+      "failure_reason": null,
+      "failure_stage": null,
+      "false_positive": null,
+      "file_hit_at_1": true,
+      "file_hit_at_3": true,
+      "index_id": "eval-index-e18e9721a7ed762cf699cf249bcb8f75",
+      "issue_hash": "190b4ee73d82711df4714cc690c3155b39f7220291c7f37bf56f325c9531c221",
+      "issue_id": "eval-issue-retry-control-flow",
+      "location_hit_at_1": true,
+      "location_hit_at_3": true,
+      "query_terms": [
+        "worker",
+        "stops",
+        "first",
+        "transient",
+        "failure",
+        "aborts",
+        "retry",
+        "attempts"
+      ],
+      "snapshot_hash": "2033251b411e241b44b310b8850bcb79cede9a26b91cf4e1ca9389af4739647d",
+      "split": "holdout",
+      "status": "succeeded",
+      "symbol_hit_at_1": false,
+      "symbol_hit_at_3": true,
+      "usage": {
+        "evidence_checks": 3,
+        "evidence_legal": 3,
+        "keyword_count": 8,
+        "returned_matches": 9,
+        "search_calls": 8
+      }
+    },
+    {
+      "abstained": false,
+      "abstention_kind": null,
+      "applicable": false,
+      "candidates": [
+        {
+          "end_line": 2,
+          "evidence": {
+            "content_hash": "6a75c1ea1dc944def814db69ad62f942c5cf0f446ece47892d1496b8926dfda1",
+            "end_line": 2,
+            "evidence_id": "evidence-a7472fe46c2a5a62bd3747b9a33ff39c",
+            "index_id": "eval-index-87769952035b8f034aee5ab77be27347",
+            "legal": true,
+            "path": "rollout/region.py",
+            "reason": null,
+            "start_line": 1
+          },
+          "index_id": "eval-index-87769952035b8f034aee5ab77be27347",
+          "kind": "function",
+          "matched_terms": [
+            "region"
+          ],
+          "path": "rollout/region.py",
+          "qualified_name": "rollout.region.region_for",
+          "rank": 1,
+          "start_line": 1,
+          "symbol_id": "sym-f029eff9e4bf33404a6ca022ddfb3027"
+        },
+        {
+          "end_line": 2,
+          "evidence": {
+            "content_hash": "6a75c1ea1dc944def814db69ad62f942c5cf0f446ece47892d1496b8926dfda1",
+            "end_line": 2,
+            "evidence_id": "evidence-a7472fe46c2a5a62bd3747b9a33ff39c",
+            "index_id": "eval-index-87769952035b8f034aee5ab77be27347",
+            "legal": true,
+            "path": "rollout/region.py",
+            "reason": null,
+            "start_line": 1
+          },
+          "index_id": "eval-index-87769952035b8f034aee5ab77be27347",
+          "kind": "module",
+          "matched_terms": [
+            "region"
+          ],
+          "path": "rollout/region.py",
+          "qualified_name": "rollout.region",
+          "rank": 2,
+          "start_line": 1,
+          "symbol_id": "sym-9f648b177d482326cc3fa98af0ff99f8"
+        }
+      ],
+      "case_id": "remote-rollout-config",
+      "defect_category": "external_evidence_missing",
+      "elapsed_ms": 3,
+      "expected_files": [],
+      "expected_locations": [],
+      "expected_symbols": [],
+      "failure_reason": null,
+      "failure_stage": null,
+      "false_positive": true,
+      "file_hit_at_1": null,
+      "file_hit_at_3": null,
+      "index_id": "eval-index-87769952035b8f034aee5ab77be27347",
+      "issue_hash": "aded6fe987550e9bc0f3150b71f69d5e9e213ebd5b8dccc81270c44969951c3e",
+      "issue_id": "eval-issue-remote-rollout-config",
+      "location_hit_at_1": null,
+      "location_hit_at_3": null,
+      "query_terms": [
+        "users",
+        "one",
+        "region",
+        "see",
+        "feature",
+        "determine",
+        "whether",
+        "local"
+      ],
+      "snapshot_hash": "ddddb739e050a2fc3f3c7281eba59a25b9d5f17b1ccf00ae8d8b18afcf2be78f",
+      "split": "holdout",
+      "status": "succeeded",
+      "symbol_hit_at_1": null,
+      "symbol_hit_at_3": null,
+      "usage": {
+        "evidence_checks": 2,
+        "evidence_legal": 2,
+        "keyword_count": 8,
+        "returned_matches": 2,
+        "search_calls": 8
+      }
+    }
+  ],
+  "code_revision": "c2e7db1875bccca0c2dbfc5321d88f022d988f18",
+  "config": {
+    "max_candidates": 3,
+    "max_keywords": 8,
+    "model_calls": 0,
+    "network_calls": 0,
+    "per_term_limit": 8,
+    "search_only_index": true,
+    "source_max_lines": 200,
+    "tokenizer_version": "unicode-word-v1"
+  },
+  "dataset_id": "codetrail-p4-e1",
+  "dataset_version": "p4-e1-v1",
+  "elapsed_ms": 35,
+  "generated_at": "2026-09-13T03:49:18.598977Z",
+  "repository_dirty": true,
+  "run_id": "eval-run-db0acea332e2ee00489c5219c6d1be2f",
+  "schema_version": "p4-e1",
+  "split": "all",
+  "summary": {
+    "applicable_cases": 4,
+    "evidence_legal_rate": {
+      "denominator": 17,
+      "numerator": 17,
+      "value": 1.0
+    },
+    "failed_cases": 0,
+    "file_hit_at_1": {
+      "denominator": 4,
+      "numerator": 2,
+      "value": 0.5
+    },
+    "file_hit_at_3": {
+      "denominator": 4,
+      "numerator": 4,
+      "value": 1.0
+    },
+    "insufficient_abstention_rate": {
+      "denominator": 2,
+      "numerator": 0,
+      "value": 0.0
+    },
+    "insufficient_cases": 2,
+    "insufficient_false_positive_rate": {
+      "denominator": 2,
+      "numerator": 2,
+      "value": 1.0
+    },
+    "succeeded_cases": 6,
+    "symbol_hit_at_1": {
+      "denominator": 4,
+      "numerator": 0,
+      "value": 0.0
+    },
+    "symbol_hit_at_3": {
+      "denominator": 4,
+      "numerator": 3,
+      "value": 0.75
+    },
+    "total_cases": 6
+  }
+}
