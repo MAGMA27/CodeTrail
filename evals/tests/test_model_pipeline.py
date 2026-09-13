@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import shutil
+import threading
 from pathlib import Path
 
 import pytest
@@ -8,13 +10,17 @@ import pytest
 from evals.model_models import ModelBudgetLimits
 from evals.model_pipeline import (
     OfflineFakeIssueAdapter,
+    _complete_case,
+    _new_case_app,
+    _start_run,
     build_dry_run_plan,
     default_method,
     map_report_candidates,
     run_model_evaluation,
 )
 from evals.pipeline import load_frozen_dataset
-from app.contracts import CandidateLink, Evidence, Finding, GraphSnapshot, Report, Symbol
+from app.contracts import CandidateLink, CancelRunRequest, Evidence, Finding, GraphSnapshot, Report, RunBudget, Symbol
+from app.feature_generation import ModelCall
 
 
 def test_dry_run_plan_is_gold_free() -> None:
@@ -96,6 +102,54 @@ def test_model_budget_failure_stays_in_the_denominator(tmp_path: Path) -> None:
     assert report.summary.failed_cases >= 1
     assert all(not item.execution.candidates for item in applicable_failures)
     assert all(item.score.file_hit_at_1 is False for item in applicable_failures)
+
+
+class _BlockingAdapter:
+    def __init__(self) -> None:
+        self.started = threading.Event()
+        self.release = threading.Event()
+
+    def generate(self, prompt: str, **_: object) -> ModelCall:
+        del prompt
+        self.started.set()
+        self.release.wait(2)
+        raise RuntimeError("released after cancellation")
+
+    def repair(self, prompt: str, invalid_output: str, validation_error: str, **_: object) -> ModelCall:
+        del prompt, invalid_output, validation_error
+        raise AssertionError("repair must not run after cancellation")
+
+
+def test_real_run_cancellation_is_preserved_by_model_evaluation(tmp_path: Path) -> None:
+    frozen = load_frozen_dataset()
+    case = frozen.cases[0]
+    source_root = tmp_path / "source"
+    shutil.copytree(case.source_root, source_root)
+    adapter = _BlockingAdapter()
+    application = _new_case_app(source_root, tmp_path / "data", lambda _mode: adapter)
+    method = default_method(ModelBudgetLimits(max_seconds=30))
+    checkpoint = _start_run(
+        application,
+        case,
+        method,
+        RunBudget(**method.budget.model_dump(mode="python")),
+        frozen.dataset.version,
+    )
+    assert adapter.started.wait(2)
+    service = application.state.workspace_service
+    service.cancel_run(
+        checkpoint.project_id,
+        checkpoint.session_id,
+        checkpoint.run_id,
+        CancelRunRequest(reason="test cancellation"),
+    )
+    adapter.release.set()
+    raw = _complete_case(application, case, checkpoint, method, tmp_path / "results")
+
+    assert raw.run_status == "cancelled"
+    assert raw.execution_status == "cancelled"
+    assert raw.candidates == []
+    assert raw.failure_stage == "run"
 
 
 def _valid_report(case) -> Report:
