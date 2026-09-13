@@ -3,12 +3,14 @@ from __future__ import annotations
 import json
 import shutil
 import threading
+from datetime import datetime, timezone
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 import evals.model_pipeline as model_pipeline
-from evals.model_models import ModelBudgetLimits
+from evals.model_models import EvaluationBudgetLimits, ModelBudgetLimits
 from evals.model_pipeline import (
     OfflineFakeIssueAdapter,
     _complete_case,
@@ -19,7 +21,7 @@ from evals.model_pipeline import (
     map_report_candidates,
     run_model_evaluation,
 )
-from evals.pipeline import load_frozen_dataset
+from evals.pipeline import FrozenDataset, load_frozen_dataset
 from app.contracts import CandidateLink, CancelRunRequest, Evidence, Finding, GraphSnapshot, Report, RunBudget, Symbol
 from app.feature_generation import ModelCall
 
@@ -78,6 +80,10 @@ def test_offline_fake_real_run_scores_and_resumes_without_duplicate_runs(
     assert comparison.groups[0].model.total_cases == 6
     assert len(adapters) == 6
     assert phases == ["run"] * 6 + ["annotations"]
+    assert report.evaluation_usage.cases == 6
+    assert report.evaluation_reserved.cases == 0
+    assert report.evaluation_usage.input_tokens is None
+    assert report.evaluation_usage.output_tokens is None
 
     resumed_adapters: list[OfflineFakeIssueAdapter] = []
 
@@ -97,6 +103,283 @@ def test_offline_fake_real_run_scores_and_resumes_without_duplicate_runs(
     assert resumed_adapters == []
     raw_state = json.loads((output_dir / "raw-state.json").read_text(encoding="utf-8"))
     assert all("expected_files" not in json.dumps(value, ensure_ascii=False) for value in raw_state["results"].values())
+
+
+def test_cumulative_budget_preserves_denominator_and_does_not_start_skipped_runs(tmp_path: Path) -> None:
+    frozen = load_frozen_dataset()
+    adapters: list[str] = []
+
+    def factory(_mode: str):
+        adapters.append("started")
+        return OfflineFakeIssueAdapter()
+
+    report, _ = run_model_evaluation(
+        frozen,
+        method=default_method(ModelBudgetLimits(max_model_calls=1)),
+        evaluation_budget=EvaluationBudgetLimits(max_cases=2),
+        runtime_dir=tmp_path / "runtime",
+        output_dir=tmp_path / "results",
+        adapter_factory=factory,
+    )
+
+    assert report.summary.total_cases == 6
+    assert report.summary.failed_cases == 2
+    assert report.summary.skipped_cases == 4
+    assert [item.execution.execution_status for item in report.cases[2:]] == ["budget_skipped"] * 4
+    assert len(adapters) == 2
+    assert report.evaluation_usage.cases == 2
+    assert report.evaluation_reserved.cases == 0
+    assert not any(
+        (tmp_path / "results" / "runs" / item.score.case_id / "report.json").exists()
+        for item in report.cases[2:]
+    )
+
+
+def test_budget_rejection_before_start_creates_no_run_or_adapter(tmp_path: Path) -> None:
+    frozen = load_frozen_dataset()
+    adapters: list[str] = []
+
+    def factory(_mode: str):
+        adapters.append("unexpected")
+        raise AssertionError("budget rejection must happen before creating a Run")
+
+    report, _ = run_model_evaluation(
+        frozen,
+        evaluation_budget=EvaluationBudgetLimits(max_model_calls=0),
+        runtime_dir=tmp_path / "runtime",
+        output_dir=tmp_path / "results",
+        adapter_factory=factory,
+    )
+
+    assert all(item.execution.execution_status == "budget_skipped" for item in report.cases)
+    assert report.summary.skipped_cases == 6
+    assert report.evaluation_usage.cases == 0
+    assert adapters == []
+    assert not (tmp_path / "runtime").exists()
+
+
+def test_cumulative_model_call_budget_stops_before_next_run(tmp_path: Path) -> None:
+    frozen = load_frozen_dataset()
+    adapters: list[str] = []
+
+    def factory(_mode: str):
+        adapters.append("started")
+        return OfflineFakeIssueAdapter()
+
+    report, _ = run_model_evaluation(
+        frozen,
+        method=default_method(ModelBudgetLimits(max_model_calls=4)),
+        evaluation_budget=EvaluationBudgetLimits(max_model_calls=4),
+        runtime_dir=tmp_path / "runtime",
+        output_dir=tmp_path / "results",
+        adapter_factory=factory,
+    )
+
+    assert report.cases[0].execution.execution_status == "succeeded"
+    assert all(item.execution.execution_status == "budget_skipped" for item in report.cases[1:])
+    assert report.summary.failed_cases == 0
+    assert report.summary.skipped_cases == 5
+    assert report.evaluation_usage.model_calls == 3
+    assert len(adapters) == 1
+
+
+def test_first_failed_run_does_not_stop_following_cases(tmp_path: Path) -> None:
+    frozen = load_frozen_dataset()
+
+    class FailingAdapter:
+        def generate(self, prompt: str, **_: object) -> ModelCall:
+            del prompt
+            raise RuntimeError("first provider failure")
+
+        def repair(self, prompt: str, invalid_output: str, validation_error: str, **_: object) -> ModelCall:
+            del prompt, invalid_output, validation_error
+            raise AssertionError("repair must not run after provider failure")
+
+    created = 0
+
+    def factory(_mode: str):
+        nonlocal created
+        created += 1
+        return FailingAdapter() if created == 1 else OfflineFakeIssueAdapter()
+
+    report, _ = run_model_evaluation(
+        frozen,
+        split="holdout",
+        runtime_dir=tmp_path / "runtime",
+        output_dir=tmp_path / "results",
+        adapter_factory=factory,
+    )
+
+    assert created == 3
+    assert report.cases[0].execution.execution_status == "failed"
+    assert report.cases[1].execution.execution_status == "succeeded"
+    assert report.cases[2].execution.execution_status == "succeeded"
+    assert report.summary.failed_cases == 1
+    assert report.summary.skipped_cases == 0
+
+
+def test_first_cancelled_run_consumes_case_budget_and_continues(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    frozen = load_frozen_dataset()
+    blocker = _BlockingAdapter()
+    created = 0
+    original_complete = model_pipeline._complete_case
+    first = True
+
+    def factory(_mode: str):
+        nonlocal created
+        created += 1
+        return blocker if first else OfflineFakeIssueAdapter()
+
+    def complete(application, case, checkpoint, method, output_dir, **kwargs):
+        nonlocal first
+        if first:
+            first = False
+            application.state.workspace_service.cancel_run(
+                checkpoint.project_id,
+                checkpoint.session_id,
+                checkpoint.run_id,
+                CancelRunRequest(reason="evaluation cancellation regression"),
+            )
+            blocker.release.set()
+        return original_complete(application, case, checkpoint, method, output_dir, **kwargs)
+
+    monkeypatch.setattr(model_pipeline, "_complete_case", complete)
+    report, _ = run_model_evaluation(
+        frozen,
+        split="holdout",
+        runtime_dir=tmp_path / "runtime",
+        output_dir=tmp_path / "results",
+        adapter_factory=factory,
+    )
+
+    assert created >= 2
+    assert report.cases[0].execution.execution_status == "cancelled"
+    assert report.cases[1].execution.execution_status == "succeeded"
+    assert report.evaluation_usage.cases == 3
+    assert report.evaluation_reserved.cases == 0
+
+
+def test_first_interrupted_run_uses_conservative_reserved_usage_and_continues(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    frozen = load_frozen_dataset()
+    blocker = _BlockingAdapter()
+    created = 0
+    original_complete = model_pipeline._complete_case
+    first = True
+
+    def factory(_mode: str):
+        nonlocal created
+        created += 1
+        return blocker if first else OfflineFakeIssueAdapter()
+
+    def complete(application, case, checkpoint, method, output_dir, **kwargs):
+        nonlocal first
+        if first:
+            first = False
+            service = application.state.workspace_service
+            project = service._find_project(checkpoint.project_id)
+            with service.registry.store_for_repository(project.repository_id) as store:
+                store.recover_incomplete_runs(datetime.now(timezone.utc))
+            blocker.release.set()
+        return original_complete(application, case, checkpoint, method, output_dir, **kwargs)
+
+    monkeypatch.setattr(model_pipeline, "_complete_case", complete)
+    report, _ = run_model_evaluation(
+        frozen,
+        split="holdout",
+        runtime_dir=tmp_path / "runtime",
+        output_dir=tmp_path / "results",
+        adapter_factory=factory,
+    )
+
+    assert created >= 2
+    assert report.cases[0].execution.execution_status == "interrupted"
+    assert report.cases[0].execution.usage.model_calls == 4
+    assert report.cases[1].execution.execution_status == "succeeded"
+    assert report.evaluation_usage.model_calls >= 4
+    assert report.evaluation_reserved.cases == 0
+
+
+def test_changed_issue_rejects_resume_without_overwriting_artifacts(tmp_path: Path) -> None:
+    frozen = load_frozen_dataset()
+    budget = EvaluationBudgetLimits(max_cases=0)
+    output_dir = tmp_path / "results"
+    run_model_evaluation(
+        frozen,
+        evaluation_budget=budget,
+        runtime_dir=tmp_path / "runtime",
+        output_dir=output_dir,
+    )
+    tracked = [output_dir / "dry-run-plan.json", output_dir / "dry-run-plan.md", output_dir / "raw-state.json"]
+    before = {path: path.read_bytes() for path in tracked}
+    changed_case = replace(
+        frozen.cases[0],
+        issue=frozen.cases[0].issue.model_copy(update={"body": frozen.cases[0].issue.body + " changed"}),
+    )
+    changed = FrozenDataset(dataset=frozen.dataset, cases=(changed_case, *frozen.cases[1:]))
+
+    with pytest.raises(ValueError, match="fingerprint|identity"):
+        run_model_evaluation(
+            changed,
+            evaluation_budget=budget,
+            runtime_dir=tmp_path / "runtime",
+            output_dir=output_dir,
+        )
+
+    assert {path: path.read_bytes() for path in tracked} == before
+
+
+def test_state_item_identity_mismatch_rejects_resume_without_writing(tmp_path: Path) -> None:
+    frozen = load_frozen_dataset()
+    budget = EvaluationBudgetLimits(max_cases=0)
+    output_dir = tmp_path / "results"
+    run_model_evaluation(
+        frozen,
+        evaluation_budget=budget,
+        runtime_dir=tmp_path / "runtime",
+        output_dir=output_dir,
+    )
+    state_path = output_dir / "raw-state.json"
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["results"][frozen.cases[0].entry.case_id]["issue_hash"] = "0" * 64
+    state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    before = state_path.read_bytes()
+    plan_before = (output_dir / "dry-run-plan.json").read_bytes()
+
+    with pytest.raises(ValueError, match="result identity"):
+        run_model_evaluation(
+            frozen,
+            evaluation_budget=budget,
+            runtime_dir=tmp_path / "runtime",
+            output_dir=output_dir,
+        )
+
+    assert state_path.read_bytes() == before
+    assert (output_dir / "dry-run-plan.json").read_bytes() == plan_before
+
+
+def test_legacy_state_is_rejected_explicitly(tmp_path: Path) -> None:
+    frozen = load_frozen_dataset()
+    output_dir = tmp_path / "results"
+    output_dir.mkdir()
+    state_path = output_dir / "raw-state.json"
+    state_path.write_text(json.dumps({"schema_version": "p4-e2a-state"}) + "\n", encoding="utf-8")
+    before = state_path.read_bytes()
+
+    with pytest.raises(ValueError, match="legacy|unsupported"):
+        run_model_evaluation(
+            frozen,
+            evaluation_budget=EvaluationBudgetLimits(max_cases=0),
+            runtime_dir=tmp_path / "runtime",
+            output_dir=output_dir,
+        )
+
+    assert state_path.read_bytes() == before
 
 
 def test_model_budget_failure_stays_in_the_denominator(tmp_path: Path) -> None:

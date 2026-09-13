@@ -140,7 +140,7 @@ class CaseResult(EvalModel):
     split: Literal["calibration", "holdout"]
     applicable: bool
     defect_category: str = Field(min_length=1, max_length=100)
-    status: Literal["succeeded", "failed"]
+    status: Literal["succeeded", "failed", "skipped"]
     failure_stage: str | None = None
     failure_reason: str | None = None
     issue_id: str = Field(min_length=1, max_length=200)
@@ -185,6 +185,7 @@ class EvaluationSummary(EvalModel):
     failed_cases: NonNegativeInt
     applicable_cases: NonNegativeInt
     insufficient_cases: NonNegativeInt
+    skipped_cases: NonNegativeInt = 0
     file_hit_at_1: Metric
     file_hit_at_3: Metric
     symbol_hit_at_1: Metric

@@ -39,12 +39,19 @@ from app.main import create_app
 from .model_models import (
     MODEL_EVALUATION_SCHEMA_VERSION,
     MODEL_EXECUTION_VERSION,
+    MODEL_INPUT_CONSTRUCTION_VERSION,
     MODEL_METHOD_VERSION,
+    MODEL_STATE_SCHEMA_VERSION,
     ComparisonCase,
     ComparisonGroup,
     ComparisonReport,
     DryRunCase,
     DryRunPlan,
+    EvaluationBudgetLimits,
+    EvaluationBudgetState,
+    EvaluationCaseIdentity,
+    EvaluationIdentity,
+    EvaluationUsage,
     ModelBudgetLimits,
     ModelCandidate,
     ModelCaseResult,
@@ -85,6 +92,8 @@ SIMULATION_NOTICE = (
     "它不代表任何真实模型的语义质量、根因判断或供应商表现。"
 )
 DEFAULT_BUDGET_LIMITS = ModelBudgetLimits()
+DEFAULT_EVALUATION_BUDGET = EvaluationBudgetLimits()
+MODEL_RESULTS_DIR = "p4-e2a-fix-v1"
 TERMINAL_STATUSES = {"succeeded", "failed", "cancelled", "interrupted"}
 
 
@@ -289,27 +298,86 @@ def default_method(budget: ModelBudgetLimits | None = None) -> ModelMethod:
     )
 
 
+def _method_fingerprint(method: ModelMethod) -> str:
+    return hashlib.sha256(_canonical_json(method.model_dump(mode="json")).encode("utf-8")).hexdigest()
+
+
+def _case_identity(
+    case: EvalCase,
+    method: ModelMethod,
+    *,
+    input_construction_version: str = MODEL_INPUT_CONSTRUCTION_VERSION,
+) -> EvaluationCaseIdentity:
+    return EvaluationCaseIdentity(
+        case_id=case.entry.case_id,
+        split=case.entry.split,
+        issue_id=case.issue.issue_id,
+        issue_hash=_model_hash(case.issue),
+        index_id=case.index_id,
+        snapshot_hash=case.manifest.snapshot_hash,
+        input_construction_version=input_construction_version,
+        method_fingerprint=_method_fingerprint(method),
+    )
+
+
+def _evaluation_identity(
+    frozen: FrozenDataset,
+    cases: Sequence[EvalCase],
+    method: ModelMethod,
+    evaluation_budget: EvaluationBudgetLimits,
+    split: str,
+    revision: str,
+    *,
+    input_construction_version: str = MODEL_INPUT_CONSTRUCTION_VERSION,
+) -> EvaluationIdentity:
+    return EvaluationIdentity(
+        dataset_id=frozen.dataset.dataset_id,
+        dataset_version=frozen.dataset.version,
+        split=split,  # type: ignore[arg-type]
+        code_revision=revision,
+        input_construction_version=input_construction_version,
+        method_fingerprint=_method_fingerprint(method),
+        method=method,
+        evaluation_budget=evaluation_budget,
+        cases=[
+            _case_identity(
+                case,
+                method,
+                input_construction_version=input_construction_version,
+            )
+            for case in cases
+        ],
+    )
+
+
 def build_dry_run_plan(
     frozen: FrozenDataset,
     *,
     split: str = "all",
     output_dir: Path | None = None,
     method: ModelMethod | None = None,
+    evaluation_budget: EvaluationBudgetLimits | None = None,
+    input_construction_version: str = MODEL_INPUT_CONSTRUCTION_VERSION,
 ) -> DryRunPlan:
     """Build a gold-free execution checklist before any Run is created."""
 
     selected = select_cases(frozen, split)
     if not selected:
         raise ValueError(f"evaluation split has no cases: {split}")
-    output = output_dir or ROOT / "results" / "p4-e2a-v1"
+    output = output_dir or ROOT / "results" / MODEL_RESULTS_DIR
     selected_method = method or default_method()
+    selected_evaluation_budget = evaluation_budget or DEFAULT_EVALUATION_BUDGET
+    planned_method = selected_method.model_copy(
+        update={"model_calls_expected": len(selected) * selected_method.budget.max_model_calls}
+    )
+    method_fingerprint = _method_fingerprint(planned_method)
     return DryRunPlan(
         dataset_id=frozen.dataset.dataset_id,
         dataset_version=frozen.dataset.version,
         split=split,  # type: ignore[arg-type]
-        method=selected_method.model_copy(
-            update={"model_calls_expected": len(selected) * selected_method.budget.max_model_calls}
-        ),
+        method=planned_method,
+        evaluation_budget=selected_evaluation_budget,
+        input_construction_version=input_construction_version,
         output_dir=str(output),
         raw_state_path=str(output / "raw-state.json"),
         simulation_notice=SIMULATION_NOTICE,
@@ -320,6 +388,9 @@ def build_dry_run_plan(
                 issue_id=case.issue.issue_id,
                 issue_hash=_model_hash(case.issue),
                 issue_input=case.issue.model_dump(mode="json", by_alias=True),
+                index_id=case.index_id,
+                input_construction_version=input_construction_version,
+                method_fingerprint=method_fingerprint,
                 source_files=[item.path for item in case.manifest.files],
                 source_manifest_hash=case.manifest.snapshot_hash,
                 run_input_fields=["Issue JSON", "complete saved Session message prefix"],
@@ -337,6 +408,11 @@ def render_dry_run_plan(plan: DryRunPlan) -> str:
         f"- 数据集：`{plan.dataset_id}` / `{plan.dataset_version}`；划分：`{plan.split}`",
         f"- 方法：`{plan.method.method_id}`；provider：`{plan.method.model_provider}`；模型：`{plan.method.model}`",
         f"- prompt：`{plan.method.prompt_version}`；execution：`{plan.method.execution_version}`",
+        f"- 输入构造：`{plan.input_construction_version}`；整次预算：cases={plan.evaluation_budget.max_cases}，"
+        f"model calls={plan.evaluation_budget.max_model_calls}，input/model input chars="
+        f"{plan.evaluation_budget.max_input_chars}/{plan.evaluation_budget.max_model_input_chars}，"
+        f"output/model output chars={plan.evaluation_budget.max_output_chars}/"
+        f"{plan.evaluation_budget.max_model_output_chars}，seconds={plan.evaluation_budget.max_seconds}",
         f"- 结果目录：`{plan.output_dir}`；恢复状态：`{plan.raw_state_path}`",
         f"- 网络调用：`{plan.method.network_calls}`；最大模型调用：`{plan.method.model_calls_expected}`",
         f"- 模拟说明：{plan.simulation_notice}",
@@ -375,37 +451,299 @@ def _write_json(path: Path, value: object) -> None:
     temporary.replace(path)
 
 
+_USAGE_COUNTERS = (
+    "cases",
+    "model_calls",
+    "repair_calls",
+    "tool_calls",
+    "source_lines",
+    "input_chars",
+    "model_input_chars",
+    "output_chars",
+    "model_output_chars",
+    "events",
+    "elapsed_ms",
+)
+
+
+def _merge_tokens(left: EvaluationUsage, right: EvaluationUsage, field: str) -> int | None:
+    left_value = getattr(left, field)
+    right_value = getattr(right, field)
+    left_empty = left.cases == 0 and left.model_calls == 0
+    right_empty = right.cases == 0 and right.model_calls == 0
+    if left_empty:
+        return right_value
+    if right_empty:
+        return left_value
+    if left_value is None or right_value is None:
+        return None
+    return left_value + right_value
+
+
+def _add_usage(left: EvaluationUsage, right: EvaluationUsage) -> EvaluationUsage:
+    payload = {name: getattr(left, name) + getattr(right, name) for name in _USAGE_COUNTERS}
+    payload["input_tokens"] = _merge_tokens(left, right, "input_tokens")
+    payload["output_tokens"] = _merge_tokens(left, right, "output_tokens")
+    return EvaluationUsage(**payload)
+
+
+def _subtract_usage(left: EvaluationUsage, right: EvaluationUsage) -> EvaluationUsage:
+    payload: dict[str, int | None] = {}
+    for name in _USAGE_COUNTERS:
+        remaining = getattr(left, name) - getattr(right, name)
+        if remaining < 0:
+            raise ValueError(f"evaluation budget reservation exceeds {name} usage")
+        payload[name] = remaining
+    payload["input_tokens"] = None
+    payload["output_tokens"] = None
+    return EvaluationUsage(**payload)
+
+
+def _usage_without_tokens(usage: EvaluationUsage) -> dict[str, int]:
+    return {name: getattr(usage, name) for name in _USAGE_COUNTERS}
+
+
+def _usage_from_model_usage(usage: ModelUsage, *, elapsed_ms: int, cases: int = 1) -> EvaluationUsage:
+    return EvaluationUsage(
+        cases=cases,
+        model_calls=usage.model_calls,
+        repair_calls=usage.repair_calls,
+        tool_calls=usage.tool_calls,
+        source_lines=usage.source_lines,
+        input_chars=usage.input_chars,
+        model_input_chars=usage.model_input_chars,
+        output_chars=usage.output_chars,
+        model_output_chars=usage.model_output_chars,
+        elapsed_ms=elapsed_ms,
+        input_tokens=usage.input_tokens,
+        output_tokens=usage.output_tokens,
+    )
+
+
+def _worst_case_usage(method: ModelMethod) -> EvaluationUsage:
+    budget = method.budget
+    return EvaluationUsage(
+        cases=1,
+        model_calls=budget.max_model_calls,
+        repair_calls=budget.max_repair_calls,
+        tool_calls=budget.max_tool_calls,
+        source_lines=budget.max_total_source_lines,
+        input_chars=budget.max_input_chars,
+        model_input_chars=budget.max_model_input_chars,
+        output_chars=budget.max_output_chars,
+        model_output_chars=budget.max_model_output_chars,
+        events=budget.max_events,
+        elapsed_ms=budget.max_seconds * 1_000,
+    )
+
+
+def _reservation_failure_reason(
+    state: EvaluationBudgetState,
+    reservation: EvaluationUsage,
+) -> str | None:
+    consumed_and_reserved = _add_usage(state.consumed, state.reserved)
+    limits = state.limits
+    checks = (
+        ("cases", consumed_and_reserved.cases + reservation.cases, limits.max_cases),
+        ("model_calls", consumed_and_reserved.model_calls + reservation.model_calls, limits.max_model_calls),
+        ("input_chars", consumed_and_reserved.input_chars + reservation.input_chars, limits.max_input_chars),
+        (
+            "model_input_chars",
+            consumed_and_reserved.model_input_chars + reservation.model_input_chars,
+            limits.max_model_input_chars,
+        ),
+        ("output_chars", consumed_and_reserved.output_chars + reservation.output_chars, limits.max_output_chars),
+        (
+            "model_output_chars",
+            consumed_and_reserved.model_output_chars + reservation.model_output_chars,
+            limits.max_model_output_chars,
+        ),
+        ("elapsed_ms", consumed_and_reserved.elapsed_ms + reservation.elapsed_ms, limits.max_seconds * 1_000),
+    )
+    for name, requested, maximum in checks:
+        if requested > maximum:
+            return f"evaluation budget exhausted: max_{name} ({requested}>{maximum})"
+    return None
+
+
+def _reserve_budget(state: RawEvaluationState, case_id: str, reservation: EvaluationUsage) -> None:
+    if case_id in state.budget.reservations:
+        raise ValueError(f"evaluation budget reservation already exists for {case_id}")
+    reason = _reservation_failure_reason(state.budget, reservation)
+    if reason:
+        raise ValueError(reason)
+    state.budget.reservations[case_id] = reservation
+    state.budget.reserved = _add_usage(state.budget.reserved, reservation)
+
+
+def _settle_budget(
+    state: RawEvaluationState,
+    case_id: str,
+    actual: EvaluationUsage,
+) -> None:
+    reservation = state.budget.reservations.pop(case_id, None)
+    if reservation is None:
+        raise ValueError(f"evaluation budget reservation is missing for {case_id}")
+    state.budget.reserved = _subtract_usage(state.budget.reserved, reservation)
+    state.budget.consumed = _add_usage(state.budget.consumed, actual)
+
+
+def _validate_state(
+    state: RawEvaluationState,
+    identity: EvaluationIdentity,
+) -> None:
+    """Reject stale, partially migrated, or cross-case state before any write."""
+
+    if state.schema_version != MODEL_STATE_SCHEMA_VERSION:
+        raise ValueError(
+            "P4-E2a raw state uses an unsupported legacy schema; choose a new result directory"
+        )
+    if state.identity.model_dump(mode="json") != identity.model_dump(mode="json"):
+        raise ValueError(
+            "P4-E2a raw state execution identity differs (Issue/source/index/method/budget); "
+            "choose a new result directory"
+        )
+    if state.budget.limits.model_dump(mode="json") != identity.evaluation_budget.model_dump(mode="json"):
+        raise ValueError("P4-E2a raw state evaluation budget differs; choose a new result directory")
+
+    cases = {case.case_id: case for case in identity.cases}
+    for collection_name, collection in (
+        ("checkpoint", state.checkpoints),
+        ("result", state.results),
+        ("reservation", state.budget.reservations),
+    ):
+        unknown = sorted(set(collection).difference(cases))
+        if unknown:
+            raise ValueError(f"P4-E2a raw state has {collection_name} outside the execution list: {unknown}")
+
+    for case_id, checkpoint in state.checkpoints.items():
+        expected = cases[case_id]
+        actual = {
+            "case_id": checkpoint.case_id,
+            "split": checkpoint.split,
+            "issue_id": checkpoint.issue_id,
+            "issue_hash": checkpoint.issue_hash,
+            "index_id": checkpoint.source_index_id,
+            "snapshot_hash": checkpoint.snapshot_hash,
+            "input_construction_version": checkpoint.input_construction_version,
+            "method_fingerprint": checkpoint.method_fingerprint,
+        }
+        wanted = expected.model_dump(mode="json")
+        if actual != wanted or checkpoint.case_id != case_id:
+            raise ValueError(f"P4-E2a checkpoint identity differs for {case_id}")
+
+    for case_id, result in state.results.items():
+        expected = cases[case_id]
+        if result.case_id != case_id:
+            raise ValueError(f"P4-E2a result key does not match case_id for {case_id}")
+        if (
+            result.split != expected.split
+            or result.issue_id != expected.issue_id
+            or result.issue_hash != expected.issue_hash
+            or result.source_index_id != expected.index_id
+            or result.source_manifest_hash != expected.snapshot_hash
+            or result.input_construction_version != expected.input_construction_version
+            or result.method_fingerprint != expected.method_fingerprint
+            or (result.snapshot_hash is not None and result.snapshot_hash != expected.snapshot_hash)
+        ):
+            raise ValueError(f"P4-E2a result identity differs for {case_id}")
+        checkpoint = state.checkpoints.get(case_id)
+        if checkpoint is not None:
+            if result.run_id is not None and result.run_id != checkpoint.run_id:
+                raise ValueError(f"P4-E2a result Run identity differs for {case_id}")
+            if result.index_id is not None and result.index_id != checkpoint.index_id:
+                raise ValueError(f"P4-E2a result index identity differs for {case_id}")
+            if result.input_hash is not None and result.input_hash != checkpoint.input_hash:
+                raise ValueError(f"P4-E2a result input identity differs for {case_id}")
+        if result.execution_status == "budget_skipped":
+            if checkpoint is not None or result.run_id is not None or result.report_id is not None:
+                raise ValueError(f"budget-skipped case unexpectedly has a Run for {case_id}")
+
+    for case_id in state.checkpoints:
+        if case_id not in state.results and case_id not in state.budget.reservations:
+            raise ValueError(f"P4-E2a checkpoint has no result or active reservation for {case_id}")
+    for case_id in state.budget.reservations:
+        if case_id in state.results:
+            raise ValueError(f"P4-E2a completed case still has a budget reservation: {case_id}")
+
+    expected_reserved = EvaluationUsage()
+    for reservation in state.budget.reservations.values():
+        expected_reserved = _add_usage(expected_reserved, reservation)
+    if _usage_without_tokens(state.budget.reserved) != _usage_without_tokens(expected_reserved):
+        raise ValueError("P4-E2a raw state reserved usage does not match reservations")
+    limits = state.budget.limits
+    consumed_and_reserved = _add_usage(state.budget.consumed, state.budget.reserved)
+    if (
+        consumed_and_reserved.cases > limits.max_cases
+        or consumed_and_reserved.model_calls > limits.max_model_calls
+        or consumed_and_reserved.input_chars > limits.max_input_chars
+        or consumed_and_reserved.model_input_chars > limits.max_model_input_chars
+        or consumed_and_reserved.output_chars > limits.max_output_chars
+        or consumed_and_reserved.model_output_chars > limits.max_model_output_chars
+        or consumed_and_reserved.elapsed_ms > limits.max_seconds * 1_000
+    ):
+        raise ValueError("P4-E2a raw state cumulative budget exceeds its limits")
+
+
 def _state_fingerprint(
     frozen: FrozenDataset,
     cases: Sequence[EvalCase],
     method: ModelMethod,
     split: str,
     revision: str,
+    evaluation_budget: EvaluationBudgetLimits | None = None,
+    input_construction_version: str = MODEL_INPUT_CONSTRUCTION_VERSION,
 ) -> str:
-    payload = {
-        "schema_version": MODEL_EVALUATION_SCHEMA_VERSION,
-        "dataset_id": frozen.dataset.dataset_id,
-        "dataset_version": frozen.dataset.version,
-        "case_ids": [case.entry.case_id for case in cases],
-        "manifests": [case.manifest.snapshot_hash for case in cases],
-        "method": method.model_dump(mode="json"),
-        "split": split,
-        "code_revision": revision,
-    }
-    return hashlib.sha256(_canonical_json(payload).encode("utf-8")).hexdigest()
+    identity = _evaluation_identity(
+        frozen,
+        cases,
+        method,
+        evaluation_budget or DEFAULT_EVALUATION_BUDGET,
+        split,
+        revision,
+        input_construction_version=input_construction_version,
+    )
+    return hashlib.sha256(_canonical_json(identity.model_dump(mode="json")).encode("utf-8")).hexdigest()
 
 
-def _load_or_create_state(path: Path, fingerprint: str, *, resume: bool) -> RawEvaluationState:
+def _load_or_create_state(
+    path: Path,
+    fingerprint: str,
+    *,
+    resume: bool,
+    identity: EvaluationIdentity,
+) -> RawEvaluationState:
     if not path.exists():
-        return RawEvaluationState(fingerprint=fingerprint)
+        return RawEvaluationState(
+            fingerprint=fingerprint,
+            identity=identity,
+            budget=EvaluationBudgetState(
+                limits=identity.evaluation_budget,
+                reserved=EvaluationUsage(),
+                consumed=EvaluationUsage(),
+                reservations={},
+            ),
+        )
     if not resume:
         raise ValueError(f"raw evaluation state already exists; use resume or choose a new output directory: {path}")
+    raw: object
     try:
-        state = RawEvaluationState.model_validate(json.loads(path.read_text(encoding="utf-8")))
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(raw, dict) or raw.get("schema_version") != MODEL_STATE_SCHEMA_VERSION:
+            raise ValueError(
+                "P4-E2a raw state is legacy or unsupported; choose a new result directory"
+            )
+        state = RawEvaluationState.model_validate(raw)
     except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValidationError) as exc:
         raise ValueError(f"invalid P4-E2a raw state: {path}") from exc
+    except ValueError as exc:
+        raise ValueError(f"invalid P4-E2a raw state: {path}: {exc}") from exc
     if state.fingerprint != fingerprint:
-        raise ValueError("P4-E2a raw state fingerprint differs; choose a new output directory")
+        raise ValueError(
+            "P4-E2a raw state fingerprint differs (Issue/source/index/method/budget changed); "
+            "choose a new result directory"
+        )
+    _validate_state(state, identity)
     return state
 
 
@@ -476,6 +814,8 @@ def _start_run(
     method: ModelMethod,
     budget: RunBudget,
     dataset_version: str,
+    *,
+    input_construction_version: str = MODEL_INPUT_CONSTRUCTION_VERSION,
 ) -> RunCheckpoint:
     service = application.state.workspace_service
     project = service.create_project(
@@ -507,7 +847,7 @@ def _start_run(
             content=f"{case.issue.title}\n{case.issue.body}",
         ),
     )
-    run = service.create_run(
+    created = service.create_run(
         project.project_id,
         session_id,
         CreateRunRequest(
@@ -521,19 +861,29 @@ def _start_run(
             idempotency_key=f"p4-e2a-{case.entry.case_id}",
         ),
     )
+    persisted = service.get_run(project.project_id, session_id, created.run_id).run
     return RunCheckpoint(
         case_id=case.entry.case_id,
+        split=case.entry.split,
+        issue_id=case.issue.issue_id,
+        issue_hash=_model_hash(case.issue),
+        source_index_id=case.index_id,
+        source_manifest_hash=case.manifest.snapshot_hash,
+        snapshot_hash=index.snapshot_hash,
+        input_construction_version=input_construction_version,
+        method_fingerprint=_method_fingerprint(method),
         source_root=str(application.state.registry.source_root_for("eval-case")),
         data_root=str(application.state.registry.data_root),
         project_id=project.project_id,
         session_id=session_id,
         index_id=index.index_id,
-        run_id=run.run_id,
+        run_id=persisted.run_id,
+        input_hash=persisted.input_hash,
     )
 
 
 def _wait_for_terminal(service, checkpoint: RunCheckpoint, max_seconds: int):
-    deadline = time.monotonic() + max_seconds + 5
+    deadline = time.monotonic() + max_seconds
     while time.monotonic() < deadline:
         status = service.get_run(checkpoint.project_id, checkpoint.session_id, checkpoint.run_id)
         if status.run.status in TERMINAL_STATUSES:
@@ -690,23 +1040,111 @@ def _model_usage(run_budget: RunBudget) -> ModelUsage:
     )
 
 
-def _failure_result(case: EvalCase, stage: str, reason: str, *, checkpoint: RunCheckpoint | None = None) -> RawModelCaseResult:
+def _model_usage_from_evaluation_usage(usage: EvaluationUsage) -> ModelUsage:
+    return ModelUsage(
+        model_calls=usage.model_calls,
+        repair_calls=usage.repair_calls,
+        tool_calls=usage.tool_calls,
+        source_lines=usage.source_lines,
+        input_chars=usage.input_chars,
+        model_input_chars=usage.model_input_chars,
+        output_chars=usage.output_chars,
+        model_output_chars=usage.model_output_chars,
+        input_tokens=usage.input_tokens,
+        output_tokens=usage.output_tokens,
+    )
+
+
+def _failure_result(
+    case: EvalCase,
+    stage: str,
+    reason: str,
+    *,
+    method: ModelMethod,
+    input_construction_version: str = MODEL_INPUT_CONSTRUCTION_VERSION,
+    checkpoint: RunCheckpoint | None = None,
+    execution_status: str = "failed",
+    usage: ModelUsage | None = None,
+    elapsed_ms: int = 0,
+    run_status: str | None = None,
+    run_outcome: str | None = None,
+) -> RawModelCaseResult:
     return RawModelCaseResult(
         case_id=case.entry.case_id,
         split=case.entry.split,
         issue_id=case.issue.issue_id,
         issue_hash=_model_hash(case.issue),
+        source_index_id=case.index_id,
         source_manifest_hash=case.manifest.snapshot_hash,
-        execution_status="failed",
-        run_status=None,
+        input_construction_version=input_construction_version,
+        method_fingerprint=_method_fingerprint(method),
+        execution_status=execution_status,  # type: ignore[arg-type]
+        run_status=run_status,  # type: ignore[arg-type]
+        run_outcome=run_outcome,  # type: ignore[arg-type]
         failure_stage=stage,
         failure_reason=reason,
         project_id=checkpoint.project_id if checkpoint else None,
         session_id=checkpoint.session_id if checkpoint else None,
         run_id=checkpoint.run_id if checkpoint else None,
-        index_id=checkpoint.index_id if checkpoint else case.index_id,
+        input_hash=checkpoint.input_hash if checkpoint else None,
+        index_id=checkpoint.index_id if checkpoint else None,
+        snapshot_hash=checkpoint.snapshot_hash if checkpoint else case.manifest.snapshot_hash,
+        usage=usage or ModelUsage(),
+        elapsed_ms=elapsed_ms,
+    )
+
+
+def _budget_skipped_result(
+    case: EvalCase,
+    method: ModelMethod,
+    reason: str,
+    *,
+    input_construction_version: str = MODEL_INPUT_CONSTRUCTION_VERSION,
+) -> RawModelCaseResult:
+    return RawModelCaseResult(
+        case_id=case.entry.case_id,
+        split=case.entry.split,
+        issue_id=case.issue.issue_id,
+        issue_hash=_model_hash(case.issue),
+        source_index_id=case.index_id,
+        source_manifest_hash=case.manifest.snapshot_hash,
+        input_construction_version=input_construction_version,
+        method_fingerprint=_method_fingerprint(method),
+        execution_status="budget_skipped",
+        failure_stage="evaluation_budget",
+        failure_reason=reason,
         snapshot_hash=case.manifest.snapshot_hash,
     )
+
+
+def _recover_uncreated_reservations(
+    state: RawEvaluationState,
+    cases: Sequence[EvalCase],
+    method: ModelMethod,
+    *,
+    input_construction_version: str = MODEL_INPUT_CONSTRUCTION_VERSION,
+) -> None:
+    """Convert a reservation with no checkpoint into a conservative interruption."""
+
+    case_by_id = {case.entry.case_id: case for case in cases}
+    for case_id in list(state.budget.reservations):
+        if case_id in state.checkpoints:
+            continue
+        case = case_by_id[case_id]
+        reservation = state.budget.reservations[case_id]
+        state.results[case_id] = _failure_result(
+            case,
+            "recovery",
+            "evaluation stopped after reserving the case budget before a Run checkpoint was durable; "
+            "worst-case usage was conservatively consumed and the case will not be retried",
+            method=method,
+            input_construction_version=input_construction_version,
+            execution_status="interrupted",
+            usage=_model_usage_from_evaluation_usage(reservation),
+            elapsed_ms=reservation.elapsed_ms,
+            run_outcome="interrupted",
+        )
+        _settle_budget(state, case_id, reservation)
 
 
 def _complete_case(
@@ -715,6 +1153,8 @@ def _complete_case(
     checkpoint: RunCheckpoint,
     method: ModelMethod,
     output_dir: Path,
+    *,
+    input_construction_version: str = MODEL_INPUT_CONSTRUCTION_VERSION,
 ) -> RawModelCaseResult:
     started = time.perf_counter()
     service = application.state.workspace_service
@@ -722,8 +1162,29 @@ def _complete_case(
     run = run_status.run
     report = service.get_run_report(checkpoint.project_id, checkpoint.session_id, checkpoint.run_id).report
     report_path = Path("runs") / case.entry.case_id / "report.json"
-    _write_json(output_dir / report_path, report.model_dump(mode="json"))
     actual_index = service.get_project_index(checkpoint.project_id, checkpoint.index_id).index
+    if (
+        run.project_id != checkpoint.project_id
+        or run.session_id != checkpoint.session_id
+        or run.index_id != checkpoint.index_id
+        or run.mode != "real"
+        or run.issue.model_dump(mode="json") != case.issue.model_dump(mode="json")
+        or run.model != method.model
+        or run.model_provider != method.model_provider
+        or run.prompt_version != method.prompt_version
+        or run.execution_version != method.execution_version
+        or run.input_hash != checkpoint.input_hash
+        or report.run_id != checkpoint.run_id
+        or report.project_id != checkpoint.project_id
+        or report.session_id != checkpoint.session_id
+        or report.index_id != checkpoint.index_id
+        or report.fixture_mode
+        or actual_index.index_id != checkpoint.index_id
+        or actual_index.snapshot_hash != case.manifest.snapshot_hash
+        or checkpoint.snapshot_hash != case.manifest.snapshot_hash
+    ):
+        raise ValueError(f"Run/index identity differs from frozen case {case.entry.case_id}")
+    _write_json(output_dir / report_path, report.model_dump(mode="json"))
     mapping_errors: list[str] = []
     candidates: list[ModelCandidate] = []
     if report.status == "succeeded" and report.outcome == "candidate_found":
@@ -750,7 +1211,10 @@ def _complete_case(
         split=case.entry.split,
         issue_id=case.issue.issue_id,
         issue_hash=_model_hash(case.issue),
+        source_index_id=case.index_id,
         source_manifest_hash=case.manifest.snapshot_hash,
+        input_construction_version=input_construction_version,
+        method_fingerprint=_method_fingerprint(method),
         execution_status=execution_status,  # type: ignore[arg-type]
         run_status=run.status,
         run_outcome=report.outcome,
@@ -800,7 +1264,13 @@ def _to_scored_result(raw: RawModelCaseResult, case: EvalCase) -> CaseResult:
                 ),
             )
         )
-    status = "succeeded" if raw.execution_status == "succeeded" else "failed"
+    status = (
+        "succeeded"
+        if raw.execution_status == "succeeded"
+        else "skipped"
+        if raw.execution_status == "budget_skipped"
+        else "failed"
+    )
     return CaseResult(
         case_id=case.entry.case_id,
         split=case.entry.split,
@@ -810,7 +1280,7 @@ def _to_scored_result(raw: RawModelCaseResult, case: EvalCase) -> CaseResult:
         failure_stage=raw.failure_stage,
         failure_reason=raw.failure_reason,
         issue_id=case.issue.issue_id,
-        issue_hash=_model_hash(case.issue),
+        issue_hash=raw.issue_hash,
         index_id=raw.index_id or case.index_id,
         snapshot_hash=raw.snapshot_hash or case.manifest.snapshot_hash,
         query_terms=[],
@@ -917,11 +1387,21 @@ def render_model_markdown(report: ModelEvaluationReport) -> str:
         f"- 方法：`{report.method.method_id}`；provider：`{report.method.model_provider}`；模型：`{report.method.model}`",
         f"- 运行：`{report.run_id}`；代码 revision：`{report.code_revision}`",
         f"- 原始状态：`{report.raw_state_path}`；P4-E1 基线：`{report.baseline_report_path}`",
+        f"- 整次预算：cases={report.evaluation_budget.max_cases}，model calls={report.evaluation_budget.max_model_calls}，"
+        f"input/model input chars={report.evaluation_budget.max_input_chars}/"
+        f"{report.evaluation_budget.max_model_input_chars}，output/model output chars="
+        f"{report.evaluation_budget.max_output_chars}/{report.evaluation_budget.max_model_output_chars}，"
+        f"seconds={report.evaluation_budget.max_seconds}",
+        f"- 累计已结算：cases={report.evaluation_usage.cases}，model calls={report.evaluation_usage.model_calls}，"
+        f"input/model input chars={report.evaluation_usage.input_chars}/{report.evaluation_usage.model_input_chars}，"
+        f"output/model output chars={report.evaluation_usage.output_chars}/"
+        f"{report.evaluation_usage.model_output_chars}，elapsed_ms={report.evaluation_usage.elapsed_ms}；"
+        f"未结算预留 cases={report.evaluation_reserved.cases}",
         f"- 模拟说明：{report.simulation_notice}",
         "",
         "## 汇总",
         "",
-        f"样本 **{report.summary.total_cases}**，成功 **{report.summary.succeeded_cases}**，失败 **{report.summary.failed_cases}**；可定位 **{report.summary.applicable_cases}**，证据不足 **{report.summary.insufficient_cases}**。",
+        f"样本 **{report.summary.total_cases}**，成功 **{report.summary.succeeded_cases}**，失败 **{report.summary.failed_cases}**，跳过 **{report.summary.skipped_cases}**；可定位 **{report.summary.applicable_cases}**，证据不足 **{report.summary.insufficient_cases}**。",
         "",
         "| 指标 | 分子/分母 | 值 |",
         "| --- | ---: | ---: |",
@@ -962,12 +1442,13 @@ def render_model_markdown(report: ModelEvaluationReport) -> str:
         token_text = f"{usage.input_tokens}/{usage.output_tokens}" if usage.input_tokens is not None and usage.output_tokens is not None else "unknown"
         lines.append(
             f"- 用量：model={usage.model_calls}，repair={usage.repair_calls}，tool={usage.tool_calls}，"
-            f"model chars={usage.model_input_chars}/{usage.model_output_chars}，tokens={token_text}。"
+            f"input/model input chars={usage.input_chars}/{usage.model_input_chars}，"
+            f"output/model output chars={usage.output_chars}/{usage.model_output_chars}，tokens={token_text}。"
         )
         if execution.failure_reason:
             lines.append(f"- 失败：`{execution.failure_stage}` — {execution.failure_reason}")
         lines.append("")
-    lines.extend(["## 边界与局限", "", SIMULATION_NOTICE, "模型结果只取最终 candidate_link/finding 的同快照证据；中间检索符号不计为答案，失败/取消不继承中间命中。P4-E1 基线和模型结果使用相同冻结案例及评分字段，但算术对照不能证明模型优于基线。", ""])
+    lines.extend(["## 边界与局限", "", SIMULATION_NOTICE, "模型结果只取最终 candidate_link/finding 的同快照证据；中间检索符号不计为答案，失败/取消/中断不继承中间命中，budget_skipped 保留在总样本分母。token 用量未知时保持 unknown/null，整次预算使用可执行的调用/字符/墙钟最坏预留，不能据此推断 token 费用。P4-E1 基线和模型结果使用相同冻结案例及评分字段，但算术对照不能证明模型优于基线。", ""])
     return "\n".join(lines)
 
 
@@ -981,15 +1462,16 @@ def render_comparison_markdown(report: ComparisonReport) -> str:
         "",
         "## 分组汇总",
         "",
-        "| 分组 | 方法 | file H@1 | file H@3 | symbol H@1 | symbol H@3 | 失败 |",
-        "| --- | --- | ---: | ---: | ---: | ---: | ---: |",
+        "| 分组 | 方法 | file H@1 | file H@3 | symbol H@1 | symbol H@3 | 失败 | 跳过 |",
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for group in report.groups:
         for method, summary in (("baseline", group.baseline), ("offline fake Run", group.model)):
             lines.append(
                 f"| {group.split} | {method} | {_metric_text(summary.file_hit_at_1)} | "
                 f"{_metric_text(summary.file_hit_at_3)} | {_metric_text(summary.symbol_hit_at_1)} | "
-                f"{_metric_text(summary.symbol_hit_at_3)} | {summary.failed_cases}/{summary.total_cases} |"
+                f"{_metric_text(summary.symbol_hit_at_3)} | {summary.failed_cases}/{summary.total_cases} | "
+                f"{summary.skipped_cases}/{summary.total_cases} |"
             )
     lines.extend(["", "## 逐例对照", "", "| 案例 | 划分 | 基线 symbol H@1/H@3 | fake Run symbol H@1/H@3 | Run 状态 |", "| --- | --- | --- | --- | --- |"])
     for case in report.cases:
@@ -999,7 +1481,7 @@ def render_comparison_markdown(report: ComparisonReport) -> str:
             f"{hit(case.baseline.symbol_hit_at_1)}/{hit(case.baseline.symbol_hit_at_3)} | "
             f"{hit(case.model.symbol_hit_at_1)}/{hit(case.model.symbol_hit_at_3)} | {case.model_execution_status} |"
         )
-    lines.extend(["", "## 解释边界", "", "这是相同冻结输入上的指标对照和执行状态记录。provider 是本地模拟适配器，不能据此作出真实模型优劣、根因能力或供应商质量结论；留出集分母、失败、弃答和误报均按报告逐例保留。", ""])
+    lines.extend(["", "## 解释边界", "", "这是相同冻结输入上的指标对照和执行状态记录。provider 是本地模拟适配器，不能据此作出真实模型优劣、根因能力或供应商质量结论；留出集分母、失败、跳过、弃答和误报均按报告逐例保留。", ""])
     return "\n".join(lines)
 
 
@@ -1010,6 +1492,13 @@ def _load_baseline_report(path: Path) -> EvaluationReport:
         raise ValueError(f"invalid P4-E1 baseline report: {path}") from exc
 
 
+def _path_reference(path: Path) -> str:
+    try:
+        return path.resolve().relative_to(ROOT.parent.resolve()).as_posix()
+    except ValueError:
+        return str(path)
+
+
 def run_model_evaluation(
     frozen: FrozenDataset,
     *,
@@ -1018,6 +1507,7 @@ def run_model_evaluation(
     output_dir: Path | None = None,
     provider: str = "offline_fake",
     method: ModelMethod | None = None,
+    evaluation_budget: EvaluationBudgetLimits | None = None,
     adapter_factory: Callable[[str], IssueModelAdapter] | None = None,
     resume: bool = True,
 ) -> tuple[ModelEvaluationReport, ComparisonReport]:
@@ -1030,23 +1520,78 @@ def run_model_evaluation(
     selected = select_cases(frozen, split)
     if not selected:
         raise ValueError(f"evaluation split has no cases: {split}")
-    output = output_dir or ROOT / "results" / "p4-e2a-v1"
-    runtime = runtime_dir or ROOT / ".runtime" / "p4-e2a-v1"
+    output = output_dir or ROOT / "results" / MODEL_RESULTS_DIR
+    runtime = runtime_dir or ROOT / ".runtime" / MODEL_RESULTS_DIR
     selected_method = method or default_method()
-    plan = build_dry_run_plan(frozen, split=split, output_dir=output, method=selected_method)
-    write_dry_run_plan(plan, output)
+    selected_evaluation_budget = evaluation_budget or DEFAULT_EVALUATION_BUDGET
+    plan = build_dry_run_plan(
+        frozen,
+        split=split,
+        output_dir=output,
+        method=selected_method,
+        evaluation_budget=selected_evaluation_budget,
+    )
     revision, dirty = _git_metadata()
-    fingerprint = _state_fingerprint(frozen, selected, plan.method, split, revision)
+    identity = _evaluation_identity(
+        frozen,
+        selected,
+        plan.method,
+        plan.evaluation_budget,
+        split,
+        revision,
+        input_construction_version=plan.input_construction_version,
+    )
+    fingerprint = hashlib.sha256(_canonical_json(identity.model_dump(mode="json")).encode("utf-8")).hexdigest()
     state_path = output / "raw-state.json"
-    state = _load_or_create_state(state_path, fingerprint, resume=resume)
+    state = _load_or_create_state(
+        state_path,
+        fingerprint,
+        resume=resume,
+        identity=identity,
+    )
+    _recover_uncreated_reservations(
+        state,
+        selected,
+        plan.method,
+        input_construction_version=plan.input_construction_version,
+    )
+    _validate_state(state, identity)
+    # Plan and state are written only after the existing state has passed all
+    # identity checks, so a rejected resume cannot overwrite any artifact.
+    write_dry_run_plan(plan, output)
     _write_json(state_path, state.model_dump(mode="json"))
     factory = adapter_factory or (lambda _mode: OfflineFakeIssueAdapter())
     started = time.perf_counter()
     for case in selected:
-        if case.entry.case_id in state.results:
+        case_id = case.entry.case_id
+        if case_id in state.results:
             continue
-        checkpoint = state.checkpoints.get(case.entry.case_id)
-        case_runtime = runtime / MODEL_METHOD_VERSION / case.entry.case_id
+        checkpoint = state.checkpoints.get(case_id)
+        checkpoint_was_existing = checkpoint is not None
+        reservation = state.budget.reservations.get(case_id)
+        if checkpoint is None:
+            if reservation is not None:
+                raise ValueError(f"P4-E2a active reservation has no recovered result for {case_id}")
+            worst_case = _worst_case_usage(plan.method)
+            reason = _reservation_failure_reason(state.budget, worst_case)
+            if reason:
+                state.results[case_id] = _budget_skipped_result(
+                    case,
+                    plan.method,
+                    reason,
+                    input_construction_version=plan.input_construction_version,
+                )
+                _write_json(state_path, state.model_dump(mode="json"))
+                continue
+            _reserve_budget(state, case_id, worst_case)
+            reservation = worst_case
+            _write_json(state_path, state.model_dump(mode="json"))
+        elif reservation is None:
+            raise ValueError(f"P4-E2a checkpoint has no active reservation for {case_id}")
+
+        assert reservation is not None
+        case_started = time.perf_counter()
+        case_runtime = runtime / MODEL_METHOD_VERSION / case_id
         source_root = Path(checkpoint.source_root) if checkpoint else case_runtime / "source"
         data_root = Path(checkpoint.data_root) if checkpoint else case_runtime / "data"
         try:
@@ -1054,18 +1599,59 @@ def run_model_evaluation(
             application = _new_case_app(source_root, data_root, factory)
             budget = RunBudget(**plan.method.budget.model_dump(mode="python"))
             if checkpoint is None:
-                checkpoint = _start_run(application, case, plan.method, budget, frozen.dataset.version)
-                state.checkpoints[case.entry.case_id] = checkpoint
+                checkpoint = _start_run(
+                    application,
+                    case,
+                    plan.method,
+                    budget,
+                    frozen.dataset.version,
+                    input_construction_version=plan.input_construction_version,
+                )
+                state.checkpoints[case_id] = checkpoint
                 _write_json(state_path, state.model_dump(mode="json"))
-            raw = _complete_case(application, case, checkpoint, plan.method, output)
+            raw = _complete_case(
+                application,
+                case,
+                checkpoint,
+                plan.method,
+                output,
+                input_construction_version=plan.input_construction_version,
+            )
+            elapsed_ms = max(raw.elapsed_ms, round((time.perf_counter() - case_started) * 1000))
+            raw = raw.model_copy(update={"elapsed_ms": elapsed_ms})
+            actual = _usage_from_model_usage(raw.usage, elapsed_ms=elapsed_ms)
+            if raw.execution_status == "interrupted":
+                # A restart/interruption may have happened during a provider
+                # request whose final output was never durable.  Do not let a
+                # resume turn that unknown usage into free budget.
+                actual = reservation
+                raw = raw.model_copy(
+                    update={
+                        "usage": _model_usage_from_evaluation_usage(reservation),
+                        "elapsed_ms": max(raw.elapsed_ms, reservation.elapsed_ms),
+                    }
+                )
+            elif checkpoint_was_existing:
+                # A checkpoint can survive a process restart.  Its prior
+                # wall-clock interval is not recoverable, so settle that
+                # dimension conservatively even when the Run is terminal.
+                actual = actual.model_copy(update={"elapsed_ms": reservation.elapsed_ms})
         except Exception as exc:
             raw = _failure_result(
                 case,
                 "orchestration",
                 f"{type(exc).__name__}: {exc}",
+                method=plan.method,
+                input_construction_version=plan.input_construction_version,
                 checkpoint=checkpoint,
+                execution_status="interrupted" if checkpoint is not None else "failed",
+                usage=_model_usage_from_evaluation_usage(reservation),
+                elapsed_ms=reservation.elapsed_ms,
+                run_outcome="interrupted" if checkpoint is not None else None,
             )
+            actual = reservation
         state.results[case.entry.case_id] = raw
+        _settle_budget(state, case_id, actual)
         _write_json(state_path, state.model_dump(mode="json"))
 
     raw_results = [state.results[case.entry.case_id] for case in selected]
@@ -1078,6 +1664,10 @@ def run_model_evaluation(
             "dataset_version": frozen.dataset.version,
             "split": split,
             "method": plan.method.model_dump(mode="json"),
+            "evaluation_budget": plan.evaluation_budget.model_dump(mode="json"),
+            "evaluation_usage": state.budget.consumed.model_dump(mode="json"),
+            "evaluation_reserved": state.budget.reserved.model_dump(mode="json"),
+            "input_construction_version": plan.input_construction_version,
             "simulation_notice": SIMULATION_NOTICE,
             "cases": [item.model_dump(mode="json") for item in raw_results],
         },
@@ -1096,8 +1686,11 @@ def run_model_evaluation(
         generated_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         elapsed_ms=max(0, round((time.perf_counter() - started) * 1000)),
         method=plan.method,
+        evaluation_budget=plan.evaluation_budget,
+        evaluation_usage=state.budget.consumed,
+        evaluation_reserved=state.budget.reserved,
         baseline_report_path="evals/results/p4-e1-v1/baseline-all.json",
-        raw_state_path="evals/results/p4-e2a-v1/raw-state.json",
+        raw_state_path=_path_reference(state_path),
         simulation_notice=SIMULATION_NOTICE,
         summary=summarize([item.score for item in scored_cases]),
         cases=scored_cases,
@@ -1112,7 +1705,7 @@ def run_model_evaluation(
         report,
         baseline,
         baseline_path="evals/results/p4-e1-v1/baseline-all.json",
-        model_path=f"evals/results/p4-e2a-v1/model-{split}.json",
+        model_path=_path_reference(output / f"model-{split}.json"),
     )
     comparison_json_path = output / f"comparison-{split}.json"
     comparison_md_path = output / f"comparison-{split}.md"
@@ -1123,7 +1716,9 @@ def run_model_evaluation(
 
 __all__ = [
     "DEFAULT_BUDGET_LIMITS",
+    "DEFAULT_EVALUATION_BUDGET",
     "MODEL_METHOD_VERSION",
+    "MODEL_RESULTS_DIR",
     "OFFLINE_FAKE_MODEL",
     "OfflineFakeIssueAdapter",
     "build_comparison",

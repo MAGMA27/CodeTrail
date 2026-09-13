@@ -639,9 +639,10 @@ def summarize(results: Sequence[CaseResult]) -> EvaluationSummary:
     return EvaluationSummary(
         total_cases=len(results),
         succeeded_cases=succeeded,
-        failed_cases=len(results) - succeeded,
+        failed_cases=sum(item.status == "failed" for item in results),
         applicable_cases=len(applicable),
         insufficient_cases=len(insufficient),
+        skipped_cases=sum(item.status == "skipped" for item in results),
         file_hit_at_1=_metric(sum(item.file_hit_at_1 is True for item in applicable), len(applicable)),
         file_hit_at_3=_metric(sum(item.file_hit_at_3 is True for item in applicable), len(applicable)),
         symbol_hit_at_1=_metric(sum(item.symbol_hit_at_1 is True for item in applicable), len(applicable)),

@@ -16,6 +16,10 @@ P4-E2a 新增独立的模型评测编排：先只加载冻结 Issue、manifest �
 
 评分在所有案例执行结果持久化后才加载 annotation，沿用 P4-E1 的 file/symbol/location Hit@1/3、证据合法性、证据不足弃答/误报和失败分母。token 用量缺失记为 null/unknown，不能以零代替；对照报告必须醒目标记模拟 provider，不输出模型优于基线的语义结论。
 
+P4-E2a 验收修复将恢复状态升级为 v2：有序案例的 Issue hash、冻结源码/index snapshot、输入构造版本、方法/单 Run 预算、整次预算和代码 revision 组成执行身份；checkpoint/raw result 逐项核对身份，旧格式或不匹配状态明确拒绝。写入 dry-run 或结果前先完成身份校验，拒绝恢复不覆盖既有文件。
+
+整次评测另外有案例数、模型调用、输入/输出字符和墙钟上限。启动案例前按单 Run 最坏预算做持久预留，执行后按实际用量结算；服务重启/进程中断导致的未知阶段按预留最坏用量保守记账，不能通过重启扩大额度。预算不足的未执行案例以 `budget_skipped` 写入 raw state 和报告，保留总样本、失败和跳过分母；token 缺失仍为 unknown/null，调用/字符/墙钟上限是可执行的保守策略而不是 token 费用核算。
+
 ## 替代方案
 
 - 在 `evals/` 里重新实现搜索、读取和模型循环：会复制产品的权限、预算和证据校验，拒绝采用。
@@ -28,9 +32,9 @@ P4-E2a 新增独立的模型评测编排：先只加载冻结 Issue、manifest �
 实现入口为 [模型评测编排](../../evals/model_pipeline.py)、[评测模型契约](../../evals/model_models.py) 和 [评测 README](../../evals/README.md)。
 
 - `pnpm evals:validate` 通过，冻结数据版本和六例划分未变。
-- `pnpm evals:test` 通过（16 passed），覆盖 gold-free 清单、真实 Run 离线假供应商、多轮工具结果、显式弃答、预算失败、取消、恢复去重、最终候选去重和非法证据映射。
-- 离线集成结果写入 `evals/results/p4-e2a-v1/`；六例均沿真实 Run 路径产生终态，模型和对照报告明确标记 `offline-fake`。结果为 6/6 成功、4/4 可定位案例证据合法、2/2 证据不足案例明确弃答，token 用量为 unknown/null。
-- `pnpm contracts:check`（21 passed）、`pnpm docs:check`、后端回归（121 passed）和 Python 编译检查通过；本步不改变共享 API/Pydantic 契约。
+- `pnpm evals:test` 通过（24 passed），覆盖 gold-free 清单、真实 Run 离线假供应商、多轮工具结果、显式弃答、累计预算、预算前拒绝、失败/取消/中断、正常恢复、输入变化、状态错配、最终候选去重和非法证据映射。
+- 修复验证结果独立写入 `evals/results/p4-e2a-fix-v1/`；默认六例沿真实 Run 路径产生终态，模型和对照报告明确标记 `offline-fake`。结果为 6/6 成功、4/4 可定位案例证据合法、2/2 证据不足案例明确弃答，token 用量为 unknown/null；历史 `p4-e2a-v1` 未覆盖。
+- `pnpm contracts:check`、`pnpm docs:check`、`pnpm docs:check:local`、后端回归和 Python 编译检查通过；本步不改变共享 API/Pydantic 契约。
 
 ## 后果
 
