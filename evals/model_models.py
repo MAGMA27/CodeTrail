@@ -21,6 +21,24 @@ MODEL_STATE_SCHEMA_VERSION = "p4-e2a-state-v2"
 MODEL_INPUT_CONSTRUCTION_VERSION = "p4-e2a-input-v2"
 
 
+class EvaluationCostPolicy(EvalModel):
+    """Conservative, versioned price basis used before an external request."""
+
+    provider: Literal["deepseek"]
+    model: str = Field(min_length=1, max_length=200)
+    currency: Literal["USD"] = "USD"
+    pricing_source_url: str = Field(min_length=1, max_length=500)
+    pricing_checked_at: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    input_cache_hit_microusd_per_million: NonNegativeInt
+    input_cache_miss_microusd_per_million: NonNegativeInt
+    output_microusd_per_million: NonNegativeInt
+    reserve_cache: Literal["miss"] = "miss"
+    tokens_per_char_upper_bound: PositiveInt = Field(default=1, le=4)
+    settlement: Literal["reported_tokens_cache_miss_conservative"] = (
+        "reported_tokens_cache_miss_conservative"
+    )
+
+
 class ModelBudgetLimits(EvalModel):
     """The request-side Run limits, without mutable usage counters."""
 
@@ -55,6 +73,7 @@ class EvaluationBudgetLimits(EvalModel):
     max_output_chars: NonNegativeInt = Field(default=300_000, le=10_000_000)
     max_model_output_chars: NonNegativeInt = Field(default=120_000, le=10_000_000)
     max_seconds: NonNegativeInt = Field(default=180, le=86_400)
+    max_cost_microusd: NonNegativeInt = Field(default=0, le=100_000_000)
     token_usage_policy: Literal["unknown_reported_not_counted"] = "unknown_reported_not_counted"
 
     @model_validator(mode="after")
@@ -79,6 +98,9 @@ class ModelMethod(EvalModel):
     network_calls: NonNegativeInt = 0
     model_calls_expected: NonNegativeInt = 0
     source_scope: Literal["case_manifest_only"] = "case_manifest_only"
+    provider_config_fingerprint: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    configuration_status: Literal["not_required", "ready", "missing"] = "not_required"
+    cost_policy: EvaluationCostPolicy | None = None
 
     @model_validator(mode="after")
     def validate_provider_mode(self) -> ModelMethod:
@@ -86,6 +108,15 @@ class ModelMethod(EvalModel):
             raise ValueError("offline model execution must use the offline_fake provider kind")
         if self.execution_mode == "external" and self.provider_kind != "external":
             raise ValueError("external model execution must use the external provider kind")
+        if self.execution_mode == "offline_fake":
+            if self.provider_config_fingerprint is not None or self.cost_policy is not None:
+                raise ValueError("offline model execution cannot carry external configuration or pricing")
+            if self.configuration_status != "not_required":
+                raise ValueError("offline model execution does not have a configuration status")
+        elif self.provider_config_fingerprint is None:
+            raise ValueError("external model execution must carry a redacted configuration fingerprint")
+        elif self.cost_policy is None:
+            raise ValueError("external model execution must carry a cost policy")
         return self
 
 
@@ -180,6 +211,7 @@ class EvaluationUsage(EvalModel):
     model_output_chars: NonNegativeInt = 0
     events: NonNegativeInt = 0
     elapsed_ms: NonNegativeInt = 0
+    estimated_cost_microusd: NonNegativeInt = 0
     input_tokens: NonNegativeInt | None = None
     output_tokens: NonNegativeInt | None = None
 
@@ -252,6 +284,12 @@ class RawModelCaseResult(EvalModel):
     candidates: list[ModelCandidate] = Field(default_factory=list, max_length=3)
     usage: ModelUsage = Field(default_factory=ModelUsage)
     elapsed_ms: NonNegativeInt = 0
+    estimated_cost_microusd: NonNegativeInt = 0
+    cost_settlement: Literal[
+        "not_applicable",
+        "reported_tokens_cache_miss_conservative",
+        "worst_case_unknown",
+    ] = "not_applicable"
 
 
 class ModelCaseResult(EvalModel):
@@ -262,7 +300,7 @@ class ModelCaseResult(EvalModel):
 
 
 class ModelEvaluationReport(EvalModel):
-    """Offline model-evaluation report; explicitly not a semantic quality claim."""
+    """Model-evaluation report; execution mode and semantic limits stay explicit."""
 
     schema_version: Literal["p4-e2a"] = MODEL_EVALUATION_SCHEMA_VERSION
     dataset_id: str = Field(min_length=1, max_length=200)
@@ -331,7 +369,7 @@ class ComparisonGroup(EvalModel):
 
 
 class ComparisonReport(EvalModel):
-    """Per-case and split comparison with a mandatory simulation warning."""
+    """Per-case and split comparison with a mandatory execution warning."""
 
     schema_version: Literal["p4-e2a"] = MODEL_EVALUATION_SCHEMA_VERSION
     dataset_id: str = Field(min_length=1, max_length=200)

@@ -4,16 +4,21 @@ from __future__ import annotations
 
 import argparse
 import json
+from decimal import Decimal, InvalidOperation, ROUND_CEILING
 from pathlib import Path
 
 from .model_pipeline import (
     DEFAULT_EVALUATION_BUDGET,
+    EXTERNAL_RESULTS_DIR,
+    MODEL_RESULTS_DIR,
     build_dry_run_plan,
+    external_method,
     run_model_evaluation,
     write_dry_run_plan,
 )
 from .model_models import EvaluationBudgetLimits
 from .models import EvaluationReport
+from app.config import load_model_config_file
 from .pipeline import (
     ROOT,
     build_indexes,
@@ -43,23 +48,32 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--runtime-dir", type=Path, default=ROOT / ".runtime")
     run.add_argument("--output-dir", type=Path, default=ROOT / "results" / "p4-e1-v1")
 
-    model_plan = subparsers.add_parser("model-plan", help="write a gold-free P4-E2a execution checklist")
+    model_plan = subparsers.add_parser("model-plan", help="write a gold-free P4-E2a/P4-E2b execution checklist")
     model_plan.add_argument("--dataset", type=Path, default=ROOT / "dataset.json")
     model_plan.add_argument("--split", choices=["all", "calibration", "holdout"], default="all")
-    model_plan.add_argument("--output-dir", type=Path, default=ROOT / "results" / "p4-e2a-fix-v1")
+    model_plan.add_argument("--output-dir", type=Path, default=None)
+    model_plan.add_argument(
+        "--provider",
+        choices=["offline_fake", "external"],
+        default="offline_fake",
+        help="external creates a gated DeepSeek plan and never sends a request",
+    )
+    model_plan.add_argument("--config-file", type=Path, default=None)
     _add_evaluation_budget_args(model_plan)
 
-    model_run = subparsers.add_parser("model-run", help="run bounded real Runs with the offline fake provider")
+    model_run = subparsers.add_parser("model-run", help="run bounded real Runs with offline or explicitly allowed external provider")
     model_run.add_argument("--dataset", type=Path, default=ROOT / "dataset.json")
     model_run.add_argument("--split", choices=["all", "calibration", "holdout"], default="all")
-    model_run.add_argument("--runtime-dir", type=Path, default=ROOT / ".runtime" / "p4-e2a-fix-v1")
-    model_run.add_argument("--output-dir", type=Path, default=ROOT / "results" / "p4-e2a-fix-v1")
+    model_run.add_argument("--runtime-dir", type=Path, default=None)
+    model_run.add_argument("--output-dir", type=Path, default=None)
     model_run.add_argument(
         "--provider",
         choices=["offline_fake", "external"],
         default="offline_fake",
-        help="external is reserved for the separately authorized P4-E2b run",
+        help="external requires --allow-external, a persistent key, and an explicit cost cap",
     )
+    model_run.add_argument("--allow-external", action="store_true", help="authorize external network requests for this invocation")
+    model_run.add_argument("--config-file", type=Path, default=None)
     model_run.add_argument("--no-resume", action="store_true", help="refuse an existing raw state file")
     _add_evaluation_budget_args(model_run)
 
@@ -81,6 +95,12 @@ def _add_evaluation_budget_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--max-eval-output-chars", type=int, default=None)
     parser.add_argument("--max-eval-model-output-chars", type=int, default=None)
     parser.add_argument("--max-eval-seconds", type=int, default=None)
+    parser.add_argument(
+        "--max-eval-cost-usd",
+        type=str,
+        default=None,
+        help="external-only cumulative cost cap in USD, rounded up to micro-USD",
+    )
 
 
 def _evaluation_budget(args: argparse.Namespace) -> EvaluationBudgetLimits:
@@ -98,7 +118,29 @@ def _evaluation_budget(args: argparse.Namespace) -> EvaluationBudgetLimits:
         value = getattr(args, argument)
         if value is not None:
             values[field] = value
+    if args.max_eval_cost_usd is not None:
+        try:
+            amount = Decimal(args.max_eval_cost_usd)
+        except (InvalidOperation, ValueError) as exc:
+            raise SystemExit("--max-eval-cost-usd must be a finite non-negative decimal") from exc
+        if not amount.is_finite() or amount < 0:
+            raise SystemExit("--max-eval-cost-usd must be a finite non-negative decimal")
+        values["max_cost_microusd"] = int(
+            (amount * Decimal(1_000_000)).to_integral_value(rounding=ROUND_CEILING)
+        )
     return EvaluationBudgetLimits(**values)
+
+
+def _config_path(config_file: Path | None) -> Path:
+    return config_file or ROOT.parent / ".codetrail" / "config.json"
+
+
+def _model_output_dir(provider: str, output_dir: Path | None) -> Path:
+    return output_dir or ROOT / "results" / (EXTERNAL_RESULTS_DIR if provider == "external" else MODEL_RESULTS_DIR)
+
+
+def _model_runtime_dir(provider: str, runtime_dir: Path | None) -> Path:
+    return runtime_dir or ROOT / ".runtime" / (EXTERNAL_RESULTS_DIR if provider == "external" else MODEL_RESULTS_DIR)
 
 
 def main() -> None:
@@ -112,29 +154,41 @@ def main() -> None:
         return
     if args.command == "model-plan":
         frozen = load_frozen_dataset(args.dataset)
+        output_dir = _model_output_dir(args.provider, args.output_dir)
+        budget = _evaluation_budget(args)
+        method = (
+            external_method(load_model_config_file(_config_path(args.config_file)))
+            if args.provider == "external"
+            else None
+        )
         plan = build_dry_run_plan(
             frozen,
             split=args.split,
-            output_dir=args.output_dir,
-            evaluation_budget=_evaluation_budget(args),
+            output_dir=output_dir,
+            method=method,
+            evaluation_budget=budget,
         )
-        json_path, markdown_path = write_dry_run_plan(plan, args.output_dir)
+        json_path, markdown_path = write_dry_run_plan(plan, output_dir)
         print(f"wrote {json_path} and {markdown_path} cases={len(plan.cases)}")
         return
     if args.command == "model-run":
         frozen = load_frozen_dataset(args.dataset)
+        output_dir = _model_output_dir(args.provider, args.output_dir)
+        runtime_dir = _model_runtime_dir(args.provider, args.runtime_dir)
         report, comparison = run_model_evaluation(
             frozen,
             split=args.split,
-            runtime_dir=args.runtime_dir,
-            output_dir=args.output_dir,
+            runtime_dir=runtime_dir,
+            output_dir=output_dir,
             provider=args.provider,
             evaluation_budget=_evaluation_budget(args),
             resume=not args.no_resume,
+            allow_external=args.allow_external,
+            config_file=args.config_file,
         )
         print(
-            f"wrote {args.output_dir / f'model-{args.split}.json'} and "
-            f"{args.output_dir / f'comparison-{args.split}.json'} "
+            f"wrote {output_dir / f'model-{args.split}.json'} and "
+            f"{output_dir / f'comparison-{args.split}.json'} "
             f"cases={report.summary.total_cases} failed={report.summary.failed_cases} "
             f"model_provider={report.method.model_provider}"
         )

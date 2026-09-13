@@ -1,8 +1,11 @@
-"""P4-E2a model-evaluation orchestration through the real Run service.
+"""P4-E2a/P4-E2b model-evaluation orchestration through the real Run service.
 
 The default provider is a deterministic local adapter.  It exercises the same
 IssueModelAdapter, tool, budget, persistence, and report path as a configured
 provider, but never opens a network connection and never sees annotations.
+The explicit external provider reuses the compatible HTTP adapter and is
+blocked unless a caller supplies persistent configuration, an execution gate,
+and a positive cumulative cost limit.
 """
 
 from __future__ import annotations
@@ -15,6 +18,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Callable, Mapping, Sequence
+from urllib.parse import urlsplit
 
 from pydantic import ValidationError
 
@@ -32,8 +36,9 @@ from app.contracts import (
     Report,
     RunBudget,
 )
+from app.config import ModelProviderConfig, load_model_config_file
 from app.feature_generation import ModelCall
-from app.issue_analysis import ISSUE_PROMPT_VERSION, IssueModelAdapter
+from app.issue_analysis import ISSUE_PROMPT_VERSION, IssueModelAdapter, OpenAICompatibleIssueAdapter
 from app.main import create_app
 
 from .model_models import (
@@ -50,6 +55,7 @@ from .model_models import (
     EvaluationBudgetLimits,
     EvaluationBudgetState,
     EvaluationCaseIdentity,
+    EvaluationCostPolicy,
     EvaluationIdentity,
     EvaluationUsage,
     ModelBudgetLimits,
@@ -87,9 +93,31 @@ from .pipeline import (
 
 OFFLINE_FAKE_MODEL = "codetrail-eval-fake-v1"
 OFFLINE_FAKE_PROVIDER = "offline-fake"
+EXTERNAL_PROVIDER = "deepseek"
+EXTERNAL_MODEL = "deepseek-v4-flash"
+EXTERNAL_METHOD_VERSION = "real-run-external-deepseek-v1"
+EXTERNAL_RESULTS_DIR = "p4-e2b-external-v1"
+DEEPSEEK_PRICING_SOURCE_URL = "https://api-docs.deepseek.com/quick_start/pricing"
+DEEPSEEK_PRICING_CHECKED_AT = "2026-09-13"
+DEEPSEEK_COST_POLICY = EvaluationCostPolicy(
+    provider="deepseek",
+    model=EXTERNAL_MODEL,
+    currency="USD",
+    pricing_source_url=DEEPSEEK_PRICING_SOURCE_URL,
+    pricing_checked_at=DEEPSEEK_PRICING_CHECKED_AT,
+    # Official peak, cache-miss pricing as checked on 2026-09-13.  Values
+    # are micro-USD per million tokens to keep reservations integer-only.
+    input_cache_hit_microusd_per_million=14_000,
+    input_cache_miss_microusd_per_million=440_000,
+    output_microusd_per_million=1_320_000,
+)
 SIMULATION_NOTICE = (
     "本报告使用本地确定性假供应商，目的是验证真实 Run/工具/预算/持久化/评分适配；"
     "它不代表任何真实模型的语义质量、根因判断或供应商表现。"
+)
+EXTERNAL_NOTICE = (
+    "这是受显式授权、配置指纹、发送范围和累计费用上限约束的真实供应商评测入口；"
+    "本地验证使用 HTTP 假供应商，当前仓库交付不代表已经访问外网或产生真实费用。"
 )
 DEFAULT_BUDGET_LIMITS = ModelBudgetLimits()
 DEFAULT_EVALUATION_BUDGET = EvaluationBudgetLimits()
@@ -298,6 +326,55 @@ def default_method(budget: ModelBudgetLimits | None = None) -> ModelMethod:
     )
 
 
+def provider_config_fingerprint(config: ModelProviderConfig) -> str:
+    """Hash provider settings without ever serializing the credential itself."""
+
+    redacted = {
+        "provider": config.provider,
+        "base_url": config.base_url,
+        "model": config.model,
+        "api_key_sha256": hashlib.sha256(config.api_key.encode("utf-8")).hexdigest(),
+    }
+    return hashlib.sha256(_canonical_json(redacted).encode("utf-8")).hexdigest()
+
+
+def external_method(
+    config: ModelProviderConfig,
+    budget: ModelBudgetLimits | None = None,
+) -> ModelMethod:
+    """Declare the gated DeepSeek-compatible external evaluation method."""
+
+    if config.provider.casefold() != EXTERNAL_PROVIDER:
+        raise ValueError(
+            f"P4-E2b external evaluation only supports provider {EXTERNAL_PROVIDER!r}; "
+            f"got {config.provider!r}"
+        )
+    if config.model != EXTERNAL_MODEL:
+        raise ValueError(
+            f"P4-E2b external evaluation requires model {EXTERNAL_MODEL!r}; got {config.model!r}"
+        )
+    parsed = urlsplit(config.base_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("P4-E2b external evaluation requires a valid HTTP(S) provider URL")
+    limits = budget or DEFAULT_BUDGET_LIMITS
+    return ModelMethod(
+        method_id=EXTERNAL_METHOD_VERSION,
+        method_version=EXTERNAL_METHOD_VERSION,
+        execution_mode="external",
+        provider_kind="external",
+        model_provider=config.provider,
+        model=config.model,
+        prompt_version=ISSUE_PROMPT_VERSION,
+        execution_version=MODEL_EXECUTION_VERSION,
+        budget=limits,
+        network_calls=limits.max_model_calls,
+        model_calls_expected=limits.max_model_calls,
+        provider_config_fingerprint=provider_config_fingerprint(config),
+        configuration_status="ready" if config.api_key.strip() else "missing",
+        cost_policy=DEEPSEEK_COST_POLICY,
+    )
+
+
 def _method_fingerprint(method: ModelMethod) -> str:
     return hashlib.sha256(_canonical_json(method.model_dump(mode="json")).encode("utf-8")).hexdigest()
 
@@ -364,11 +441,22 @@ def build_dry_run_plan(
     selected = select_cases(frozen, split)
     if not selected:
         raise ValueError(f"evaluation split has no cases: {split}")
-    output = output_dir or ROOT / "results" / MODEL_RESULTS_DIR
     selected_method = method or default_method()
     selected_evaluation_budget = evaluation_budget or DEFAULT_EVALUATION_BUDGET
+    if selected_method.execution_mode == "external" and selected_evaluation_budget.max_cost_microusd <= 0:
+        raise ValueError("external evaluation requires an explicit positive max evaluation cost")
+    output = output_dir or ROOT / "results" / (
+        EXTERNAL_RESULTS_DIR if selected_method.execution_mode == "external" else MODEL_RESULTS_DIR
+    )
     planned_method = selected_method.model_copy(
-        update={"model_calls_expected": len(selected) * selected_method.budget.max_model_calls}
+        update={
+            "model_calls_expected": len(selected) * selected_method.budget.max_model_calls,
+            "network_calls": (
+                len(selected) * selected_method.budget.max_model_calls
+                if selected_method.execution_mode == "external"
+                else selected_method.network_calls
+            ),
+        }
     )
     method_fingerprint = _method_fingerprint(planned_method)
     return DryRunPlan(
@@ -380,7 +468,7 @@ def build_dry_run_plan(
         input_construction_version=input_construction_version,
         output_dir=str(output),
         raw_state_path=str(output / "raw-state.json"),
-        simulation_notice=SIMULATION_NOTICE,
+        simulation_notice=EXTERNAL_NOTICE if selected_method.execution_mode == "external" else SIMULATION_NOTICE,
         cases=[
             DryRunCase(
                 case_id=case.entry.case_id,
@@ -402,20 +490,31 @@ def build_dry_run_plan(
 
 
 def render_dry_run_plan(plan: DryRunPlan) -> str:
+    external = plan.method.execution_mode == "external"
+    title = "P4-E2b 外部供应商评测执行清单" if external else "P4-E2a 离线 Run 评测执行清单"
+    notice = EXTERNAL_NOTICE if external else SIMULATION_NOTICE
+    cost_line = (
+        f"；费用上限={plan.evaluation_budget.max_cost_microusd / 1_000_000:.6f} USD；"
+        f"价格依据={plan.method.cost_policy.pricing_source_url}（检查日 {plan.method.cost_policy.pricing_checked_at}）"
+        if external and plan.method.cost_policy is not None
+        else ""
+    )
     lines = [
-        "# P4-E2a 离线 Run 评测执行清单",
+        f"# {title}",
         "",
         f"- 数据集：`{plan.dataset_id}` / `{plan.dataset_version}`；划分：`{plan.split}`",
         f"- 方法：`{plan.method.method_id}`；provider：`{plan.method.model_provider}`；模型：`{plan.method.model}`",
+        f"- 配置状态：`{plan.method.configuration_status}`；配置指纹：`{plan.method.provider_config_fingerprint or 'not-required'}`",
         f"- prompt：`{plan.method.prompt_version}`；execution：`{plan.method.execution_version}`",
         f"- 输入构造：`{plan.input_construction_version}`；整次预算：cases={plan.evaluation_budget.max_cases}，"
         f"model calls={plan.evaluation_budget.max_model_calls}，input/model input chars="
         f"{plan.evaluation_budget.max_input_chars}/{plan.evaluation_budget.max_model_input_chars}，"
         f"output/model output chars={plan.evaluation_budget.max_output_chars}/"
-        f"{plan.evaluation_budget.max_model_output_chars}，seconds={plan.evaluation_budget.max_seconds}",
+        f"{plan.evaluation_budget.max_model_output_chars}，seconds={plan.evaluation_budget.max_seconds}"
+        f"{cost_line}",
         f"- 结果目录：`{plan.output_dir}`；恢复状态：`{plan.raw_state_path}`",
         f"- 网络调用：`{plan.method.network_calls}`；最大模型调用：`{plan.method.model_calls_expected}`",
-        f"- 模拟说明：{plan.simulation_notice}",
+        f"- 执行说明：{notice}",
         "",
         "## 案例输入",
         "",
@@ -463,6 +562,7 @@ _USAGE_COUNTERS = (
     "model_output_chars",
     "events",
     "elapsed_ms",
+    "estimated_cost_microusd",
 )
 
 
@@ -503,7 +603,13 @@ def _usage_without_tokens(usage: EvaluationUsage) -> dict[str, int]:
     return {name: getattr(usage, name) for name in _USAGE_COUNTERS}
 
 
-def _usage_from_model_usage(usage: ModelUsage, *, elapsed_ms: int, cases: int = 1) -> EvaluationUsage:
+def _usage_from_model_usage(
+    usage: ModelUsage,
+    *,
+    elapsed_ms: int,
+    cases: int = 1,
+    cost_policy: EvaluationCostPolicy | None = None,
+) -> EvaluationUsage:
     return EvaluationUsage(
         cases=cases,
         model_calls=usage.model_calls,
@@ -515,8 +621,40 @@ def _usage_from_model_usage(usage: ModelUsage, *, elapsed_ms: int, cases: int = 
         output_chars=usage.output_chars,
         model_output_chars=usage.model_output_chars,
         elapsed_ms=elapsed_ms,
+        estimated_cost_microusd=(
+            _cost_from_tokens(
+                cost_policy,
+                input_tokens=usage.input_tokens,
+                output_tokens=usage.output_tokens,
+            )
+            if cost_policy is not None
+            and usage.input_tokens is not None
+            and usage.output_tokens is not None
+            else 0
+        ),
         input_tokens=usage.input_tokens,
         output_tokens=usage.output_tokens,
+    )
+
+
+def _cost_from_tokens(
+    policy: EvaluationCostPolicy,
+    *,
+    input_tokens: int,
+    output_tokens: int,
+) -> int:
+    total = (
+        input_tokens * policy.input_cache_miss_microusd_per_million
+        + output_tokens * policy.output_microusd_per_million
+    )
+    return (total + 999_999) // 1_000_000
+
+
+def _worst_case_cost(policy: EvaluationCostPolicy, budget: ModelBudgetLimits) -> int:
+    return _cost_from_tokens(
+        policy,
+        input_tokens=budget.max_model_input_chars * policy.tokens_per_char_upper_bound,
+        output_tokens=budget.max_model_output_chars * policy.tokens_per_char_upper_bound,
     )
 
 
@@ -534,6 +672,11 @@ def _worst_case_usage(method: ModelMethod) -> EvaluationUsage:
         model_output_chars=budget.max_model_output_chars,
         events=budget.max_events,
         elapsed_ms=budget.max_seconds * 1_000,
+        estimated_cost_microusd=(
+            _worst_case_cost(method.cost_policy, budget)
+            if method.cost_policy is not None
+            else 0
+        ),
     )
 
 
@@ -559,6 +702,11 @@ def _reservation_failure_reason(
             limits.max_model_output_chars,
         ),
         ("elapsed_ms", consumed_and_reserved.elapsed_ms + reservation.elapsed_ms, limits.max_seconds * 1_000),
+        (
+            "cost_microusd",
+            consumed_and_reserved.estimated_cost_microusd + reservation.estimated_cost_microusd,
+            limits.max_cost_microusd,
+        ),
     )
     for name, requested, maximum in checks:
         if requested > maximum:
@@ -681,6 +829,7 @@ def _validate_state(
         or consumed_and_reserved.output_chars > limits.max_output_chars
         or consumed_and_reserved.model_output_chars > limits.max_model_output_chars
         or consumed_and_reserved.elapsed_ms > limits.max_seconds * 1_000
+        or consumed_and_reserved.estimated_cost_microusd > limits.max_cost_microusd
     ):
         raise ValueError("P4-E2a raw state cumulative budget exceeds its limits")
 
@@ -796,15 +945,19 @@ def _ensure_offline_config(data_root: Path) -> None:
 def _new_case_app(
     source_root: Path,
     data_root: Path,
-    adapter_factory: Callable[[str], IssueModelAdapter],
+    adapter_factory: Callable[[str], IssueModelAdapter] | None = None,
+    *,
+    model_config: ModelProviderConfig | None = None,
 ):
-    _ensure_offline_config(data_root)
+    if model_config is None:
+        _ensure_offline_config(data_root)
     return create_app(
         {"eval-case": source_root},
         data_root=data_root,
         real_run_enabled=True,
         run_model_adapter_factory=adapter_factory,
         run_max_concurrent_runs=1,
+        model_config=model_config,
     )
 
 
@@ -1055,6 +1208,61 @@ def _model_usage_from_evaluation_usage(usage: EvaluationUsage) -> ModelUsage:
     )
 
 
+def _settle_case_usage(
+    raw: RawModelCaseResult,
+    reservation: EvaluationUsage,
+    method: ModelMethod,
+    *,
+    elapsed_ms: int,
+) -> tuple[EvaluationUsage, RawModelCaseResult]:
+    """Settle known usage, or retain the full reservation when billing is unknown."""
+
+    if raw.execution_status == "interrupted":
+        return reservation, raw.model_copy(
+            update={
+                "usage": _model_usage_from_evaluation_usage(reservation),
+                "elapsed_ms": max(raw.elapsed_ms, reservation.elapsed_ms),
+                "estimated_cost_microusd": reservation.estimated_cost_microusd,
+                "cost_settlement": (
+                    "worst_case_unknown"
+                    if method.cost_policy is not None
+                    else "not_applicable"
+                ),
+            }
+        )
+
+    actual = _usage_from_model_usage(
+        raw.usage,
+        elapsed_ms=elapsed_ms,
+        cost_policy=method.cost_policy,
+    )
+    if method.cost_policy is None:
+        return actual, raw.model_copy(update={"cost_settlement": "not_applicable"})
+    if raw.usage.input_tokens is None or raw.usage.output_tokens is None:
+        actual = actual.model_copy(update={"estimated_cost_microusd": reservation.estimated_cost_microusd})
+        return actual, raw.model_copy(
+            update={
+                "estimated_cost_microusd": reservation.estimated_cost_microusd,
+                "cost_settlement": "worst_case_unknown",
+            }
+        )
+    estimated = actual.estimated_cost_microusd
+    if estimated > reservation.estimated_cost_microusd:
+        actual = actual.model_copy(update={"estimated_cost_microusd": reservation.estimated_cost_microusd})
+        return actual, raw.model_copy(
+            update={
+                "estimated_cost_microusd": reservation.estimated_cost_microusd,
+                "cost_settlement": "worst_case_unknown",
+            }
+        )
+    return actual, raw.model_copy(
+        update={
+            "estimated_cost_microusd": estimated,
+            "cost_settlement": "reported_tokens_cache_miss_conservative",
+        }
+    )
+
+
 def _failure_result(
     case: EvalCase,
     stage: str,
@@ -1132,7 +1340,7 @@ def _recover_uncreated_reservations(
             continue
         case = case_by_id[case_id]
         reservation = state.budget.reservations[case_id]
-        state.results[case_id] = _failure_result(
+        recovered = _failure_result(
             case,
             "recovery",
             "evaluation stopped after reserving the case budget before a Run checkpoint was durable; "
@@ -1143,6 +1351,16 @@ def _recover_uncreated_reservations(
             usage=_model_usage_from_evaluation_usage(reservation),
             elapsed_ms=reservation.elapsed_ms,
             run_outcome="interrupted",
+        )
+        state.results[case_id] = recovered.model_copy(
+            update={
+                "estimated_cost_microusd": reservation.estimated_cost_microusd,
+                "cost_settlement": (
+                    "worst_case_unknown"
+                    if method.cost_policy is not None
+                    else "not_applicable"
+                ),
+            }
         )
         _settle_budget(state, case_id, reservation)
 
@@ -1369,7 +1587,7 @@ def build_comparison(
         method_id=model_report.method.method_id,
         baseline_report_path=baseline_path,
         model_report_path=model_path,
-        simulation_notice=SIMULATION_NOTICE,
+        simulation_notice=model_report.simulation_notice,
         groups=groups,
         cases=cases,
     )
@@ -1380,8 +1598,17 @@ def _metric_text(metric: Metric) -> str:
 
 
 def render_model_markdown(report: ModelEvaluationReport) -> str:
+    external = report.method.execution_mode == "external"
+    title = "P4-E2b 外部供应商 Run 评测" if external else "P4-E2a 离线假供应商 Run 评测"
+    cost_summary = (
+        f"；费用上限={report.evaluation_budget.max_cost_microusd / 1_000_000:.6f} USD，"
+        f"已结算={report.evaluation_usage.estimated_cost_microusd / 1_000_000:.6f} USD，"
+        f"价格依据={report.method.cost_policy.pricing_source_url}（检查日 {report.method.cost_policy.pricing_checked_at}）"
+        if external and report.method.cost_policy is not None
+        else ""
+    )
     lines = [
-        "# P4-E2a 离线假供应商 Run 评测",
+        f"# {title}",
         "",
         f"- 数据集：`{report.dataset_id}` / `{report.dataset_version}`；划分：`{report.split}`",
         f"- 方法：`{report.method.method_id}`；provider：`{report.method.model_provider}`；模型：`{report.method.model}`",
@@ -1391,13 +1618,14 @@ def render_model_markdown(report: ModelEvaluationReport) -> str:
         f"input/model input chars={report.evaluation_budget.max_input_chars}/"
         f"{report.evaluation_budget.max_model_input_chars}，output/model output chars="
         f"{report.evaluation_budget.max_output_chars}/{report.evaluation_budget.max_model_output_chars}，"
-        f"seconds={report.evaluation_budget.max_seconds}",
+        f"seconds={report.evaluation_budget.max_seconds}{cost_summary}",
         f"- 累计已结算：cases={report.evaluation_usage.cases}，model calls={report.evaluation_usage.model_calls}，"
         f"input/model input chars={report.evaluation_usage.input_chars}/{report.evaluation_usage.model_input_chars}，"
         f"output/model output chars={report.evaluation_usage.output_chars}/"
         f"{report.evaluation_usage.model_output_chars}，elapsed_ms={report.evaluation_usage.elapsed_ms}；"
-        f"未结算预留 cases={report.evaluation_reserved.cases}",
-        f"- 模拟说明：{report.simulation_notice}",
+        f"未结算预留 cases={report.evaluation_reserved.cases}，"
+        f"cost_microusd={report.evaluation_reserved.estimated_cost_microusd}",
+        f"- 执行说明：{report.simulation_notice}",
         "",
         "## 汇总",
         "",
@@ -1445,16 +1673,28 @@ def render_model_markdown(report: ModelEvaluationReport) -> str:
             f"input/model input chars={usage.input_chars}/{usage.model_input_chars}，"
             f"output/model output chars={usage.output_chars}/{usage.model_output_chars}，tokens={token_text}。"
         )
+        if external:
+            lines.append(
+                f"- 费用估算：{execution.estimated_cost_microusd / 1_000_000:.6f} USD；"
+                f"结算方式=`{execution.cost_settlement}`。"
+            )
         if execution.failure_reason:
             lines.append(f"- 失败：`{execution.failure_stage}` — {execution.failure_reason}")
         lines.append("")
-    lines.extend(["## 边界与局限", "", SIMULATION_NOTICE, "模型结果只取最终 candidate_link/finding 的同快照证据；中间检索符号不计为答案，失败/取消/中断不继承中间命中，budget_skipped 保留在总样本分母。token 用量未知时保持 unknown/null，整次预算使用可执行的调用/字符/墙钟最坏预留，不能据此推断 token 费用。P4-E1 基线和模型结果使用相同冻结案例及评分字段，但算术对照不能证明模型优于基线。", ""])
+    boundary = (
+        "外部费用按官方 USD 价格的 cache-miss 最坏档保守估算；供应商未返回 token 或请求中断时，整例保留最坏费用预留，不能把未知记为零。"
+        if external
+        else "token 用量未知时保持 unknown/null，整次预算使用可执行的调用/字符/墙钟最坏预留，不能据此推断 token 费用。"
+    )
+    lines.extend(["## 边界与局限", "", report.simulation_notice, "模型结果只取最终 candidate_link/finding 的同快照证据；中间检索符号不计为答案，失败/取消/中断不继承中间命中，budget_skipped 保留在总样本分母。", boundary, "P4-E1 基线和模型结果使用相同冻结案例及评分字段，但算术对照不能证明模型优于基线。", ""])
     return "\n".join(lines)
 
 
 def render_comparison_markdown(report: ComparisonReport) -> str:
+    external = report.method_id == EXTERNAL_METHOD_VERSION
+    title = "P4-E2b 外部供应商与基线对照" if external else "P4-E2a 基线与 Run 评测对照"
     lines = [
-        "# P4-E2a 基线与 Run 评测对照",
+        f"# {title}",
         "",
         f"- 数据集：`{report.dataset_id}` / `{report.dataset_version}`；方法：`{report.method_id}`",
         f"- 基线：`{report.baseline_report_path}`；模型报告：`{report.model_report_path}`",
@@ -1466,14 +1706,16 @@ def render_comparison_markdown(report: ComparisonReport) -> str:
         "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for group in report.groups:
-        for method, summary in (("baseline", group.baseline), ("offline fake Run", group.model)):
+        model_label = "external Run" if external else "offline fake Run"
+        for method, summary in (("baseline", group.baseline), (model_label, group.model)):
             lines.append(
                 f"| {group.split} | {method} | {_metric_text(summary.file_hit_at_1)} | "
                 f"{_metric_text(summary.file_hit_at_3)} | {_metric_text(summary.symbol_hit_at_1)} | "
                 f"{_metric_text(summary.symbol_hit_at_3)} | {summary.failed_cases}/{summary.total_cases} | "
                 f"{summary.skipped_cases}/{summary.total_cases} |"
             )
-    lines.extend(["", "## 逐例对照", "", "| 案例 | 划分 | 基线 symbol H@1/H@3 | fake Run symbol H@1/H@3 | Run 状态 |", "| --- | --- | --- | --- | --- |"])
+    model_label = "external Run" if external else "fake Run"
+    lines.extend(["", "## 逐例对照", "", f"| 案例 | 划分 | 基线 symbol H@1/H@3 | {model_label} symbol H@1/H@3 | Run 状态 |", "| --- | --- | --- | --- | --- |"])
     for case in report.cases:
         hit = lambda value: "n/a" if value is None else ("1" if value else "0")
         lines.append(
@@ -1481,7 +1723,12 @@ def render_comparison_markdown(report: ComparisonReport) -> str:
             f"{hit(case.baseline.symbol_hit_at_1)}/{hit(case.baseline.symbol_hit_at_3)} | "
             f"{hit(case.model.symbol_hit_at_1)}/{hit(case.model.symbol_hit_at_3)} | {case.model_execution_status} |"
         )
-    lines.extend(["", "## 解释边界", "", "这是相同冻结输入上的指标对照和执行状态记录。provider 是本地模拟适配器，不能据此作出真实模型优劣、根因能力或供应商质量结论；留出集分母、失败、跳过、弃答和误报均按报告逐例保留。", ""])
+    boundary = (
+        "这是相同冻结输入上的指标对照和执行状态记录。外部 provider 的真实语义质量、网络稳定性和最终费用仍需在独立授权运行后判断；"
+        if external
+        else "这是相同冻结输入上的指标对照和执行状态记录。provider 是本地模拟适配器，不能据此作出真实模型优劣、根因能力或供应商质量结论；"
+    )
+    lines.extend(["", "## 解释边界", "", boundary + "留出集分母、失败、跳过、弃答和误报均按报告逐例保留。", ""])
     return "\n".join(lines)
 
 
@@ -1499,6 +1746,19 @@ def _path_reference(path: Path) -> str:
         return str(path)
 
 
+def _default_model_config_file() -> Path:
+    return ROOT.parent / ".codetrail" / "config.json"
+
+
+def _resolve_external_config(
+    model_config: ModelProviderConfig | None,
+    config_file: Path | None,
+) -> ModelProviderConfig:
+    if model_config is not None and config_file is not None:
+        raise ValueError("provide either model_config or config_file, not both")
+    return model_config or load_model_config_file(config_file or _default_model_config_file())
+
+
 def run_model_evaluation(
     frozen: FrozenDataset,
     *,
@@ -1510,19 +1770,40 @@ def run_model_evaluation(
     evaluation_budget: EvaluationBudgetLimits | None = None,
     adapter_factory: Callable[[str], IssueModelAdapter] | None = None,
     resume: bool = True,
+    allow_external: bool = False,
+    model_config: ModelProviderConfig | None = None,
+    config_file: Path | None = None,
 ) -> tuple[ModelEvaluationReport, ComparisonReport]:
     """Run/recover bounded real Runs, then load gold and score the results."""
 
-    if provider != "offline_fake":
-        raise ValueError(
-            "external model execution is not enabled in P4-E2a; use the explicit P4-E2b provider path"
-        )
+    if provider not in {"offline_fake", "external"}:
+        raise ValueError(f"unsupported evaluation provider: {provider}")
+    external_config: ModelProviderConfig | None = None
+    if provider == "external":
+        if not allow_external:
+            raise ValueError("P4-E2b external evaluation requires explicit allow_external=True")
+        if adapter_factory is not None:
+            raise ValueError("external evaluation owns the compatible HTTP adapter; custom adapters are forbidden")
+        external_config = _resolve_external_config(model_config, config_file)
+        if not external_config.api_key.strip():
+            raise ValueError("P4-E2b external evaluation requires a non-empty key in persistent config.json")
+        selected_method = method or external_method(external_config)
+        if selected_method.execution_mode != "external":
+            raise ValueError("external evaluation requires an external ModelMethod")
+        if selected_method.provider_config_fingerprint != provider_config_fingerprint(external_config):
+            raise ValueError("external provider config fingerprint differs; create a new plan")
+        if selected_method.model_provider != external_config.provider or selected_method.model != external_config.model:
+            raise ValueError("external provider config differs from the ModelMethod; create a new plan")
+    else:
+        if method is not None and method.execution_mode != "offline_fake":
+            raise ValueError("offline_fake evaluation requires an offline ModelMethod")
+        selected_method = method or default_method()
     selected = select_cases(frozen, split)
     if not selected:
         raise ValueError(f"evaluation split has no cases: {split}")
-    output = output_dir or ROOT / "results" / MODEL_RESULTS_DIR
-    runtime = runtime_dir or ROOT / ".runtime" / MODEL_RESULTS_DIR
-    selected_method = method or default_method()
+    result_dir_name = EXTERNAL_RESULTS_DIR if provider == "external" else MODEL_RESULTS_DIR
+    output = output_dir or ROOT / "results" / result_dir_name
+    runtime = runtime_dir or ROOT / ".runtime" / result_dir_name
     selected_evaluation_budget = evaluation_budget or DEFAULT_EVALUATION_BUDGET
     plan = build_dry_run_plan(
         frozen,
@@ -1591,12 +1872,17 @@ def run_model_evaluation(
 
         assert reservation is not None
         case_started = time.perf_counter()
-        case_runtime = runtime / MODEL_METHOD_VERSION / case_id
+        case_runtime = runtime / plan.method.method_id / case_id
         source_root = Path(checkpoint.source_root) if checkpoint else case_runtime / "source"
         data_root = Path(checkpoint.data_root) if checkpoint else case_runtime / "data"
         try:
             _ensure_runtime_source(case, source_root)
-            application = _new_case_app(source_root, data_root, factory)
+            application = _new_case_app(
+                source_root,
+                data_root,
+                None if provider == "external" else factory,
+                model_config=external_config,
+            )
             budget = RunBudget(**plan.method.budget.model_dump(mode="python"))
             if checkpoint is None:
                 checkpoint = _start_run(
@@ -1619,19 +1905,13 @@ def run_model_evaluation(
             )
             elapsed_ms = max(raw.elapsed_ms, round((time.perf_counter() - case_started) * 1000))
             raw = raw.model_copy(update={"elapsed_ms": elapsed_ms})
-            actual = _usage_from_model_usage(raw.usage, elapsed_ms=elapsed_ms)
-            if raw.execution_status == "interrupted":
-                # A restart/interruption may have happened during a provider
-                # request whose final output was never durable.  Do not let a
-                # resume turn that unknown usage into free budget.
-                actual = reservation
-                raw = raw.model_copy(
-                    update={
-                        "usage": _model_usage_from_evaluation_usage(reservation),
-                        "elapsed_ms": max(raw.elapsed_ms, reservation.elapsed_ms),
-                    }
-                )
-            elif checkpoint_was_existing:
+            actual, raw = _settle_case_usage(
+                raw,
+                reservation,
+                plan.method,
+                elapsed_ms=elapsed_ms,
+            )
+            if checkpoint_was_existing:
                 # A checkpoint can survive a process restart.  Its prior
                 # wall-clock interval is not recoverable, so settle that
                 # dimension conservatively even when the Run is terminal.
@@ -1650,6 +1930,13 @@ def run_model_evaluation(
                 run_outcome="interrupted" if checkpoint is not None else None,
             )
             actual = reservation
+            if plan.method.cost_policy is not None:
+                raw = raw.model_copy(
+                    update={
+                        "estimated_cost_microusd": reservation.estimated_cost_microusd,
+                        "cost_settlement": "worst_case_unknown",
+                    }
+                )
         state.results[case.entry.case_id] = raw
         _settle_budget(state, case_id, actual)
         _write_json(state_path, state.model_dump(mode="json"))
@@ -1668,7 +1955,7 @@ def run_model_evaluation(
             "evaluation_usage": state.budget.consumed.model_dump(mode="json"),
             "evaluation_reserved": state.budget.reserved.model_dump(mode="json"),
             "input_construction_version": plan.input_construction_version,
-            "simulation_notice": SIMULATION_NOTICE,
+            "simulation_notice": plan.simulation_notice,
             "cases": [item.model_dump(mode="json") for item in raw_results],
         },
     )
@@ -1691,7 +1978,7 @@ def run_model_evaluation(
         evaluation_reserved=state.budget.reserved,
         baseline_report_path="evals/results/p4-e1-v1/baseline-all.json",
         raw_state_path=_path_reference(state_path),
-        simulation_notice=SIMULATION_NOTICE,
+        simulation_notice=plan.simulation_notice,
         summary=summarize([item.score for item in scored_cases]),
         cases=scored_cases,
     )
@@ -1717,6 +2004,13 @@ def run_model_evaluation(
 __all__ = [
     "DEFAULT_BUDGET_LIMITS",
     "DEFAULT_EVALUATION_BUDGET",
+    "DEEPSEEK_COST_POLICY",
+    "DEEPSEEK_PRICING_CHECKED_AT",
+    "DEEPSEEK_PRICING_SOURCE_URL",
+    "EXTERNAL_METHOD_VERSION",
+    "EXTERNAL_MODEL",
+    "EXTERNAL_PROVIDER",
+    "EXTERNAL_RESULTS_DIR",
     "MODEL_METHOD_VERSION",
     "MODEL_RESULTS_DIR",
     "OFFLINE_FAKE_MODEL",
@@ -1724,7 +2018,9 @@ __all__ = [
     "build_comparison",
     "build_dry_run_plan",
     "default_method",
+    "external_method",
     "map_report_candidates",
+    "provider_config_fingerprint",
     "render_comparison_markdown",
     "render_dry_run_plan",
     "render_model_markdown",

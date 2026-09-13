@@ -58,6 +58,7 @@ from .contracts import (
     SourceIndexResponse,
 )
 from .github import GitHubClient
+from .config import ModelProviderConfig
 from .feature_generation import FeatureModelAdapter
 from .issue_analysis import IssueModelAdapter
 from .run_sse import (
@@ -120,6 +121,7 @@ def create_app(
     run_model_adapter_factory: Callable[[str], IssueModelAdapter] | None = None,
     run_max_concurrent_runs: int | None = None,
     run_sse_config: RunEventStreamConfig | None = None,
+    model_config: ModelProviderConfig | None = None,
 ) -> FastAPI:
     """Create an API with a server-owned repository allow-list."""
 
@@ -132,6 +134,7 @@ def create_app(
             mcp_run_write_enabled=mcp_run_write_enabled,
             real_run_enabled=real_run_enabled,
             mcp_real_run_enabled=mcp_real_run_enabled,
+            model_config=model_config,
         )
         if repository_roots is None
         else RepositoryRegistry(
@@ -145,6 +148,7 @@ def create_app(
             mcp_run_write_enabled=mcp_run_write_enabled,
             real_run_enabled=real_run_enabled,
             mcp_real_run_enabled=mcp_real_run_enabled,
+            model_config=model_config,
         )
     )
     index_service = IndexService(registry)

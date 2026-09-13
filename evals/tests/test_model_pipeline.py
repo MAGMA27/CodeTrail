@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 import shutil
 import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from datetime import datetime, timezone
 from dataclasses import replace
 from pathlib import Path
+from re import MULTILINE, search
 
 import pytest
 
@@ -23,7 +25,9 @@ from evals.model_pipeline import (
 )
 from evals.pipeline import FrozenDataset, load_frozen_dataset
 from app.contracts import CandidateLink, CancelRunRequest, Evidence, Finding, GraphSnapshot, Report, RunBudget, Symbol
+from app.config import ModelProviderConfig
 from app.feature_generation import ModelCall
+from evals.model_pipeline import EXTERNAL_METHOD_VERSION, EXTERNAL_MODEL, external_method
 
 
 def test_dry_run_plan_is_gold_free() -> None:
@@ -529,3 +533,365 @@ def test_final_candidate_mapping_rejects_wrong_evidence_hash() -> None:
 def test_external_provider_is_not_implicitly_called() -> None:
     with pytest.raises(ValueError, match="P4-E2b"):
         run_model_evaluation(load_frozen_dataset(), provider="external")
+
+
+def test_external_missing_key_is_rejected_before_output_write(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="non-empty key"):
+        run_model_evaluation(
+            load_frozen_dataset(),
+            provider="external",
+            allow_external=True,
+            model_config=ModelProviderConfig(
+                provider="deepseek",
+                api_key="",
+                base_url="https://api.deepseek.com",
+                model=EXTERNAL_MODEL,
+            ),
+            evaluation_budget=EvaluationBudgetLimits(max_cost_microusd=200_000),
+            runtime_dir=tmp_path / "runtime",
+            output_dir=tmp_path / "results",
+        )
+    assert not (tmp_path / "runtime").exists()
+    assert not (tmp_path / "results").exists()
+
+
+class _ExternalProtocolHandler(BaseHTTPRequestHandler):
+    requests: list[dict[str, object]] = []
+    include_usage = True
+    status_code = 200
+    block = False
+    started = threading.Event()
+    release = threading.Event()
+
+    def do_POST(self) -> None:  # noqa: N802 - stdlib handler API
+        length = int(self.headers.get("Content-Length", "0"))
+        raw = self.rfile.read(length)
+        payload = json.loads(raw.decode("utf-8"))
+        self.__class__.requests.append(
+            {
+                "authorization": self.headers.get("Authorization"),
+                "payload": payload,
+            }
+        )
+        if self.__class__.block:
+            self.__class__.started.set()
+            self.__class__.release.wait(2)
+        if self.__class__.status_code != 200:
+            self.send_response(self.__class__.status_code)
+            self.end_headers()
+            return
+        user_prompt = payload["messages"][1]["content"]
+        index_match = search(r"^index_id=(\S+)$", user_prompt, flags=MULTILINE)
+        assert index_match is not None
+        final = {
+            "schema_version": "0.1.0",
+            "kind": "final",
+            "index_id": index_match.group(1),
+            "outcome": "insufficient_evidence",
+            "summary": "The local protocol server returned a bounded abstention.",
+            "findings": [],
+            "candidate_links": [],
+            "evidence_ids": [],
+            "limitations": ["local protocol server"],
+        }
+        response: dict[str, object] = {
+            "choices": [{"message": {"content": json.dumps(final, separators=(",", ":"))}}]
+        }
+        if self.__class__.include_usage:
+            response["usage"] = {"prompt_tokens": 10, "completion_tokens": 5}
+        encoded = json.dumps(response).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(encoded)))
+        self.end_headers()
+        self.wfile.write(encoded)
+
+    def log_message(self, _format: str, *args: object) -> None:
+        del args
+
+
+def _external_server(
+    *,
+    include_usage: bool = True,
+    status_code: int = 200,
+    block: bool = False,
+) -> tuple[ThreadingHTTPServer, str, threading.Thread]:
+    handler = type("ProtocolHandler", (_ExternalProtocolHandler,), {})
+    handler.requests = []
+    handler.include_usage = include_usage
+    handler.status_code = status_code
+    handler.block = block
+    handler.started = threading.Event()
+    handler.release = threading.Event()
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server, f"http://127.0.0.1:{server.server_port}", thread
+
+
+def _external_config(base_url: str, *, api_key: str = "local-secret") -> ModelProviderConfig:
+    return ModelProviderConfig(
+        provider="deepseek",
+        api_key=api_key,
+        base_url=base_url,
+        model=EXTERNAL_MODEL,
+    )
+
+
+def test_external_plan_is_redacted_and_calibration_scoped() -> None:
+    frozen = load_frozen_dataset()
+    config = _external_config("https://api.deepseek.com", api_key="plan-secret")
+    plan = build_dry_run_plan(
+        frozen,
+        split="calibration",
+        method=external_method(config),
+        evaluation_budget=EvaluationBudgetLimits(max_cost_microusd=200_000),
+    )
+
+    serialized = json.dumps(plan.model_dump(mode="json"), ensure_ascii=False)
+    assert len(plan.cases) == 3
+    assert plan.method.execution_mode == "external"
+    assert plan.method.configuration_status == "ready"
+    assert plan.method.provider_config_fingerprint
+    assert "plan-secret" not in serialized
+    assert "api_key" not in serialized
+    assert plan.method.cost_policy is not None
+    assert plan.method.cost_policy.pricing_source_url.endswith("/quick_start/pricing")
+
+
+def test_external_local_http_path_is_real_transport_and_redacts_secret(tmp_path: Path) -> None:
+    frozen = load_frozen_dataset()
+    server, base_url, thread = _external_server()
+    try:
+        config = _external_config(base_url)
+        output_dir = tmp_path / "results"
+        report, _ = run_model_evaluation(
+            frozen,
+            split="calibration",
+            provider="external",
+            allow_external=True,
+            model_config=config,
+            evaluation_budget=EvaluationBudgetLimits(
+                max_cases=3,
+                max_model_calls=12,
+                max_cost_microusd=200_000,
+            ),
+            runtime_dir=tmp_path / "runtime",
+            output_dir=output_dir,
+        )
+        handler = server.RequestHandlerClass
+        assert len(handler.requests) == 3
+        assert all(item["authorization"] == "Bearer local-secret" for item in handler.requests)
+        assert all(item["payload"]["model"] == EXTERNAL_MODEL for item in handler.requests)
+        assert all(item["payload"]["response_format"] == {"type": "json_object"} for item in handler.requests)
+        assert report.method.execution_mode == "external"
+        assert report.method.model_provider == "deepseek"
+        assert report.evaluation_usage.estimated_cost_microusd > 0
+        assert report.evaluation_usage.estimated_cost_microusd <= report.evaluation_budget.max_cost_microusd
+        assert all(item.execution.cost_settlement == "reported_tokens_cache_miss_conservative" for item in report.cases)
+        assert not (tmp_path / "runtime" / EXTERNAL_METHOD_VERSION / "csv-import-validation" / "data" / "config.json").exists()
+        for path in output_dir.rglob("*"):
+            if path.is_file():
+                assert "local-secret" not in path.read_text(encoding="utf-8")
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_external_budget_rejection_happens_before_http_request(tmp_path: Path) -> None:
+    server, base_url, thread = _external_server()
+    try:
+        report, _ = run_model_evaluation(
+            load_frozen_dataset(),
+            split="calibration",
+            provider="external",
+            allow_external=True,
+            model_config=_external_config(base_url),
+            evaluation_budget=EvaluationBudgetLimits(max_cases=3, max_model_calls=12, max_cost_microusd=1),
+            runtime_dir=tmp_path / "runtime",
+            output_dir=tmp_path / "results",
+        )
+        assert report.summary.skipped_cases == 3
+        assert server.RequestHandlerClass.requests == []
+        assert not (tmp_path / "runtime").exists()
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_external_provider_error_is_recorded_without_fixture_fallback(tmp_path: Path) -> None:
+    server, base_url, thread = _external_server(status_code=429)
+    try:
+        report, _ = run_model_evaluation(
+            load_frozen_dataset(),
+            split="calibration",
+            provider="external",
+            allow_external=True,
+            model_config=_external_config(base_url),
+            evaluation_budget=EvaluationBudgetLimits(max_cases=1, max_model_calls=4, max_cost_microusd=100_000),
+            runtime_dir=tmp_path / "runtime",
+            output_dir=tmp_path / "results",
+        )
+        assert len(server.RequestHandlerClass.requests) == 1
+        assert report.cases[0].execution.execution_status == "failed"
+        assert report.cases[0].execution.failure_stage == "run"
+        assert report.cases[0].execution.estimated_cost_microusd == 61_600
+        assert report.cases[0].execution.cost_settlement == "worst_case_unknown"
+        assert report.cases[1].execution.execution_status == "budget_skipped"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_external_config_change_rejects_resume_before_overwriting_state(tmp_path: Path) -> None:
+    frozen = load_frozen_dataset()
+    server, base_url, thread = _external_server()
+    try:
+        output_dir = tmp_path / "results"
+        config = _external_config(base_url, api_key="first-secret")
+        budget = EvaluationBudgetLimits(max_cases=0, max_model_calls=12, max_cost_microusd=200_000)
+        run_model_evaluation(
+            frozen,
+            split="calibration",
+            provider="external",
+            allow_external=True,
+            model_config=config,
+            evaluation_budget=budget,
+            runtime_dir=tmp_path / "runtime",
+            output_dir=output_dir,
+        )
+        state_path = output_dir / "raw-state.json"
+        plan_path = output_dir / "dry-run-plan.json"
+        state_before = state_path.read_bytes()
+        plan_before = plan_path.read_bytes()
+
+        with pytest.raises(ValueError, match="fingerprint|identity|config"):
+            run_model_evaluation(
+                frozen,
+                split="calibration",
+                provider="external",
+                allow_external=True,
+                model_config=_external_config(base_url, api_key="second-secret"),
+                evaluation_budget=budget,
+                runtime_dir=tmp_path / "runtime",
+                output_dir=output_dir,
+            )
+        assert state_path.read_bytes() == state_before
+        assert plan_path.read_bytes() == plan_before
+        assert "first-secret" not in state_before.decode("utf-8")
+        assert "second-secret" not in plan_before.decode("utf-8")
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_external_unknown_usage_consumes_worst_case_cost(tmp_path: Path) -> None:
+    server, base_url, thread = _external_server(include_usage=False)
+    try:
+        report, _ = run_model_evaluation(
+            load_frozen_dataset(),
+            split="calibration",
+            provider="external",
+            allow_external=True,
+            model_config=_external_config(base_url),
+            evaluation_budget=EvaluationBudgetLimits(max_cases=1, max_model_calls=4, max_cost_microusd=100_000),
+            runtime_dir=tmp_path / "runtime",
+            output_dir=tmp_path / "results",
+        )
+        first = report.cases[0].execution
+        assert first.cost_settlement == "worst_case_unknown"
+        assert first.estimated_cost_microusd == 61_600
+        assert report.evaluation_usage.estimated_cost_microusd == 61_600
+        assert report.cases[1].execution.execution_status == "budget_skipped"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_external_cancelled_run_is_not_retried_or_made_free(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    server, base_url, thread = _external_server()
+    original_complete = model_pipeline._complete_case
+    first = True
+
+    def complete(application, case, checkpoint, method, output_dir, **kwargs):
+        nonlocal first
+        if first:
+            first = False
+            application.state.workspace_service.cancel_run(
+                checkpoint.project_id,
+                checkpoint.session_id,
+                checkpoint.run_id,
+                CancelRunRequest(reason="external cancellation regression"),
+            )
+        return original_complete(application, case, checkpoint, method, output_dir, **kwargs)
+
+    monkeypatch.setattr(model_pipeline, "_complete_case", complete)
+    try:
+        report, _ = run_model_evaluation(
+            load_frozen_dataset(),
+            split="calibration",
+            provider="external",
+            allow_external=True,
+            model_config=_external_config(base_url),
+            evaluation_budget=EvaluationBudgetLimits(max_cases=3, max_model_calls=12, max_cost_microusd=200_000),
+            runtime_dir=tmp_path / "runtime",
+            output_dir=tmp_path / "results",
+        )
+        assert report.cases[0].execution.execution_status == "cancelled"
+        assert report.cases[0].execution.cost_settlement == "worst_case_unknown"
+        assert report.cases[0].execution.estimated_cost_microusd == 61_600
+        assert report.evaluation_reserved.cases == 0
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_external_recovery_keeps_inflight_request_conservative(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    server, base_url, thread = _external_server(block=True)
+    original_complete = model_pipeline._complete_case
+    first = True
+
+    def complete(application, case, checkpoint, method, output_dir, **kwargs):
+        nonlocal first
+        if first:
+            first = False
+            assert server.RequestHandlerClass.started.wait(2)
+            project = application.state.workspace_service._find_project(checkpoint.project_id)
+            with application.state.workspace_service.registry.store_for_repository(project.repository_id) as store:
+                store.recover_incomplete_runs(datetime.now(timezone.utc))
+            server.RequestHandlerClass.release.set()
+        return original_complete(application, case, checkpoint, method, output_dir, **kwargs)
+
+    monkeypatch.setattr(model_pipeline, "_complete_case", complete)
+    try:
+        report, _ = run_model_evaluation(
+            load_frozen_dataset(),
+            split="calibration",
+            provider="external",
+            allow_external=True,
+            model_config=_external_config(base_url),
+            evaluation_budget=EvaluationBudgetLimits(max_cases=3, max_model_calls=12, max_cost_microusd=200_000),
+            runtime_dir=tmp_path / "runtime",
+            output_dir=tmp_path / "results",
+        )
+        assert report.cases[0].execution.execution_status == "interrupted"
+        assert report.cases[0].execution.cost_settlement == "worst_case_unknown"
+        assert report.cases[0].execution.estimated_cost_microusd == 61_600
+        assert report.evaluation_reserved.cases == 0
+    finally:
+        server.RequestHandlerClass.release.set()
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)

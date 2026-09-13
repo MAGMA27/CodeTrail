@@ -78,7 +78,7 @@ Run 拒绝未开启能力的 `mode=real`、拒绝空 Session、跨项目/Session
   "provider": "deepseek",
   "api_key": "sk-你的 DeepSeek API Key",
   "base_url": "https://api.deepseek.com",
-  "model": "deepseek-flash"
+  "model": "deepseek-v4-flash"
 }
 ```
 

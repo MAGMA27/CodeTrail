@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 MODEL_CONFIG_FILENAME = "config.json"
 DEFAULT_MODEL_PROVIDER = "deepseek"
 DEFAULT_MODEL_BASE_URL = "https://api.deepseek.com"
-DEFAULT_MODEL_NAME = "deepseek-flash"
+DEFAULT_MODEL_NAME = "deepseek-v4-flash"
 
 
 class ModelConfigError(ValueError):
@@ -38,9 +38,15 @@ def model_config_path(data_root: str | Path) -> Path:
 def load_model_config(data_root: str | Path) -> ModelProviderConfig:
     """Load the optional persistent model config, defaulting to an empty DeepSeek config."""
 
-    path = model_config_path(data_root)
+    return load_model_config_file(model_config_path(data_root))
+
+
+def load_model_config_file(path: str | Path) -> ModelProviderConfig:
+    """Load one exact persistent config file without accepting environment secrets."""
+
+    config_path = Path(path)
     try:
-        raw = path.read_text(encoding="utf-8")
+        raw = config_path.read_text(encoding="utf-8")
     except FileNotFoundError:
         return ModelProviderConfig()
     except OSError as exc:

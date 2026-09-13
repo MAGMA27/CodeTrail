@@ -1,0 +1,157 @@
+{
+  "cases": [
+    {
+      "case_id": "csv-import-validation",
+      "index_id": "eval-index-e3218aa8934b1e1451500f66a2c86fcc",
+      "input_construction_version": "p4-e2a-input-v2",
+      "issue_hash": "3e7ba9cc05f01ca45cdbd7d99e80683d050ca1842cc3cf7d840ebf2a9a54c140",
+      "issue_id": "eval-issue-csv-import-validation",
+      "issue_input": {
+        "body": "CSV import fails with KeyError when a row has no name. The reader should validate malformed rows before formatting.",
+        "id": "eval-issue-csv-import-validation",
+        "mentioned_paths": [
+          "reader.py"
+        ],
+        "schema_version": "0.1.0",
+        "stacktrace": null,
+        "title": "CSV import needs validation for rows without a name"
+      },
+      "method_fingerprint": "c3404fb10f4e767c9494a528520d4da84d17896dbe51313891fdf32bf6eac7fe",
+      "result_path": "runs/csv-import-validation/report.json",
+      "run_input_fields": [
+        "Issue JSON",
+        "complete saved Session message prefix"
+      ],
+      "source_files": [
+        "app.py",
+        "formatter.py",
+        "other.py",
+        "reader.py"
+      ],
+      "source_manifest_hash": "cd81783813b21b440c4f4e795b0e1a367b50e4c876deca3a1b17036dc2fa5027",
+      "split": "calibration"
+    },
+    {
+      "case_id": "cache-key-tenant",
+      "index_id": "eval-index-41cef4955fdaecc38dd5b411bb6ca5b2",
+      "input_construction_version": "p4-e2a-input-v2",
+      "issue_hash": "8eeae5a2c1f88b7844b7f4594bb1a95398a98bd07385f9517484c9e8c34179ff",
+      "issue_id": "eval-issue-cache-key-tenant",
+      "issue_input": {
+        "body": "Profiles from two organizations sometimes cross. The cache lookup must include tenant_id in the key before loading a user profile.",
+        "id": "eval-issue-cache-key-tenant",
+        "mentioned_paths": [
+          "service.py",
+          "cache.py"
+        ],
+        "schema_version": "0.1.0",
+        "stacktrace": null,
+        "title": "Profiles from different tenants cross in the cache"
+      },
+      "method_fingerprint": "c3404fb10f4e767c9494a528520d4da84d17896dbe51313891fdf32bf6eac7fe",
+      "result_path": "runs/cache-key-tenant/report.json",
+      "run_input_fields": [
+        "Issue JSON",
+        "complete saved Session message prefix"
+      ],
+      "source_files": [
+        "cache.py",
+        "repository.py",
+        "service.py"
+      ],
+      "source_manifest_hash": "4aa1b67e0201bd5da6c24579556c3adeaf053a5e7fa235fac58940c1cf9c15dd",
+      "split": "calibration"
+    },
+    {
+      "case_id": "partner-billing-outage",
+      "index_id": "eval-index-eb4a9ad120468f08a99ac8e8f21dc3af",
+      "input_construction_version": "p4-e2a-input-v2",
+      "issue_hash": "8196263f39d59c186a89edfc829c091737c0a09bef33887d8bd309bee446b2ae",
+      "issue_id": "eval-issue-partner-billing-outage",
+      "issue_input": {
+        "body": "The partner billing endpoint intermittently returns 503. Determine whether the outage or the local client is responsible, but the partner response and deployment logs are not available here.",
+        "id": "eval-issue-partner-billing-outage",
+        "mentioned_paths": [
+          "billing/client.py"
+        ],
+        "schema_version": "0.1.0",
+        "stacktrace": null,
+        "title": "Partner billing endpoint intermittently returns 503"
+      },
+      "method_fingerprint": "c3404fb10f4e767c9494a528520d4da84d17896dbe51313891fdf32bf6eac7fe",
+      "result_path": "runs/partner-billing-outage/report.json",
+      "run_input_fields": [
+        "Issue JSON",
+        "complete saved Session message prefix"
+      ],
+      "source_files": [
+        "billing/client.py",
+        "billing/config.py",
+        "billing/handlers.py"
+      ],
+      "source_manifest_hash": "b03e176f68ba3f46df1f3ed33ffc41d5d75d5d061e4f1b38a2f86c56c3436d34",
+      "split": "calibration"
+    }
+  ],
+  "dataset_id": "codetrail-p4-e1",
+  "dataset_version": "p4-e1-v1",
+  "evaluation_budget": {
+    "max_cases": 100,
+    "max_cost_microusd": 250000,
+    "max_input_chars": 600000,
+    "max_model_calls": 24,
+    "max_model_input_chars": 800000,
+    "max_model_output_chars": 120000,
+    "max_output_chars": 300000,
+    "max_seconds": 180,
+    "token_usage_policy": "unknown_reported_not_counted"
+  },
+  "input_construction_version": "p4-e2a-input-v2",
+  "method": {
+    "budget": {
+      "max_events": 100,
+      "max_input_chars": 60000,
+      "max_model_calls": 4,
+      "max_model_input_chars": 80000,
+      "max_model_output_chars": 20000,
+      "max_output_chars": 50000,
+      "max_repair_calls": 1,
+      "max_seconds": 30,
+      "max_source_lines": 200,
+      "max_tool_calls": 8,
+      "max_total_source_lines": 800
+    },
+    "configuration_status": "missing",
+    "cost_policy": {
+      "currency": "USD",
+      "input_cache_hit_microusd_per_million": 14000,
+      "input_cache_miss_microusd_per_million": 440000,
+      "model": "deepseek-v4-flash",
+      "output_microusd_per_million": 1320000,
+      "pricing_checked_at": "2026-09-13",
+      "pricing_source_url": "https://api-docs.deepseek.com/quick_start/pricing",
+      "provider": "deepseek",
+      "reserve_cache": "miss",
+      "settlement": "reported_tokens_cache_miss_conservative",
+      "tokens_per_char_upper_bound": 1
+    },
+    "execution_mode": "external",
+    "execution_version": "p4-e2a-real-run-v1",
+    "method_id": "real-run-external-deepseek-v1",
+    "method_version": "real-run-external-deepseek-v1",
+    "model": "deepseek-v4-flash",
+    "model_calls_expected": 12,
+    "model_provider": "deepseek",
+    "network_calls": 12,
+    "prompt_version": "issue-analysis-v1",
+    "provider_config_fingerprint": "fda3a9c567af846745f0cc64ffd00e4078752359b86a556faf39fd9d4ba16cac",
+    "provider_kind": "external",
+    "source_scope": "case_manifest_only"
+  },
+  "output_dir": "evals\\results\\p4-e2b-external-v1",
+  "plan_kind": "dry_run",
+  "raw_state_path": "evals\\results\\p4-e2b-external-v1\\raw-state.json",
+  "schema_version": "p4-e2a",
+  "simulation_notice": "这是受显式授权、配置指纹、发送范围和累计费用上限约束的真实供应商评测入口；本地验证使用 HTTP 假供应商，当前仓库交付不代表已经访问外网或产生真实费用。",
+  "split": "calibration"
+}

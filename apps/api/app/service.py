@@ -150,6 +150,7 @@ class RepositoryRegistry:
         mcp_run_write_enabled: bool | None = None,
         real_run_enabled: bool | None = None,
         mcp_real_run_enabled: bool | None = None,
+        model_config: ModelProviderConfig | None = None,
     ) -> None:
         normalized: dict[str, RepositorySpec] = {}
         for repository_id, repository_root in roots.items():
@@ -176,7 +177,7 @@ class RepositoryRegistry:
             )
         configured_data_root = data_root or os.getenv("CODETRAIL_DATA_DIR") or (Path.cwd() / ".codetrail")
         self._data_root = _prepare_data_root(configured_data_root)
-        self._model_config = load_model_config(self._data_root)
+        self._model_config = model_config if model_config is not None else load_model_config(self._data_root)
         self._management_store = ManagementStore(self._data_root / "registry.sqlite3")
         self._allowed_import_roots = self._prepare_allowed_import_roots(
             allowed_import_roots
@@ -239,6 +240,7 @@ class RepositoryRegistry:
         mcp_run_write_enabled: bool | None = None,
         real_run_enabled: bool | None = None,
         mcp_real_run_enabled: bool | None = None,
+        model_config: ModelProviderConfig | None = None,
     ) -> RepositoryRegistry:
         raw = os.getenv("CODETRAIL_REPOSITORIES", "").strip()
         payload: dict[str, str] = {}
@@ -270,6 +272,7 @@ class RepositoryRegistry:
             mcp_run_write_enabled=mcp_run_write_enabled,
             real_run_enabled=real_run_enabled,
             mcp_real_run_enabled=mcp_real_run_enabled,
+            model_config=model_config,
         )
 
     @property

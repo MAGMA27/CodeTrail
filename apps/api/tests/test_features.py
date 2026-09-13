@@ -448,7 +448,7 @@ def test_real_mode_without_server_credentials_is_explicit_and_never_falls_back(
     assert generation["error"]["kind"] == "model_unavailable"
     assert generation["features"] == []
     assert generation["mode"] == "real"
-    assert generation["model"] == "deepseek-flash"
+    assert generation["model"] == "deepseek-v4-flash"
 
 
 def test_persistent_deepseek_config_is_loaded_from_service_data_root(tmp_path: Path) -> None:
@@ -460,7 +460,7 @@ def test_persistent_deepseek_config_is_loaded_from_service_data_root(tmp_path: P
                 "provider": "deepseek",
                 "api_key": "sk-persisted-test",
                 "base_url": "https://api.deepseek.com",
-                "model": "deepseek-flash",
+                "model": "deepseek-v4-flash",
             }
         ),
         encoding="utf-8",
