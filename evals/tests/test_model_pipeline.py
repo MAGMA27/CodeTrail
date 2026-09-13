@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+import evals.model_pipeline as model_pipeline
 from evals.model_models import ModelBudgetLimits
 from evals.model_pipeline import (
     OfflineFakeIssueAdapter,
@@ -34,13 +35,26 @@ def test_dry_run_plan_is_gold_free() -> None:
     assert len(plan.cases) == 6
 
 
-def test_offline_fake_real_run_scores_and_resumes_without_duplicate_runs(tmp_path: Path) -> None:
+def test_offline_fake_real_run_scores_and_resumes_without_duplicate_runs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     frozen = load_frozen_dataset()
     adapters: list[OfflineFakeIssueAdapter] = []
+    phases: list[str] = []
+
+    original_loader = model_pipeline.load_annotations_for_dataset
+
+    def load_annotations_after_execution(dataset):
+        phases.append("annotations")
+        return original_loader(dataset)
+
+    monkeypatch.setattr(model_pipeline, "load_annotations_for_dataset", load_annotations_after_execution)
 
     def factory(_mode: str) -> OfflineFakeIssueAdapter:
         adapter = OfflineFakeIssueAdapter()
         adapters.append(adapter)
+        phases.append("run")
         return adapter
 
     output_dir = tmp_path / "results"
@@ -63,6 +77,7 @@ def test_offline_fake_real_run_scores_and_resumes_without_duplicate_runs(tmp_pat
     assert all((output_dir / item.execution.report_path).is_file() for item in report.cases if item.execution.report_path)
     assert comparison.groups[0].model.total_cases == 6
     assert len(adapters) == 6
+    assert phases == ["run"] * 6 + ["annotations"]
 
     resumed_adapters: list[OfflineFakeIssueAdapter] = []
 

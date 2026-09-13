@@ -28,9 +28,9 @@ P4-E2a 新增独立的模型评测编排：先只加载冻结 Issue、manifest �
 实现入口为 [模型评测编排](../../evals/model_pipeline.py)、[评测模型契约](../../evals/model_models.py) 和 [评测 README](../../evals/README.md)。
 
 - `pnpm evals:validate` 通过，冻结数据版本和六例划分未变。
-- `pnpm evals:test` 通过，覆盖 gold-free 清单、真实 Run 离线假供应商、多轮工具结果、显式弃答、预算失败、恢复去重、最终候选去重和非法证据映射。
-- 离线集成结果写入 `evals/results/p4-e2a-v1/`；六例均沿真实 Run 路径产生终态，模型和对照报告明确标记 `offline-fake`。
-- `pnpm contracts:check`、`pnpm docs:check`、后端回归和 Python 编译检查通过；本步不改变共享 API/Pydantic 契约。
+- `pnpm evals:test` 通过（16 passed），覆盖 gold-free 清单、真实 Run 离线假供应商、多轮工具结果、显式弃答、预算失败、取消、恢复去重、最终候选去重和非法证据映射。
+- 离线集成结果写入 `evals/results/p4-e2a-v1/`；六例均沿真实 Run 路径产生终态，模型和对照报告明确标记 `offline-fake`。结果为 6/6 成功、4/4 可定位案例证据合法、2/2 证据不足案例明确弃答，token 用量为 unknown/null。
+- `pnpm contracts:check`（21 passed）、`pnpm docs:check`、后端回归（121 passed）和 Python 编译检查通过；本步不改变共享 API/Pydantic 契约。
 
 ## 后果
 

@@ -1,0 +1,89 @@
+{
+  "candidate_links": [
+    {
+      "candidate_id": "candidate-offline-fake",
+      "evidence_ids": [
+        "evidence-e75277132e829b02bd54951256ac1dc7"
+      ],
+      "index_id": "index-eval-case-83b6daed08a499b1",
+      "relation": "selected by the offline fake adapter",
+      "source_symbol_id": "sym-f0c740e0c38bd7b7b0ffd59e748adbfe",
+      "target_symbol_id": null
+    }
+  ],
+  "evidence": [
+    {
+      "content_hash": "719ec0997e476d390d8cdce2d65ebf7be07cd2260c0a5afac5d284367597c3d9",
+      "end_line": 2,
+      "evidence_id": "evidence-e75277132e829b02bd54951256ac1dc7",
+      "excerpt": "def build_login_redirect(next_path: str, state: str) -> str:\n    return f\"/login?next={next_path}&state={state}\"",
+      "index_id": "index-eval-case-83b6daed08a499b1",
+      "kind": "source",
+      "path": "auth.py",
+      "start_line": 1
+    }
+  ],
+  "findings": [
+    {
+      "evidence_ids": [
+        "evidence-e75277132e829b02bd54951256ac1dc7"
+      ],
+      "finding_id": "finding-offline-fake",
+      "kind": "hypothesis",
+      "symbol_ids": [
+        "sym-f0c740e0c38bd7b7b0ffd59e748adbfe"
+      ],
+      "text": "The selected source span is a bounded candidate for the Issue."
+    }
+  ],
+  "fixture_mode": false,
+  "graph": {
+    "candidate_links": [
+      {
+        "candidate_id": "candidate-offline-fake",
+        "evidence_ids": [
+          "evidence-e75277132e829b02bd54951256ac1dc7"
+        ],
+        "index_id": "index-eval-case-83b6daed08a499b1",
+        "relation": "selected by the offline fake adapter",
+        "source_symbol_id": "sym-f0c740e0c38bd7b7b0ffd59e748adbfe",
+        "target_symbol_id": null
+      }
+    ],
+    "index_id": "index-eval-case-83b6daed08a499b1",
+    "nodes": [
+      {
+        "end_line": 2,
+        "index_id": "index-eval-case-83b6daed08a499b1",
+        "kind": "module",
+        "path": "auth.py",
+        "qualified_name": "auth",
+        "start_line": 1,
+        "symbol_id": "sym-101872d5214bd1ff5b99c69a4bfe749b"
+      },
+      {
+        "end_line": 2,
+        "index_id": "index-eval-case-83b6daed08a499b1",
+        "kind": "function",
+        "path": "auth.py",
+        "qualified_name": "auth.build_login_redirect",
+        "start_line": 1,
+        "symbol_id": "sym-f0c740e0c38bd7b7b0ffd59e748adbfe"
+      }
+    ],
+    "static_edges": [],
+    "truncated": false,
+    "truncation_reason": null,
+    "unresolved": []
+  },
+  "index_id": "index-eval-case-83b6daed08a499b1",
+  "outcome": "candidate_found",
+  "project_id": "project-a5818bae3be442c39c18aa6577af18ec",
+  "report_id": "report-run-21d9690ae73b4d93a33322b3963a8b61",
+  "run_id": "run-21d9690ae73b4d93a33322b3963a8b61",
+  "schema_version": "0.1.0",
+  "session_id": "session-a7738dc9cdf34ea38602a4fb79469171",
+  "status": "succeeded",
+  "summary": "The bounded snapshot contains a candidate supported by same-snapshot source evidence.",
+  "terminal_sequence": 11
+}

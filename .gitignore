@@ -20,6 +20,8 @@ __pycache__/
 .codetrail/
 .codetrail*/
 evals/.runtime/
+# Per-run recovery checkpoints contain machine-local paths and are not reports.
+evals/results/p4-e2a-v1/raw-state.json
 
 # Project planning docs are maintained outside Git
 /memory-bank/

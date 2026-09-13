@@ -1,0 +1,442 @@
+{
+  "baseline_report_path": "evals/results/p4-e1-v1/baseline-all.json",
+  "cases": [
+    {
+      "baseline": {
+        "abstained": null,
+        "false_positive": null,
+        "file_hit_at_1": false,
+        "file_hit_at_3": true,
+        "location_hit_at_1": false,
+        "location_hit_at_3": true,
+        "status": "succeeded",
+        "symbol_hit_at_1": false,
+        "symbol_hit_at_3": false
+      },
+      "case_id": "csv-import-validation",
+      "model": {
+        "abstained": null,
+        "false_positive": null,
+        "file_hit_at_1": true,
+        "file_hit_at_3": true,
+        "location_hit_at_1": false,
+        "location_hit_at_3": false,
+        "status": "succeeded",
+        "symbol_hit_at_1": true,
+        "symbol_hit_at_3": true
+      },
+      "model_execution_status": "succeeded",
+      "note": null,
+      "split": "calibration"
+    },
+    {
+      "baseline": {
+        "abstained": null,
+        "false_positive": null,
+        "file_hit_at_1": true,
+        "file_hit_at_3": true,
+        "location_hit_at_1": true,
+        "location_hit_at_3": true,
+        "status": "succeeded",
+        "symbol_hit_at_1": false,
+        "symbol_hit_at_3": true
+      },
+      "case_id": "cache-key-tenant",
+      "model": {
+        "abstained": null,
+        "false_positive": null,
+        "file_hit_at_1": false,
+        "file_hit_at_3": false,
+        "location_hit_at_1": false,
+        "location_hit_at_3": false,
+        "status": "succeeded",
+        "symbol_hit_at_1": false,
+        "symbol_hit_at_3": false
+      },
+      "model_execution_status": "succeeded",
+      "note": null,
+      "split": "calibration"
+    },
+    {
+      "baseline": {
+        "abstained": false,
+        "false_positive": true,
+        "file_hit_at_1": null,
+        "file_hit_at_3": null,
+        "location_hit_at_1": null,
+        "location_hit_at_3": null,
+        "status": "succeeded",
+        "symbol_hit_at_1": null,
+        "symbol_hit_at_3": null
+      },
+      "case_id": "partner-billing-outage",
+      "model": {
+        "abstained": true,
+        "false_positive": false,
+        "file_hit_at_1": null,
+        "file_hit_at_3": null,
+        "location_hit_at_1": null,
+        "location_hit_at_3": null,
+        "status": "succeeded",
+        "symbol_hit_at_1": null,
+        "symbol_hit_at_3": null
+      },
+      "model_execution_status": "succeeded",
+      "note": "model explicitly returned insufficient_evidence",
+      "split": "calibration"
+    },
+    {
+      "baseline": {
+        "abstained": null,
+        "false_positive": null,
+        "file_hit_at_1": false,
+        "file_hit_at_3": true,
+        "location_hit_at_1": false,
+        "location_hit_at_3": true,
+        "status": "succeeded",
+        "symbol_hit_at_1": false,
+        "symbol_hit_at_3": true
+      },
+      "case_id": "redirect-query-encoding",
+      "model": {
+        "abstained": null,
+        "false_positive": null,
+        "file_hit_at_1": true,
+        "file_hit_at_3": true,
+        "location_hit_at_1": true,
+        "location_hit_at_3": true,
+        "status": "succeeded",
+        "symbol_hit_at_1": true,
+        "symbol_hit_at_3": true
+      },
+      "model_execution_status": "succeeded",
+      "note": null,
+      "split": "holdout"
+    },
+    {
+      "baseline": {
+        "abstained": null,
+        "false_positive": null,
+        "file_hit_at_1": true,
+        "file_hit_at_3": true,
+        "location_hit_at_1": true,
+        "location_hit_at_3": true,
+        "status": "succeeded",
+        "symbol_hit_at_1": false,
+        "symbol_hit_at_3": true
+      },
+      "case_id": "retry-control-flow",
+      "model": {
+        "abstained": null,
+        "false_positive": null,
+        "file_hit_at_1": true,
+        "file_hit_at_3": true,
+        "location_hit_at_1": true,
+        "location_hit_at_3": true,
+        "status": "succeeded",
+        "symbol_hit_at_1": true,
+        "symbol_hit_at_3": true
+      },
+      "model_execution_status": "succeeded",
+      "note": null,
+      "split": "holdout"
+    },
+    {
+      "baseline": {
+        "abstained": false,
+        "false_positive": true,
+        "file_hit_at_1": null,
+        "file_hit_at_3": null,
+        "location_hit_at_1": null,
+        "location_hit_at_3": null,
+        "status": "succeeded",
+        "symbol_hit_at_1": null,
+        "symbol_hit_at_3": null
+      },
+      "case_id": "remote-rollout-config",
+      "model": {
+        "abstained": true,
+        "false_positive": false,
+        "file_hit_at_1": null,
+        "file_hit_at_3": null,
+        "location_hit_at_1": null,
+        "location_hit_at_3": null,
+        "status": "succeeded",
+        "symbol_hit_at_1": null,
+        "symbol_hit_at_3": null
+      },
+      "model_execution_status": "succeeded",
+      "note": "model explicitly returned insufficient_evidence",
+      "split": "holdout"
+    }
+  ],
+  "dataset_id": "codetrail-p4-e1",
+  "dataset_version": "p4-e1-v1",
+  "groups": [
+    {
+      "baseline": {
+        "applicable_cases": 4,
+        "evidence_legal_rate": {
+          "denominator": 17,
+          "numerator": 17,
+          "value": 1.0
+        },
+        "failed_cases": 0,
+        "file_hit_at_1": {
+          "denominator": 4,
+          "numerator": 2,
+          "value": 0.5
+        },
+        "file_hit_at_3": {
+          "denominator": 4,
+          "numerator": 4,
+          "value": 1.0
+        },
+        "insufficient_abstention_rate": {
+          "denominator": 2,
+          "numerator": 0,
+          "value": 0.0
+        },
+        "insufficient_cases": 2,
+        "insufficient_false_positive_rate": {
+          "denominator": 2,
+          "numerator": 2,
+          "value": 1.0
+        },
+        "succeeded_cases": 6,
+        "symbol_hit_at_1": {
+          "denominator": 4,
+          "numerator": 0,
+          "value": 0.0
+        },
+        "symbol_hit_at_3": {
+          "denominator": 4,
+          "numerator": 3,
+          "value": 0.75
+        },
+        "total_cases": 6
+      },
+      "model": {
+        "applicable_cases": 4,
+        "evidence_legal_rate": {
+          "denominator": 4,
+          "numerator": 4,
+          "value": 1.0
+        },
+        "failed_cases": 0,
+        "file_hit_at_1": {
+          "denominator": 4,
+          "numerator": 3,
+          "value": 0.75
+        },
+        "file_hit_at_3": {
+          "denominator": 4,
+          "numerator": 3,
+          "value": 0.75
+        },
+        "insufficient_abstention_rate": {
+          "denominator": 2,
+          "numerator": 2,
+          "value": 1.0
+        },
+        "insufficient_cases": 2,
+        "insufficient_false_positive_rate": {
+          "denominator": 2,
+          "numerator": 0,
+          "value": 0.0
+        },
+        "succeeded_cases": 6,
+        "symbol_hit_at_1": {
+          "denominator": 4,
+          "numerator": 3,
+          "value": 0.75
+        },
+        "symbol_hit_at_3": {
+          "denominator": 4,
+          "numerator": 3,
+          "value": 0.75
+        },
+        "total_cases": 6
+      },
+      "split": "all"
+    },
+    {
+      "baseline": {
+        "applicable_cases": 2,
+        "evidence_legal_rate": {
+          "denominator": 9,
+          "numerator": 9,
+          "value": 1.0
+        },
+        "failed_cases": 0,
+        "file_hit_at_1": {
+          "denominator": 2,
+          "numerator": 1,
+          "value": 0.5
+        },
+        "file_hit_at_3": {
+          "denominator": 2,
+          "numerator": 2,
+          "value": 1.0
+        },
+        "insufficient_abstention_rate": {
+          "denominator": 1,
+          "numerator": 0,
+          "value": 0.0
+        },
+        "insufficient_cases": 1,
+        "insufficient_false_positive_rate": {
+          "denominator": 1,
+          "numerator": 1,
+          "value": 1.0
+        },
+        "succeeded_cases": 3,
+        "symbol_hit_at_1": {
+          "denominator": 2,
+          "numerator": 0,
+          "value": 0.0
+        },
+        "symbol_hit_at_3": {
+          "denominator": 2,
+          "numerator": 1,
+          "value": 0.5
+        },
+        "total_cases": 3
+      },
+      "model": {
+        "applicable_cases": 2,
+        "evidence_legal_rate": {
+          "denominator": 2,
+          "numerator": 2,
+          "value": 1.0
+        },
+        "failed_cases": 0,
+        "file_hit_at_1": {
+          "denominator": 2,
+          "numerator": 1,
+          "value": 0.5
+        },
+        "file_hit_at_3": {
+          "denominator": 2,
+          "numerator": 1,
+          "value": 0.5
+        },
+        "insufficient_abstention_rate": {
+          "denominator": 1,
+          "numerator": 1,
+          "value": 1.0
+        },
+        "insufficient_cases": 1,
+        "insufficient_false_positive_rate": {
+          "denominator": 1,
+          "numerator": 0,
+          "value": 0.0
+        },
+        "succeeded_cases": 3,
+        "symbol_hit_at_1": {
+          "denominator": 2,
+          "numerator": 1,
+          "value": 0.5
+        },
+        "symbol_hit_at_3": {
+          "denominator": 2,
+          "numerator": 1,
+          "value": 0.5
+        },
+        "total_cases": 3
+      },
+      "split": "calibration"
+    },
+    {
+      "baseline": {
+        "applicable_cases": 2,
+        "evidence_legal_rate": {
+          "denominator": 8,
+          "numerator": 8,
+          "value": 1.0
+        },
+        "failed_cases": 0,
+        "file_hit_at_1": {
+          "denominator": 2,
+          "numerator": 1,
+          "value": 0.5
+        },
+        "file_hit_at_3": {
+          "denominator": 2,
+          "numerator": 2,
+          "value": 1.0
+        },
+        "insufficient_abstention_rate": {
+          "denominator": 1,
+          "numerator": 0,
+          "value": 0.0
+        },
+        "insufficient_cases": 1,
+        "insufficient_false_positive_rate": {
+          "denominator": 1,
+          "numerator": 1,
+          "value": 1.0
+        },
+        "succeeded_cases": 3,
+        "symbol_hit_at_1": {
+          "denominator": 2,
+          "numerator": 0,
+          "value": 0.0
+        },
+        "symbol_hit_at_3": {
+          "denominator": 2,
+          "numerator": 2,
+          "value": 1.0
+        },
+        "total_cases": 3
+      },
+      "model": {
+        "applicable_cases": 2,
+        "evidence_legal_rate": {
+          "denominator": 2,
+          "numerator": 2,
+          "value": 1.0
+        },
+        "failed_cases": 0,
+        "file_hit_at_1": {
+          "denominator": 2,
+          "numerator": 2,
+          "value": 1.0
+        },
+        "file_hit_at_3": {
+          "denominator": 2,
+          "numerator": 2,
+          "value": 1.0
+        },
+        "insufficient_abstention_rate": {
+          "denominator": 1,
+          "numerator": 1,
+          "value": 1.0
+        },
+        "insufficient_cases": 1,
+        "insufficient_false_positive_rate": {
+          "denominator": 1,
+          "numerator": 0,
+          "value": 0.0
+        },
+        "succeeded_cases": 3,
+        "symbol_hit_at_1": {
+          "denominator": 2,
+          "numerator": 2,
+          "value": 1.0
+        },
+        "symbol_hit_at_3": {
+          "denominator": 2,
+          "numerator": 2,
+          "value": 1.0
+        },
+        "total_cases": 3
+      },
+      "split": "holdout"
+    }
+  ],
+  "method_id": "real-run-offline-fake-v1",
+  "model_report_path": "evals/results/p4-e2a-v1/model-all.json",
+  "schema_version": "p4-e2a",
+  "simulation_notice": "本报告使用本地确定性假供应商，目的是验证真实 Run/工具/预算/持久化/评分适配；它不代表任何真实模型的语义质量、根因判断或供应商表现。"
+}

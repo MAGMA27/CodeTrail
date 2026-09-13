@@ -1,0 +1,25 @@
+{
+  "candidate_links": [],
+  "evidence": [],
+  "findings": [],
+  "fixture_mode": false,
+  "graph": {
+    "candidate_links": [],
+    "index_id": "index-eval-case-b03e176f68ba3f46",
+    "nodes": [],
+    "static_edges": [],
+    "truncated": false,
+    "truncation_reason": null,
+    "unresolved": []
+  },
+  "index_id": "index-eval-case-b03e176f68ba3f46",
+  "outcome": "insufficient_evidence",
+  "project_id": "project-a3fded3b53b1436cb5b84bb737d6c2a8",
+  "report_id": "report-run-f52e0b55feea4be39a87c76452bfda1d",
+  "run_id": "run-f52e0b55feea4be39a87c76452bfda1d",
+  "schema_version": "0.1.0",
+  "session_id": "session-50eff0cc7071447d8134c07fe4e83b7d",
+  "status": "succeeded",
+  "summary": "The bounded snapshot does not contain enough local evidence for a conclusion.",
+  "terminal_sequence": 6
+}
