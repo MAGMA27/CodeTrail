@@ -142,6 +142,7 @@ def build_source_snapshot(
     revision: str = "working-tree",
     dirty: bool = True,
     index_id: str | None = None,
+    identity_version: str = "source-v1",
     max_file_bytes: int = 1_000_000,
 ) -> SourceSnapshot:
     """Read a bounded Python source tree and build a reproducible snapshot.
@@ -154,6 +155,8 @@ def build_source_snapshot(
 
     if max_file_bytes < 1:
         raise ValueError("max_file_bytes must be positive")
+    if not re.fullmatch(r"[A-Za-z0-9._-]{1,80}", identity_version):
+        raise ValueError("identity_version must be a short stable identifier")
 
     root = _resolve_repository_root(repository_root)
     paths, issues = _discover_python_files(root)
@@ -219,7 +222,7 @@ def build_source_snapshot(
     snapshot_files.sort(key=lambda source_file: source_file.path)
     issues.sort(key=lambda issue: (issue.path, issue.kind))
     snapshot_hash = _snapshot_hash(snapshot_files, issues)
-    generated_index_id = index_id or _make_index_id(repository_id, snapshot_hash)
+    generated_index_id = index_id or _make_index_id(repository_id, snapshot_hash, identity_version)
     status = "failed" if any(issue.kind in _BLOCKING_ISSUES for issue in issues) else "ready"
 
     index = IndexSnapshot(
@@ -443,7 +446,8 @@ def _snapshot_hash(files: list[SnapshotFile], issues: list[SnapshotIssue]) -> st
     return _sha256(payload)
 
 
-def _make_index_id(repository_id: str, snapshot_hash: str) -> str:
+def _make_index_id(repository_id: str, snapshot_hash: str, identity_version: str = "source-v1") -> str:
     slug = re.sub(r"[^A-Za-z0-9_-]+", "-", repository_id).strip("-_") or "repository"
-    return f"index-{slug[:80]}-{snapshot_hash[:16]}"
-
+    if identity_version == "source-v1":
+        return f"index-{slug[:80]}-{snapshot_hash[:16]}"
+    return f"index-{slug[:60]}-{identity_version}-{snapshot_hash[:16]}"

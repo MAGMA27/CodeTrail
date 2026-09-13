@@ -15,7 +15,7 @@ from .contracts import (
     ProjectOverview,
     Symbol,
 )
-from .relations import RelationIndex
+from .relations import RelationIndex, relation_coverage_limitations
 
 
 DEFAULT_MAX_NODES = 40
@@ -47,6 +47,14 @@ def build_feature_graph(
     reasons: list[str] = []
     if relation.truncated and relation.truncation_reason:
         reasons.append(f"static relation graph: {relation.truncation_reason}")
+    limitations.extend(
+        relation_coverage_limitations(
+            truncated=False,
+            truncation_reason=None,
+            unresolved_truncated=relation.unresolved_truncated,
+            unresolved_truncation_reason=relation.unresolved_truncation_reason,
+        )
+    )
     if generation.status == "failed":
         limitations.append("失败版本没有可展开的功能节点。")
     elif generation.status == "insufficient_evidence":

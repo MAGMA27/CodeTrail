@@ -194,6 +194,8 @@
             "index_id": "index-timeout-demo-v1",
             "index_truncated": false,
             "index_truncation_reason": null,
+            "index_unresolved_truncated": null,
+            "index_unresolved_truncation_reason": null,
             "kind": "get_neighbors.succeeded",
             "neighbors": [
               {
@@ -1453,6 +1455,8 @@
       "index_id": "index-timeout-demo-v1",
       "index_truncated": false,
       "index_truncation_reason": null,
+      "index_unresolved_truncated": null,
+      "index_unresolved_truncation_reason": null,
       "kind": "get_neighbors.succeeded",
       "neighbors": [
         {

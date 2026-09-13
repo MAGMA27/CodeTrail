@@ -14,6 +14,30 @@ from .indexing import DefinitionIndex, SnapshotIssue, SourceSnapshot
 
 RelationKind = Literal["imports", "calls"]
 BindingKind = Literal["module", "symbol"]
+RELATION_INDEX_IDENTITY_VERSION = "relations-v2"
+
+
+def relation_coverage_limitations(
+    *,
+    truncated: bool,
+    truncation_reason: str | None,
+    unresolved_truncated: bool | None,
+    unresolved_truncation_reason: str | None,
+) -> list[str]:
+    """Describe index coverage without treating missing relations as proof of absence."""
+
+    limitations: list[str] = []
+    if truncated:
+        reason = truncation_reason or "未知原因"
+        limitations.append(f"固定关系索引扫描未完成：{reason}；空邻接不能证明没有关系。")
+    if unresolved_truncated is True:
+        reason = unresolved_truncation_reason or "未知原因"
+        limitations.append(
+            f"固定关系索引的 unresolved 详情已截断：{reason}；未返回的 unresolved 不能被当作不存在。"
+        )
+    elif unresolved_truncated is None:
+        limitations.append("固定关系索引的 unresolved 覆盖状态未知（旧索引未记录该字段）。")
+    return limitations
 
 
 @dataclass(frozen=True)
@@ -25,6 +49,8 @@ class RelationIndex:
     unresolved: tuple[UnresolvedReference, ...]
     truncated: bool
     truncation_reason: str | None
+    unresolved_truncated: bool | None = None
+    unresolved_truncation_reason: str | None = None
 
     @property
     def snapshot(self) -> SourceSnapshot:
@@ -74,6 +100,8 @@ class _RelationBudget:
         self.unresolved_count = 0
         self.truncated = False
         self.reason: str | None = None
+        self.unresolved_truncated = False
+        self.unresolved_reason: str | None = None
 
     def reserve(self, category: Literal["edges", "unresolved"]) -> bool:
         if self.truncated:
@@ -88,7 +116,8 @@ class _RelationBudget:
             self.edge_count += 1
         else:
             if self.unresolved_count >= self.max_unresolved:
-                self._stop("max_unresolved reached")
+                self.unresolved_truncated = True
+                self.unresolved_reason = "max_unresolved reached"
                 return False
             self.unresolved_count += 1
         return True
@@ -147,6 +176,8 @@ def extract_relations(
         unresolved=tuple(unresolved),
         truncated=budget.truncated,
         truncation_reason=budget.reason,
+        unresolved_truncated=budget.unresolved_truncated,
+        unresolved_truncation_reason=budget.unresolved_reason,
     )
 
 

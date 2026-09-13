@@ -19,7 +19,7 @@
 
 ## 接口与依赖
 
-契约位于 [contracts.py](app/contracts.py)，Schema 由 [export_schema.py](app/export_schema.py) 生成。旧 `/api/indexes/*` 保留兼容；项目工作区使用 `/api/projects/*`。Run 的 HTTP 入口为 `/api/projects/{project_id}/sessions/{session_id}/runs` 及其 detail、events、`events/stream`、tool-results、report、impact、cancel 子路径；fixture/real 创建只做边界校验、冻结、容量预留和提交，worker 启动成功后返回 queued 的 run_id。external Run 只从 MCP `start_external_run` 创建，冻结同样的 Session 输入但不占内部 worker；`run_search_code`、`run_read_source`、`run_get_neighbors` 记录服务端实际结果，`get_neighbors` 的 `truncated` 与 `index_truncated` 分别表示查询预算和固定关系索引覆盖。`submit_external_run` 只接受本 Run 返回的同快照证据/符号。容量满时内部 Run 返回可重试的 `budget_exceeded`/429，不写入 Run。`events/stream` 在握手前校验 project/session/run 与 `after_sequence`/`Last-Event-ID`，按 `{run_id}:{sequence}` 逐帧回放持久化公开事件，终态后关闭，SSE 不可用时由工作台自行回退轮询。`impact` 只按已保存报告中的一个 candidate/finding ID 查询 Run 固定 index 上的静态 `calls`，限制方向、深度、节点、路径和 unresolved 输出，不修改 Run。执行由 [Run 执行子系统](../../docs/subsystems/execution.md)负责。所有项目索引、Session 和 Run 操作都复用 WorkspaceService 的归属校验。
+契约位于 [contracts.py](app/contracts.py)，Schema 由 [export_schema.py](app/export_schema.py) 生成。旧 `/api/indexes/*` 保留兼容；项目工作区使用 `/api/projects/*`。Run 的 HTTP 入口为 `/api/projects/{project_id}/sessions/{session_id}/runs` 及其 detail、events、`events/stream`、tool-results、report、impact、cancel 子路径；fixture/real 创建只做边界校验、冻结、容量预留和提交，worker 启动成功后返回 queued 的 run_id。external Run 只从 MCP `start_external_run` 创建，冻结同样的 Session 输入但不占内部 worker；`run_search_code`、`run_read_source`、`run_get_neighbors` 记录服务端实际结果，`get_neighbors` 的 `truncated` 表示查询预算，`index_truncated` 表示固定关系扫描覆盖，`index_unresolved_truncated` 表示 unresolved 详情覆盖。`submit_external_run` 只接受本 Run 返回的同快照证据/符号。容量满时内部 Run 返回可重试的 `budget_exceeded`/429，不写入 Run。`events/stream` 在握手前校验 project/session/run 与 `after_sequence`/`Last-Event-ID`，按 `{run_id}:{sequence}` 逐帧回放持久化公开事件，终态后关闭，SSE 不可用时由工作台自行回退轮询。`impact` 只按已保存报告中的一个 candidate/finding ID 查询 Run 固定 index 上的静态 `calls`，并返回固定索引覆盖事实；限制方向、深度、节点、路径和 unresolved 输出，不修改 Run。执行由 [Run 执行子系统](../../docs/subsystems/execution.md)负责。所有项目索引、Session 和 Run 操作都复用 WorkspaceService 的归属校验。
 
 ## 数据与生命周期
 
@@ -46,7 +46,7 @@ API 健康检查为 `GET /api/health`。前端或测试先创建 Project、建�
 
 本地/GitHub 导入继续执行绝对路径、allow-list、符号链接/junction、官方 URL、归档安全、时间和大小边界；HTTP 写入口只接受 loopback 客户端。未知项目、非所属索引/Session/Run 返回 `not_found`，参数、预算和执行容量边界返回 `invalid_input` 或可重试的 `budget_exceeded`，失败不泄露宿主路径。
 
-Run 拒绝未开启能力的 `mode=real` 或 `CODETRAIL_MCP_EXTERNAL_RUN_ENABLED`、拒绝空 Session、跨项目/Session/index/generation，冻结完整消息前缀而不是前端已加载页；草稿不会进入输入。单次/总源码行、工具调用、模型调用/修复、模型输入/输出字符、输入/输出字符、事件、总时间和进程并发均有服务端上限；状态只能从 queued/running 进入一个终态，终态事件不可重复，取消幂等，重启中的 Run 标为 interrupted。external 不执行内部模型，且结论不能引用本 Run 未实际返回的证据或符号；终态拒绝迟到工具和结论。模型供应商缺失、请求失败、非法结构化输出和预算耗尽明确失败，不回退 fixture；Run 历史、事件和工具结果分页均有上限并带作用域游标。SSE 的跨 Run、未来游标、游标冲突和订阅容量拒绝在流建立前返回结构化错误；断线只释放订阅，不取消或重启 Run，终态游标收到 `run.stream.end` 控制帧后有限结束；容量满不落库且不影响查询/取消/health；取消/中断报告无候选结论，失败报告保留已持久化的同快照 evidence。影响查询要求报告中的 candidate/finding 精确归属；找不到唯一源符号时返回有解释的空 unmapped 结果，找到后只遍历同快照 `calls`，最大深度 2、默认节点 40，并保留 cycles 的静态边和 unresolved 未知边界。
+Run 拒绝未开启能力的 `mode=real` 或 `CODETRAIL_MCP_EXTERNAL_RUN_ENABLED`、拒绝空 Session、跨项目/Session/index/generation，冻结完整消息前缀而不是前端已加载页；草稿不会进入输入。单次/总源码行、工具调用、模型调用/修复、模型输入/输出字符、输入/输出字符、事件、总时间和进程并发均有服务端上限；状态只能从 queued/running 进入一个终态，终态事件不可重复，取消幂等，重启中的 Run 标为 interrupted。关系扫描和 unresolved 详情分别受有界预算控制；前者未完成与后者未知/截断都不能被空邻接解释为没有关系，旧 index 的 NULL 只表示尚未记录。external 不执行内部模型，且结论不能引用本 Run 未实际返回的证据或符号；终态拒绝迟到工具和结论。模型供应商缺失、请求失败、非法结构化输出和预算耗尽明确失败，不回退 fixture；Run 历史、事件和工具结果分页均有上限并带作用域游标。SSE 的跨 Run、未来游标、游标冲突和订阅容量拒绝在流建立前返回结构化错误；断线只释放订阅，不取消或重启 Run，终态游标收到 `run.stream.end` 控制帧后有限结束；容量满不落库且不影响查询/取消/health；取消/中断报告无候选结论，失败报告保留已持久化的同快照 evidence。影响查询要求报告中的 candidate/finding 精确归属；找不到唯一源符号时返回有解释的空 unmapped 结果，找到后只遍历同快照 `calls`，最大深度 2、默认节点 40，并保留 cycles 的静态边和 unresolved 未知边界。
 
 ## 验证
 
@@ -63,6 +63,7 @@ Run 拒绝未开启能力的 `mode=real` 或 `CODETRAIL_MCP_EXTERNAL_RUN_ENABLED
 - [P2-R2 模型驱动 Issue 分析决策](../../docs/decisions/2026-09-12-run-model-analysis.md)
 - [MVP 操作说明](../../docs/mvp-operation.md)
 - [Run SSE 决策](../../docs/decisions/2026-09-12-run-sse.md)
+- [关系扫描与 unresolved 覆盖语义](../../docs/decisions/2026-09-13-relation-coverage.md)
 
 ## 本地 MCP 入口
 

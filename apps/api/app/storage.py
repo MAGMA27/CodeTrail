@@ -139,6 +139,16 @@ class SearchQueryResult:
 
 
 @dataclass(frozen=True)
+class RelationCoverage:
+    """Persisted coverage facts for one immutable relation index."""
+
+    index_truncated: bool
+    index_truncation_reason: str | None
+    index_unresolved_truncated: bool | None
+    index_unresolved_truncation_reason: str | None
+
+
+@dataclass(frozen=True)
 class NeighborQueryResult:
     """Bounded static neighbors and all nodes needed to render their edges."""
 
@@ -151,6 +161,8 @@ class NeighborQueryResult:
     truncation_reason: str | None
     index_truncated: bool
     index_truncation_reason: str | None
+    index_unresolved_truncated: bool | None
+    index_unresolved_truncation_reason: str | None
 
 
 @dataclass(frozen=True)
@@ -166,6 +178,10 @@ class ImpactQueryResult:
     reachable_node_count: int
     truncated: bool
     truncation_reason: str | None
+    index_truncated: bool
+    index_truncation_reason: str | None
+    index_unresolved_truncated: bool | None
+    index_unresolved_truncation_reason: str | None
 
 
 @dataclass(frozen=True)
@@ -330,6 +346,8 @@ CREATE TABLE IF NOT EXISTS index_snapshots (
     status TEXT NOT NULL CHECK (status IN ('ready', 'building', 'failed')),
     truncated INTEGER NOT NULL CHECK (truncated IN (0, 1)),
     truncation_reason TEXT,
+    unresolved_truncated INTEGER CHECK (unresolved_truncated IN (0, 1)),
+    unresolved_truncation_reason TEXT,
     payload_hash TEXT NOT NULL
 );
 
@@ -1034,6 +1052,7 @@ class IndexStore:
             self._connection.execute("PRAGMA foreign_keys = ON")
             self._check_fts5()
             self._connection.executescript(_SCHEMA)
+            self._ensure_columns()
         except sqlite3.Error as exc:
             self.close()
             if "fts5" in str(exc).casefold():
@@ -1065,6 +1084,23 @@ class IndexStore:
         if connection is not None:
             connection.close()
             self._connection = None  # type: ignore[assignment]
+
+    def _ensure_columns(self) -> None:
+        """Migrate legacy index databases without rewriting immutable rows."""
+
+        existing = {
+            row[1]
+            for row in self._connection.execute("PRAGMA table_info(index_snapshots)").fetchall()
+        }
+        additions = {
+            "unresolved_truncated": "INTEGER CHECK (unresolved_truncated IN (0, 1))",
+            "unresolved_truncation_reason": "TEXT",
+        }
+        for column, definition in additions.items():
+            if column not in existing:
+                self._connection.execute(
+                    f"ALTER TABLE index_snapshots ADD COLUMN {column} {definition}"
+                )
 
     def __enter__(self) -> IndexStore:
         return self
@@ -1397,12 +1433,25 @@ class IndexStore:
             unresolved=unresolved,
             truncated=bool(index_row["truncated"]),
             truncation_reason=index_row["truncation_reason"],
+            unresolved_truncated=_nullable_bool(index_row["unresolved_truncated"]),
+            unresolved_truncation_reason=index_row["unresolved_truncation_reason"],
         )
 
     def load_index_snapshot(self, index_id: str) -> IndexSnapshot:
         """Read only index metadata without loading source, symbols, or relations."""
 
         return _index_from_row(self._require_index(index_id))
+
+    def get_relation_coverage(self, index_id: str) -> RelationCoverage:
+        """Read relation coverage facts without loading the immutable graph payload."""
+
+        row = self._require_index(index_id)
+        return RelationCoverage(
+            index_truncated=bool(row["truncated"]),
+            index_truncation_reason=row["truncation_reason"],
+            index_unresolved_truncated=_nullable_bool(row["unresolved_truncated"]),
+            index_unresolved_truncation_reason=row["unresolved_truncation_reason"],
+        )
 
     def save_feature_generation(
         self,
@@ -2905,6 +2954,8 @@ class IndexStore:
         index_row = self._require_index(index_id)
         index_truncated = bool(index_row["truncated"])
         index_truncation_reason = index_row["truncation_reason"]
+        index_unresolved_truncated = _nullable_bool(index_row["unresolved_truncated"])
+        index_unresolved_truncation_reason = index_row["unresolved_truncation_reason"]
         try:
             params = GetNeighborsParams(
                 symbol_id=symbol_id,
@@ -3011,6 +3062,8 @@ class IndexStore:
             truncation_reason=truncation_reason,
             index_truncated=index_truncated,
             index_truncation_reason=index_truncation_reason,
+            index_unresolved_truncated=index_unresolved_truncated,
+            index_unresolved_truncation_reason=index_unresolved_truncation_reason,
         )
 
     def get_static_impact(
@@ -3029,7 +3082,11 @@ class IndexStore:
     ) -> ImpactQueryResult:
         """Enumerate bounded simple paths over same-snapshot static ``calls`` edges."""
 
-        self._require_index(index_id)
+        index_row = self._require_index(index_id)
+        index_truncated = bool(index_row["truncated"])
+        index_truncation_reason = index_row["truncation_reason"]
+        index_unresolved_truncated = _nullable_bool(index_row["unresolved_truncated"])
+        index_unresolved_truncation_reason = index_row["unresolved_truncation_reason"]
         if direction not in {"callers", "callees"}:
             raise StorageInputError("impact direction must be callers or callees")
         if (
@@ -3164,6 +3221,10 @@ class IndexStore:
             reachable_node_count=max(0, len(nodes) - 1),
             truncated=truncated,
             truncation_reason=truncation_reason,
+            index_truncated=index_truncated,
+            index_truncation_reason=index_truncation_reason,
+            index_unresolved_truncated=index_unresolved_truncated,
+            index_unresolved_truncation_reason=index_unresolved_truncation_reason,
         )
 
     def _load_unresolved(
@@ -3237,8 +3298,9 @@ class IndexStore:
         index = relation.snapshot.index
         self._connection.execute(
             "INSERT INTO index_snapshots (index_id, schema_version, repository_id, revision, dirty, "
-            "snapshot_hash, status, truncated, truncation_reason, payload_hash) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "snapshot_hash, status, truncated, truncation_reason, unresolved_truncated, "
+            "unresolved_truncation_reason, payload_hash) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 index.index_id,
                 index.schema_version,
@@ -3249,6 +3311,8 @@ class IndexStore:
                 index.status,
                 int(relation.truncated),
                 relation.truncation_reason,
+                None if relation.unresolved_truncated is None else int(relation.unresolved_truncated),
+                relation.unresolved_truncation_reason,
                 payload_hash,
             ),
         )
@@ -3364,6 +3428,12 @@ class IndexStore:
             raise StorageInputError("truncated relations must explain the truncation")
         if not relation.truncated and relation.truncation_reason:
             raise StorageInputError("non-truncated relations cannot have a truncation reason")
+        if relation.unresolved_truncated is True and not relation.unresolved_truncation_reason:
+            raise StorageInputError("truncated unresolved details must explain the truncation")
+        if relation.unresolved_truncated is not True and relation.unresolved_truncation_reason:
+            raise StorageInputError(
+                "non-truncated or unknown unresolved details cannot have a truncation reason"
+            )
         files = {source_file.path: source_file for source_file in relation.snapshot.files}
         if len(files) != len(relation.snapshot.files):
             raise StorageInputError("snapshot file paths must be unique")
@@ -3398,6 +3468,12 @@ class IndexStore:
                 raise StorageInputError("unresolved location is outside the snapshot")
             if not set(unresolved.possible_target_ids).issubset(symbol_by_id):
                 raise StorageInputError("unresolved candidate crosses the snapshot boundary")
+
+
+def _nullable_bool(value: object) -> bool | None:
+    if value is None:
+        return None
+    return bool(value)
 
 
 def _index_from_row(row: sqlite3.Row) -> IndexSnapshot:
@@ -3482,6 +3558,8 @@ def _payload_hash(relation: RelationIndex) -> str:
         "unresolved": [item.model_dump(mode="json") for item in relation.unresolved],
         "truncated": relation.truncated,
         "truncation_reason": relation.truncation_reason,
+        "unresolved_truncated": relation.unresolved_truncated,
+        "unresolved_truncation_reason": relation.unresolved_truncation_reason,
     }
     serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()

@@ -144,6 +144,8 @@ class IndexResponse(VersionedModel):
     issues: list[IndexIssue] = Field(default_factory=list)
     truncated: bool = False
     truncation_reason: str | None = Field(default=None, max_length=1_000)
+    unresolved_truncated: bool | None = None
+    unresolved_truncation_reason: str | None = Field(default=None, max_length=1_000)
 
     @model_validator(mode="after")
     def validate_truncation(self) -> IndexResponse:
@@ -151,6 +153,12 @@ class IndexResponse(VersionedModel):
             raise ValueError("truncated indexes must explain the truncation")
         if not self.truncated and self.truncation_reason:
             raise ValueError("non-truncated indexes cannot have a truncation reason")
+        if self.unresolved_truncated is True and not self.unresolved_truncation_reason:
+            raise ValueError("truncated unresolved details must explain the truncation")
+        if self.unresolved_truncated is not True and self.unresolved_truncation_reason:
+            raise ValueError(
+                "non-truncated or unknown unresolved details cannot have a truncation reason"
+            )
         return self
 
 
@@ -925,6 +933,8 @@ class GetNeighborsSuccess(ToolResultBase):
     truncation_reason: str | None = Field(default=None, max_length=1_000)
     index_truncated: bool = False
     index_truncation_reason: str | None = Field(default=None, max_length=1_000)
+    index_unresolved_truncated: bool | None = None
+    index_unresolved_truncation_reason: str | None = Field(default=None, max_length=1_000)
 
     @model_validator(mode="after")
     def validate_truncation(self) -> GetNeighborsSuccess:
@@ -936,6 +946,12 @@ class GetNeighborsSuccess(ToolResultBase):
             raise ValueError("truncated neighbor indexes must explain the truncation")
         if not self.index_truncated and self.index_truncation_reason:
             raise ValueError("non-truncated neighbor indexes cannot have a truncation reason")
+        if self.index_unresolved_truncated is True and not self.index_unresolved_truncation_reason:
+            raise ValueError("truncated unresolved details must explain the truncation")
+        if self.index_unresolved_truncated is not True and self.index_unresolved_truncation_reason:
+            raise ValueError(
+                "non-truncated or unknown unresolved details cannot have a truncation reason"
+            )
         return self
 
 
@@ -975,6 +991,8 @@ class NeighborsIndexResponse(VersionedModel):
     truncation_reason: str | None = Field(default=None, max_length=1_000)
     index_truncated: bool = False
     index_truncation_reason: str | None = Field(default=None, max_length=1_000)
+    index_unresolved_truncated: bool | None = None
+    index_unresolved_truncation_reason: str | None = Field(default=None, max_length=1_000)
 
     @model_validator(mode="after")
     def validate_truncation(self) -> NeighborsIndexResponse:
@@ -1006,6 +1024,12 @@ class NeighborsIndexResponse(VersionedModel):
             raise ValueError("truncated neighbor indexes must explain the truncation")
         if not self.index_truncated and self.index_truncation_reason:
             raise ValueError("non-truncated neighbor indexes cannot have a truncation reason")
+        if self.index_unresolved_truncated is True and not self.index_unresolved_truncation_reason:
+            raise ValueError("truncated unresolved details must explain the truncation")
+        if self.index_unresolved_truncated is not True and self.index_unresolved_truncation_reason:
+            raise ValueError(
+                "non-truncated or unknown unresolved details cannot have a truncation reason"
+            )
         return self
 
 
@@ -1058,9 +1082,23 @@ class RunImpactResponse(VersionedModel):
     scope_note: str = Field(min_length=1, max_length=1_000)
     truncated: bool = False
     truncation_reason: str | None = Field(default=None, max_length=1_000)
+    index_truncated: bool = False
+    index_truncation_reason: str | None = Field(default=None, max_length=1_000)
+    index_unresolved_truncated: bool | None = None
+    index_unresolved_truncation_reason: str | None = Field(default=None, max_length=1_000)
 
     @model_validator(mode="after")
     def validate_impact_consistency(self) -> RunImpactResponse:
+        if self.index_truncated and not self.index_truncation_reason:
+            raise ValueError("truncated impact indexes must explain the truncation")
+        if not self.index_truncated and self.index_truncation_reason:
+            raise ValueError("non-truncated impact indexes cannot have a truncation reason")
+        if self.index_unresolved_truncated is True and not self.index_unresolved_truncation_reason:
+            raise ValueError("truncated unresolved details must explain the truncation")
+        if self.index_unresolved_truncated is not True and self.index_unresolved_truncation_reason:
+            raise ValueError(
+                "non-truncated or unknown unresolved details cannot have a truncation reason"
+            )
         if (self.candidate_id is None) == (self.finding_id is None):
             raise ValueError("impact response must identify exactly one candidate or finding")
         if self.returned_node_count != len(self.nodes):

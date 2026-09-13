@@ -13,6 +13,8 @@ export type GraphState = {
   truncationReason: string | null;
   indexTruncated: boolean;
   indexTruncationReason: string | null;
+  indexUnresolvedTruncated: boolean | null;
+  indexUnresolvedTruncationReason: string | null;
 };
 
 export type SymbolGroup = {
@@ -29,6 +31,8 @@ export const emptyGraphState: GraphState = {
   truncationReason: null,
   indexTruncated: false,
   indexTruncationReason: null,
+  indexUnresolvedTruncated: null,
+  indexUnresolvedTruncationReason: null,
 };
 
 export function mergeNeighborGraph(previous: GraphState, response: NeighborsResponse): GraphState {
@@ -48,6 +52,13 @@ export function mergeNeighborGraph(previous: GraphState, response: NeighborsResp
   for (const reference of response.unresolved) {
     unresolved.set(reference.unresolved_id, reference);
   }
+  const responseUnresolvedTruncated = response.index_unresolved_truncated ?? null;
+  const indexUnresolvedTruncated =
+    previous.indexUnresolvedTruncated === true || responseUnresolvedTruncated === true
+      ? true
+      : responseUnresolvedTruncated === false
+        ? false
+        : previous.indexUnresolvedTruncated;
   return {
     symbols: [...symbols.values()],
     edges: [...edges.values()],
@@ -60,6 +71,10 @@ export function mergeNeighborGraph(previous: GraphState, response: NeighborsResp
     indexTruncationReason: response.index_truncated
       ? response.index_truncation_reason
       : previous.indexTruncationReason,
+    indexUnresolvedTruncated,
+    indexUnresolvedTruncationReason: indexUnresolvedTruncated
+      ? response.index_unresolved_truncation_reason ?? previous.indexUnresolvedTruncationReason
+      : null,
   };
 }
 

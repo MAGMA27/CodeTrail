@@ -18,13 +18,13 @@
 
 ## 数据与生命周期
 
-打开 Session 后读取消息和 Run history；history 选择活动或最新 Run，并载入状态、事件、工具结果和报告。Session 视图在首次 history 成功后以 1 秒有界轮询重新读取 history，发现 `execution_source=codex` 的 queued/running Run 时自动选择并载入详情；轮询只更新历史，不重复创建或并行建立 SSE。代码关系查询回传的 `index_truncated` 会在图面板显示覆盖告警；当关系为空时仍保留该告警，不把“未分析到”渲染成“没有关系”。图按相对目录分组，超过 12 个符号的分组首次收起；用户展开后默认把选中节点及最多 8 个节点放大，聚焦按钮重复该行为。点击报告中的候选链接或唯一 finding symbol 后，工作台按 Run 固定 index 请求 callers/callees 影响，显示根节点、静态 calls 路径、unresolved 未知边界、深度/截断和范围说明；没有唯一映射时只显示 unmapped 空态。点击“启动离线分析”或“启动真实分析”时只发送当前 Session 的固定 index、模式、主题和 Issue body，服务端独立冻结完整已保存消息；未保存 draft 仅显示警告，不被提交。真实模式启动前明确提示会发送冻结 Issue/消息和有界源码证据、可能产生费用且失败不回退 fixture。Run 返回 queued 后前端先读取事件历史，再以最后成功 sequence 订阅 SSE；事件按 Run/sequence 去重，断线有限指数退避，`onopen` 不被视为事件进展，只有有效前进事件重置重连预算；超过上限才回退 450ms 轮询，且不与 SSE 并行，连接状态不等于 Run 失败，四类终态控制帧或终态事件均停止订阅并刷新报告。
+打开 Session 后读取消息和 Run history；history 选择活动或最新 Run，并载入状态、事件、工具结果和报告。Session 视图在首次 history 成功后以 1 秒有界轮询重新读取 history，发现 `execution_source=codex` 的 queued/running Run 时自动选择并载入详情；轮询只更新历史，不重复创建或并行建立 SSE。代码关系查询回传的 `index_truncated` 会在图面板显示扫描覆盖告警，`index_unresolved_truncated` 另显示 unresolved 详情告警，旧索引的 NULL 显示未知；当关系为空时仍保留告警，不把“未分析到”渲染成“没有关系”。图按相对目录分组，超过 12 个符号的分组首次收起；用户展开后默认把选中节点及最多 8 个节点放大，聚焦按钮重复该行为。点击报告中的候选链接或唯一 finding symbol 后，工作台按 Run 固定 index 请求 callers/callees 影响，显示根节点、静态 calls 路径、unresolved 未知边界、深度/截断、固定索引覆盖和范围说明；没有唯一映射时只显示 unmapped 空态。点击“启动离线分析”或“启动真实分析”时只发送当前 Session 的固定 index、模式、主题和 Issue body，服务端独立冻结完整已保存消息；未保存 draft 仅显示警告，不被提交。真实模式启动前明确提示会发送冻结 Issue/消息和有界源码证据、可能产生费用且失败不回退 fixture。Run 返回 queued 后前端先读取事件历史，再以最后成功 sequence 订阅 SSE；事件按 Run/sequence 去重，断线有限指数退避，`onopen` 不被视为事件进展，只有有效前进事件重置重连预算；超过上限才回退 450ms 轮询，且不与 SSE 并行，连接状态不等于 Run 失败，四类终态控制帧或终态事件均停止订阅并刷新报告。
 
 切换 Session/Project 会 abort 并递增请求代数，关闭旧 EventSource、清理旧 Run 轮询和影响请求、状态和详情，旧流/旧影响回调不能写入新范围；刷新后从服务端历史恢复，不重复创建。Run report 的 evidence 点击进入既有源码证据检查器，影响节点点击也使用节点自身的固定 `index_id`，并校验 project/index/path/line/hash/evidence_id；工作台不展示隐藏思维链，不把后续消息或 latest index 合并进已冻结 Run。
 
 ## 错误与限制
 
-API 离线、归属错误、消息为空、活动 Run 冲突、预算或执行容量拒绝、模型不可用/失败、结构化输出失败、取消和 interrupted 状态显示为明确错误或状态；容量拒绝不创建本地 Run，提示可稍后重试。固定关系索引的全局截断会显示“关系提取未完成”，查询自身达到节点/边/时间/输出边界则另显示“查询已截断”；两者同时存在时不把空邻接当成否定证据。real Run 仍需服务端显式能力开关和持久化配置，失败不回退 fixture；fixture、real 和 external 都不执行仓库源码或 shell，external 的公开工具/报告状态只从服务端持久化事实读取。影响请求失败、无唯一映射、超出深度/节点/路径边界和 unresolved 均显示明确状态，不猜测同名符号。前端读取 Run history/events/tool-results 受服务端页大小限制，报告和证据必须绑定同一 index；请求失败不会用旧项目、旧 Session 或 latest index 的数据填补。
+API 离线、归属错误、消息为空、活动 Run 冲突、预算或执行容量拒绝、模型不可用/失败、结构化输出失败、取消和 interrupted 状态显示为明确错误或状态；容量拒绝不创建本地 Run，提示可稍后重试。固定关系索引扫描未完成会显示“关系提取未完成”，unresolved 详情截断会显示独立告警，旧索引未记录该状态会显示未知，查询自身达到节点/边/时间/输出边界则另显示“查询已截断”；这些状态同时存在时不把空邻接当成否定证据。real Run 仍需服务端显式能力开关和持久化配置，失败不回退 fixture；fixture、real 和 external 都不执行仓库源码或 shell，external 的公开工具/报告状态只从服务端持久化事实读取。影响请求失败、无唯一映射、超出深度/节点/路径边界和 unresolved 均显示明确状态，不猜测同名符号。前端读取 Run history/events/tool-results 受服务端页大小限制，报告和证据必须绑定同一 index；请求失败不会用旧项目、旧 Session 或 latest index 的数据填补。
 
 Session 草稿按 project/session 保存到 localStorage，消息保存旧响应不能清除新草稿；Run 请求也按项目/Session取消和代数隔离。工作台只显示公开事件、工具结果、同快照证据、报告结论和用量，不显示模型隐藏思维链。
 
@@ -41,3 +41,4 @@ Session 草稿按 project/session 保存到 localStorage，消息保存旧响应
 - [项目与会话决策](../decisions/2026-09-11-project-session-workspace.md)
 - [工作区 UI 规范](../design/workspace-ui-spec.md)
 - [Codex 外部 Agent Run 决策](../decisions/2026-09-13-external-agent-run.md)
+- [关系扫描与 unresolved 覆盖语义](../decisions/2026-09-13-relation-coverage.md)

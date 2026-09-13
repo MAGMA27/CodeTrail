@@ -40,6 +40,7 @@ from .feature_generation import (
     OpenAICompatibleFeatureAdapter,
 )
 from .config import ModelProviderConfig
+from .relations import relation_coverage_limitations
 
 
 ISSUE_PROMPT_VERSION = "issue-analysis-v1"
@@ -192,6 +193,14 @@ class IssueAnalysisContext:
             )
             if result.truncated and result.truncation_reason:
                 self.limitations.append(result.truncation_reason)
+            self.limitations.extend(
+                relation_coverage_limitations(
+                    truncated=result.index_truncated,
+                    truncation_reason=result.index_truncation_reason,
+                    unresolved_truncated=result.index_unresolved_truncated,
+                    unresolved_truncation_reason=result.index_unresolved_truncation_reason,
+                )
+            )
 
     def prompt(self, *, max_chars: int) -> str:
         """Serialize the full frozen request and all returned evidence within a hard bound."""
@@ -528,6 +537,8 @@ def _tool_result_summary(result: ToolResult) -> str:
                 "node_ids": [node.symbol_id for node in result.nodes],
                 "edge_ids": [item.edge.edge_id for item in result.neighbors],
                 "truncated": result.truncated,
+                "index_truncated": result.index_truncated,
+                "index_unresolved_truncated": result.index_unresolved_truncated,
             }
         )
     return _compact_json({"kind": result.kind, "tool": result.tool})

@@ -132,6 +132,8 @@ def test_http_index_query_and_snapshot_evidence_flow(tmp_path: Path) -> None:
     index_id = created["index"]["index_id"]
     assert created["index"]["status"] == "ready"
     assert created["issues"] == []
+    assert created["unresolved_truncated"] is False
+    assert created["unresolved_truncation_reason"] is None
 
     status, repeated = request(application, "POST", "/api/indexes", create_request())
     assert status == 200
@@ -175,6 +177,8 @@ def test_http_index_query_and_snapshot_evidence_flow(tmp_path: Path) -> None:
     assert status == 200
     assert neighbors["index_truncated"] is False
     assert neighbors["index_truncation_reason"] is None
+    assert neighbors["index_unresolved_truncated"] is False
+    assert neighbors["index_unresolved_truncation_reason"] is None
     assert any(
         neighbor["symbol"]["qualified_name"] == "timeout_demo.app.start"
         for neighbor in neighbors["neighbors"]
@@ -705,6 +709,8 @@ def test_tool_adapter_returns_contract_results_and_safe_failures(tmp_path: Path)
     assert isinstance(neighbors, GetNeighborsSuccess)
     assert neighbors.index_truncated is False
     assert neighbors.index_truncation_reason is None
+    assert neighbors.index_unresolved_truncated is False
+    assert neighbors.index_unresolved_truncation_reason is None
     assert {
         item.symbol.qualified_name for item in neighbors.neighbors
     }.isdisjoint({"timeout_demo.handlers.handle", "timeout_demo.other_handlers.handle"})

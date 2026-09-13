@@ -61,6 +61,28 @@ def test_snapshot_hash_and_index_id_change_with_source_content(tmp_path: Path) -
     assert first.index.index_id != second.index.index_id
 
 
+def test_relation_rule_identity_separates_same_source_snapshot(tmp_path: Path) -> None:
+    source = tmp_path / "module.py"
+    source.write_text("def first() -> str:\n    return 'same'\n", encoding="utf-8")
+
+    source_identity = build_source_snapshot(
+        tmp_path,
+        repository_id="versioned",
+        revision="fixture-v1",
+        dirty=False,
+    )
+    relation_identity = build_source_snapshot(
+        tmp_path,
+        repository_id="versioned",
+        revision="fixture-v1",
+        dirty=False,
+        identity_version="relations-v2",
+    )
+
+    assert relation_identity.index.snapshot_hash == source_identity.index.snapshot_hash
+    assert relation_identity.index.index_id != source_identity.index.index_id
+
+
 def test_definition_extraction_locates_same_named_handlers_and_config() -> None:
     result = extract_definitions(
         build_source_snapshot(

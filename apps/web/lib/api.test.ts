@@ -5,6 +5,7 @@ import {
   isFeatureGenerationListResponse,
   isFeatureGenerationResponse,
   isFeatureGraphResponse,
+  isIndexResponse,
   isNeighborsResponse,
   isProjectOverviewResponse,
   isRunImpactResponse,
@@ -152,6 +153,8 @@ test("neighbor validator keeps query and index truncation states separate", () =
     truncation_reason: null,
     index_truncated: false,
     index_truncation_reason: null,
+    index_unresolved_truncated: false,
+    index_unresolved_truncation_reason: null,
   };
   assert.equal(isNeighborsResponse(value), true);
 
@@ -167,6 +170,15 @@ test("neighbor validator keeps query and index truncation states separate", () =
   const strayReason = structuredClone(value);
   strayReason.index_truncation_reason = "not-truncated";
   assert.equal(isNeighborsResponse(strayReason), false);
+
+  const incompleteUnresolved = structuredClone(value);
+  incompleteUnresolved.index_unresolved_truncated = true;
+  incompleteUnresolved.index_unresolved_truncation_reason = "max_unresolved reached";
+  assert.equal(isNeighborsResponse(incompleteUnresolved), true);
+
+  const missingUnresolvedReason = structuredClone(incompleteUnresolved);
+  missingUnresolvedReason.index_unresolved_truncation_reason = null;
+  assert.equal(isNeighborsResponse(missingUnresolvedReason), false);
 });
 
 function runImpact() {
@@ -218,8 +230,36 @@ function runImpact() {
     scope_note: "Static calls only.",
     truncated: false,
     truncation_reason: null,
+    index_truncated: false,
+    index_truncation_reason: null,
+    index_unresolved_truncated: false,
+    index_unresolved_truncation_reason: null,
   };
 }
+
+test("index validator accepts explicit unresolved coverage and legacy omission", () => {
+  const value = {
+    schema_version: SCHEMA_VERSION,
+    index: {
+      index_id: indexId,
+      repository_id: "repo",
+      revision: "v1",
+      dirty: false,
+      snapshot_hash: "hash",
+      status: "ready",
+    },
+    issues: [],
+    truncated: false,
+    truncation_reason: null,
+    unresolved_truncated: true,
+    unresolved_truncation_reason: "max_unresolved reached",
+  };
+  assert.equal(isIndexResponse(value), true);
+  const legacy = structuredClone(value);
+  delete (legacy as Record<string, unknown>).unresolved_truncated;
+  delete (legacy as Record<string, unknown>).unresolved_truncation_reason;
+  assert.equal(isIndexResponse(legacy), true);
+});
 
 test("Run impact validator accepts same-snapshot paths and rejects forged direction", () => {
   assert.equal(isRunImpactResponse(runImpact()), true);

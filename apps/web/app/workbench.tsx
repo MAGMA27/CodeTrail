@@ -2051,7 +2051,7 @@ export default function Workbench() {
       setIndexStatus(
         response.index.status === "failed"
           ? "error"
-          : response.truncated || response.issues.length > 0
+          : response.truncated || response.unresolved_truncated === true || response.issues.length > 0
             ? "partial"
             : "ready",
       );
@@ -3328,6 +3328,8 @@ export default function Workbench() {
         codeTruncationReason: graph.truncationReason,
         codeIndexTruncated: graph.indexTruncated,
         codeIndexTruncationReason: graph.indexTruncationReason,
+        codeIndexUnresolvedTruncated: graph.indexUnresolvedTruncated,
+        codeIndexUnresolvedTruncationReason: graph.indexUnresolvedTruncationReason,
         codeFocusNodeIds,
         codeSymbolCount: graph.symbols.length,
         codeEdgeCount: graph.edges.length,

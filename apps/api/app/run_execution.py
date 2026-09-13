@@ -61,6 +61,7 @@ from .issue_analysis import (
     IssueModelAdapter,
     default_issue_adapter,
 )
+from .relations import relation_coverage_limitations
 from .storage import (
     IndexStore,
     RunRecord,
@@ -286,6 +287,7 @@ class RunExecutor:
         evidence: list[Any] = []
         static_edges: list[Any] = []
         candidate_links: list[CandidateLink] = []
+        limitations: list[str] = []
 
         if record.run.mode == "real":
             self._execute_real(record, deadline)
@@ -406,6 +408,14 @@ class RunExecutor:
             if neighbors_result.root is not None:
                 symbols[neighbors_result.root.symbol_id] = neighbors_result.root
             static_edges.extend(neighbor.edge for neighbor in neighbors_result.neighbors)
+            limitations.extend(
+                relation_coverage_limitations(
+                    truncated=neighbors_result.index_truncated,
+                    truncation_reason=neighbors_result.index_truncation_reason,
+                    unresolved_truncated=neighbors_result.index_unresolved_truncated,
+                    unresolved_truncation_reason=neighbors_result.index_unresolved_truncation_reason,
+                )
+            )
 
         self._append_stage(record, "analysis", deadline=deadline)
         candidate_links.append(
@@ -437,6 +447,7 @@ class RunExecutor:
             deadline=deadline,
             finding_text=finding.text,
             findings=[finding],
+            limitations=limitations,
         )
 
     def _execute_real(self, record: RunRecord, deadline: float) -> None:
@@ -505,6 +516,7 @@ class RunExecutor:
                 symbols=tuple(exc.context.observed_symbols.values()),
                 static_edges=list(exc.context.static_edges),
                 candidate_links=(),
+                limitations=exc.context.limitations,
             )
             return
         except FeatureGenerationErrorBase as exc:
@@ -516,6 +528,7 @@ class RunExecutor:
                 symbols=tuple(context.observed_symbols.values()),
                 static_edges=list(context.static_edges),
                 candidate_links=(),
+                limitations=context.limitations,
             )
             return
         except StorageInputError as exc:
@@ -527,6 +540,7 @@ class RunExecutor:
                 symbols=tuple(context.observed_symbols.values()),
                 static_edges=list(context.static_edges),
                 candidate_links=(),
+                limitations=context.limitations,
             )
             return
         except StorageConflictError:
@@ -540,6 +554,7 @@ class RunExecutor:
                 symbols=tuple(context.observed_symbols.values()),
                 static_edges=list(context.static_edges),
                 candidate_links=(),
+                limitations=context.limitations,
             )
             return
 
@@ -558,6 +573,7 @@ class RunExecutor:
                 deadline=deadline,
                 finding_text=result.final.summary,
                 findings=list(result.final.findings),
+                limitations=result.context.limitations,
             )
         except StorageConflictError:
             return
@@ -570,6 +586,7 @@ class RunExecutor:
                 symbols=tuple(result.context.observed_symbols.values()),
                 static_edges=list(result.context.static_edges),
                 candidate_links=(),
+                limitations=result.context.limitations,
             )
 
     def _call_tool(
@@ -683,6 +700,7 @@ class RunExecutor:
         deadline: float,
         finding_text: str,
         findings: list[Finding] | None = None,
+        limitations: list[str] | tuple[str, ...] = (),
     ) -> None:
         current = self._load(run)
         self._ensure_running(current, deadline)
@@ -703,6 +721,7 @@ class RunExecutor:
             evidence=list(evidence),
             findings=list(findings or []),
             candidate_links=list(candidate_links),
+            limitations=list(limitations),
         )
 
     def _finish_failure(
@@ -715,6 +734,7 @@ class RunExecutor:
         symbols: tuple[Any, ...],
         static_edges: tuple[Any, ...] | list[Any],
         candidate_links: tuple[CandidateLink, ...] | list[CandidateLink],
+        limitations: list[str] | tuple[str, ...] = (),
     ) -> None:
         try:
             current = self._load(run)
@@ -741,6 +761,7 @@ class RunExecutor:
                 evidence=list(evidence),
                 findings=[finding],
                 candidate_links=list(candidate_links),
+                limitations=list(limitations),
                 error=RunError(code=code, message=message),
             )
         except StorageConflictError:
@@ -757,6 +778,7 @@ class RunExecutor:
         evidence: list[Any],
         findings: list[Finding],
         candidate_links: list[CandidateLink],
+        limitations: list[str] | tuple[str, ...] = (),
         error: RunError | None = None,
     ) -> None:
         current = self._load(run)
@@ -778,6 +800,7 @@ class RunExecutor:
             evidence=evidence,
             findings=findings,
             candidate_links=candidate_links,
+            limitations=list(dict.fromkeys(limitations))[:30],
             terminal_sequence=terminal_sequence,
         )
         if status == "succeeded":

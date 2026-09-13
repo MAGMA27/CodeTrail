@@ -91,6 +91,8 @@ def test_relation_output_is_reproducible_and_locations_are_bounded() -> None:
     assert [item.model_dump() for item in first.unresolved] == [item.model_dump() for item in second.unresolved]
     assert first.truncated is False
     assert first.truncation_reason is None
+    assert first.unresolved_truncated is False
+    assert first.unresolved_truncation_reason is None
     for edge in first.edges:
         assert edge.source_location.start_line <= edge.source_location.end_line
         assert edge.source_location.end_line <= 40
@@ -116,6 +118,48 @@ def test_relation_time_budget_is_observable() -> None:
 
     assert result.truncated is True
     assert result.truncation_reason == "max_seconds exceeded"
+
+
+def test_unresolved_budget_does_not_stop_later_static_relation_extraction(tmp_path: Path) -> None:
+    package = tmp_path / "sample"
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "a_noise.py").write_text(
+        "def noisy() -> None:\n"
+        "    missing_one()\n"
+        "    missing_two()\n",
+        encoding="utf-8",
+    )
+    (package / "targets.py").write_text(
+        "def target() -> None:\n    pass\n",
+        encoding="utf-8",
+    )
+    (package / "z_later.py").write_text(
+        "from .targets import target\n\n"
+        "def caller() -> None:\n"
+        "    target()\n",
+        encoding="utf-8",
+    )
+
+    definitions = extract_definitions(
+        build_source_snapshot(tmp_path, repository_id="unresolved-budget", revision="fixture-v1", dirty=False)
+    )
+    result = extract_relations(definitions, max_edges=20, max_unresolved=1, max_seconds=1.0)
+    names = {symbol.symbol_id: symbol.qualified_name for symbol in result.symbols}
+
+    assert result.truncated is False
+    assert result.truncation_reason is None
+    assert result.unresolved_truncated is True
+    assert result.unresolved_truncation_reason == "max_unresolved reached"
+    assert len(result.unresolved) == 1
+    assert (
+        "sample.z_later.caller",
+        "sample.targets.target",
+    ) in {
+        (names[edge.source_id], names[edge.target_id])
+        for edge in result.edges
+        if edge.kind == "calls"
+    }
 
 
 def test_aliases_parameter_shadowing_rebinding_and_unknown_imports(tmp_path: Path) -> None:

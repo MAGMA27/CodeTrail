@@ -75,6 +75,8 @@ export type IndexResponse = {
   issues: IndexIssue[];
   truncated: boolean;
   truncation_reason: string | null;
+  unresolved_truncated: boolean | null;
+  unresolved_truncation_reason: string | null;
 };
 
 export type ProjectRecord = {
@@ -432,6 +434,10 @@ export type RunImpactResponse = {
   scope_note: string;
   truncated: boolean;
   truncation_reason: string | null;
+  index_truncated: boolean;
+  index_truncation_reason: string | null;
+  index_unresolved_truncated: boolean | null;
+  index_unresolved_truncation_reason: string | null;
 };
 
 export type CancelRunResponse = {
@@ -493,6 +499,8 @@ export type NeighborsResponse = {
   truncation_reason: string | null;
   index_truncated: boolean;
   index_truncation_reason: string | null;
+  index_unresolved_truncated: boolean | null;
+  index_unresolved_truncation_reason: string | null;
 };
 
 export type OverviewEntryPoint = {
@@ -811,6 +819,23 @@ function isIndexTruncation(value: Record<string, unknown>): boolean {
     (value.index_truncated
       ? isString(value.index_truncation_reason)
       : value.index_truncation_reason === null)
+  );
+}
+
+function isOptionalUnresolvedTruncation(
+  value: Record<string, unknown>,
+  flagKey: string,
+  reasonKey: string,
+): boolean {
+  const flag = value[flagKey];
+  const reason = value[reasonKey];
+  if (flag === undefined && reason === undefined) {
+    return true;
+  }
+  return (
+    (typeof flag === "boolean" || flag === null) &&
+    (reason === null || isString(reason)) &&
+    (flag === true ? isString(reason) : reason === null)
   );
 }
 
@@ -1414,7 +1439,13 @@ function isRunImpact(value: unknown): value is RunImpactResponse {
     value.returned_node_count !== nodes.length ||
     value.reachable_node_count !== Math.max(0, nodes.length - 1) ||
     !isString(value.scope_note) ||
-    !isTruncation(value)
+    !isTruncation(value) ||
+    !isIndexTruncation(value) ||
+    !isOptionalUnresolvedTruncation(
+      value,
+      "index_unresolved_truncated",
+      "index_unresolved_truncation_reason",
+    )
   ) {
     return false;
   }
@@ -1515,7 +1546,12 @@ export function isIndexResponse(value: unknown): value is IndexResponse {
         isString(issue.message) &&
         (issue.size === null || isNumber(issue.size)),
     ) &&
-    isTruncation(value)
+    isTruncation(value) &&
+    isOptionalUnresolvedTruncation(
+      value,
+      "unresolved_truncated",
+      "unresolved_truncation_reason",
+    )
   );
 }
 
@@ -1556,6 +1592,11 @@ export function isNeighborsResponse(value: unknown): value is NeighborsResponse 
     Array.isArray(value.unresolved) &&
     value.unresolved.every(isUnresolvedReference) &&
     isIndexTruncation(value) &&
+    isOptionalUnresolvedTruncation(
+      value,
+      "index_unresolved_truncated",
+      "index_unresolved_truncation_reason",
+    ) &&
     isTruncation(value)
   );
 }

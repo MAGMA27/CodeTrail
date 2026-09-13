@@ -19,7 +19,7 @@ from .contracts import (
     OverviewCoverage,
     UnresolvedReference,
 )
-from .relations import RelationIndex
+from .relations import RelationIndex, relation_coverage_limitations
 
 
 RULES_VERSION = "python-entry-v1"
@@ -108,6 +108,14 @@ def build_project_overview(
 
     if relation.truncated and relation.truncation_reason:
         reasons.append(f"relation index: {relation.truncation_reason}")
+    unresolved_limitations = relation_coverage_limitations(
+        truncated=False,
+        truncation_reason=None,
+        unresolved_truncated=relation.unresolved_truncated,
+        unresolved_truncation_reason=relation.unresolved_truncation_reason,
+    )
+    if relation.unresolved_truncated is True:
+        reasons.extend(f"relation index: {item}" for item in unresolved_limitations)
     if _deadline_reached(deadline):
         reasons.append("max_seconds reached")
 
@@ -231,6 +239,8 @@ def build_project_overview(
         ]
     if cycle_skipped:
         notes.append("循环调用只保留首次有界路径，未继续展开循环。")
+    if relation.unresolved_truncated is None:
+        notes.extend(unresolved_limitations)
 
     for entry in entries:
         entry.direct_symbol_ids = direct_symbol_ids_by_entry.get(entry.entry_point_id, [])

@@ -115,6 +115,10 @@ def test_static_impact_keeps_simple_paths_deduplicates_nodes_and_retains_cycle_e
             target.symbol_id,
         }
         assert result.reachable_node_count == 2
+        assert result.index_truncated is False
+        assert result.index_truncation_reason is None
+        assert result.index_unresolved_truncated is False
+        assert result.index_unresolved_truncation_reason is None
         assert {tuple(path.symbol_ids) for path in result.paths} == {
             (root.symbol_id, branch.symbol_id),
             (root.symbol_id, target.symbol_id),
@@ -175,7 +179,11 @@ def test_roundtrip_preserves_definition_issues_and_relation_truncation(tmp_path:
 
 def test_neighbors_exposes_index_relation_truncation_separately(tmp_path: Path) -> None:
     relation = fixture_relation(index_id="index-neighbor-coverage")
-    relation = replace(relation, truncated=True, truncation_reason="max_unresolved reached")
+    relation = replace(
+        relation,
+        unresolved_truncated=True,
+        unresolved_truncation_reason="max_unresolved reached",
+    )
     root = next(symbol for symbol in relation.symbols if symbol.qualified_name == "timeout_demo.app.start")
 
     with IndexStore(tmp_path / "index.sqlite3") as store:
@@ -190,8 +198,47 @@ def test_neighbors_exposes_index_relation_truncation_separately(tmp_path: Path) 
 
     assert result.truncated is False
     assert result.truncation_reason is None
+    assert result.index_truncated is False
+    assert result.index_truncation_reason is None
+    assert result.index_unresolved_truncated is True
+    assert result.index_unresolved_truncation_reason == "max_unresolved reached"
+
+
+def test_legacy_index_without_unresolved_coverage_is_unknown(tmp_path: Path) -> None:
+    relation = fixture_relation(index_id="index-legacy-coverage")
+    relation = replace(
+        relation,
+        truncated=True,
+        truncation_reason="max_unresolved reached",
+        unresolved_truncated=None,
+        unresolved_truncation_reason=None,
+    )
+
+    with IndexStore(tmp_path / "index.sqlite3") as store:
+        store.write_index(relation)
+        store.connection.execute(
+            "UPDATE index_snapshots SET unresolved_truncated = NULL, "
+            "unresolved_truncation_reason = NULL WHERE index_id = ?",
+            (relation.snapshot.index.index_id,),
+        )
+        loaded = store.load_index(relation.snapshot.index.index_id)
+        assert loaded.truncated is True
+        assert loaded.truncation_reason == "max_unresolved reached"
+        assert loaded.unresolved_truncated is None
+        assert loaded.unresolved_truncation_reason is None
+        root = next(symbol for symbol in loaded.symbols if symbol.qualified_name == "timeout_demo.app.start")
+        result = store.get_neighbors(
+            loaded.snapshot.index.index_id,
+            root.symbol_id,
+            "both",
+            depth=1,
+            limit=40,
+        )
+
     assert result.index_truncated is True
     assert result.index_truncation_reason == "max_unresolved reached"
+    assert result.index_unresolved_truncated is None
+    assert result.index_unresolved_truncation_reason is None
 
 
 def test_search_is_snapshot_scoped_deterministic_and_safe_for_special_queries(tmp_path: Path) -> None:

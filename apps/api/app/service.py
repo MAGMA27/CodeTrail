@@ -99,7 +99,11 @@ from .contracts import (
 from .config import ModelProviderConfig, load_model_config
 from .indexing import SnapshotBoundaryError, build_source_snapshot, extract_definitions
 from .github import GitHubArchive, GitHubClient, GitHubError, GitHubRepository, GitHubResolution, parse_github_repository_url
-from .relations import extract_relations
+from .relations import (
+    RELATION_INDEX_IDENTITY_VERSION,
+    extract_relations,
+    relation_coverage_limitations,
+)
 from .overview import build_project_overview
 from .feature_generation import (
     FeatureGenerationEngine,
@@ -566,6 +570,7 @@ class IndexService:
                     repository_id=request.repository_id,
                     revision=request.revision,
                     dirty=request.dirty,
+                    identity_version=RELATION_INDEX_IDENTITY_VERSION,
                     max_file_bytes=self.max_file_bytes,
                 )
                 if not snapshot.files:
@@ -653,6 +658,8 @@ class IndexService:
                 truncation_reason=result.truncation_reason,
                 index_truncated=result.index_truncated,
                 index_truncation_reason=result.index_truncation_reason,
+                index_unresolved_truncated=result.index_unresolved_truncated,
+                index_unresolved_truncation_reason=result.index_unresolved_truncation_reason,
             )
 
         return self._with_index(index_id, operation)
@@ -707,6 +714,8 @@ class IndexService:
                     truncation_reason=result.truncation_reason,
                     index_truncated=result.index_truncated,
                     index_truncation_reason=result.index_truncation_reason,
+                    index_unresolved_truncated=result.index_unresolved_truncated,
+                    index_unresolved_truncation_reason=result.index_unresolved_truncation_reason,
                 )
             raise ServiceError("invalid_input", 400, "unsupported tool parameters")
         except ServiceError as exc:
@@ -1344,7 +1353,22 @@ class WorkspaceService:
                     if record.run.status != "succeeded":
                         raise ServiceError("conflict", 409, "external Run is already terminal")
                     report = store.load_run_report(project_id, session_id, run_id)
-                    if not _external_report_matches_final(report, validated_final):
+                    result_page = store.load_run_tool_results(
+                        project_id,
+                        session_id,
+                        run_id,
+                        limit=40,
+                    )
+                    _, _, _, _, _, _, coverage_limitations = _external_graph_data(
+                        list(result_page.results),
+                        run_id=run_id,
+                        index_id=record.run.index_id,
+                    )
+                    if not _external_report_matches_final(
+                        report,
+                        validated_final,
+                        derived_limitations=coverage_limitations,
+                    ):
                         raise ServiceError(
                             "conflict",
                             409,
@@ -1366,7 +1390,15 @@ class WorkspaceService:
                     limit=40,
                 )
                 tool_results = list(result_page.results)
-                nodes, static_edges, unresolved, evidence_by_id, truncated, truncation_reason = _external_graph_data(
+                (
+                    nodes,
+                    static_edges,
+                    unresolved,
+                    evidence_by_id,
+                    truncated,
+                    truncation_reason,
+                    coverage_limitations,
+                ) = _external_graph_data(
                     tool_results,
                     run_id=run_id,
                     index_id=record.run.index_id,
@@ -1414,7 +1446,9 @@ class WorkspaceService:
                     evidence=selected_evidence,
                     findings=list(validated_final.findings),
                     candidate_links=list(validated_final.candidate_links),
-                    limitations=list(validated_final.limitations),
+                    limitations=list(
+                        dict.fromkeys([*validated_final.limitations, *coverage_limitations])
+                    )[:30],
                     terminal_sequence=terminal_sequence,
                 )
                 event = RunCompletedEvent(
@@ -1436,7 +1470,11 @@ class WorkspaceService:
                 )
                 finished = store.finish_run(updated_run, event, report)
                 persisted_report = store.load_run_report(project_id, session_id, run_id)
-                if not _external_report_matches_final(persisted_report, validated_final):
+                if not _external_report_matches_final(
+                    persisted_report,
+                    validated_final,
+                    derived_limitations=coverage_limitations,
+                ):
                     raise ServiceError(
                         "conflict",
                         409,
@@ -1708,6 +1746,7 @@ class WorkspaceService:
                     or report.index_id != record.run.index_id
                 ):
                     raise StorageInputError("Run report does not match the requested Run scope")
+                coverage = store.get_relation_coverage(record.run.index_id)
 
                 root_symbol_id: str | None = None
                 mapping_status = "mapped"
@@ -1753,6 +1792,10 @@ class WorkspaceService:
                         scope_note=(
                             "当前报告没有一个可用于影响遍历的唯一候选符号；只保留报告中的源码证据。"
                         ),
+                        index_truncated=coverage.index_truncated,
+                        index_truncation_reason=coverage.index_truncation_reason,
+                        index_unresolved_truncated=coverage.index_unresolved_truncated,
+                        index_unresolved_truncation_reason=coverage.index_unresolved_truncation_reason,
                     )
 
                 result = store.get_static_impact(
@@ -1783,6 +1826,10 @@ class WorkspaceService:
                     scope_note=scope_note,
                     truncated=result.truncated,
                     truncation_reason=result.truncation_reason,
+                    index_truncated=result.index_truncated,
+                    index_truncation_reason=result.index_truncation_reason,
+                    index_unresolved_truncated=result.index_unresolved_truncated,
+                    index_unresolved_truncation_reason=result.index_unresolved_truncation_reason,
                 )
         except StorageNotFoundError as exc:
             raise ServiceError("not_found", 404, "Run, report, candidate, or finding was not found") from exc
@@ -3087,6 +3134,8 @@ def _index_response(relation) -> IndexResponse:
         ],
         truncated=relation.truncated,
         truncation_reason=relation.truncation_reason,
+        unresolved_truncated=relation.unresolved_truncated,
+        unresolved_truncation_reason=relation.unresolved_truncation_reason,
     )
 
 
@@ -3126,13 +3175,22 @@ def _external_graph_data(
     *,
     run_id: str,
     index_id: str,
-) -> tuple[list[object], list[object], list[object], dict[str, object], bool, str | None]:
+) -> tuple[
+    list[object],
+    list[object],
+    list[object],
+    dict[str, object],
+    bool,
+    str | None,
+    list[str],
+]:
     """Collect only symbols, edges, unresolved references, and evidence returned by one Run."""
 
     nodes: dict[str, object] = {}
     static_edges: dict[str, object] = {}
     unresolved: dict[str, object] = {}
     evidence: dict[str, object] = {}
+    coverage_limitations: list[str] = []
     truncated = False
     truncation_reason: str | None = None
 
@@ -3164,6 +3222,14 @@ def _external_graph_data(
                 add_item(unresolved, item.unresolved_id, item, "unresolved reference")
             truncated = truncated or result.truncated
             truncation_reason = truncation_reason or result.truncation_reason
+            coverage_limitations.extend(
+                relation_coverage_limitations(
+                    truncated=result.index_truncated,
+                    truncation_reason=result.index_truncation_reason,
+                    unresolved_truncated=result.index_unresolved_truncated,
+                    unresolved_truncation_reason=result.index_unresolved_truncation_reason,
+                )
+            )
 
     if truncated and not truncation_reason:
         truncation_reason = "one or more external tool results were truncated"
@@ -3174,10 +3240,16 @@ def _external_graph_data(
         evidence,
         truncated,
         truncation_reason,
+        list(dict.fromkeys(coverage_limitations)),
     )
 
 
-def _external_report_matches_final(report: Report, final: IssueModelFinal) -> bool:
+def _external_report_matches_final(
+    report: Report,
+    final: IssueModelFinal,
+    *,
+    derived_limitations: list[str] | tuple[str, ...] = (),
+) -> bool:
     """Compare the durable public conclusion for external completion idempotency."""
 
     return (
@@ -3186,6 +3258,10 @@ def _external_report_matches_final(report: Report, final: IssueModelFinal) -> bo
         and report.summary == final.summary
         and report.findings == final.findings
         and report.candidate_links == final.candidate_links
-        and report.limitations == final.limitations
+        and (
+            report.limitations == final.limitations
+            or report.limitations
+            == list(dict.fromkeys([*final.limitations, *derived_limitations])[:30])
+        )
         and [evidence.evidence_id for evidence in report.evidence] == final.evidence_ids
     )

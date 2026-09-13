@@ -1132,6 +1132,31 @@
               "default": null,
               "title": "Index Truncation Reason"
             },
+            "index_unresolved_truncated": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Unresolved Truncated"
+            },
+            "index_unresolved_truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Unresolved Truncation Reason"
+            },
             "kind": {
               "const": "get_neighbors.succeeded",
               "default": "get_neighbors.succeeded",
@@ -3218,6 +3243,31 @@
               ],
               "default": null,
               "title": "Index Truncation Reason"
+            },
+            "index_unresolved_truncated": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Unresolved Truncated"
+            },
+            "index_unresolved_truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Unresolved Truncation Reason"
             },
             "kind": {
               "const": "get_neighbors.succeeded",
@@ -9719,6 +9769,31 @@
               "default": null,
               "title": "Index Truncation Reason"
             },
+            "index_unresolved_truncated": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Unresolved Truncated"
+            },
+            "index_unresolved_truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Unresolved Truncation Reason"
+            },
             "kind": {
               "const": "get_neighbors.succeeded",
               "default": "get_neighbors.succeeded",
@@ -12470,6 +12545,31 @@
               ],
               "default": null,
               "title": "Truncation Reason"
+            },
+            "unresolved_truncated": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Unresolved Truncated"
+            },
+            "unresolved_truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Unresolved Truncation Reason"
             }
           },
           "required": [
@@ -14083,6 +14183,31 @@
               ],
               "default": null,
               "title": "Truncation Reason"
+            },
+            "unresolved_truncated": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Unresolved Truncated"
+            },
+            "unresolved_truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Unresolved Truncation Reason"
             }
           },
           "required": [
@@ -15451,6 +15576,31 @@
               ],
               "default": null,
               "title": "Truncation Reason"
+            },
+            "unresolved_truncated": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Unresolved Truncated"
+            },
+            "unresolved_truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Unresolved Truncation Reason"
             }
           },
           "required": [
@@ -17926,6 +18076,31 @@
               ],
               "default": null,
               "title": "Truncation Reason"
+            },
+            "unresolved_truncated": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Unresolved Truncated"
+            },
+            "unresolved_truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Unresolved Truncation Reason"
             }
           },
           "required": [
@@ -18568,6 +18743,31 @@
               ],
               "default": null,
               "title": "Truncation Reason"
+            },
+            "unresolved_truncated": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Unresolved Truncated"
+            },
+            "unresolved_truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Unresolved Truncation Reason"
             }
           },
           "required": [
@@ -18918,6 +19118,31 @@
               ],
               "default": null,
               "title": "Truncation Reason"
+            },
+            "unresolved_truncated": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Unresolved Truncated"
+            },
+            "unresolved_truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Unresolved Truncation Reason"
             }
           },
           "required": [
@@ -19213,6 +19438,31 @@
               ],
               "default": null,
               "title": "Index Truncation Reason"
+            },
+            "index_unresolved_truncated": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Unresolved Truncated"
+            },
+            "index_unresolved_truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Unresolved Truncation Reason"
             },
             "neighbors": {
               "items": {
@@ -21455,6 +21705,31 @@
               "default": null,
               "title": "Index Truncation Reason"
             },
+            "index_unresolved_truncated": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Unresolved Truncated"
+            },
+            "index_unresolved_truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Unresolved Truncation Reason"
+            },
             "kind": {
               "const": "get_neighbors.succeeded",
               "default": "get_neighbors.succeeded",
@@ -23474,6 +23749,49 @@
               "minLength": 1,
               "title": "Index Id",
               "type": "string"
+            },
+            "index_truncated": {
+              "default": false,
+              "title": "Index Truncated",
+              "type": "boolean"
+            },
+            "index_truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Truncation Reason"
+            },
+            "index_unresolved_truncated": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Unresolved Truncated"
+            },
+            "index_unresolved_truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Unresolved Truncation Reason"
             },
             "mapping_status": {
               "enum": [
@@ -26124,6 +26442,31 @@
               ],
               "default": null,
               "title": "Index Truncation Reason"
+            },
+            "index_unresolved_truncated": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Unresolved Truncated"
+            },
+            "index_unresolved_truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Unresolved Truncation Reason"
             },
             "kind": {
               "const": "get_neighbors.succeeded",
@@ -31851,6 +32194,31 @@
               "default": null,
               "title": "Index Truncation Reason"
             },
+            "index_unresolved_truncated": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Unresolved Truncated"
+            },
+            "index_unresolved_truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Unresolved Truncation Reason"
+            },
             "kind": {
               "const": "get_neighbors.succeeded",
               "default": "get_neighbors.succeeded",
@@ -33907,6 +34275,49 @@
           "title": "Index Id",
           "type": "string"
         },
+        "index_truncated": {
+          "default": false,
+          "title": "Index Truncated",
+          "type": "boolean"
+        },
+        "index_truncation_reason": {
+          "anyOf": [
+            {
+              "maxLength": 1000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Index Truncation Reason"
+        },
+        "index_unresolved_truncated": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Index Unresolved Truncated"
+        },
+        "index_unresolved_truncation_reason": {
+          "anyOf": [
+            {
+              "maxLength": 1000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Index Unresolved Truncation Reason"
+        },
         "mapping_status": {
           "enum": [
             "mapped",
@@ -35522,6 +35933,31 @@
               ],
               "default": null,
               "title": "Index Truncation Reason"
+            },
+            "index_unresolved_truncated": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Unresolved Truncated"
+            },
+            "index_unresolved_truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Unresolved Truncation Reason"
             },
             "kind": {
               "const": "get_neighbors.succeeded",
@@ -37347,6 +37783,31 @@
               ],
               "default": null,
               "title": "Index Truncation Reason"
+            },
+            "index_unresolved_truncated": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Unresolved Truncated"
+            },
+            "index_unresolved_truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Unresolved Truncation Reason"
             },
             "kind": {
               "const": "get_neighbors.succeeded",
@@ -39619,6 +40080,31 @@
               ],
               "default": null,
               "title": "Index Truncation Reason"
+            },
+            "index_unresolved_truncated": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Unresolved Truncated"
+            },
+            "index_unresolved_truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Unresolved Truncation Reason"
             },
             "kind": {
               "const": "get_neighbors.succeeded",
