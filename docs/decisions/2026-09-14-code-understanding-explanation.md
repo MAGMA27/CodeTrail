@@ -31,7 +31,7 @@ Status: implemented
 - 前端 API 解析、步骤阅读、源码 evidence、唯一 symbol 下钻、partial/unknown 文案和刷新恢复通过；旧候选报告仍能打开影响范围。
 - 运行相关后端/前端测试、类型检查、生产构建、Python 编译、Schema 导出与 `contracts:check`、`docs:check`、`docs:check:local`；实际 Codex 宿主首次 explanation 提交与工作台发现若需 reload，记录实际 reload 结果，不以独立进程替代。
 
-代码侧最终验证通过：后端全量 134 passed，前端测试 24 passed，契约测试 23 passed，类型检查、生产构建、compileall、Schema 导出、doc-sync 和本地文档检查均通过。当前 Codex `app-server` 仍缓存旧的 MCP 工具 schema；本轮对旧宿主进行了实际探测并取消了探测 Run，但未以旧 schema 冒充 explanation 首次提交，因此宿主 explanation 提交与工作台自动发现保持 UNVERIFIED，不能由本地 stdio 结果替代。
+代码侧最终验证通过：后端全量 134 passed，前端测试 24 passed，契约测试 23 passed，类型检查、生产构建、compileall、Schema 导出、doc-sync 和本地文档检查均通过。2026-09-14 重启 Codex 后，宿主已暴露 `analysis_kind=understanding`、`outcome=explanation` 和 `explanation` 字段；实际宿主 Run `run-9e9be4452abf4230aa446354950cb463` 首次提交成功，同内容重试返回同一报告，改变结论返回冲突。MCP 与 HTTP 读取到相同的 5 步 explanation、13 条公开事件和单一终态，浏览器工作台已显示流程步骤、4 段源码 evidence、局部关系图入口及 partial/unknown 限制。此前旧 schema 探测产生的 Run `run-8bd6336b2de243b799d1a40fa8e87807` 已取消；未清理持久化项目、索引或配置。
 
 ## 后果
 
