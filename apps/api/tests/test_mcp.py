@@ -1453,6 +1453,214 @@ def test_mcp_external_run_persists_actual_tools_and_report(tmp_path: Path) -> No
     asyncio.run(exercise_boundaries())
 
 
+def test_mcp_external_first_completion_with_multiple_evidence_is_idempotent(tmp_path: Path) -> None:
+    repository = copy_fixture(tmp_path)
+    application = create_app(
+        {"timeout-demo": repository},
+        data_root=tmp_path / "data",
+        mcp_external_run_enabled=True,
+    )
+    status, project = request(
+        application,
+        "POST",
+        "/api/projects",
+        {"name": "External first completion", "repository_id": "timeout-demo"},
+    )
+    assert status == 200
+    project_id = project["project_id"]
+    status, index = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/indexes",
+        {"revision": "external-first-completion-v1", "dirty": False},
+    )
+    assert status == 200
+    index_id = index["index"]["index_id"]
+    status, session = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/sessions",
+        {"topic": "External first completion", "index_id": index_id},
+    )
+    assert status == 200
+    session_id = session["session"]["session_id"]
+    status, _ = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/sessions/{session_id}/messages",
+        {"source": "human", "content": "Trace the local import flow."},
+    )
+    assert status == 200
+
+    async def exercise() -> str:
+        environment = {
+            "CODETRAIL_REPOSITORIES": json.dumps({"timeout-demo": str(repository)}),
+            "CODETRAIL_DATA_DIR": str(tmp_path / "data"),
+            "CODETRAIL_WORKBENCH_URL": "http://localhost:3000",
+            "CODETRAIL_MCP_EXTERNAL_RUN_ENABLED": "1",
+        }
+        parameters = StdioServerParameters(
+            command=sys.executable,
+            args=["-m", "app.mcp_server"],
+            env=environment,
+            cwd=API_ROOT,
+        )
+        async with Client(parameters, read_timeout_seconds=15) as client:
+            started = await client.call_tool(
+                "start_external_run",
+                {
+                    "project_id": project_id,
+                    "session_id": session_id,
+                    "index_id": index_id,
+                    "issue_id": "external-first-completion",
+                    "title": "first completion with multiple evidence",
+                    "body": "Trace the local import flow using only returned evidence.",
+                    "max_tool_calls": 8,
+                    "max_seconds": 30,
+                    "max_source_lines": 40,
+                    "max_total_source_lines": 100,
+                    "max_output_chars": 20_000,
+                    "idempotency_key": "external-first-completion-start",
+                },
+            )
+            assert started.structured_content["ok"] is True
+            run_id = started.structured_content["result"]["run_id"]
+
+            searched = await client.call_tool(
+                "run_search_code",
+                {
+                    "project_id": project_id,
+                    "session_id": session_id,
+                    "run_id": run_id,
+                    "index_id": index_id,
+                    "request_id": "external-first-completion-search",
+                    "query": "load_settings",
+                    "limit": 8,
+                },
+            )
+            assert searched.structured_content["ok"] is True
+            match = next(
+                item
+                for item in searched.structured_content["result"]["matches"]
+                if item["symbol"]["qualified_name"] == "timeout_demo.config.load_settings"
+            )
+
+            evidence_ids: list[str] = []
+            for number, path in enumerate(
+                (
+                    "timeout_demo/config.py",
+                    "timeout_demo/__main__.py",
+                    "timeout_demo/app.py",
+                    "timeout_demo/client.py",
+                    "timeout_demo/handlers.py",
+                ),
+                start=1,
+            ):
+                source = await client.call_tool(
+                    "run_read_source",
+                    {
+                        "project_id": project_id,
+                        "session_id": session_id,
+                        "run_id": run_id,
+                        "index_id": index_id,
+                        "request_id": f"external-first-completion-read-{number}",
+                        "path": path,
+                        "start_line": 1,
+                        "end_line": 8,
+                    },
+                )
+                assert source.structured_content["ok"] is True
+                evidence_ids.append(source.structured_content["result"]["evidence"]["evidence_id"])
+
+            neighbors = await client.call_tool(
+                "run_get_neighbors",
+                {
+                    "project_id": project_id,
+                    "session_id": session_id,
+                    "run_id": run_id,
+                    "index_id": index_id,
+                    "request_id": "external-first-completion-neighbors",
+                    "symbol_id": match["symbol"]["symbol_id"],
+                    "direction": "callers",
+                    "depth": 1,
+                    "limit": 40,
+                },
+            )
+            assert neighbors.structured_content["ok"] is True
+
+            conclusion = {
+                "project_id": project_id,
+                "session_id": session_id,
+                "run_id": run_id,
+                "index_id": index_id,
+                "outcome": "insufficient_evidence",
+                "summary": "The local import flow has multiple source observations, but the complete runtime chain is not statically confirmed.",
+                "findings": [
+                    {
+                        "finding_id": "observation-entry",
+                        "kind": "observation",
+                        "text": "The entry and source evidence were returned by the bound Run.",
+                        "evidence_ids": [evidence_ids[0]],
+                    },
+                    {
+                        "finding_id": "observation-storage",
+                        "kind": "observation",
+                        "text": "Additional source evidence was returned by the same bound Run.",
+                        "evidence_ids": evidence_ids[1:4],
+                    },
+                    {
+                        "finding_id": "observation-limits",
+                        "kind": "hypothesis",
+                        "text": "Coverage and unresolved limits prevent claiming a complete runtime flow.",
+                        "evidence_ids": [],
+                    },
+                ],
+                "candidate_links": [],
+                "evidence_ids": evidence_ids,
+                "limitations": [
+                    "The fixture relation result is bounded and cannot confirm every runtime call.",
+                    "The report is an understanding result, not a defect candidate.",
+                ],
+            }
+            completed = await client.call_tool("submit_external_run", conclusion)
+            assert completed.structured_content["ok"] is True
+            assert completed.structured_content["report"]["outcome"] == "insufficient_evidence"
+            assert len(completed.structured_content["report"]["evidence"]) == 5
+            assert len(completed.structured_content["references"]) == 5
+
+            repeated = await client.call_tool("submit_external_run", conclusion)
+            assert repeated.structured_content == completed.structured_content
+
+            conflicting = await client.call_tool(
+                "submit_external_run",
+                {**conclusion, "summary": "A different conclusion must be rejected."},
+            )
+            assert conflicting.structured_content["ok"] is False
+            assert conflicting.structured_content["error"]["code"] == "conflict"
+
+            events = await client.call_tool(
+                "list_run_events",
+                {"project_id": project_id, "session_id": session_id, "run_id": run_id},
+            )
+            event_types = [event["type"] for event in events.structured_content["result"]["events"]]
+            assert event_types[0] == "run.started"
+            assert event_types.count("tool.started") == 7
+            assert event_types.count("tool.completed") == 7
+            assert event_types.count("graph.updated") == 1
+            assert event_types.count("run.completed") == 1
+            return run_id
+
+    run_id = asyncio.run(exercise())
+    status, report_response = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/sessions/{session_id}/runs/{run_id}/report",
+    )
+    assert status == 200
+    assert report_response["report"]["report_id"] == f"report-{run_id}"
+    assert len(report_response["report"]["evidence"]) == 5
+
+
 def test_external_tool_expiry_interrupts_after_slow_bounded_call(tmp_path: Path) -> None:
     repository = copy_fixture(tmp_path)
     application = create_app(

@@ -21,6 +21,7 @@ CodeTrail 已有本地 stdio MCP、工作区 Session/Run 持久化、只读代�
 - 工具调用复用现有 `IndexService.execute_tool`。服务端记录开始事件、实际工具结果和返回证据；客户端不能伪造工具结果或证据。
 - 结构化结论只允许 `candidate_found` 或 `insufficient_evidence`。服务端仅接受同一 Run、同一索引快照且实际返回过的证据和符号引用，并复用现有 Report/Impact 契约。
 - start/tool/complete/cancel 均按请求幂等处理：同一幂等键和相同输入返回既有结果，终态 Run 拒绝新的活动；外部连接恢复不重复追加事件。外部 Run 跨进程恢复时只将超过 Run 预算时间的活动 Run 标为 interrupted，不影响另一个进程中新建或仍在预算内的 Run。
+- `submit_external_run` 完成持久化后返回与 Report 相同的 `report_id` 和终态序号；若回执在持久化后丢失，完全相同的结论可安全重试并复用同一 Report/evidence references，不追加终态事件；不同结论返回 `conflict`，未知 `internal_error` 不得被客户端视为成功或通过补偿 Run 掩盖。
 - 工作台通过既有 Session Run 列表发现外部 Run，自动选择并订阅同一 Run 的 SSE；刷新、切换 Session 或重复发现不得重复订阅或混入迟到事件。展示公开工具活动、证据、结论和限制，不展示隐藏思维链。
 
 ## 输入、输出与归属
