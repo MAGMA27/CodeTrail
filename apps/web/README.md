@@ -27,10 +27,10 @@ Session 内的 fixture/real 分析必须由用户显式点击对应启动按钮�
 
 ## 使用与配置
 
-先启动 API，再从仓库根目录执行：
+先按 [MVP 操作说明](../../docs/mvp-operation.md) 启动 API，再从仓库根目录执行共享启动脚本：
 
 ```powershell
-pnpm web:dev
+pwsh -File .\scripts\start-local.ps1 -Service web
 ```
 
 打开 `http://localhost:3000`，创建或打开项目、建立 ready 索引、创建 Session 并保存至少一条消息，在 Session 的“Issue 分析”面板选择 fixture 场景后点击“启动离线分析”，或选择 real 后点击“启动真实分析”。`success-timeout-missing` 展示候选结论和同快照 evidence；`insufficient-external-service` 展示证据不足；`tool-failure-read-source` 展示工具失败及失败前保留的 evidence。real 还要求 API 设置 `CODETRAIL_REAL_RUN_ENABLED=1` 并在服务数据目录配置 `config.json`。
@@ -58,3 +58,4 @@ API 离线、项目/Session/index 不属于当前范围、消息未保存、空 
 - [关系扫描与 unresolved 覆盖语义](../../docs/decisions/2026-09-13-relation-coverage.md)
 - [FastAPI 路由入口概览](../../docs/decisions/2026-09-14-fastapi-route-overview.md)
 - [项目结构总览](../../docs/decisions/2026-09-14-project-structure-overview.md)
+- [共享本地运行环境与 Codex 联合演示](../../docs/decisions/2026-09-14-shared-runtime-codex-demo.md)

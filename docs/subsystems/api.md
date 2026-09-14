@@ -26,6 +26,16 @@ Run 拒绝空消息、跨 Project/Session/Index/Generation、不合法 cutoff �
 
 其它来源导入、GitHub、模型配置、Session 和功能生成限制见 [apps/api README](../../apps/api/README.md)；Run 的设计取舍见 [Run 决策](../decisions/2026-09-12-run-execution.md)、[Run SSE 决策](../decisions/2026-09-12-run-sse.md) 和 [Run 影响查询决策](../decisions/2026-09-13-run-impact.md)。
 
+## 使用与配置
+
+当前本地联合环境使用 [共享启动脚本](../../scripts/start-local.ps1)，固定让 API 使用 `D:/Dev/CodeTrail-runtime` 中已有的 managed source；API 与 Codex MCP 必须共用该目录。完整步骤见 [MVP 操作说明](../mvp-operation.md)：
+
+```powershell
+pwsh -File .\scripts\start-local.ps1 -Service api
+```
+
+MCP 代码更新后由 Codex 宿主对 `codetrail` 做一次 reload（或按宿主能力重启 Codex）；仓库不清理运行目录，也不通过手工项目/索引 ID 绕过列表发现。
+
 ## 验证
 
 `apps/api/tests/test_runs.py` 验证 fixture 生命周期和固定报告影响查询；`apps/api/tests/test_storage.py` 验证有界静态路径、环、去重和未知边界；`apps/api/tests/test_run_sse.py` 验证持久化逐帧回放、双游标续接、终态控制帧、未来/跨 Run 拒绝、断开释放容量和 health 并发；`apps/api/tests/test_issue_runs.py` 验证 real 的模型工具协议、不同问题的工具计划、证据不足、非法引用/工具、有限修复、预算、持久化配置和 OpenAI-compatible 请求、供应商失败、取消与终态容量；`apps/api/tests/test_mcp.py` 验证 HTTP/MCP 同一 Run、影响结果、独立 real 写能力和 Codex external 的实际工具结果、证据拒绝、幂等、时间预算、取消与终态拒写；`apps/api/tests/test_overview.py` 另验证结构组、模块关系、预算和固定快照。另运行全量 pytest、compileall、本地 stdio MCP 与浏览器结构下钻流程。真实 DeepSeek 语义质量为 UNVERIFIED。
@@ -40,3 +50,4 @@ Run 拒绝空消息、跨 Project/Session/Index/Generation、不合法 cutoff �
 - [Codex 外部 Agent Run 决策](../decisions/2026-09-13-external-agent-run.md)
 - [FastAPI 路由入口概览](../decisions/2026-09-14-fastapi-route-overview.md)
 - [项目结构总览](../decisions/2026-09-14-project-structure-overview.md)
+- [共享本地运行环境与 Codex 联合演示](../decisions/2026-09-14-shared-runtime-codex-demo.md)

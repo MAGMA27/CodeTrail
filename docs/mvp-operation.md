@@ -4,21 +4,21 @@
 
 ## 启动 API 与工作台
 
-从仓库根目录启动 API；API 和 MCP 必须使用同一个服务数据目录，已有 managed source 才能被项目列表发现。
+本地联合演示固定使用 `D:/Dev/CodeTrail-runtime` 作为服务管理目录。该目录中的已注册 managed source、Project、Index、Session 和 Run 会被 API 与 Codex MCP 共同读取；启动脚本不会创建、清空或迁移数据，也不需要在当前 PowerShell 会话中手工设置临时环境变量。
+
+从仓库根目录启动 API：
 
 ```powershell
-$env:CODETRAIL_DATA_DIR = 'D:/Dev/CodeTrail-runtime'
-$env:CODETRAIL_REPOSITORIES = '{}'
-$env:CODETRAIL_WORKBENCH_URL = 'http://localhost:3000'
-$env:CODETRAIL_MCP_EXTERNAL_RUN_ENABLED = '1'
-uv run --directory apps/api uvicorn app.main:app --host 127.0.0.1 --port 8000
+pwsh -File .\scripts\start-local.ps1 -Service api
 ```
 
 另开 PowerShell 启动工作台：
 
 ```powershell
-pnpm --dir apps/web dev
+pwsh -File .\scripts\start-local.ps1 -Service web
 ```
+
+若 API 已经占用 `8000`，先在原 API 终端按 `Ctrl+C` 停止，再只启动一个 API 实例。启动后先检查 `http://127.0.0.1:8000/api/health`；工作台打开后应能发现名为 `CodeTrail 自用验收` 的项目及其 ready 索引。
 
 ## 从 HTTP 入口理解项目
 
@@ -36,15 +36,19 @@ MCP `get_overview` 使用同一 `project_id`、`index_id`、结构规则和预�
 
 ## 加载 Codex MCP
 
-把 `apps/api/README.md` 中的 Windows stdio 配置写入当前 Codex 主机的配置文件，确保 `CODETRAIL_DATA_DIR` 与 API 完全一致；启用 `CODETRAIL_MCP_EXTERNAL_RUN_ENABLED=1` 后重启或重载 Codex 主机。external Run 不需要真实模型供应商密钥。
+当前 Codex 主机的 `codetrail` stdio 配置已经使用与 API 相同的代码目录、`D:/Dev/CodeTrail-runtime` 和 `CODETRAIL_MCP_EXTERNAL_RUN_ENABLED=1`；配置示例和完整字段见 [API README](../apps/api/README.md)。MCP 进程在启动时加载代码和工具契约，因此代码更新后只需对 `codetrail` MCP 做一次 reload（如果宿主没有单独的 reload，则重启 Codex 一次）。不要通过清空数据或手工填写项目/索引 ID 来修复版本不一致。external Run 不需要真实模型供应商密钥。
+
+本轮实际检查发现：HTTP 已使用当前 `python-entry-v4` 代码返回结构组和模块关系，但当前宿主中的旧 MCP 进程仍返回 `python-entry-v1`。因此宿主 reload 完成前，HTTP/浏览器与 Codex MCP 的新结构字段联合验收保持 `UNVERIFIED`；reload 后从 MCP 的 `list_projects` 和 `get_overview` 重新发现目标，不复用旧响应。
 
 ## 进行调查
 
-打开 `http://localhost:3000`，选择目标项目和一个已有消息的 Session；当前自用验收使用项目 `CodeTrail 自用验收`、Session `已知费用结算问题自用验收` 和其固定 ready index。首次使用时先导入来源、等待索引 ready、创建 Session 并保存一条问题消息。
+打开 `http://localhost:3000`，选择目标项目和一个已有消息的 Session；当前自用验收使用项目 `CodeTrail 自用验收`、Session `已知费用结算问题自用验收`，项目和索引 ID 由 API/MCP 列表发现，不手工编造。结构总览选择该项目的最新 `relations-v2` ready index。
 
 在 Codex 中只描述现象，不预先提供候选文件、函数或行号，例如：“批量评测时供应商返回明确 token 用量，但费用高于请求前预留时最终累计费用可能仍停留在预留值，请检查是否存在导致低估的逻辑，给出源码证据、触发条件与可能影响；证据不足时明确说明。”
 
 Codex 应从 MCP 项目发现开始，使用同一 Run 的 `start_external_run`、`run_search_code`、`run_read_source`、`run_get_neighbors` 和 `submit_external_run`；工作台不创建 external Run，只从当前 Session history 自动发现并展示。
+
+该 Session 已有完成的 external Run，可直接读取并核对报告恢复、公开事件、工具结果和同快照 evidence；本轮不需要为了重复验收新建 Run。已有报告绑定自己的旧 ready index，不能与结构总览的最新 index 混用或互相覆盖。
 
 ## 查看结果
 
@@ -53,3 +57,10 @@ Codex 应从 MCP 项目发现开始，使用同一 Run 的 `start_external_run`�
 ## 边界
 
 external Run 只执行白名单代码搜索、源码读取和静态邻接查询，不执行来源仓库代码、shell 或测试；报告不展示隐藏思维链。真实供应商调用、DeepSeek 语义质量和实际账单仍需单独授权与评测，不因本地 external 闭环通过而宣称已验证。
+
+## 停止后复现
+
+1. 在 API 终端按 `Ctrl+C`，等待进程退出。
+2. 从仓库根目录重新执行 `pwsh -File .\scripts\start-local.ps1 -Service api`。
+3. 用 `GET http://127.0.0.1:8000/api/health` 检查服务，再打开工作台确认 `CodeTrail 自用验收` 和 `python-entry-v4` 结构总览。
+4. 如 Codex MCP 也需要加载当前代码，对 `codetrail` MCP 做一次 reload，然后用 `list_projects`/`get_overview` 重新发现并对照；不要重复 reload，也不要清理运行目录。

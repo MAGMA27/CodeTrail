@@ -31,13 +31,10 @@ fixture Run 继续接受三个场景：候选、证据不足和工具失败。re
 
 ## 使用与配置
 
-从仓库根目录准备服务端仓库映射后启动；当前 Codex external 验收的完整步骤见 [MVP 操作说明](../../docs/mvp-operation.md)：
+从仓库根目录启动当前 API 与 Codex external 联合验收环境；脚本固定使用 `D:/Dev/CodeTrail-runtime`，从该服务数据目录读取已注册 managed source，不需要手工设置临时环境变量。完整步骤见 [MVP 操作说明](../../docs/mvp-operation.md)：
 
 ```powershell
-$env:CODETRAIL_REPOSITORIES = '{"timeout-demo":"D:\\Dev\\CodeTrail\\fixtures\\repos\\timeout-demo"}'
-$env:CODETRAIL_DATA_DIR = 'D:\\Dev\\CodeTrail\\.codetrail-service'
-Set-Location apps/api
-uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
+pwsh -File .\scripts\start-local.ps1 -Service api
 ```
 
 API 健康检查为 `GET /api/health`。前端或测试先创建 Project、建立 Index、创建 Session 并追加至少一条已保存消息，再 POST Run 请求；`message_end_sequence` 省略时由服务端读取当前保存消息计数。Run 读取通过同一 Project/Session 的 list/detail/events/tool-results/report 端点，取消使用 cancel 端点。Run 请求可声明预算和幂等键；响应的 Run 状态、输入 hash、消息范围、公开事件、工具结果和报告都是服务端持久化数据。external Run 的工具 request_id 和 start/complete/cancel 由 MCP 固定入口承载；工作台会从 Session Run history 发现 Codex external Run 并订阅其 SSE。
@@ -68,6 +65,7 @@ Run 拒绝未开启能力的 `mode=real` 或 `CODETRAIL_MCP_EXTERNAL_RUN_ENABLED
 - [关系扫描与 unresolved 覆盖语义](../../docs/decisions/2026-09-13-relation-coverage.md)
 - [FastAPI 路由入口概览](../../docs/decisions/2026-09-14-fastapi-route-overview.md)
 - [项目结构总览](../../docs/decisions/2026-09-14-project-structure-overview.md)
+- [共享本地运行环境与 Codex 联合演示](../../docs/decisions/2026-09-14-shared-runtime-codex-demo.md)
 
 ## 本地 MCP 入口
 
@@ -93,6 +91,8 @@ CODETRAIL_REPOSITORIES = "{}" # 使用 CODETRAIL_DATA_DIR 中已注册的 manage
 CODETRAIL_WORKBENCH_URL = "http://localhost:3000"
 CODETRAIL_MCP_EXTERNAL_RUN_ENABLED = "1"
 ```
+
+配置文件由 Codex 宿主加载；修改 MCP 代码后对 `codetrail` 做一次 reload（或按宿主能力重启 Codex）即可。API/MCP 不应各自指向仓库根目录下的默认 `.codetrail`，也不应通过手工项目/索引 ID 绕过列表发现。
 
 功能生成和 Run 的 `real` 模式默认适配 DeepSeek，从服务数据目录的 `config.json` 读取配置；例如：
 
