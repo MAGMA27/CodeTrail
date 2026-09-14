@@ -139,6 +139,16 @@ class SearchQueryResult:
 
 
 @dataclass(frozen=True)
+class _SearchCandidate:
+    """An unbounded candidate considered before applying the public result cap."""
+
+    symbol: Symbol
+    priority: int
+    body_score: float
+    source_text: str | None
+
+
+@dataclass(frozen=True)
 class RelationCoverage:
     """Persisted coverage facts for one immutable relation index."""
 
@@ -2840,7 +2850,13 @@ class IndexStore:
         *,
         limit: int = 40,
     ) -> SearchQueryResult:
-        """Search and report whether the result cap omitted additional matches."""
+        """Rank symbol names before scoped body matches, then apply the result cap.
+
+        The file-level FTS rows are only a candidate index. Body matches are
+        rechecked against each symbol's immutable source span so a token in one
+        function does not make every function in that file a match. Module
+        symbols intentionally retain the full-file span for navigation.
+        """
 
         self._require_index(index_id)
         try:
@@ -2851,41 +2867,105 @@ class IndexStore:
         if not tokens:
             return SearchQueryResult((), False, None)
         fts_query = " AND ".join(f'"{token.replace(chr(34), chr(34) * 2)}"' for token in tokens)
+        name_query = ".".join(tokens)
         try:
-            rows = self._connection.execute(
-                "SELECT symbol_id, qualified_name, source_text FROM symbol_fts "
-                "WHERE index_id = ? AND symbol_fts MATCH ? "
-                "ORDER BY bm25(symbol_fts), qualified_name COLLATE BINARY, symbol_id "
-                "LIMIT ?",
-                (index_id, fts_query, params.limit + 1),
+            symbol_rows = self._connection.execute(
+                "SELECT symbol_id, path, qualified_name, kind, start_line, end_line FROM symbols "
+                "WHERE index_id = ? ORDER BY path COLLATE BINARY, start_line, end_line, kind, qualified_name, symbol_id",
+                (index_id,),
+            ).fetchall()
+            fts_rows = self._connection.execute(
+                "SELECT symbol_fts.symbol_id, bm25(symbol_fts) AS body_score, "
+                "snapshot_files.source_text "
+                "FROM symbol_fts "
+                "JOIN symbols ON symbols.index_id = symbol_fts.index_id "
+                "AND symbols.symbol_id = symbol_fts.symbol_id "
+                "JOIN snapshot_files ON snapshot_files.index_id = symbols.index_id "
+                "AND snapshot_files.path = symbols.path "
+                "WHERE symbol_fts.index_id = ? AND symbol_fts MATCH ?",
+                (index_id, fts_query),
             ).fetchall()
         except sqlite3.OperationalError as exc:
             raise StorageError(f"symbol search failed: {exc}") from exc
 
-        truncated = len(rows) > params.limit
+        symbols = {
+            row["symbol_id"]: _symbol_from_row(index_id, row)
+            for row in symbol_rows
+        }
+        name_priorities: dict[str, int] = {}
+        for symbol in symbols.values():
+            folded_name = symbol.qualified_name.casefold()
+            leaf_name = folded_name.rsplit(".", 1)[-1]
+            if folded_name == name_query or (
+                len(tokens) > 1 and folded_name.endswith(f".{name_query}")
+            ):
+                name_priorities[symbol.symbol_id] = 0
+            elif len(tokens) == 1 and leaf_name == name_query:
+                name_priorities[symbol.symbol_id] = 1
+            elif all(token in folded_name for token in tokens):
+                name_priorities[symbol.symbol_id] = 2
+
+        body_candidates: dict[str, tuple[float, str]] = {}
+        token_set = set(tokens)
+        for row in fts_rows:
+            symbol = symbols.get(row["symbol_id"])
+            if symbol is None:
+                continue
+            scoped_source = _symbol_source_text(row["source_text"], symbol)
+            if token_set.issubset(set(_search_tokens(scoped_source))):
+                body_candidates[symbol.symbol_id] = (float(row["body_score"]), scoped_source)
+
+        candidates: list[_SearchCandidate] = []
+        for symbol_id in set(name_priorities) | set(body_candidates):
+            symbol = symbols[symbol_id]
+            body_candidate = body_candidates.get(symbol_id)
+            body_score = body_candidate[0] if body_candidate is not None else math.inf
+            scoped_source = body_candidate[1] if body_candidate is not None else None
+            candidates.append(
+                _SearchCandidate(
+                    symbol=symbol,
+                    priority=name_priorities.get(symbol_id, 3),
+                    body_score=body_score,
+                    source_text=scoped_source,
+                )
+            )
+        candidates.sort(key=_search_candidate_sort_key)
+
+        selected = candidates[: params.limit]
+        source_by_path: dict[str, str] = {}
+        missing_source_paths = sorted({candidate.symbol.path for candidate in selected if candidate.source_text is None})
+        if missing_source_paths:
+            placeholders = ", ".join("?" for _ in missing_source_paths)
+            source_rows = self._connection.execute(
+                f"SELECT path, source_text FROM snapshot_files WHERE index_id = ? AND path IN ({placeholders})",
+                (index_id, *missing_source_paths),
+            ).fetchall()
+            source_by_path = {row["path"]: row["source_text"] for row in source_rows}
+
         results: list[SymbolSearchResult] = []
-        for rank, row in enumerate(rows[: params.limit], start=1):
-            symbol = self._load_symbol(index_id, row["symbol_id"])
-            source_text = row["source_text"]
+        for rank, candidate in enumerate(selected, start=1):
+            source_text = candidate.source_text
+            if source_text is None:
+                source_text = _symbol_source_text(source_by_path.get(candidate.symbol.path, ""), candidate.symbol)
+            folded_name = candidate.symbol.qualified_name.casefold()
+            scoped_tokens = set(_search_tokens(source_text))
             matched_terms = [
-                token
-                for token in tokens
-                if token.casefold() in f"{row['qualified_name']}\n{source_text}".casefold()
+                token for token in tokens if token in folded_name or token in scoped_tokens
             ]
             results.append(
                 SymbolSearchResult(
                     match=SearchMatch(
                         rank=rank,
-                        symbol=symbol,
+                        symbol=candidate.symbol,
                         matched_terms=matched_terms or [tokens[0]],
                     ),
-                    snippet=_snippet(source_text, tokens, row["qualified_name"]),
+                    snippet=_snippet(source_text, tokens, candidate.symbol.qualified_name),
                 )
             )
         return SearchQueryResult(
             matches=tuple(results),
-            truncated=truncated,
-            truncation_reason="max_results reached" if truncated else None,
+            truncated=len(candidates) > params.limit,
+            truncation_reason="max_results reached" if len(candidates) > params.limit else None,
         )
 
     def read_evidence(
@@ -3567,6 +3647,29 @@ def _payload_hash(relation: RelationIndex) -> str:
 
 def _search_tokens(query: str) -> list[str]:
     return list(dict.fromkeys(re.findall(r"\w+", query.casefold(), flags=re.UNICODE)))
+
+
+def _search_candidate_sort_key(candidate: _SearchCandidate) -> tuple[int, float, str, str, str]:
+    """Sort name matches ahead of body matches, then keep every tie deterministic."""
+
+    return (
+        candidate.priority,
+        candidate.body_score if candidate.priority == 3 else 0.0,
+        candidate.symbol.qualified_name.casefold(),
+        candidate.symbol.path,
+        candidate.symbol.symbol_id,
+    )
+
+
+def _symbol_source_text(source_text: str, symbol: Symbol) -> str:
+    """Return only the immutable source span owned by one indexed symbol."""
+
+    lines = source_text.splitlines()
+    start = max(0, symbol.start_line - 1)
+    end = min(len(lines), symbol.end_line)
+    if start >= end:
+        return ""
+    return "\n".join(lines[start:end])
 
 
 def _snippet(source_text: str, tokens: list[str], qualified_name: str, max_chars: int = 240) -> str:

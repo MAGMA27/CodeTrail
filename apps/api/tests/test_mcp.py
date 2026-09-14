@@ -1174,6 +1174,19 @@ def test_mcp_external_run_persists_actual_tools_and_report(tmp_path: Path) -> No
             assert searched.structured_content["ok"] is True
             search_result = searched.structured_content["result"]
             assert search_result["kind"] == "search_code.succeeded"
+            status, http_search = await _request(
+                application,
+                "GET",
+                f"/api/projects/{project_id}/indexes/{index_id}/search?query=load_settings&limit=8",
+            )
+            assert status == 200
+            assert [
+                item["symbol"]["symbol_id"] for item in search_result["matches"]
+            ] == [
+                item["symbol"]["symbol_id"] for item in http_search["matches"]
+            ]
+            assert search_result["truncated"] == http_search["truncated"]
+            assert search_result["truncation_reason"] == http_search["truncation_reason"]
             match = next(
                 item for item in search_result["matches"]
                 if item["symbol"]["qualified_name"] == "timeout_demo.config.load_settings"

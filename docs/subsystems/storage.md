@@ -8,6 +8,8 @@
 
 [IndexStore](../../apps/api/app/storage.py) 拥有不可变 Index、Project 关联、Session/消息和 Run 生命周期数据；[ManagementStore](../../apps/api/app/storage.py) 拥有动态来源和 ImportAttempt。存储层负责事务、唯一约束、作用域读取、游标、契约反序列化和同快照静态 `calls` 影响遍历，不负责 HTTP 错误呈现、模型推理或工具计划；影响查询只读取已有 symbols/static_edges/unresolved，不修改 Run 或推断模型影响；real Run 的模型调用只通过这里原子预留/记录有界用量，不保存原始 prompt/response；external Run 的请求事件、实际 ToolResult、超时中断和 Report 也由同一事务边界拥有。
 
+搜索的 `symbol_fts` 保持文件级 `qualified_name/source_text` 候选索引，以兼容已有不可变快照；`search_symbols_bounded` 会在应用 `limit` 前对完整候选集排序。完整限定名（或限定名后缀）优先于叶子名精确匹配，随后是名称部分匹配和正文匹配；正文候选必须在该 Symbol 的 `start_line/end_line` 范围内再次命中。模块 Symbol 保留整文件范围用于导航，函数/类不继承同文件其他 Symbol 的正文命中；同层使用限定名、路径、`symbol_id` 稳定排序，同名定义不合并，`truncated` 反映排序后的候选是否超过上限。该查询修复不修改 FTS 格式、快照 hash、Symbol ID 或历史 Run，不需要重建旧索引。
+
 ## 接口与依赖
 
 应用服务通过 [service.py](../../apps/api/app/service.py) 的 registry 获取对应 IndexStore；Run executor 只通过同一存储接口写事件、工具结果和报告，[run_sse.py](../../apps/api/app/run_sse.py) 只调用有界事件读取。Run 表、run_inputs、run_events、run_tool_results、run_reports 与 sessions 使用 project/session/index 外键和索引，所有读取要求显式作用域。JSON 行在读写边界再次通过 Pydantic Event/ToolResult/Report/Run/RunInput 校验。
@@ -24,7 +26,7 @@ Run 持久化限制工具调用、模型调用/修复、单次/总源码行、�
 
 ## 验证
 
-`apps/api/tests/test_storage.py` 验证 SQLite 重开、事务、旧快照、邻接和影响路径边界；`apps/api/tests/test_runs.py` 验证 fixture Run 冻结、唯一活动约束、分页读取、工具结果/事件/报告、固定报告影响读取、取消和重启恢复；`apps/api/tests/test_run_sse.py` 验证 SSE 逐帧回放、游标续接、终态完成标记、边界拒绝和断开释放容量；`apps/api/tests/test_issue_runs.py` 验证 real 模型用量预留、token/字符限制、终态取消竞争和报告持久化；`apps/api/tests/test_api.py`、`test_features.py` 和 `test_mcp.py` 验证上层作用域与双入口，后者另覆盖 external 工具结果、超时中断和终态拒写。本轮后端全量为 123 passed，编译检查、契约检查、文档检查和实际 stdio MCP external 闭环通过；工作台重新打开后从同一 SQLite 记录恢复报告。真实供应商语义质量仍未验证；实际 Codex 主机热加载已于 2026-09-14 完成，HTTP/MCP/工作台联合结果一致。
+`apps/api/tests/test_storage.py` 验证 SQLite 重开、事务、旧快照、邻接和影响路径边界；`apps/api/tests/test_runs.py` 验证 fixture Run 冻结、唯一活动约束、分页读取、工具结果/事件/报告、固定报告影响读取、取消和重启恢复；`apps/api/tests/test_run_sse.py` 验证 SSE 逐帧回放、游标续接、终态完成标记、边界拒绝和断开释放容量；`apps/api/tests/test_issue_runs.py` 验证 real 模型用量预留、token/字符限制、终态取消竞争和报告持久化；`apps/api/tests/test_api.py`、`test_features.py` 和 `test_mcp.py` 验证上层作用域与双入口，后者另覆盖 external 工具结果、超时中断和终态拒写。本轮后端全量为 135 passed，编译检查、契约检查、文档检查和实际 stdio MCP external 闭环通过；工作台重新打开后从同一 SQLite 记录恢复报告。真实供应商语义质量仍未验证；实际 Codex 主机热加载已于 2026-09-14 完成，HTTP/MCP/工作台联合结果一致。
 
 ## 相关决策
 

@@ -662,7 +662,7 @@ def test_tool_adapter_returns_contract_results_and_safe_failures(tmp_path: Path)
         request_id="request-search",
         run_id="run-local",
         index_id=index_id,
-        params=SearchCodeParams(query="handler", limit=1),
+        params=SearchCodeParams(query="timeout_demo.dispatch", limit=1),
     )
     search = service.execute_tool(search_request, completed_sequence=3)
     assert isinstance(search, SearchCodeSuccess)

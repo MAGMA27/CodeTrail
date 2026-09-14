@@ -21,6 +21,8 @@
 
 契约位于 [contracts.py](app/contracts.py)，Schema 由 [export_schema.py](app/export_schema.py) 生成。旧 `/api/indexes/*` 保留兼容；项目工作区使用 `/api/projects/*`。Run 的 HTTP 入口为 `/api/projects/{project_id}/sessions/{session_id}/runs` 及其 detail、events、`events/stream`、tool-results、report、impact、cancel 子路径；fixture/real 创建只做边界校验、冻结、容量预留和提交，worker 启动成功后返回 queued 的 run_id。external Run 只从 MCP `start_external_run` 创建，冻结同样的 Session 输入但不占内部 worker；`analysis_kind=understanding` 只走 external，`run_search_code`、`run_read_source`、`run_get_neighbors` 记录服务端实际结果，`get_neighbors` 的 `truncated` 表示查询预算，`index_truncated` 表示固定关系扫描覆盖，`index_unresolved_truncated` 表示 unresolved 详情覆盖。`submit_external_run` 可提交 Issue 结论或最多 12 步的 explanation，且只接受本 Run 返回的同快照证据/符号；explanation 不产生候选链接。容量满时内部 Run 返回可重试的 `budget_exceeded`/429，不写入 Run。`events/stream` 在握手前校验 project/session/run 与 `after_sequence`/`Last-Event-ID`，按 `{run_id}:{sequence}` 逐帧回放持久化公开事件，终态后关闭，SSE 不可用时由工作台自行回退轮询。`impact` 只按已保存报告中的一个 candidate/finding ID 查询 Run 固定 index 上的静态 `calls`，并返回固定索引覆盖事实；限制方向、深度、节点、路径和 unresolved 输出，不修改 Run。执行由 [Run 执行子系统](../../docs/subsystems/execution.md)负责。所有项目索引、Session 和 Run 操作都复用 WorkspaceService 的归属校验。
 
+`search_code` 与 `run_search_code` 使用同一 `IndexStore` 搜索语义：先按完整限定名（也接受限定名后缀）精确匹配，再按单段叶子名精确匹配、名称部分匹配，最后才按符号自身源码范围的正文匹配；所有候选先排序再应用最多 40 条的 `limit`。排序在同层按限定名、路径和稳定 `symbol_id` 确定，保留同名符号的独立身份并在结果中报告截断。现有 `symbol_fts` 仍是文件级候选索引，正文命中会按不可变 `start_line/end_line` 复核；模块符号有意覆盖整个文件以保留文件导航，函数/类不会因同文件其他符号命中而被带入。该改动不改变 FTS 表格式、快照 hash、Symbol ID 或历史 Run，因此已有索引无需重建。
+
 `GET /api/projects/{project_id}/indexes/{index_id}/overview` 从同一不可变快照生成确定性的 `python-entry-v4` 概览。除 `__main__.py`/main guard 外，`fastapi_route` 入口还会保存已确认的 HTTP 方法、声明路径、处理函数 symbol、装饰器到函数结束的 evidence；概览同时生成 `http_path` 和 `source_directory` 结构组，并把固定快照中可映射的跨模块 `imports`/`calls` 聚合为带代表源码位置的模块关系。处理函数仍沿既有静态图展开，入口绑定本身不新增 CodeEdge；结构组和聚合关系也不会写回静态边。HTTP 组按首个 `{parameter}` 前的声明路径静态前缀及 handler 模块分组，源码组按相对目录分组；它们都不是业务功能。只识别已知 `FastAPI()` 实例、字面量路径和静态方法，声明路径不包含未解析的 router/部署前缀；未展开语句中的可能绑定写入会保守使已知绑定失效，不把后续不确定装饰器升级为路由。结构输出由 `max_groups`（默认 80、最大 200）和 `max_module_relations`（默认 200、最大 400）独立限制，代表边最多保留 8 条并以 `edge_count` 说明总量。
 
 ## 数据与生命周期
@@ -53,7 +55,7 @@ Run 拒绝未开启能力的 `mode=real` 或 `CODETRAIL_MCP_EXTERNAL_RUN_ENABLED
 
 ## 验证
 
-从 `apps/api` 执行 `uv run pytest -q` 和 `uv run python -m compileall -q app`。`tests/test_runs.py` 覆盖 fixture 生命周期和固定 Run 报告影响查询；`tests/test_storage.py` 覆盖静态路径、节点去重、环和输出边界；`tests/test_run_sse.py` 覆盖持久化逐帧回放、双游标续接、终态控制帧、未来/跨 Run 拒绝、断开释放容量和 health 并发；`tests/test_issue_runs.py` 覆盖 real 工具决策、证据不足、非法引用/工具、有限修复、预算、取消、持久化 config.json 和 OpenAI-compatible 请求；`tests/test_mcp.py` 覆盖 HTTP/MCP Run 与影响查询对照、默认只读、独立 Run 写开关和 real 能力开关，以及 external 的实际 stdio 工具、证据边界、幂等、时间预算、取消和终态拒写。其它项目/索引/导入/Session/O1/O2/O3 测试继续覆盖各自边界。本轮全量后端 134 passed、前端测试 24 passed、契约测试 23 passed，编译、类型检查、生产构建、文档检查和本地 stdio MCP/浏览器 FastAPI 路由联动均通过；真实 DeepSeek 语义质量仍未验证。
+从 `apps/api` 执行 `uv run pytest -q` 和 `uv run python -m compileall -q app`。`tests/test_runs.py` 覆盖 fixture 生命周期和固定 Run 报告影响查询；`tests/test_storage.py` 覆盖静态路径、节点去重、环和输出边界；`tests/test_run_sse.py` 覆盖持久化逐帧回放、双游标续接、终态控制帧、未来/跨 Run 拒绝、断开释放容量和 health 并发；`tests/test_issue_runs.py` 覆盖 real 工具决策、证据不足、非法引用/工具、有限修复、预算、取消、持久化 config.json 和 OpenAI-compatible 请求；`tests/test_mcp.py` 覆盖 HTTP/MCP Run 与影响查询对照、默认只读、独立 Run 写开关和 real 能力开关，以及 external 的实际 stdio 工具、证据边界、幂等、时间预算、取消和终态拒写。其它项目/索引/导入/Session/O1/O2/O3 测试继续覆盖各自边界。本轮全量后端 135 passed、前端测试 24 passed、契约测试 23 passed，编译、类型检查、生产构建、文档检查和本地 stdio MCP/浏览器 FastAPI 路由联动均通过；真实 DeepSeek 语义质量仍未验证。
 
 ## 关联文档
 

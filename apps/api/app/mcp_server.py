@@ -327,7 +327,8 @@ def create_mcp_server(
         title="Search one CodeTrail index",
         description=(
             "Search symbols and captured source text in one explicitly selected project/index pair. "
-            "Results are capped at 40 and report truncation."
+            "Exact qualified and leaf symbol names rank before partial names and symbol-scoped body matches; "
+            "results are capped at 40 and report truncation."
         ),
         structured_output=True,
     )

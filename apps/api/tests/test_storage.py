@@ -266,6 +266,55 @@ def test_search_is_snapshot_scoped_deterministic_and_safe_for_special_queries(tm
             store.search_symbols(index_id, "load_settings", limit=41)
 
 
+def test_search_prioritizes_exact_names_and_scopes_body_matches_to_symbols(tmp_path: Path) -> None:
+    repository = tmp_path / "repo"
+    package = repository / "pkg"
+    package.mkdir(parents=True)
+    (package / "one.py").write_text(
+        "def handle() -> str:\n"
+        "    return 'needle'\n\n"
+        "def sibling() -> str:\n"
+        "    return 'different'\n",
+        encoding="utf-8",
+    )
+    (package / "two.py").write_text(
+        "def handle() -> str:\n"
+        "    return 'other'\n",
+        encoding="utf-8",
+    )
+    relation = relation_for_repository(repository, repository_id="search-ranking")
+    index_id = relation.snapshot.index.index_id
+
+    with IndexStore(tmp_path / "index.sqlite3") as store:
+        store.write_index(relation)
+
+        leaf_matches = store.search_symbols_bounded(index_id, "handle", limit=2)
+        assert [item.symbol.qualified_name for item in leaf_matches.matches] == [
+            "pkg.one.handle",
+            "pkg.two.handle",
+        ]
+        assert leaf_matches.truncated is True
+
+        partial_matches = store.search_symbols(index_id, "hand", limit=2)
+        assert [item.symbol.qualified_name for item in partial_matches] == [
+            "pkg.one.handle",
+            "pkg.two.handle",
+        ]
+
+        qualified_matches = store.search_symbols(index_id, "pkg.two.handle", limit=1)
+        assert qualified_matches[0].symbol.qualified_name == "pkg.two.handle"
+        suffix_matches = store.search_symbols(index_id, "two.handle", limit=1)
+        assert suffix_matches[0].symbol.qualified_name == "pkg.two.handle"
+
+        body_matches = store.search_symbols(index_id, "needle", limit=4)
+        body_names = {item.symbol.qualified_name for item in body_matches}
+        assert "pkg.one" in body_names
+        assert "pkg.one.handle" in body_names
+        assert "pkg.one.sibling" not in body_names
+        assert "pkg.two.handle" not in body_names
+        assert body_matches == store.search_symbols(index_id, "needle", limit=4)
+
+
 def test_read_evidence_uses_the_persisted_snapshot_after_worktree_changes(tmp_path: Path) -> None:
     repository = tmp_path / "repo"
     repository.mkdir()
