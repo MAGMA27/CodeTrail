@@ -24,7 +24,7 @@ Run 持久化限制工具调用、模型调用/修复、单次/总源码行、�
 
 ## 验证
 
-`apps/api/tests/test_storage.py` 验证 SQLite 重开、事务、旧快照、邻接和影响路径边界；`apps/api/tests/test_runs.py` 验证 fixture Run 冻结、唯一活动约束、分页读取、工具结果/事件/报告、固定报告影响读取、取消和重启恢复；`apps/api/tests/test_run_sse.py` 验证 SSE 逐帧回放、游标续接、终态完成标记、边界拒绝和断开释放容量；`apps/api/tests/test_issue_runs.py` 验证 real 模型用量预留、token/字符限制、终态取消竞争和报告持久化；`apps/api/tests/test_api.py`、`test_features.py` 和 `test_mcp.py` 验证上层作用域与双入口，后者另覆盖 external 工具结果、超时中断和终态拒写。本轮后端全量为 123 passed，编译检查、契约检查、文档检查和实际 stdio MCP external 闭环通过；工作台重新打开后从同一 SQLite 记录恢复报告。真实供应商语义质量和实际 Codex 主机热加载仍未验证。
+`apps/api/tests/test_storage.py` 验证 SQLite 重开、事务、旧快照、邻接和影响路径边界；`apps/api/tests/test_runs.py` 验证 fixture Run 冻结、唯一活动约束、分页读取、工具结果/事件/报告、固定报告影响读取、取消和重启恢复；`apps/api/tests/test_run_sse.py` 验证 SSE 逐帧回放、游标续接、终态完成标记、边界拒绝和断开释放容量；`apps/api/tests/test_issue_runs.py` 验证 real 模型用量预留、token/字符限制、终态取消竞争和报告持久化；`apps/api/tests/test_api.py`、`test_features.py` 和 `test_mcp.py` 验证上层作用域与双入口，后者另覆盖 external 工具结果、超时中断和终态拒写。本轮后端全量为 123 passed，编译检查、契约检查、文档检查和实际 stdio MCP external 闭环通过；工作台重新打开后从同一 SQLite 记录恢复报告。真实供应商语义质量仍未验证；实际 Codex 主机热加载已于 2026-09-14 完成，HTTP/MCP/工作台联合结果一致。
 
 ## 相关决策
 

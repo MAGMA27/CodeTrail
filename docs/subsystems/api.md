@@ -2,7 +2,7 @@
 
 ## 状态
 
-已实现 Project/Index/Session、来源导入、O1 `python-entry-v4` 概览（入口、HTTP/源码结构组和聚合模块关系）、O2/O3 功能生成与 P2-R1/P2-R2 fixture/real Run 的 HTTP 和本地 MCP 入口。Run 已覆盖冻结输入、受限工具执行、单 Agent 有界模型循环、公开事件、持久化 SSE 回放/续接、报告、取消和重启中断；P3-I1 已增加从保存报告候选/发现读取固定快照的有界静态影响查询；Codex external Agent 已能通过本地 MCP 创建并驱动同一持久化 Run。真实供应商语义质量和实际 Codex 主机热加载仍未验证。
+已实现 Project/Index/Session、来源导入、O1 `python-entry-v4` 概览（入口、HTTP/源码结构组和聚合模块关系）、O2/O3 功能生成与 P2-R1/P2-R2 fixture/real Run 的 HTTP 和本地 MCP 入口。Run 已覆盖冻结输入、受限工具执行、单 Agent 有界模型循环、公开事件、持久化 SSE 回放/续接、报告、取消和重启中断；P3-I1 已增加从保存报告候选/发现读取固定快照的有界静态影响查询；Codex external Agent 已能通过本地 MCP 创建并驱动同一持久化 Run。真实供应商语义质量仍未验证；2026-09-14 已完成实际 Codex 主机 MCP 热加载后的 v4 联合对照。
 
 ## 职责与范围
 

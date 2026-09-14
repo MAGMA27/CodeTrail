@@ -2,7 +2,7 @@
 
 ## 状态
 
-P2-R1 的 fixture 闭环已扩展为 P2-R2 的显式 fixture/real Run：服务端冻结 Session 输入，后台执行白名单工具；real 模式由一个有界模型工具循环决定检索计划并生成结构化结论。公开事件、工具结果、报告、取消、历史读取和重启中断继续复用同一生命周期；P3-S1 已增加基于持久化事件表的有界 SSE 回放与断线续接；P3-I1 已从终态报告候选提供固定快照上的有界静态影响读取，不改变 Run 生命周期；Codex external Run 已由本地 MCP 驱动同一生命周期并自动进入工作台。LangGraph、多 Agent、任意仓库代码执行和真实供应商语义质量仍未实现或验证，实际 Codex 主机热加载仍待确认。
+P2-R1 的 fixture 闭环已扩展为 P2-R2 的显式 fixture/real Run：服务端冻结 Session 输入，后台执行白名单工具；real 模式由一个有界模型工具循环决定检索计划并生成结构化结论。公开事件、工具结果、报告、取消、历史读取和重启中断继续复用同一生命周期；P3-S1 已增加基于持久化事件表的有界 SSE 回放与断线续接；P3-I1 已从终态报告候选提供固定快照上的有界静态影响读取，不改变 Run 生命周期；Codex external Run 已由本地 MCP 驱动同一生命周期并自动进入工作台。LangGraph、多 Agent、任意仓库代码执行和真实供应商语义质量仍未实现或验证；实际 Codex 主机热加载已于 2026-09-14 完成并与 HTTP/工作台结构结果对照。
 
 ## 职责与范围
 
@@ -34,7 +34,7 @@ Run 固定 `project_id/session_id/index_id`、Issue、模式、场景、版本�
 
 ## 验证
 
-`apps/api/tests/test_runs.py` 覆盖 fixture 生命周期和固定 Run 报告影响查询；`apps/api/tests/test_storage.py` 覆盖有界静态路径、环、去重和未知边界；`apps/api/tests/test_run_sse.py` 覆盖 HTTP 逐帧回放、双游标续接、终态控制帧、边界拒绝、断开释放容量和 health 并发；`apps/api/tests/test_issue_runs.py` 覆盖不同问题的工具计划、证据不足、非法工具/引用、有限修复、模型预算、供应商失败、持久化 DeepSeek-compatible 协议、token/字符用量、取消和无凭据能力边界；`apps/api/tests/test_mcp.py` 覆盖 HTTP/MCP 的 real 能力开关、共享 Run 读取和影响结果对照，以及 external 工具实际结果、证据边界、幂等、时间预算、取消和终态拒写；`apps/web/lib/run-event-stream.test.ts` 覆盖前端实际订阅处理器。本轮后端全量测试为 123 passed，Python `compileall`、前端 19 项测试、类型检查、生产构建、契约/文档检查均通过；按实际配置启动的本地 stdio MCP 完成 external 工具协议闭环，工作台浏览器完成自动发现、事件/证据/报告载入和重新打开恢复。当前 Codex 主机热加载仍待重载，真实 DeepSeek 语义质量为 UNVERIFIED。
+`apps/api/tests/test_runs.py` 覆盖 fixture 生命周期和固定 Run 报告影响查询；`apps/api/tests/test_storage.py` 覆盖有界静态路径、环、去重和未知边界；`apps/api/tests/test_run_sse.py` 覆盖 HTTP 逐帧回放、双游标续接、终态控制帧、边界拒绝、断开释放容量和 health 并发；`apps/api/tests/test_issue_runs.py` 覆盖不同问题的工具计划、证据不足、非法工具/引用、有限修复、模型预算、供应商失败、持久化 DeepSeek-compatible 协议、token/字符用量、取消和无凭据能力边界；`apps/api/tests/test_mcp.py` 覆盖 HTTP/MCP 的 real 能力开关、共享 Run 读取和影响结果对照，以及 external 工具实际结果、证据边界、幂等、时间预算、取消和终态拒写；`apps/web/lib/run-event-stream.test.ts` 覆盖前端实际订阅处理器。本轮后端全量测试为 123 passed，Python `compileall`、前端 19 项测试、类型检查、生产构建、契约/文档检查均通过；按实际配置启动的本地 stdio MCP 完成 external 工具协议闭环，工作台浏览器完成自动发现、事件/证据/报告载入和重新打开恢复。实际 Codex 主机热加载已于 2026-09-14 完成，并与 HTTP/工作台结构结果对照；真实 DeepSeek 语义质量仍为 UNVERIFIED。
 
 ## 相关决策
 

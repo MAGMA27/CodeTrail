@@ -38,7 +38,7 @@ MCP `get_overview` 使用同一 `project_id`、`index_id`、结构规则和预�
 
 当前 Codex 主机的 `codetrail` stdio 配置已经使用与 API 相同的代码目录、`D:/Dev/CodeTrail-runtime` 和 `CODETRAIL_MCP_EXTERNAL_RUN_ENABLED=1`；配置示例和完整字段见 [API README](../apps/api/README.md)。MCP 进程在启动时加载代码和工具契约，因此代码更新后只需对 `codetrail` MCP 做一次 reload（如果宿主没有单独的 reload，则重启 Codex 一次）。不要通过清空数据或手工填写项目/索引 ID 来修复版本不一致。external Run 不需要真实模型供应商密钥。
 
-本轮实际检查发现：HTTP 已使用当前 `python-entry-v4` 代码返回结构组和模块关系，但当前宿主中的旧 MCP 进程仍返回 `python-entry-v1`。因此宿主 reload 完成前，HTTP/浏览器与 Codex MCP 的新结构字段联合验收保持 `UNVERIFIED`；reload 后从 MCP 的 `list_projects` 和 `get_overview` 重新发现目标，不复用旧响应。
+2026-09-14 reload 前曾发现宿主旧 MCP 进程返回 `python-entry-v1`；本轮重载后已由实际 Codex MCP 重新通过 `list_projects`/`get_overview` 发现目标，并返回 `python-entry-v4`、结构组和模块关系。当前联合验收结果以本节停止后复现步骤和本轮实际 HTTP/MCP/工作台对照为准，不把旧响应当作当前状态。
 
 ## 进行调查
 

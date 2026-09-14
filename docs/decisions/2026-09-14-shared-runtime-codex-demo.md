@@ -1,6 +1,6 @@
 # 决策：共享本地运行环境与 Codex 联合演示
 
-Status: proposed
+Status: implemented
 - Date: 2026-09-14
 - Scope: 本地 API、工作台、stdio MCP、结构总览与 external Run 的可复现启动
 
@@ -26,7 +26,7 @@ Status: proposed
 - 已验证 API 以共享目录启动后，`/api/projects` 发现 `CodeTrail 自用验收`，其最新关系索引返回 `python-entry-v4`、36 个结构组和 68 条模块关系；抽查组包含 `/api/health`、`/api/projects`、`/api/indexes`，模块关系包含 `imports`/`calls`、`edge_count` 和源码位置。
 - 已验证现有 external Run 报告可从同一共享目录读取，状态为 succeeded，报告、工具结果和 evidence 绑定其自身固定 index；本轮没有创建新 Run。
 - API 重启后浏览器已使用同一项目/index 核对 `API ONLINE`、`python-entry-v4`、36 个结构组、`/api/health` 入口 evidence、2 节点/1 条边处理函数关系图和返回结构总览；切换到已有 external Run 会话后也恢复了 11 条公开事件、4 项工具结果和固定报告证据。
-- 当前 Codex 宿主的 MCP 进程仍返回旧 `python-entry-v1`，尚未完成一次宿主 reload；因此 HTTP/浏览器与实际 Codex MCP 的新结构字段对照保持 `UNVERIFIED`，不以旧工具响应代替验收。
+- 2026-09-14 reload 前曾出现旧 MCP 进程返回 `python-entry-v1` 的历史状态；重载后实际 Codex MCP 已返回 `python-entry-v4`，并与 HTTP 在同一 project/index、同一预算下对照通过，groups/module_relations、计数、成员、关系类型、edge_count、源码位置和 coverage 字段一致。本记录不把旧响应当作当前状态。
 
 ## 后果
 
