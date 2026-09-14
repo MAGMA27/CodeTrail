@@ -11,7 +11,10 @@ import pytest
 from pydantic import ValidationError
 
 from app.contracts import (
+    CodeExplanation,
+    CodeUnderstandingFinal,
     EvidenceReference,
+    ExplanationStep,
     FixtureResponseSet,
     McpSourceResponse,
     ReadSourceParams,
@@ -72,6 +75,70 @@ def test_insufficient_bundle_does_not_claim_a_root_cause() -> None:
     assert bundle.report.outcome == "insufficient_evidence"
     assert bundle.report.evidence == []
     assert bundle.report.candidate_links == []
+    assert bundle.report.explanation is None
+
+
+def test_code_understanding_requires_ordered_supported_steps() -> None:
+    explanation = CodeExplanation(
+        coverage="partial",
+        steps=[
+            ExplanationStep(
+                step_id="step-entry",
+                kind="confirmed",
+                title="入口读取配置",
+                description="入口函数读取固定配置源码。",
+                evidence_ids=["evidence-entry"],
+                symbol_ids=["symbol-entry"],
+            ),
+            ExplanationStep(
+                step_id="step-gap",
+                kind="unknown",
+                title="运行时分支",
+                description="当前静态工具结果无法确认运行时分支。",
+            ),
+        ],
+    )
+    final = CodeUnderstandingFinal(
+        index_id="index-one",
+        summary="已解释可见的入口和未确认边界。",
+        explanation=explanation,
+        evidence_ids=["evidence-entry"],
+    )
+
+    assert final.explanation.steps[0].symbol_ids == ["symbol-entry"]
+
+    with pytest.raises(ValidationError):
+        ExplanationStep(
+            step_id="step-invalid",
+            kind="confirmed",
+            title="没有证据",
+            description="确认步骤不能没有证据。",
+        )
+    with pytest.raises(ValidationError):
+        CodeExplanation(
+            coverage="complete",
+            steps=[
+                ExplanationStep(
+                    step_id="step-unknown",
+                    kind="unknown",
+                    title="未知",
+                    description="完整解释不能包含未确认步骤。",
+                )
+            ],
+        )
+    with pytest.raises(ValidationError):
+        CodeUnderstandingFinal(
+            index_id="index-one",
+            summary="证据集合与步骤不一致。",
+            explanation=explanation,
+            evidence_ids=["evidence-entry", "evidence-unused"],
+        )
+
+
+def test_schema_artifact_includes_code_understanding_contracts() -> None:
+    models = build_schema_document()["models"]
+
+    assert {"CodeExplanation", "CodeUnderstandingFinal", "ExplanationStep"} <= models.keys()
 
 
 def test_failed_tool_bundle_preserves_prior_evidence_without_fake_source() -> None:

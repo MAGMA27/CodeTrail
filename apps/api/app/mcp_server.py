@@ -13,6 +13,8 @@ from pydantic import Field
 
 from .contracts import (
     CandidateLink,
+    CodeExplanation,
+    CodeUnderstandingFinal,
     EvidenceReference,
     CancelRunRequest,
     CreateRunRequest,
@@ -904,6 +906,7 @@ def create_mcp_server(
             max_output_chars: Annotated[int, Field(ge=1, le=100_000)] = 50_000,
             max_model_output_chars: Annotated[int, Field(ge=1, le=50_000)] = 20_000,
             max_events: Annotated[int, Field(ge=2, le=200)] = 100,
+            analysis_kind: Literal["issue", "understanding"] = "issue",
         ) -> McpRunStartResponse:
             try:
                 from .contracts import RunBudget
@@ -921,6 +924,7 @@ def create_mcp_server(
                             mentioned_paths=mentioned_paths or [],
                         ),
                         mode="external",
+                        analysis_kind=analysis_kind,
                         execution_source="codex",
                         fixture_scenario=None,
                         feature_generation_id=feature_generation_id,
@@ -1060,9 +1064,9 @@ def create_mcp_server(
             name="submit_external_run",
             title="Submit a Codex Run conclusion",
             description=(
-                "Submit one structured candidate_found or insufficient_evidence conclusion. The server verifies every "
-                "evidence, symbol, candidate, and index reference against results actually returned by this Run before "
-                "persisting the report. Repeating the same conclusion is idempotent."
+                "Submit one structured candidate_found, insufficient_evidence, or explanation conclusion. The server "
+                "verifies every evidence, symbol, candidate, and index reference against results actually returned by "
+                "this Run before persisting the report. Repeating the same conclusion is idempotent."
             ),
             structured_output=True,
         )
@@ -1071,19 +1075,31 @@ def create_mcp_server(
             session_id: _SessionId,
             run_id: _RunId,
             index_id: _IndexId,
-            outcome: Literal["candidate_found", "insufficient_evidence"],
+            outcome: Literal["candidate_found", "insufficient_evidence", "explanation"],
             summary: Annotated[str, Field(min_length=1, max_length=5_000)],
             findings: list[Finding] | None = None,
             candidate_links: list[CandidateLink] | None = None,
             evidence_ids: list[Identifier] | None = None,
             limitations: list[Annotated[str, Field(min_length=1, max_length=1_000)]] | None = None,
+            explanation: CodeExplanation | None = None,
         ) -> McpExternalCompleteResponse:
             try:
-                status, report = service.complete_external_run(
-                    project_id,
-                    session_id,
-                    run_id,
-                    IssueModelFinal(
+                if outcome == "explanation":
+                    if explanation is None or findings or candidate_links:
+                        raise ValueError(
+                            "explanation conclusions require explanation and cannot include Issue findings or candidate links"
+                        )
+                    final = CodeUnderstandingFinal(
+                        index_id=index_id,
+                        summary=summary,
+                        explanation=explanation,
+                        evidence_ids=evidence_ids or [],
+                        limitations=limitations or [],
+                    )
+                else:
+                    if explanation is not None:
+                        raise ValueError("Issue conclusions cannot include an explanation")
+                    final = IssueModelFinal(
                         index_id=index_id,
                         outcome=outcome,
                         summary=summary,
@@ -1091,7 +1107,12 @@ def create_mcp_server(
                         candidate_links=candidate_links or [],
                         evidence_ids=evidence_ids or [],
                         limitations=limitations or [],
-                    ),
+                    )
+                status, report = service.complete_external_run(
+                    project_id,
+                    session_id,
+                    run_id,
+                    final,
                 )
                 return McpExternalCompleteResponse(
                     ok=True,
@@ -1101,6 +1122,11 @@ def create_mcp_server(
                 )
             except ServiceError as exc:
                 return _failure(McpExternalCompleteResponse, exc)
+            except ValueError as exc:
+                return _failure(
+                    McpExternalCompleteResponse,
+                    ServiceError("invalid_input", 400, str(exc)),
+                )
             except Exception:
                 return _unexpected_failure("submit_external_run", McpExternalCompleteResponse)
 

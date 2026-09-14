@@ -9,6 +9,7 @@ import {
   isNeighborsResponse,
   isProjectOverviewResponse,
   isRunImpactResponse,
+  isRunReportResponse,
   isSessionListResponse,
   isSessionMessagesResponse,
   isSessionResponse,
@@ -372,6 +373,83 @@ test("Run impact validator accepts an explicitly unmapped empty result", () => {
   value.reachable_node_count = 0;
   value.returned_node_count = 0;
   assert.equal(isRunImpactResponse(value), true);
+});
+
+function explanationReport() {
+  return {
+    schema_version: SCHEMA_VERSION,
+    report: {
+      schema_version: SCHEMA_VERSION,
+      report_id: "report-understanding",
+      run_id: "run-understanding",
+      project_id: "project-understanding",
+      session_id: "session-understanding",
+      index_id: indexId,
+      status: "succeeded",
+      outcome: "explanation",
+      fixture_mode: false,
+      summary: "The visible flow is partially explained.",
+      graph: {
+        index_id: indexId,
+        nodes: [],
+        static_edges: [],
+        unresolved: [],
+        candidate_links: [],
+        truncated: false,
+        truncation_reason: null,
+      },
+      evidence: [
+        {
+          evidence_id: "evidence-understanding",
+          index_id: indexId,
+          path: "pkg/app.py",
+          start_line: 4,
+          end_line: 5,
+          excerpt: "load()",
+          content_hash: "content-hash",
+          kind: "source",
+        },
+      ],
+      findings: [],
+      candidate_links: [],
+      explanation: {
+        coverage: "partial",
+        steps: [
+          {
+            step_id: "step-entry",
+            kind: "confirmed",
+            title: "入口",
+            description: "源码支持入口步骤。",
+            evidence_ids: ["evidence-understanding"],
+            symbol_ids: ["symbol-entry"],
+          },
+          {
+            step_id: "step-gap",
+            kind: "unknown",
+            title: "运行时交接",
+            description: "当前快照无法确认。",
+            evidence_ids: [],
+            symbol_ids: [],
+          },
+        ],
+      },
+      limitations: ["静态范围有限。"],
+      terminal_sequence: 4,
+    },
+  };
+}
+
+test("Run report validator accepts explanation coverage and rejects invalid completion", () => {
+  const value = explanationReport();
+  assert.equal(isRunReportResponse(value), true);
+
+  const completeWithUnknown = structuredClone(value);
+  completeWithUnknown.report.explanation.coverage = "complete";
+  assert.equal(isRunReportResponse(completeWithUnknown), false);
+
+  const missingExplanation = structuredClone(value) as unknown as { report: { explanation: unknown } };
+  missingExplanation.report.explanation = null;
+  assert.equal(isRunReportResponse(missingExplanation), false);
 });
 
 function featureGeneration() {

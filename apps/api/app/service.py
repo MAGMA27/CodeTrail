@@ -26,6 +26,7 @@ from .contracts import (
     AppendSessionMessageRequest,
     CreateRunRequest,
     CreateRunResponse,
+    CodeUnderstandingFinal,
     CancelRunRequest,
     CancelRunResponse,
     Event,
@@ -65,6 +66,7 @@ from .contracts import (
     ReadSourceFailure,
     ReadSourceSuccess,
     Run,
+    ExternalRunFinal,
     RunBudget,
     RunEventsResponse,
     RunInput,
@@ -1128,6 +1130,7 @@ class WorkspaceService:
                     feature_generation_id=feature_generation_id,
                     issue=request.issue,
                     mode=request.mode,
+                    analysis_kind=request.analysis_kind,
                     execution_source=request.execution_source,
                     fixture_scenario=request.fixture_scenario,
                     model_provider=(self.registry.model_config.provider if request.mode == "real" else None),
@@ -1329,12 +1332,15 @@ class WorkspaceService:
         project_id: str,
         session_id: str,
         run_id: str,
-        final: IssueModelFinal,
+        final: ExternalRunFinal,
     ) -> tuple[RunStatusResponse, Report]:
         """Validate and persist a structured Codex conclusion for one external Run."""
 
         try:
-            validated_final = IssueModelFinal.model_validate(final)
+            if isinstance(final, CodeUnderstandingFinal):
+                validated_final: ExternalRunFinal = CodeUnderstandingFinal.model_validate(final)
+            else:
+                validated_final = IssueModelFinal.model_validate(final)
         except ValueError as exc:
             raise ServiceError("invalid_input", 400, "external Run conclusion is invalid") from exc
 
@@ -1343,6 +1349,7 @@ class WorkspaceService:
             with self.registry.store_for_repository(project.repository_id) as store:
                 record = store._require_run_scope(project_id, session_id, run_id)
                 self._require_external_run(record)
+                self._require_external_final_kind(record.run.analysis_kind, validated_final)
                 if validated_final.index_id != record.run.index_id:
                     raise ServiceError(
                         "conflict",
@@ -1414,7 +1421,11 @@ class WorkspaceService:
                     nodes=nodes,
                     static_edges=static_edges,
                     unresolved=unresolved,
-                    candidate_links=list(validated_final.candidate_links),
+                    candidate_links=(
+                        list(validated_final.candidate_links)
+                        if isinstance(validated_final, IssueModelFinal)
+                        else []
+                    ),
                     truncated=truncated,
                     truncation_reason=truncation_reason,
                 )
@@ -1444,8 +1455,21 @@ class WorkspaceService:
                     summary=validated_final.summary,
                     graph=graph,
                     evidence=selected_evidence,
-                    findings=list(validated_final.findings),
-                    candidate_links=list(validated_final.candidate_links),
+                    findings=(
+                        list(validated_final.findings)
+                        if isinstance(validated_final, IssueModelFinal)
+                        else []
+                    ),
+                    candidate_links=(
+                        list(validated_final.candidate_links)
+                        if isinstance(validated_final, IssueModelFinal)
+                        else []
+                    ),
+                    explanation=(
+                        validated_final.explanation
+                        if isinstance(validated_final, CodeUnderstandingFinal)
+                        else None
+                    ),
                     limitations=list(
                         dict.fromkeys([*validated_final.limitations, *coverage_limitations])
                     )[:30],
@@ -1515,6 +1539,20 @@ class WorkspaceService:
             raise ServiceError("conflict", 409, "Run is not a Codex external Run")
 
     @staticmethod
+    def _require_external_final_kind(
+        analysis_kind: str,
+        final: ExternalRunFinal,
+    ) -> None:
+        is_understanding = isinstance(final, CodeUnderstandingFinal)
+        if (analysis_kind == "understanding") != is_understanding:
+            expected = "code understanding" if analysis_kind == "understanding" else "Issue"
+            raise ServiceError(
+                "conflict",
+                409,
+                f"external conclusion must be a {expected} conclusion for this Run",
+            )
+
+    @staticmethod
     def _ensure_external_run_started(store: IndexStore, record: RunRecord) -> RunRecord:
         if record.run.status != "queued":
             return record
@@ -1529,6 +1567,7 @@ class WorkspaceService:
                 index_id=record.run.index_id,
                 issue_id=record.run.issue.issue_id,
                 mode=record.run.mode,
+                analysis_kind=record.run.analysis_kind,
                 execution_source=record.run.execution_source,
                 message_end_sequence=record.run.message_end_sequence,
                 input_hash=record.run.input_hash,
@@ -1559,7 +1598,7 @@ class WorkspaceService:
 
     @staticmethod
     def _validate_external_final(
-        final: IssueModelFinal,
+        final: ExternalRunFinal,
         run: Run,
         *,
         evidence_by_id: Mapping[str, object],
@@ -1574,6 +1613,30 @@ class WorkspaceService:
                 409,
                 "external conclusion references evidence not returned by this Run",
             )
+        if isinstance(final, CodeUnderstandingFinal):
+            if not any(
+                getattr(evidence_by_id[evidence_id], "kind", None) == "source"
+                for evidence_id in final.evidence_ids
+            ):
+                raise ServiceError(
+                    "conflict",
+                    409,
+                    "external explanations must include returned source evidence",
+                )
+            for step in final.explanation.steps:
+                if not set(step.evidence_ids).issubset(returned_evidence_ids):
+                    raise ServiceError(
+                        "conflict",
+                        409,
+                        "external explanation references evidence not returned by this Run",
+                    )
+                if not set(step.symbol_ids).issubset(symbol_ids):
+                    raise ServiceError(
+                        "conflict",
+                        409,
+                        "external explanation references a symbol not returned by this Run",
+                    )
+            return
         for finding in final.findings:
             if not set(finding.symbol_ids).issubset(symbol_ids):
                 raise ServiceError(
@@ -3090,11 +3153,16 @@ def _run_creation_fingerprint(
     session_id: str,
     request: CreateRunRequest,
 ) -> str:
+    request_payload = request.model_dump(mode="json", exclude={"idempotency_key"})
+    # Keep the fingerprint stable for pre-analysis-kind requests while making
+    # understanding Runs distinct from the legacy Issue request shape.
+    if request.analysis_kind == "issue":
+        request_payload.pop("analysis_kind", None)
     payload = {
         "kind": "create-run-v1",
         "project_id": project_id,
         "session_id": session_id,
-        "request": request.model_dump(mode="json", exclude={"idempotency_key"}),
+        "request": request_payload,
     }
     serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
@@ -3250,22 +3318,33 @@ def _external_graph_data(
 
 def _external_report_matches_final(
     report: Report,
-    final: IssueModelFinal,
+    final: ExternalRunFinal,
     *,
     derived_limitations: list[str] | tuple[str, ...] = (),
 ) -> bool:
     """Compare the durable public conclusion for external completion idempotency."""
 
-    return (
+    matches_common = (
         report.status == "succeeded"
         and report.outcome == final.outcome
         and report.summary == final.summary
-        and report.findings == final.findings
-        and report.candidate_links == final.candidate_links
         and (
             report.limitations == final.limitations
             or report.limitations
             == list(dict.fromkeys([*final.limitations, *derived_limitations])[:30])
         )
         and [evidence.evidence_id for evidence in report.evidence] == final.evidence_ids
+    )
+    if not matches_common:
+        return False
+    if isinstance(final, CodeUnderstandingFinal):
+        return (
+            report.findings == []
+            and report.candidate_links == []
+            and report.explanation == final.explanation
+        )
+    return (
+        report.explanation is None
+        and report.findings == final.findings
+        and report.candidate_links == final.candidate_links
     )

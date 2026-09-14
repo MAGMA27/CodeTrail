@@ -328,6 +328,18 @@ code { font-family: var(--ct-mono); }
 .ct-run-finding { display: grid; gap: 4px; padding: 8px; border: 1px solid var(--ct-border); border-radius: 6px; background: var(--ct-bg); }
 .ct-run-finding strong { color: var(--ct-blue); font-family: var(--ct-mono); font-size: 9px; text-transform: uppercase; }
 .ct-run-finding span { color: var(--ct-text); font-size: 10px; line-height: 1.5; }
+.ct-run-explanation { display: grid; gap: 8px; padding: 9px; border: 1px solid var(--ct-border-strong); border-left: 3px solid var(--ct-blue); border-radius: 6px; background: var(--ct-bg); }
+.ct-run-explanation-heading, .ct-run-explanation-step-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.ct-run-explanation-heading small, .ct-run-explanation-heading span, .ct-run-explanation-step-heading span { color: var(--ct-blue); font-family: var(--ct-mono); font-size: 9px; }
+.ct-run-explanation-heading span.is-partial, .ct-run-explanation-step.is-unknown .ct-run-explanation-step-heading span { color: var(--ct-warning); }
+.ct-run-explanation-note { margin: 0; color: var(--ct-warning); font-size: 10px; line-height: 1.5; }
+.ct-run-explanation-steps { display: grid; gap: 7px; margin: 0; padding-left: 22px; }
+.ct-run-explanation-step { padding: 7px 8px; border: 1px solid var(--ct-border); border-radius: 5px; background: var(--ct-surface); }
+.ct-run-explanation-step.is-unknown { border-left: 2px solid var(--ct-warning); }
+.ct-run-explanation-step-heading strong { color: var(--ct-text); font-size: 10px; }
+.ct-run-explanation-step > p { margin: 4px 0 6px; color: var(--ct-muted); font-size: 10px; line-height: 1.5; }
+.ct-run-explanation-links { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 9px; }
+.ct-run-explanation-links small { color: var(--ct-muted); font-size: 9px; }
 .ct-run-impact-links { display: grid; gap: 5px; padding: 8px; border: 1px solid var(--ct-border); border-left: 3px solid var(--ct-warning); border-radius: 6px; background: var(--ct-warning-soft); }
 .ct-run-impact-links > small { color: var(--ct-warning); font-family: var(--ct-mono); font-size: 9px; }
 .ct-run-impact-link { display: flex; align-items: center; justify-content: space-between; gap: 8px; }

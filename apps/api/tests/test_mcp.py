@@ -1661,6 +1661,241 @@ def test_mcp_external_first_completion_with_multiple_evidence_is_idempotent(tmp_
     assert len(report_response["report"]["evidence"]) == 5
 
 
+def test_mcp_external_understanding_run_persists_ordered_explanation(tmp_path: Path) -> None:
+    repository = copy_fixture(tmp_path)
+    data_root = tmp_path / "data"
+    application = create_app(
+        {"timeout-demo": repository},
+        data_root=data_root,
+        mcp_external_run_enabled=True,
+    )
+    status, project = request(
+        application,
+        "POST",
+        "/api/projects",
+        {"name": "External understanding", "repository_id": "timeout-demo"},
+    )
+    assert status == 200
+    project_id = project["project_id"]
+    status, index = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/indexes",
+        {"revision": "external-understanding-v1", "dirty": False},
+    )
+    assert status == 200
+    index_id = index["index"]["index_id"]
+    status, session = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/sessions",
+        {"topic": "Trace local import flow", "index_id": index_id},
+    )
+    assert status == 200
+    session_id = session["session"]["session_id"]
+    status, _ = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/sessions/{session_id}/messages",
+        {"source": "human", "content": "How does the local import request flow through the service?"},
+    )
+    assert status == 200
+
+    async def exercise() -> dict:
+        environment = {
+            "CODETRAIL_REPOSITORIES": json.dumps({"timeout-demo": str(repository)}),
+            "CODETRAIL_DATA_DIR": str(data_root),
+            "CODETRAIL_WORKBENCH_URL": "http://localhost:3000",
+            "CODETRAIL_MCP_EXTERNAL_RUN_ENABLED": "1",
+        }
+        parameters = StdioServerParameters(
+            command=sys.executable,
+            args=["-m", "app.mcp_server"],
+            env=environment,
+            cwd=API_ROOT,
+        )
+        async with Client(parameters, read_timeout_seconds=15) as client:
+            started = await client.call_tool(
+                "start_external_run",
+                {
+                    "project_id": project_id,
+                    "session_id": session_id,
+                    "index_id": index_id,
+                    "analysis_kind": "understanding",
+                    "issue_id": "external-understanding",
+                    "title": "local import flow",
+                    "body": "Explain the local import request flow with ordered evidence-backed steps.",
+                    "idempotency_key": "external-understanding-start",
+                },
+            )
+            assert started.structured_content["ok"] is True
+            run_id = started.structured_content["result"]["run_id"]
+
+            run_status = await client.call_tool(
+                "get_session_run",
+                {"project_id": project_id, "session_id": session_id, "run_id": run_id},
+            )
+            assert run_status.structured_content["result"]["run"]["analysis_kind"] == "understanding"
+
+            searched = await client.call_tool(
+                "run_search_code",
+                {
+                    "project_id": project_id,
+                    "session_id": session_id,
+                    "run_id": run_id,
+                    "index_id": index_id,
+                    "request_id": "external-understanding-search",
+                    "query": "load_settings",
+                    "limit": 8,
+                },
+            )
+            assert searched.structured_content["ok"] is True
+            match = next(
+                item
+                for item in searched.structured_content["result"]["matches"]
+                if item["symbol"]["qualified_name"] == "timeout_demo.config.load_settings"
+            )
+            symbol_id = match["symbol"]["symbol_id"]
+
+            evidence_ids: list[str] = []
+            for number, path in enumerate(
+                (
+                    "timeout_demo/config.py",
+                    "timeout_demo/__main__.py",
+                    "timeout_demo/app.py",
+                ),
+                start=1,
+            ):
+                source = await client.call_tool(
+                    "run_read_source",
+                    {
+                        "project_id": project_id,
+                        "session_id": session_id,
+                        "run_id": run_id,
+                        "index_id": index_id,
+                        "request_id": f"external-understanding-read-{number}",
+                        "path": path,
+                        "start_line": 1,
+                        "end_line": 8,
+                    },
+                )
+                assert source.structured_content["ok"] is True
+                evidence_ids.append(source.structured_content["result"]["evidence"]["evidence_id"])
+
+            conclusion = {
+                "project_id": project_id,
+                "session_id": session_id,
+                "run_id": run_id,
+                "index_id": index_id,
+                "outcome": "explanation",
+                "summary": "The visible import entry and configuration step are supported; the runtime handoff remains unconfirmed.",
+                "explanation": {
+                    "coverage": "partial",
+                    "steps": [
+                        {
+                            "step_id": "step-entry",
+                            "kind": "confirmed",
+                            "title": "读取本地导入入口",
+                            "description": "入口相关源码已由本 Run 返回，并可映射到一个索引符号。",
+                            "evidence_ids": [evidence_ids[0]],
+                            "symbol_ids": [symbol_id],
+                        },
+                        {
+                            "step_id": "step-validation",
+                            "kind": "confirmed",
+                            "title": "进入配置读取步骤",
+                            "description": "配置读取源码由同一固定快照返回。",
+                            "evidence_ids": [evidence_ids[1]],
+                            "symbol_ids": [],
+                        },
+                        {
+                            "step_id": "step-runtime-gap",
+                            "kind": "unknown",
+                            "title": "运行时交接",
+                            "description": "当前 Python 静态结果不能确认完整运行时交接。",
+                            "evidence_ids": [evidence_ids[2]],
+                            "symbol_ids": [],
+                        },
+                    ],
+                },
+                "evidence_ids": evidence_ids,
+                "limitations": ["当前解释不覆盖未索引的前端或运行时分支。"],
+            }
+            invalid_scope = {
+                **conclusion,
+                "explanation": {
+                    **conclusion["explanation"],
+                    "steps": [
+                        {
+                            **conclusion["explanation"]["steps"][0],
+                            "symbol_ids": ["symbol-not-returned-by-this-run"],
+                        },
+                        *conclusion["explanation"]["steps"][1:],
+                    ],
+                },
+            }
+            invalid_scope_result = await client.call_tool("submit_external_run", invalid_scope)
+            assert invalid_scope_result.structured_content["ok"] is False
+            assert invalid_scope_result.structured_content["error"]["code"] == "conflict"
+
+            completed = await client.call_tool("submit_external_run", conclusion)
+            assert completed.structured_content["ok"] is True
+            report = completed.structured_content["report"]
+            assert report["outcome"] == "explanation"
+            assert report["findings"] == []
+            assert report["candidate_links"] == []
+            assert report["graph"]["candidate_links"] == []
+            assert [step["step_id"] for step in report["explanation"]["steps"]] == [
+                "step-entry",
+                "step-validation",
+                "step-runtime-gap",
+            ]
+            assert len(report["evidence"]) == 3
+
+            repeated = await client.call_tool("submit_external_run", conclusion)
+            assert repeated.structured_content == completed.structured_content
+
+            conflicting = await client.call_tool(
+                "submit_external_run",
+                {
+                    **conclusion,
+                    "explanation": {
+                        **conclusion["explanation"],
+                        "steps": [
+                            {
+                                **conclusion["explanation"]["steps"][0],
+                                "title": "修改后的入口步骤",
+                            },
+                            *conclusion["explanation"]["steps"][1:],
+                        ],
+                    },
+                },
+            )
+            assert conflicting.structured_content["ok"] is False
+            assert conflicting.structured_content["error"]["code"] == "conflict"
+
+            events = await client.call_tool(
+                "list_run_events",
+                {"project_id": project_id, "session_id": session_id, "run_id": run_id},
+            )
+            event_types = [event["type"] for event in events.structured_content["result"]["events"]]
+            assert event_types[0] == "run.started"
+            assert event_types.count("tool.started") == 4
+            assert event_types.count("tool.completed") == 4
+            assert event_types.count("graph.updated") == 1
+            assert event_types.count("run.completed") == 1
+            return report
+
+    mcp_report = asyncio.run(exercise())
+    status, http_report = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/sessions/{session_id}/runs/{mcp_report['run_id']}/report",
+    )
+    assert status == 200
+    assert http_report["report"] == mcp_report
+
+
 def test_external_tool_expiry_interrupts_after_slow_bounded_call(tmp_path: Path) -> None:
     repository = copy_fixture(tmp_path)
     application = create_app(

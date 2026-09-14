@@ -2,7 +2,7 @@
 
 ## 状态
 
-已实现多项目真实工作台、Project/Index/Session/消息、O1/O2/O3 浏览和 P2-R1/P2-R2 Session 内显式 fixture/real Run 面板。概览默认先展示 `python-entry-v4` 的 HTTP 路径组、源码目录组、计数和静态模块关系；选择组后可查看真实路由/模块，再从入口 evidence 进入源码或从处理函数/模块进入既有关系图。Run 面板支持模式选择、真实模式警告、启动、状态同步、持久化 SSE 事件流、有限重连/轮询回退、工具结果、报告 evidence、候选位置与有界静态影响、取消、历史选择和刷新/切换恢复；Codex external Run 会从 Session history 自动发现、选择并订阅。
+已实现多项目真实工作台、Project/Index/Session/消息、O1/O2/O3 浏览和 P2-R1/P2-R2 Session 内显式 fixture/real Run 面板。概览默认先展示 `python-entry-v4` 的 HTTP 路径组、源码目录组、计数和静态模块关系；选择组后可查看真实路由/模块，再从入口 evidence 进入源码或从处理函数/模块进入既有关系图。Run 面板支持模式选择、真实模式警告、启动、状态同步、持久化 SSE 事件流、有限重连/轮询回退、工具结果、Issue/代码理解报告 evidence、候选位置与有界静态影响、取消、历史选择和刷新/切换恢复；Codex external Run 会从 Session history 自动发现、选择并订阅，代码理解结果按顺序步骤和覆盖级别展示。
 
 ## 职责与范围
 
@@ -17,6 +17,8 @@
 生产 `/` 使用真实服务端数据；`/prototype` 仅是演示数据原型，不调用 API、不写入项目状态。UI 布局和证据侧栏沿用 [工作区 UI 规范](../design/workspace-ui-spec.md)，Run 面板是现有 Session 视图中的显式操作，不自动随消息保存触发。
 
 ## 数据与生命周期
+
+代码理解报告使用 `outcome=explanation`：结果区域显示 `complete/partial` 覆盖和最多 12 个有序步骤，按 confirmed/inferred/unknown 区分证据强度；步骤 evidence 只能打开报告内同快照源码，唯一 symbol 可进入现有局部关系图，多符号或无符号步骤说明原因，不派生候选影响。
 
 打开 Session 后读取消息和 Run history；history 选择活动或最新 Run，并载入状态、事件、工具结果和报告。Session 视图在首次 history 成功后以 1 秒有界轮询重新读取 history，发现 `execution_source=codex` 的 queued/running Run 时自动选择并载入详情；轮询只更新历史，不重复创建或并行建立 SSE。代码关系查询回传的 `index_truncated` 会在图面板显示扫描覆盖告警，`index_unresolved_truncated` 另显示 unresolved 详情告警，旧索引的 NULL 显示未知；当关系为空时仍保留告警，不把“未分析到”渲染成“没有关系”。图按相对目录分组，超过 12 个符号的分组首次收起；用户展开后默认把选中节点及最多 8 个节点放大，聚焦按钮重复该行为。点击报告中的候选链接或唯一 finding symbol 后，工作台按 Run 固定 index 请求 callers/callees 影响，显示根节点、静态 calls 路径、unresolved 未知边界、深度/截断、固定索引覆盖和范围说明；没有唯一映射时只显示 unmapped 空态。点击“启动离线分析”或“启动真实分析”时只发送当前 Session 的固定 index、模式、主题和 Issue body，服务端独立冻结完整已保存消息；未保存 draft 仅显示警告，不被提交。真实模式启动前明确提示会发送冻结 Issue/消息和有界源码证据、可能产生费用且失败不回退 fixture。Run 返回 queued 后前端先读取事件历史，再以最后成功 sequence 订阅 SSE；事件按 Run/sequence 去重，断线有限指数退避，`onopen` 不被视为事件进展，只有有效前进事件重置重连预算；超过上限才回退 450ms 轮询，且不与 SSE 并行，连接状态不等于 Run 失败，四类终态控制帧或终态事件均停止订阅并刷新报告。
 
@@ -41,6 +43,7 @@ Session 草稿按 project/session 保存到 localStorage，消息保存旧响应
 - [项目与会话决策](../decisions/2026-09-11-project-session-workspace.md)
 - [工作区 UI 规范](../design/workspace-ui-spec.md)
 - [Codex 外部 Agent Run 决策](../decisions/2026-09-13-external-agent-run.md)
+- [external Run 的代码理解流程与证据报告](../decisions/2026-09-14-code-understanding-explanation.md)
 - [关系扫描与 unresolved 覆盖语义](../decisions/2026-09-13-relation-coverage.md)
 - [FastAPI 路由入口概览](../decisions/2026-09-14-fastapi-route-overview.md)
 - [项目结构总览](../decisions/2026-09-14-project-structure-overview.md)

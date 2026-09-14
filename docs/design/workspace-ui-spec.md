@@ -95,6 +95,8 @@ UI-S1 不删除任何现有 API 能力；映射是目标信息架构，UI-S2 已
 
 Run 报告中的 candidate link 或唯一 symbol finding 提供“查看影响范围”入口。影响面板显示报告固定 `index_id` 上的根节点、调用方/被调用方方向、1–2 层深度、静态 `calls` 路径、截断状态和 unresolved 未知边界；root、静态可达和模型候选使用不同文案/图例，不能显示成已确认 Bug 影响。无唯一符号、失败、取消或中断报告显示 unmapped/空态并保留源码 evidence；点击影响节点进入同一节点 snapshot 的源码证据，不回退到当前 latest。
 
+代码理解报告的结果区域在 `outcome=explanation` 时显示“流程解释”和 `complete/partial` 覆盖级别，并按 Agent 提交顺序显示最多 12 个步骤。每步显示 confirmed/inferred/unknown 标识、标题、说明和同报告 evidence 按钮；partial 或 unknown 明确提示未确认环节。步骤只有一个有效 symbol 时提供“进入局部关系图”，多个或没有唯一 symbol 时保留源码入口并说明原因；解释步骤不显示候选影响装饰，也不把解释顺序绘成静态 calls 边。
+
 ### 项目操作
 
 “导入源代码”打开本地路径和 GitHub HTTPS 导入表单，说明路径由 API 服务端读取，来源目录只读；“索引管理”显示固定版本、失败/部分状态、revision、snapshot hash 和重试。生成模式、预算和模型供应商只放在详情或明确的生成操作中。当前真实功能生成仍需用户显式选择 `fixture/real` 与源码范围，原型不调用它。

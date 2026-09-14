@@ -13,6 +13,7 @@ import { useEffect, useMemo, useState, type CSSProperties, type FormEvent, type 
 
 import type {
   CodeEdge,
+  CodeExplanation,
   EdgeKind,
   Evidence,
   FeatureGeneration,
@@ -155,6 +156,7 @@ type SessionUi = {
   onStartRun: (mode: RunMode, scenario: RunScenario) => void | Promise<void>;
   onCancelRun: Action;
   onSelectRunEvidence: (evidence: Evidence) => void;
+  onSelectRunSymbol: (symbolId: string) => void;
   onSelectRunImpact: (selection: { candidateId?: string; findingId?: string }) => void;
 };
 
@@ -1078,6 +1080,56 @@ function runModeLabel(run: RunRecord): string {
   return run.mode === "real" ? "REAL / 模型分析" : "FIXTURE / 离线";
 }
 
+function explanationStepKindLabel(kind: CodeExplanation["steps"][number]["kind"]): string {
+  return {
+    confirmed: "已确认",
+    inferred: "推断",
+    unknown: "未确认",
+  }[kind];
+}
+
+function RunExplanation({
+  explanation,
+  evidence,
+  onSelectEvidence,
+  onSelectSymbol,
+}: {
+  explanation: CodeExplanation;
+  evidence: Evidence[];
+  onSelectEvidence: (item: Evidence) => void;
+  onSelectSymbol: (symbolId: string) => void;
+}) {
+  return (
+    <div className="ct-run-explanation">
+      <div className="ct-run-explanation-heading">
+        <small>流程解释</small>
+        <span className={explanation.coverage === "partial" ? "is-partial" : ""}>
+          {explanation.coverage === "complete" ? "所问范围内完整" : "部分覆盖"}
+        </span>
+      </div>
+      {explanation.coverage === "partial" ? <p className="ct-run-explanation-note">存在未确认环节；以下步骤只覆盖当前工具返回的证据范围。</p> : null}
+      <ol className="ct-run-explanation-steps">
+        {explanation.steps.map((step) => (
+          <li className={`ct-run-explanation-step is-${step.kind}`} key={step.step_id}>
+            <div className="ct-run-explanation-step-heading">
+              <strong>{step.title}</strong>
+              <span>{explanationStepKindLabel(step.kind)}</span>
+            </div>
+            <p>{step.description}</p>
+            <div className="ct-run-explanation-links">
+              {step.evidence_ids.map((evidenceId) => {
+                const item = evidence.find((candidate) => candidate.evidence_id === evidenceId);
+                return item ? <button type="button" className="ct-link-button" key={evidenceId} onClick={() => onSelectEvidence(item)}>查看证据 · {item.path}:L{item.start_line}</button> : null;
+              })}
+              {step.symbol_ids.length === 1 ? <button type="button" className="ct-link-button" onClick={() => onSelectSymbol(step.symbol_ids[0])}>进入局部关系图 · {step.symbol_ids[0]}</button> : step.symbol_ids.length > 1 ? <small>涉及多个符号 · 保留源码证据</small> : null}
+            </div>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
 function runEventLabel(event: RunEvent): string {
   if (event.type === "tool.started") {
     const request = event.payload.request;
@@ -1135,7 +1187,8 @@ function RunPanel({ session }: { session: SessionUi }) {
           {session.runStreamError ? <p className="ct-inline-note" role="status">{session.runStreamError}</p> : null}
           {session.runEvents.length > 0 ? <div className="ct-run-events"><div className="ct-run-subheading"><strong>公开执行事件</strong><span>{session.runEvents.length} 条</span></div>{session.runEvents.map((event) => <div className="ct-run-event" key={`${event.run_id}-${event.sequence}`}><code>#{event.sequence}</code><span>{runEventLabel(event)}</span></div>)}</div> : null}
           {session.runToolResults.length > 0 ? <div className="ct-run-tools"><div className="ct-run-subheading"><strong>工具结果</strong><span>{session.runToolResults.length} 项</span></div>{session.runToolResults.map((result) => <div className="ct-run-tool" key={result.request_id}><code>{result.tool}</code><span>{result.kind.endsWith("failed") ? "失败" : "已返回"} · #{result.completed_sequence}</span></div>)}</div> : null}
-          {session.runReport ? <div className="ct-run-report"><div className="ct-run-subheading"><strong>{session.runReport.outcome === "candidate_found" ? "候选结论" : session.runReport.outcome === "insufficient_evidence" ? "证据不足" : "执行结果"}</strong><span>{session.runStatusResponse.run.execution_source === "codex" ? "CODEX / EXTERNAL" : session.runReport.fixture_mode ? "FIXTURE" : "REAL"}</span></div><p>{session.runReport.summary}</p>{session.runReport.limitations.length > 0 ? <div className="ct-run-evidence-list"><small>限制</small>{session.runReport.limitations.map((limitation) => <p key={limitation}>{limitation}</p>)}</div> : null}{session.runReport.candidate_links.length > 0 ? <div className="ct-run-impact-links"><small>候选位置与有界影响</small>{session.runReport.candidate_links.map((candidate) => <div className="ct-run-impact-link" key={candidate.candidate_id}><span><code>{candidate.source_symbol_id}</code><small>{candidate.relation}</small></span><button type="button" className="ct-link-button" onClick={() => session.onSelectRunImpact({ candidateId: candidate.candidate_id })}>查看影响范围</button></div>)}</div> : null}{session.runReport.findings.map((finding) => <div className="ct-run-finding" key={finding.finding_id}><strong>{finding.kind}</strong><span>{finding.text}</span>{finding.symbol_ids.length === 1 ? <button type="button" className="ct-link-button" onClick={() => session.onSelectRunImpact({ findingId: finding.finding_id })}>查看潜在影响</button> : <small className="ct-run-impact-unmapped">无唯一可映射符号 · 仅显示证据</small>}{finding.evidence_ids.map((evidenceId) => { const evidence = session.runReport?.evidence.find((item) => item.evidence_id === evidenceId); return evidence ? <button type="button" className="ct-link-button" key={evidenceId} onClick={() => session.onSelectRunEvidence(evidence)}>查看证据 · {evidence.path}:L{evidence.start_line}</button> : null; })}</div>)}{session.runReport.evidence.length > 0 ? <div className="ct-run-evidence-list"><small>本次报告证据</small>{session.runReport.evidence.map((evidence) => <button type="button" className="ct-link-button" key={evidence.evidence_id} onClick={() => session.onSelectRunEvidence(evidence)}>{evidence.path}:L{evidence.start_line}–L{evidence.end_line}</button>)}</div> : null}</div> : null}
+          {session.runReport ? <div className="ct-run-report"><div className="ct-run-subheading"><strong>{session.runReport.outcome === "candidate_found" ? "候选结论" : session.runReport.outcome === "insufficient_evidence" ? "证据不足" : session.runReport.outcome === "explanation" ? "流程解释" : "执行结果"}</strong><span>{session.runStatusResponse.run.execution_source === "codex" ? "CODEX / EXTERNAL" : session.runReport.fixture_mode ? "FIXTURE" : "REAL"}</span></div><p>{session.runReport.summary}</p>{session.runReport.limitations.length > 0 ? <div className="ct-run-evidence-list"><small>限制</small>{session.runReport.limitations.map((limitation) => <p key={limitation}>{limitation}</p>)}</div> : null}{session.runReport.candidate_links.length > 0 ? <div className="ct-run-impact-links"><small>候选位置与有界影响</small>{session.runReport.candidate_links.map((candidate) => <div className="ct-run-impact-link" key={candidate.candidate_id}><span><code>{candidate.source_symbol_id}</code><small>{candidate.relation}</small></span><button type="button" className="ct-link-button" onClick={() => session.onSelectRunImpact({ candidateId: candidate.candidate_id })}>查看影响范围</button></div>)}</div> : null}{session.runReport.findings.map((finding) => <div className="ct-run-finding" key={finding.finding_id}><strong>{finding.kind}</strong><span>{finding.text}</span>{finding.symbol_ids.length === 1 ? <button type="button" className="ct-link-button" onClick={() => session.onSelectRunImpact({ findingId: finding.finding_id })}>查看潜在影响</button> : <small className="ct-run-impact-unmapped">无唯一可映射符号 · 仅显示证据</small>}{finding.evidence_ids.map((evidenceId) => { const evidence = session.runReport?.evidence.find((item) => item.evidence_id === evidenceId); return evidence ? <button type="button" className="ct-link-button" key={evidenceId} onClick={() => session.onSelectRunEvidence(evidence)}>查看证据 · {evidence.path}:L{evidence.start_line}</button> : null; })}</div>)}{session.runReport.evidence.length > 0 ? <div className="ct-run-evidence-list"><small>本次报告证据</small>{session.runReport.evidence.map((evidence) => <button type="button" className="ct-link-button" key={evidence.evidence_id} onClick={() => session.onSelectRunEvidence(evidence)}>{evidence.path}:L{evidence.start_line}–L{evidence.end_line}</button>)}</div> : null}</div> : null}
+          {session.runReport?.explanation ? <RunExplanation explanation={session.runReport.explanation} evidence={session.runReport.evidence} onSelectEvidence={session.onSelectRunEvidence} onSelectSymbol={session.onSelectRunSymbol} /> : null}
         </> : <LoadingNote>正在读取 Run 详情…</LoadingNote>}
       </div> : null}
     </section>

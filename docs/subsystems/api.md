@@ -2,7 +2,7 @@
 
 ## 状态
 
-已实现 Project/Index/Session、来源导入、O1 `python-entry-v4` 概览（入口、HTTP/源码结构组和聚合模块关系）、O2/O3 功能生成与 P2-R1/P2-R2 fixture/real Run 的 HTTP 和本地 MCP 入口。Run 已覆盖冻结输入、受限工具执行、单 Agent 有界模型循环、公开事件、持久化 SSE 回放/续接、报告、取消和重启中断；P3-I1 已增加从保存报告候选/发现读取固定快照的有界静态影响查询；Codex external Agent 已能通过本地 MCP 创建并驱动同一持久化 Run。真实供应商语义质量仍未验证；2026-09-14 已完成实际 Codex 主机 MCP 热加载后的 v4 联合对照。
+已实现 Project/Index/Session、来源导入、O1 `python-entry-v4` 概览（入口、HTTP/源码结构组和聚合模块关系）、O2/O3 功能生成与 P2-R1/P2-R2 fixture/real Run 的 HTTP 和本地 MCP 入口。Run 已覆盖冻结输入、受限工具执行、单 Agent 有界模型循环、公开事件、持久化 SSE 回放/续接、Issue/代码理解报告、取消和重启中断；P3-I1 已增加从保存报告候选/发现读取固定快照的有界静态影响查询；Codex external Agent 已能通过本地 MCP 创建并驱动同一持久化 Run。真实供应商语义质量仍未验证；2026-09-14 已完成实际 Codex 主机 MCP 热加载后的 v4 联合对照。
 
 ## 职责与范围
 
@@ -16,15 +16,19 @@ Run HTTP 包括 create/list/detail/events/`events/stream`/tool-results/report/im
 
 ## 数据与生命周期
 
+Run 的 `analysis_kind` 默认是 `issue`；只有 external Run 可声明 `understanding`。该类型提交 `CodeUnderstandingFinal`，包含最多 12 个有序 `ExplanationStep`、`complete/partial` 覆盖和同一 Run 返回的源码 evidence；confirmed 必须有 evidence，complete 不能含 unknown，服务端不生成 findings/candidate links。旧 Run JSON 缺少该字段时按 Issue 读取，不做存储迁移。
+
 创建 Run 时校验 Session 的固定 ready index、可选同快照 feature generation 和消息 cutoff；省略 cutoff 时以服务端当前保存消息计数为线性化点，并读取完整连续消息前缀，保存 input hash、字符数和范围。Run、RunInput、事件、工具结果和报告由 [IndexStore](../../apps/api/app/storage.py) 同一数据库事务保存；Session 最多一个 queued/running Run，幂等键绑定请求指纹。
 
 本地 executor 在 `CODETRAIL_RUN_MAX_CONCURRENT_RUNS`（默认 2）上做非阻塞准入，只保留有限的 daemon worker，不引入持久或内部等待队列、多 Agent。fixture 和 real 的工具计划只调用 `search_code`、`read_source`、`get_neighbors`；real 每轮由模型返回一个 Pydantic 校验的工具请求或最终结论，最多一次有限修复。external Run 在首个外部工具或结论请求时写入 `run.started`，不经过内部 executor；每个外部 `request_id` 绑定原始参数和实际结果，重复调用只返回已持久化结果。`submit_external_run` 的成功回执与持久化的 succeeded Run/Report 共用同一 `report_id` 和终态序号；连接在持久化后中断时，使用完全相同的结论重试会复用原报告和 evidence references，不追加终态事件；不同结论返回 `conflict`，不创建补偿 Run。未知 `internal_error` 不能当作成功，客户端应先读取 Run/report，再决定是否用相同内容重试。服务端按创建时间兑现 external 的 `max_seconds`，超时只中断当前 Run；成功、证据不足和工具失败报告均由这次执行的真实结果组装，证据/图绑定冻结 index_id。公开事件按连续 sequence 写入，queued/running 只能进入一次 succeeded/failed/cancelled/interrupted 终态；模型调用预算在请求前预留，输出只记录字符/token 用量，不保存原始模型文本；容量预留在存储失败、worker 启动失败、取消、超时、异常和完成路径恰好释放，晚到结果因终态事务拒绝。影响读取不持久化派生结果，且从报告映射失败时返回 unmapped 空结果，不按同名符号猜测。
 
 ## 错误与限制
 
+代码理解提交还会拒绝重复步骤 ID、未实际返回的步骤 evidence/symbol、分析类型与 Run 不匹配、`complete` 中的 unknown，以及任何 Issue findings/candidate links；步骤顺序是 Agent 解释顺序，不改变静态图或影响查询语义。
+
 Run 拒绝空消息、跨 Project/Session/Index/Generation、不合法 cutoff 和越界预算；real 只有在对应显式能力开关和服务端 `config.json` 有效时才会执行，external 还要求 `CODETRAIL_MCP_EXTERNAL_RUN_ENABLED=1` 和 Codex 来源。输入/工具调用、单次/总源码行、输入/输出字符、模型调用/修复、模型输入/输出、事件、总时间和并发都有服务端上限。概览识别另受 2 秒默认总时间、200 个入口候选、模块/组/模块关系预算约束；组总量来源于固定快照，即使组内模块因 `max_modules` 不可见也会在下钻时说明。仅支持模块/函数体直接语句中直接确认的 FastAPI 实例、字面量路径和静态方法，不展开控制流块或类体，也不解析 `APIRouter`、`include_router`、`mount`、动态路径或运行时注册。活动 Run、幂等语义不一致和快照冲突返回 conflict，未知归属返回 not_found，模型不可用、模型失败、非法结构化输出、预算或容量失败返回明确错误；real 失败不回退 fixture，external 不能提交未由本 Run 实际返回的证据或符号。容量错误可重试，且不写入 queued Run。报告只引用已持久化的同快照工具 evidence；取消/中断报告不生成候选结论。读接口带 project/session/run 作用域和有界游标，默认 MCP 读工具不会启动执行，external 终态拒绝后续写入。
 
-其它来源导入、GitHub、模型配置、Session 和功能生成限制见 [apps/api README](../../apps/api/README.md)；Run 的设计取舍见 [Run 决策](../decisions/2026-09-12-run-execution.md)、[Run SSE 决策](../decisions/2026-09-12-run-sse.md) 和 [Run 影响查询决策](../decisions/2026-09-13-run-impact.md)。
+其它来源导入、GitHub、模型配置、Session 和功能生成限制见 [apps/api README](../../apps/api/README.md)；Run 的设计取舍见 [Run 决策](../decisions/2026-09-12-run-execution.md)、[Run SSE 决策](../decisions/2026-09-12-run-sse.md)、[Run 影响查询决策](../decisions/2026-09-13-run-impact.md) 和 [代码理解流程与证据报告决策](../decisions/2026-09-14-code-understanding-explanation.md)。
 
 ## 使用与配置
 
@@ -38,7 +42,7 @@ MCP 代码更新后由 Codex 宿主对 `codetrail` 做一次 reload（或按宿�
 
 ## 验证
 
-`apps/api/tests/test_runs.py` 验证 fixture 生命周期和固定报告影响查询；`apps/api/tests/test_storage.py` 验证有界静态路径、环、去重和未知边界；`apps/api/tests/test_run_sse.py` 验证持久化逐帧回放、双游标续接、终态控制帧、未来/跨 Run 拒绝、断开释放容量和 health 并发；`apps/api/tests/test_issue_runs.py` 验证 real 的模型工具协议、不同问题的工具计划、证据不足、非法引用/工具、有限修复、预算、持久化配置和 OpenAI-compatible 请求、供应商失败、取消与终态容量；`apps/api/tests/test_mcp.py` 验证 HTTP/MCP 同一 Run、影响结果、独立 real 写能力和 Codex external 的实际工具结果、证据拒绝、幂等、时间预算、取消与终态拒写；`apps/api/tests/test_overview.py` 另验证结构组、模块关系、预算和固定快照。另运行全量 pytest、compileall、本地 stdio MCP 与浏览器结构下钻流程。真实 DeepSeek 语义质量为 UNVERIFIED。
+`apps/api/tests/test_runs.py` 验证 fixture 生命周期和固定报告影响查询；`apps/api/tests/test_storage.py` 验证有界静态路径、环、去重和未知边界；`apps/api/tests/test_run_sse.py` 验证持久化逐帧回放、双游标续接、终态控制帧、未来/跨 Run 拒绝、断开释放容量和 health 并发；`apps/api/tests/test_issue_runs.py` 验证 real 的模型工具协议、不同问题的工具计划、证据不足、非法引用/工具、有限修复、预算、持久化配置和 OpenAI-compatible 请求、供应商失败、取消与终态容量；`apps/api/tests/test_mcp.py` 验证 HTTP/MCP 同一 Run、影响结果、独立 real 写能力和 Codex external 的实际工具结果、代码理解有序步骤、证据拒绝、幂等、时间预算、取消与终态拒写；`apps/api/tests/test_overview.py` 另验证结构组、模块关系、预算和固定快照。另运行全量 pytest、compileall、本地 stdio MCP 与浏览器结构下钻流程。真实 DeepSeek 语义质量为 UNVERIFIED。
 
 ## 相关决策
 

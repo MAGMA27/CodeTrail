@@ -2,7 +2,7 @@
 
 ## 职责与边界
 
-`apps/api` 提供本地 FastAPI 服务、静态仓库 allow-list、受限本地/GitHub 来源导入、Project/Index/Session 管理、规则概览、功能生成，以及显式 fixture/real/external Run 的冻结、执行、事件、SSE、报告读取和报告候选的有界静态影响查询。它不执行被分析仓库代码、shell 或测试；real Run 只通过有界模型适配器请求服务端配置的兼容供应商，external Run 只接收 Codex 通过本地 MCP 发起的白名单工具调用和结构化结论。
+`apps/api` 提供本地 FastAPI 服务、静态仓库 allow-list、受限本地/GitHub 来源导入、Project/Index/Session 管理、规则概览、功能生成，以及显式 fixture/real/external Run 的冻结、执行、事件、SSE、Issue/代码理解报告读取和报告候选的有界静态影响查询。它不执行被分析仓库代码、shell 或测试；real Run 只通过有界模型适配器请求服务端配置的兼容供应商，external Run 只接收 Codex 通过本地 MCP 发起的白名单工具调用和结构化结论。
 
 ## 入口与目录导航
 
@@ -19,7 +19,7 @@
 
 ## 接口与依赖
 
-契约位于 [contracts.py](app/contracts.py)，Schema 由 [export_schema.py](app/export_schema.py) 生成。旧 `/api/indexes/*` 保留兼容；项目工作区使用 `/api/projects/*`。Run 的 HTTP 入口为 `/api/projects/{project_id}/sessions/{session_id}/runs` 及其 detail、events、`events/stream`、tool-results、report、impact、cancel 子路径；fixture/real 创建只做边界校验、冻结、容量预留和提交，worker 启动成功后返回 queued 的 run_id。external Run 只从 MCP `start_external_run` 创建，冻结同样的 Session 输入但不占内部 worker；`run_search_code`、`run_read_source`、`run_get_neighbors` 记录服务端实际结果，`get_neighbors` 的 `truncated` 表示查询预算，`index_truncated` 表示固定关系扫描覆盖，`index_unresolved_truncated` 表示 unresolved 详情覆盖。`submit_external_run` 只接受本 Run 返回的同快照证据/符号。容量满时内部 Run 返回可重试的 `budget_exceeded`/429，不写入 Run。`events/stream` 在握手前校验 project/session/run 与 `after_sequence`/`Last-Event-ID`，按 `{run_id}:{sequence}` 逐帧回放持久化公开事件，终态后关闭，SSE 不可用时由工作台自行回退轮询。`impact` 只按已保存报告中的一个 candidate/finding ID 查询 Run 固定 index 上的静态 `calls`，并返回固定索引覆盖事实；限制方向、深度、节点、路径和 unresolved 输出，不修改 Run。执行由 [Run 执行子系统](../../docs/subsystems/execution.md)负责。所有项目索引、Session 和 Run 操作都复用 WorkspaceService 的归属校验。
+契约位于 [contracts.py](app/contracts.py)，Schema 由 [export_schema.py](app/export_schema.py) 生成。旧 `/api/indexes/*` 保留兼容；项目工作区使用 `/api/projects/*`。Run 的 HTTP 入口为 `/api/projects/{project_id}/sessions/{session_id}/runs` 及其 detail、events、`events/stream`、tool-results、report、impact、cancel 子路径；fixture/real 创建只做边界校验、冻结、容量预留和提交，worker 启动成功后返回 queued 的 run_id。external Run 只从 MCP `start_external_run` 创建，冻结同样的 Session 输入但不占内部 worker；`analysis_kind=understanding` 只走 external，`run_search_code`、`run_read_source`、`run_get_neighbors` 记录服务端实际结果，`get_neighbors` 的 `truncated` 表示查询预算，`index_truncated` 表示固定关系扫描覆盖，`index_unresolved_truncated` 表示 unresolved 详情覆盖。`submit_external_run` 可提交 Issue 结论或最多 12 步的 explanation，且只接受本 Run 返回的同快照证据/符号；explanation 不产生候选链接。容量满时内部 Run 返回可重试的 `budget_exceeded`/429，不写入 Run。`events/stream` 在握手前校验 project/session/run 与 `after_sequence`/`Last-Event-ID`，按 `{run_id}:{sequence}` 逐帧回放持久化公开事件，终态后关闭，SSE 不可用时由工作台自行回退轮询。`impact` 只按已保存报告中的一个 candidate/finding ID 查询 Run 固定 index 上的静态 `calls`，并返回固定索引覆盖事实；限制方向、深度、节点、路径和 unresolved 输出，不修改 Run。执行由 [Run 执行子系统](../../docs/subsystems/execution.md)负责。所有项目索引、Session 和 Run 操作都复用 WorkspaceService 的归属校验。
 
 `GET /api/projects/{project_id}/indexes/{index_id}/overview` 从同一不可变快照生成确定性的 `python-entry-v4` 概览。除 `__main__.py`/main guard 外，`fastapi_route` 入口还会保存已确认的 HTTP 方法、声明路径、处理函数 symbol、装饰器到函数结束的 evidence；概览同时生成 `http_path` 和 `source_directory` 结构组，并把固定快照中可映射的跨模块 `imports`/`calls` 聚合为带代表源码位置的模块关系。处理函数仍沿既有静态图展开，入口绑定本身不新增 CodeEdge；结构组和聚合关系也不会写回静态边。HTTP 组按首个 `{parameter}` 前的声明路径静态前缀及 handler 模块分组，源码组按相对目录分组；它们都不是业务功能。只识别已知 `FastAPI()` 实例、字面量路径和静态方法，声明路径不包含未解析的 router/部署前缀；未展开语句中的可能绑定写入会保守使已知绑定失效，不把后续不确定装饰器升级为路由。结构输出由 `max_groups`（默认 80、最大 200）和 `max_module_relations`（默认 200、最大 400）独立限制，代表边最多保留 8 条并以 `edge_count` 说明总量。
 
@@ -28,6 +28,8 @@
 静态仓库由 `CODETRAIL_REPOSITORIES` JSON 对象提供；动态来源注册和导入状态写入 `CODETRAIL_DATA_DIR`，索引库归属于服务管理目录或来源的既有存储。Session 在创建时固定 ready `index_id`，消息由事务分配连续 sequence。Run 在同一索引库中保存不可变的 `project_id/session_id/index_id`、execution source、可选同快照 feature generation、完整已保存消息前缀及 hash、预算、状态、事件、工具结果和报告；每个 Session 最多一个 `queued/running` Run。服务启动把未完成的内部 Run 标记为 `interrupted`；external Run 在仍处于其创建时间预算内时保留，超时或后续活动请求只中断自身。取消与重启都保存终态事件和终态报告，迟到工具结果不会落库。进程内内部 Run 执行容量由 `CODETRAIL_RUN_MAX_CONCURRENT_RUNS` 配置，默认 2；external Run 不占用该槽位，没有内部等待队列。SSE 订阅使用 `CODETRAIL_RUN_SSE_MAX_CONNECTIONS`、`CODETRAIL_RUN_SSE_MAX_PER_RUN`、`CODETRAIL_RUN_SSE_BATCH_SIZE`、`CODETRAIL_RUN_SSE_POLL_INTERVAL_SECONDS`、`CODETRAIL_RUN_SSE_IDLE_HEARTBEAT_SECONDS`、`CODETRAIL_RUN_SSE_MAX_LIFETIME_SECONDS` 和 `CODETRAIL_RUN_SSE_MAX_EVENT_BYTES` 配置有限资源，默认总连接 8、单 Run 2、批次 20、最长 300 秒。
 
 fixture Run 继续接受三个场景：候选、证据不足和工具失败。real Run 每轮由模型选择一个 `search_code`、`read_source` 或 `get_neighbors` 请求，或返回结构化候选/证据不足结论；每个请求都包含完整冻结 Issue/消息和已返回证据，最多做一次有限格式修复。external Run 由 Codex 通过 MCP 逐次选择同一组白名单工具，服务端只持久化实际返回；结论必须使用本 Run 返回的同快照证据和符号，且按创建时间兑现时间预算。执行器使用实际索引工具结果组装报告，不执行仓库源码、shell 或测试。所有报告 evidence 和图节点绑定 Run 的固定 `index_id`；影响查询重新读取该固定快照的静态 `calls`，不把 imports、dynamic/unresolved 或模型候选升级为确定影响；草稿、后续消息和后续 latest index 不会改变已保存 Run 输入。
+
+`Run.analysis_kind=understanding` 仅用于 external Run。Codex 可在 `submit_external_run` 中提交 `outcome=explanation` 和 `explanation`：最多 12 个有序步骤，confirmed 步骤必须有本 Run 返回的 evidence，complete 不得含 unknown；服务端拒绝跨 Run/跨 index 的 evidence 或 symbol，也不为 explanation 生成 findings、candidate links 或影响结论。旧 Run/report 缺少该字段时按 Issue 语义读取，不迁移历史 JSON。
 
 ## 使用与配置
 
@@ -47,9 +49,11 @@ API 健康检查为 `GET /api/health`。前端或测试先创建 Project、建�
 
 Run 拒绝未开启能力的 `mode=real` 或 `CODETRAIL_MCP_EXTERNAL_RUN_ENABLED`、拒绝空 Session、跨项目/Session/index/generation，冻结完整消息前缀而不是前端已加载页；草稿不会进入输入。单次/总源码行、工具调用、模型调用/修复、模型输入/输出字符、输入/输出字符、事件、总时间和进程并发均有服务端上限；状态只能从 queued/running 进入一个终态，终态事件不可重复，取消幂等，重启中的 Run 标为 interrupted。关系扫描和 unresolved 详情分别受有界预算控制；前者未完成与后者未知/截断都不能被空邻接解释为没有关系，旧 index 的 NULL 只表示尚未记录。概览另受总计算时间、200 个入口候选、模块/组/模块关系上限约束；模块关系只显示两个端点都能映射到同一固定快照模块的静态边，unresolved、无法映射和自模块边不进入聚合；源码目录组即使包含因 `max_modules` 未返回的模块，也会在下钻时明确显示预算遗漏。只支持模块/函数体直接语句中的已声明 FastAPI 实例路由，不展开控制流块或类体，也不解析 `APIRouter`、`include_router`、`mount`、动态路径或运行时注册，未识别入口不表示项目没有路由。external 不执行内部模型，且结论不能引用本 Run 未实际返回的证据或符号；终态拒绝迟到工具和结论。模型供应商缺失、请求失败、非法结构化输出和预算耗尽明确失败，不回退 fixture；Run 历史、事件和工具结果分页均有上限并带作用域游标。SSE 的跨 Run、未来游标、游标冲突和订阅容量拒绝在流建立前返回结构化错误；断线只释放订阅，不取消或重启 Run，终态游标收到 `run.stream.end` 控制帧后有限结束；容量满不落库且不影响查询/取消/health；取消/中断报告无候选结论，失败报告保留已持久化的同快照 evidence。影响查询要求报告中的 candidate/finding 精确归属；找不到唯一源符号时返回有解释的空 unmapped 结果，找到后只遍历同快照 `calls`，最大深度 2、默认节点 40，并保留 cycles 的静态边和 unresolved 未知边界。
 
+代码理解 external Run 使用 `analysis_kind=understanding`，只能提交 `outcome=explanation`；服务端拒绝未返回的步骤 evidence/symbol、重复步骤 ID、确认步骤无证据、complete 含 unknown，以及任何 Issue findings/candidate links。理解结果的步骤顺序是 Agent 的解释顺序，不等同于静态 calls 图，也不承诺未索引的 TypeScript、动态注册或完整运行时行为。
+
 ## 验证
 
-从 `apps/api` 执行 `uv run pytest -q` 和 `uv run python -m compileall -q app`。`tests/test_runs.py` 覆盖 fixture 生命周期和固定 Run 报告影响查询；`tests/test_storage.py` 覆盖静态路径、节点去重、环和输出边界；`tests/test_run_sse.py` 覆盖持久化逐帧回放、双游标续接、终态控制帧、未来/跨 Run 拒绝、断开释放容量和 health 并发；`tests/test_issue_runs.py` 覆盖 real 工具决策、证据不足、非法引用/工具、有限修复、预算、取消、持久化 config.json 和 OpenAI-compatible 请求；`tests/test_mcp.py` 覆盖 HTTP/MCP Run 与影响查询对照、默认只读、独立 Run 写开关和 real 能力开关，以及 external 的实际 stdio 工具、证据边界、幂等、时间预算、取消和终态拒写。其它项目/索引/导入/Session/O1/O2/O3 测试继续覆盖各自边界。本轮全量后端 129 passed、前端测试 22 passed、契约测试 21 passed，编译、类型检查、生产构建、文档检查和本地 stdio MCP/浏览器 FastAPI 路由联动均通过；真实 DeepSeek 语义质量仍未验证。
+从 `apps/api` 执行 `uv run pytest -q` 和 `uv run python -m compileall -q app`。`tests/test_runs.py` 覆盖 fixture 生命周期和固定 Run 报告影响查询；`tests/test_storage.py` 覆盖静态路径、节点去重、环和输出边界；`tests/test_run_sse.py` 覆盖持久化逐帧回放、双游标续接、终态控制帧、未来/跨 Run 拒绝、断开释放容量和 health 并发；`tests/test_issue_runs.py` 覆盖 real 工具决策、证据不足、非法引用/工具、有限修复、预算、取消、持久化 config.json 和 OpenAI-compatible 请求；`tests/test_mcp.py` 覆盖 HTTP/MCP Run 与影响查询对照、默认只读、独立 Run 写开关和 real 能力开关，以及 external 的实际 stdio 工具、证据边界、幂等、时间预算、取消和终态拒写。其它项目/索引/导入/Session/O1/O2/O3 测试继续覆盖各自边界。本轮全量后端 134 passed、前端测试 24 passed、契约测试 23 passed，编译、类型检查、生产构建、文档检查和本地 stdio MCP/浏览器 FastAPI 路由联动均通过；真实 DeepSeek 语义质量仍未验证。
 
 ## 关联文档
 
@@ -75,7 +79,7 @@ Run 拒绝未开启能力的 `mode=real` 或 `CODETRAIL_MCP_EXTERNAL_RUN_ENABLED
 
 设置 `CODETRAIL_MCP_RUN_WRITE_ENABLED=1` 后，独立增加 `start_session_run` 和 `cancel_session_run`；它允许显式选择 fixture 或 real，但 real 还要求 `CODETRAIL_MCP_REAL_RUN_ENABLED=1`，不会因为 Run 写开关开放 `create_session` 或 `append_session_message`。Session 写入仍需 `CODETRAIL_MCP_SESSION_WRITE_ENABLED=1`。未设置时 MCP 保持只读工具，默认只读工具不会调用模型或 Run。
 
-设置 `CODETRAIL_MCP_EXTERNAL_RUN_ENABLED=1` 后，独立增加 `start_external_run`、`run_search_code`、`run_read_source`、`run_get_neighbors`、`submit_external_run` 和 `cancel_external_run`，供 Codex 作为外部 Agent 驱动一次调查。start 只冻结已有 Session 的消息和固定 index，不占内部 Run worker；每次工具调用必须带 Run 作用域和 request_id，服务端保存实际返回的结果，重复 request_id 只复用相同参数的已保存结果。submit 只接受 `candidate_found` 或 `insufficient_evidence`，所有 evidence、finding symbol 和 candidate link 都必须来自该 Run 的实际工具返回；报告带有公开限制，超时、取消和终态写入均不可伪造或重复。工作台通过 Session Run history 自动发现该 Run，并用同一 Run 的 SSE 展示公开事件。
+设置 `CODETRAIL_MCP_EXTERNAL_RUN_ENABLED=1` 后，独立增加 `start_external_run`、`run_search_code`、`run_read_source`、`run_get_neighbors`、`submit_external_run` 和 `cancel_external_run`，供 Codex 作为外部 Agent 驱动一次调查。start 只冻结已有 Session 的消息和固定 index，不占内部 Run worker；可选 `analysis_kind=understanding` 将 Run 标记为代码流程理解；每次工具调用必须带 Run 作用域和 request_id，服务端保存实际返回的结果，重复 request_id 只复用相同参数的已保存结果。submit 接受 `candidate_found`、`insufficient_evidence` 或 `explanation`；explanation 必须携带有序步骤，所有 evidence、symbol 和 Issue 字段都必须遵守该 Run 的实际工具结果与分析类型边界，且 explanation 不产生 candidate link。报告带有公开限制，超时、取消和终态写入均不可伪造或重复。工作台通过 Session Run history 自动发现该 Run，并用同一 Run 的 SSE 展示公开事件。
 
 Codex 的本地 stdio 配置示例（Windows）如下；仓库映射必须使用服务数据目录中已存在的 repository ID，`CODETRAIL_DATA_DIR` 需与 API 共用：
 
@@ -105,4 +109,4 @@ CODETRAIL_MCP_EXTERNAL_RUN_ENABLED = "1"
 }
 ```
 
-不要提交真实密钥；配置文件位于被 Git 忽略的服务数据目录。设计与验收见 [统一接口决策](../../docs/decisions/2026-09-11-agent-native-interfaces.md)、[Run 决策](../../docs/decisions/2026-09-12-run-execution.md) 和 [Codex 外部 Agent Run 决策](../../docs/decisions/2026-09-13-external-agent-run.md)。
+不要提交真实密钥；配置文件位于被 Git 忽略的服务数据目录。设计与验收见 [统一接口决策](../../docs/decisions/2026-09-11-agent-native-interfaces.md)、[Run 决策](../../docs/decisions/2026-09-12-run-execution.md)、[Codex 外部 Agent Run 决策](../../docs/decisions/2026-09-13-external-agent-run.md) 和 [代码理解流程与证据报告决策](../../docs/decisions/2026-09-14-code-understanding-explanation.md)。

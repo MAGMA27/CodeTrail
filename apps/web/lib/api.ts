@@ -212,6 +212,7 @@ export type SessionMessagesResponse = {
 export type RunStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
 export type RunTerminalStatus = "succeeded" | "failed" | "cancelled" | "interrupted";
 export type RunMode = "fixture" | "real" | "external";
+export type RunAnalysisKind = "issue" | "understanding";
 export type RunExecutionSource = "internal" | "codex";
 export type RunScenario =
   | "success-timeout-missing"
@@ -265,6 +266,7 @@ export type RunRecord = {
   feature_generation_id: string | null;
   issue: { schema_version: typeof SCHEMA_VERSION; id: string; title: string; body: string; stacktrace: string | null; mentioned_paths: string[] };
   mode: RunMode;
+  analysis_kind: RunAnalysisKind;
   execution_source: RunExecutionSource;
   fixture_scenario: RunScenario | null;
   model_provider: string | null;
@@ -369,6 +371,20 @@ export type RunFinding = {
   evidence_ids: string[];
 };
 
+export type ExplanationStep = {
+  step_id: string;
+  kind: "confirmed" | "inferred" | "unknown";
+  title: string;
+  description: string;
+  evidence_ids: string[];
+  symbol_ids: string[];
+};
+
+export type CodeExplanation = {
+  coverage: "complete" | "partial";
+  steps: ExplanationStep[];
+};
+
 export type RunReport = {
   schema_version: typeof SCHEMA_VERSION;
   report_id: string;
@@ -377,7 +393,7 @@ export type RunReport = {
   session_id: string;
   index_id: string;
   status: "succeeded" | "failed" | "cancelled" | "interrupted";
-  outcome: "candidate_found" | "insufficient_evidence" | "failed" | "cancelled" | "interrupted";
+  outcome: "candidate_found" | "insufficient_evidence" | "explanation" | "failed" | "cancelled" | "interrupted";
   fixture_mode: boolean;
   summary: string;
   graph: {
@@ -392,6 +408,7 @@ export type RunReport = {
   evidence: Evidence[];
   findings: RunFinding[];
   candidate_links: RunCandidateLink[];
+  explanation: CodeExplanation | null;
   limitations: string[];
   terminal_sequence: number;
 };
@@ -1183,6 +1200,7 @@ function isRunRecord(value: unknown): value is RunRecord {
     isNullableString(issue.stacktrace) &&
     isStringArray(issue.mentioned_paths) &&
     ["fixture", "real", "external"].includes(String(record.mode)) &&
+    ["issue", "understanding"].includes(String(record.analysis_kind)) &&
     ["internal", "codex"].includes(String(record.execution_source)) &&
     (record.fixture_scenario === null || isRunScenario(record.fixture_scenario)) &&
     isNullableString(record.model_provider) &&
@@ -1354,11 +1372,47 @@ function isRunFinding(value: unknown): value is RunFinding {
   );
 }
 
+function isExplanationStep(value: unknown): value is ExplanationStep {
+  if (!isRecord(value)) {
+    return false;
+  }
+  const step = value as Record<string, unknown>;
+  return (
+    isString(step.step_id) &&
+    ["confirmed", "inferred", "unknown"].includes(String(step.kind)) &&
+    isString(step.title) &&
+    isString(step.description) &&
+    isStringArray(step.evidence_ids) &&
+    isStringArray(step.symbol_ids) &&
+    new Set(step.evidence_ids).size === step.evidence_ids.length &&
+    new Set(step.symbol_ids).size === step.symbol_ids.length &&
+    (step.kind !== "confirmed" || step.evidence_ids.length > 0)
+  );
+}
+
+function isCodeExplanation(value: unknown): value is CodeExplanation {
+  if (!isRecord(value) || !["complete", "partial"].includes(String(value.coverage))) {
+    return false;
+  }
+  if (!Array.isArray(value.steps) || value.steps.length < 1 || value.steps.length > 12) {
+    return false;
+  }
+  if (!value.steps.every(isExplanationStep)) {
+    return false;
+  }
+  const stepIds = value.steps.map((step) => step.step_id);
+  return (
+    new Set(stepIds).size === stepIds.length &&
+    (value.coverage !== "complete" || value.steps.every((step) => step.kind !== "unknown"))
+  );
+}
+
 function isRunReport(value: unknown): value is RunReport {
   if (!isRecord(value) || !isRecord(value.graph)) {
     return false;
   }
   const graph = value.graph;
+  const explanation = value.explanation;
   return (
     value.schema_version === SCHEMA_VERSION &&
     isString(value.report_id) &&
@@ -1367,7 +1421,7 @@ function isRunReport(value: unknown): value is RunReport {
     isString(value.session_id) &&
     isString(value.index_id) &&
     ["succeeded", "failed", "cancelled", "interrupted"].includes(String(value.status)) &&
-    ["candidate_found", "insufficient_evidence", "failed", "cancelled", "interrupted"].includes(String(value.outcome)) &&
+    ["candidate_found", "insufficient_evidence", "explanation", "failed", "cancelled", "interrupted"].includes(String(value.outcome)) &&
     typeof value.fixture_mode === "boolean" &&
     isString(value.summary) &&
     isString(graph.index_id) &&
@@ -1388,6 +1442,8 @@ function isRunReport(value: unknown): value is RunReport {
     value.findings.every(isRunFinding) &&
     Array.isArray(value.candidate_links) &&
     value.candidate_links.every(isRunCandidateLink) &&
+    ((value.outcome === "explanation" && isCodeExplanation(explanation)) ||
+      (value.outcome !== "explanation" && explanation === null)) &&
     isStringArray(value.limitations) &&
     isPositiveInteger(value.terminal_sequence)
   );

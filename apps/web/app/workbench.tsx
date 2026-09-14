@@ -2635,6 +2635,21 @@ export default function Workbench() {
     [direction, edgeKinds, selectedProjectId],
   );
 
+  const selectRunSymbol = useCallback(
+    (symbolId: string) => {
+      if (!runReport || !selectedProjectId) {
+        return;
+      }
+      const symbol = runReport.graph.nodes.find((candidate) => candidate.symbol_id === symbolId);
+      if (!symbol) {
+        return;
+      }
+      setPanelMode("graph");
+      void loadNeighborhood(runReport.index_id, symbol.symbol_id, true);
+    },
+    [loadNeighborhood, runReport, selectedProjectId],
+  );
+
   const selectOverviewEntry = useCallback(
     (entry: OverviewEntryPoint) => {
       setSelectedOverviewEntryId(entry.entry_point_id);
@@ -3245,6 +3260,7 @@ export default function Workbench() {
         onStartRun: startSessionRun,
         onCancelRun: cancelSelectedRun,
         onSelectRunEvidence: selectFeatureEvidence,
+        onSelectRunSymbol: selectRunSymbol,
         onSelectRunImpact: (selection) => {
           void loadRunImpact(selection);
         },

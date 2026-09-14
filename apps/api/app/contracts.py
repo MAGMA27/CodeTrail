@@ -608,6 +608,7 @@ class RunBudget(ContractModel):
 
 
 RunMode: TypeAlias = Literal["fixture", "real", "external"]
+RunAnalysisKind: TypeAlias = Literal["issue", "understanding"]
 RunExecutionSource: TypeAlias = Literal["internal", "codex"]
 FixtureScenario: TypeAlias = Literal[
     "success-timeout-missing",
@@ -621,6 +622,7 @@ RunTerminalStatus: TypeAlias = Literal["succeeded", "failed", "cancelled", "inte
 ReportOutcome: TypeAlias = Literal[
     "candidate_found",
     "insufficient_evidence",
+    "explanation",
     "failed",
     "cancelled",
     "interrupted",
@@ -662,6 +664,7 @@ class Run(VersionedModel):
     feature_generation_id: Identifier | None = None
     issue: Issue
     mode: RunMode
+    analysis_kind: RunAnalysisKind = "issue"
     execution_source: RunExecutionSource = "internal"
     fixture_scenario: FixtureScenario | None = None
     model_provider: str | None = Field(default=None, max_length=100)
@@ -692,6 +695,8 @@ class Run(VersionedModel):
             raise ValueError("external Runs must use the Codex execution source")
         if self.mode != "external" and self.execution_source != "internal":
             raise ValueError("fixture and real Runs must use the internal execution source")
+        if self.mode != "external" and self.analysis_kind != "issue":
+            raise ValueError("understanding Runs must use the external mode")
         if self.input_chars != self.budget.input_chars_used:
             raise ValueError("run input usage must be reflected in the run budget")
         if self.input_chars > self.budget.max_input_chars:
@@ -716,6 +721,47 @@ class Finding(ContractModel):
     evidence_ids: list[Identifier] = Field(default_factory=list)
 
 
+ExplanationStepKind: TypeAlias = Literal["confirmed", "inferred", "unknown"]
+ExplanationCoverage: TypeAlias = Literal["complete", "partial"]
+
+
+class ExplanationStep(ContractModel):
+    """One ordered, evidence-aware step in a code understanding report."""
+
+    step_id: Identifier
+    kind: ExplanationStepKind
+    title: str = Field(min_length=1, max_length=200)
+    description: str = Field(min_length=1, max_length=2_000)
+    evidence_ids: list[Identifier] = Field(default_factory=list, max_length=20)
+    symbol_ids: list[Identifier] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="after")
+    def validate_step_evidence(self) -> ExplanationStep:
+        if len(set(self.evidence_ids)) != len(self.evidence_ids):
+            raise ValueError("explanation step evidence IDs must be unique")
+        if len(set(self.symbol_ids)) != len(self.symbol_ids):
+            raise ValueError("explanation step symbol IDs must be unique")
+        if self.kind == "confirmed" and not self.evidence_ids:
+            raise ValueError("confirmed explanation steps require evidence")
+        return self
+
+
+class CodeExplanation(ContractModel):
+    """Ordered process explanation separated from static graph facts."""
+
+    coverage: ExplanationCoverage
+    steps: list[ExplanationStep] = Field(min_length=1, max_length=12)
+
+    @model_validator(mode="after")
+    def validate_explanation_steps(self) -> CodeExplanation:
+        step_ids = {step.step_id for step in self.steps}
+        if len(step_ids) != len(self.steps):
+            raise ValueError("explanation step IDs must be unique")
+        if self.coverage == "complete" and any(step.kind == "unknown" for step in self.steps):
+            raise ValueError("complete explanations cannot contain unknown steps")
+        return self
+
+
 class Report(VersionedModel):
     report_id: Identifier
     run_id: Identifier
@@ -730,6 +776,7 @@ class Report(VersionedModel):
     evidence: list[Evidence] = Field(default_factory=list)
     findings: list[Finding] = Field(default_factory=list)
     candidate_links: list[CandidateLink] = Field(default_factory=list)
+    explanation: CodeExplanation | None = None
     limitations: list[str] = Field(default_factory=list, max_length=30)
     terminal_sequence: PositiveInt
 
@@ -749,13 +796,36 @@ class Report(VersionedModel):
         for link in self.candidate_links:
             if link.index_id != self.index_id or not set(link.evidence_ids).issubset(evidence_ids):
                 raise ValueError("candidate link has an invalid report evidence reference")
+        if self.explanation is not None:
+            explanation_evidence_ids = {
+                evidence_id
+                for step in self.explanation.steps
+                for evidence_id in step.evidence_ids
+            }
+            if not explanation_evidence_ids.issubset(evidence_ids):
+                raise ValueError("explanation references evidence absent from the report")
+            graph_symbol_ids = {symbol.symbol_id for symbol in self.graph.nodes}
+            if not all(
+                set(step.symbol_ids).issubset(graph_symbol_ids)
+                for step in self.explanation.steps
+            ):
+                raise ValueError("explanation references a symbol absent from the report graph")
+            if not any(evidence.kind == "source" for evidence in self.evidence):
+                raise ValueError("explanation reports must include source evidence")
         if self.outcome == "candidate_found" and not self.candidate_links:
             raise ValueError("candidate_found reports must include candidate links")
         if self.outcome == "insufficient_evidence" and self.candidate_links:
             raise ValueError("insufficient_evidence reports cannot include candidate links")
+        if self.outcome == "explanation" and self.explanation is None:
+            raise ValueError("explanation reports must include an explanation")
+        if self.outcome == "explanation" and (self.findings or self.candidate_links):
+            raise ValueError("explanation reports cannot include Issue findings or candidate links")
+        if self.outcome != "explanation" and self.explanation is not None:
+            raise ValueError("non-explanation reports cannot include an explanation")
         expected_status = {
             "candidate_found": "succeeded",
             "insufficient_evidence": "succeeded",
+            "explanation": "succeeded",
             "failed": "failed",
             "cancelled": "cancelled",
             "interrupted": "interrupted",
@@ -843,6 +913,34 @@ class IssueModelFinal(VersionedModel):
             if not set(link.evidence_ids).issubset(referenced_evidence):
                 raise ValueError("Issue candidate link references evidence absent from output")
         return self
+
+
+class CodeUnderstandingFinal(VersionedModel):
+    """A structured code-flow conclusion for an external understanding Run."""
+
+    kind: Literal["explanation"] = "explanation"
+    index_id: Identifier
+    outcome: Literal["explanation"] = "explanation"
+    summary: str = Field(min_length=1, max_length=5_000)
+    explanation: CodeExplanation
+    evidence_ids: list[Identifier] = Field(min_length=1, max_length=200)
+    limitations: list[str] = Field(default_factory=list, max_length=30)
+
+    @model_validator(mode="after")
+    def validate_understanding_output(self) -> CodeUnderstandingFinal:
+        if len(set(self.evidence_ids)) != len(self.evidence_ids):
+            raise ValueError("understanding output evidence IDs must be unique")
+        referenced_by_steps = {
+            evidence_id
+            for step in self.explanation.steps
+            for evidence_id in step.evidence_ids
+        }
+        if set(self.evidence_ids) != referenced_by_steps:
+            raise ValueError("understanding output evidence must exactly support the explanation steps")
+        return self
+
+
+ExternalRunFinal: TypeAlias = IssueModelFinal | CodeUnderstandingFinal
 
 
 IssueModelOutput: TypeAlias = Annotated[
@@ -2480,6 +2578,7 @@ class RunStartedPayload(ContractModel):
     index_id: Identifier
     issue_id: Identifier
     mode: RunMode
+    analysis_kind: RunAnalysisKind = "issue"
     execution_source: RunExecutionSource = "internal"
     message_end_sequence: PositiveInt
     input_hash: Sha256
@@ -2514,7 +2613,7 @@ class FindingCreatedPayload(ContractModel):
 
 class RunCompletedPayload(ContractModel):
     status: Literal["succeeded"]
-    outcome: Literal["candidate_found", "insufficient_evidence"]
+    outcome: Literal["candidate_found", "insufficient_evidence", "explanation"]
     report_id: Identifier
 
 
@@ -2708,6 +2807,7 @@ class CreateRunRequest(VersionedModel):
     index_id: Identifier
     issue: Issue
     mode: RunMode
+    analysis_kind: RunAnalysisKind = "issue"
     execution_source: RunExecutionSource = "internal"
     fixture_scenario: FixtureScenario | None = None
     feature_generation_id: Identifier | None = None
@@ -2730,6 +2830,8 @@ class CreateRunRequest(VersionedModel):
             raise ValueError("external requests must use the Codex execution source")
         if self.mode != "external" and self.execution_source != "internal":
             raise ValueError("fixture and real requests must use the internal execution source")
+        if self.mode != "external" and self.analysis_kind != "issue":
+            raise ValueError("understanding Runs must use the external mode")
         if self.mode == "external" and self.model is not None:
             raise ValueError("external requests cannot declare an internal model")
         if any(

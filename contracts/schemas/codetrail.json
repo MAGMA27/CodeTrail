@@ -230,6 +230,256 @@
       "title": "CodeEdge",
       "type": "object"
     },
+    "CodeExplanation": {
+      "$defs": {
+        "ExplanationStep": {
+          "additionalProperties": false,
+          "description": "One ordered, evidence-aware step in a code understanding report.",
+          "properties": {
+            "description": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "title": "Description",
+              "type": "string"
+            },
+            "evidence_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 20,
+              "title": "Evidence Ids",
+              "type": "array"
+            },
+            "kind": {
+              "enum": [
+                "confirmed",
+                "inferred",
+                "unknown"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "step_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Step Id",
+              "type": "string"
+            },
+            "symbol_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 20,
+              "title": "Symbol Ids",
+              "type": "array"
+            },
+            "title": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Title",
+              "type": "string"
+            }
+          },
+          "required": [
+            "step_id",
+            "kind",
+            "title",
+            "description"
+          ],
+          "title": "ExplanationStep",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Ordered process explanation separated from static graph facts.",
+      "properties": {
+        "coverage": {
+          "enum": [
+            "complete",
+            "partial"
+          ],
+          "title": "Coverage",
+          "type": "string"
+        },
+        "steps": {
+          "items": {
+            "$ref": "#/$defs/ExplanationStep"
+          },
+          "maxItems": 12,
+          "minItems": 1,
+          "title": "Steps",
+          "type": "array"
+        }
+      },
+      "required": [
+        "coverage",
+        "steps"
+      ],
+      "title": "CodeExplanation",
+      "type": "object"
+    },
+    "CodeUnderstandingFinal": {
+      "$defs": {
+        "CodeExplanation": {
+          "additionalProperties": false,
+          "description": "Ordered process explanation separated from static graph facts.",
+          "properties": {
+            "coverage": {
+              "enum": [
+                "complete",
+                "partial"
+              ],
+              "title": "Coverage",
+              "type": "string"
+            },
+            "steps": {
+              "items": {
+                "$ref": "#/$defs/ExplanationStep"
+              },
+              "maxItems": 12,
+              "minItems": 1,
+              "title": "Steps",
+              "type": "array"
+            }
+          },
+          "required": [
+            "coverage",
+            "steps"
+          ],
+          "title": "CodeExplanation",
+          "type": "object"
+        },
+        "ExplanationStep": {
+          "additionalProperties": false,
+          "description": "One ordered, evidence-aware step in a code understanding report.",
+          "properties": {
+            "description": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "title": "Description",
+              "type": "string"
+            },
+            "evidence_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 20,
+              "title": "Evidence Ids",
+              "type": "array"
+            },
+            "kind": {
+              "enum": [
+                "confirmed",
+                "inferred",
+                "unknown"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "step_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Step Id",
+              "type": "string"
+            },
+            "symbol_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 20,
+              "title": "Symbol Ids",
+              "type": "array"
+            },
+            "title": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Title",
+              "type": "string"
+            }
+          },
+          "required": [
+            "step_id",
+            "kind",
+            "title",
+            "description"
+          ],
+          "title": "ExplanationStep",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "A structured code-flow conclusion for an external understanding Run.",
+      "properties": {
+        "evidence_ids": {
+          "items": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 200,
+          "minItems": 1,
+          "title": "Evidence Ids",
+          "type": "array"
+        },
+        "explanation": {
+          "$ref": "#/$defs/CodeExplanation"
+        },
+        "index_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Index Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "explanation",
+          "default": "explanation",
+          "title": "Kind",
+          "type": "string"
+        },
+        "limitations": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 30,
+          "title": "Limitations",
+          "type": "array"
+        },
+        "outcome": {
+          "const": "explanation",
+          "default": "explanation",
+          "title": "Outcome",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "0.1.0",
+          "default": "0.1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "summary": {
+          "maxLength": 5000,
+          "minLength": 1,
+          "title": "Summary",
+          "type": "string"
+        }
+      },
+      "required": [
+        "index_id",
+        "summary",
+        "explanation",
+        "evidence_ids"
+      ],
+      "title": "CodeUnderstandingFinal",
+      "type": "object"
+    },
     "CreateRunRequest": {
       "$defs": {
         "Issue": {
@@ -460,6 +710,15 @@
       "additionalProperties": false,
       "description": "Start one explicit fixture or real Run from a saved Session cutoff.",
       "properties": {
+        "analysis_kind": {
+          "default": "issue",
+          "enum": [
+            "issue",
+            "understanding"
+          ],
+          "title": "Analysis Kind",
+          "type": "string"
+        },
         "budget": {
           "$ref": "#/$defs/RunBudget"
         },
@@ -1782,7 +2041,8 @@
             "outcome": {
               "enum": [
                 "candidate_found",
-                "insufficient_evidence"
+                "insufficient_evidence",
+                "explanation"
               ],
               "title": "Outcome",
               "type": "string"
@@ -2001,6 +2261,15 @@
         "RunStartedPayload": {
           "additionalProperties": false,
           "properties": {
+            "analysis_kind": {
+              "default": "issue",
+              "enum": [
+                "issue",
+                "understanding"
+              ],
+              "title": "Analysis Kind",
+              "type": "string"
+            },
             "budget": {
               "$ref": "#/$defs/RunBudget"
             },
@@ -3894,7 +4163,8 @@
             "outcome": {
               "enum": [
                 "candidate_found",
-                "insufficient_evidence"
+                "insufficient_evidence",
+                "explanation"
               ],
               "title": "Outcome",
               "type": "string"
@@ -4113,6 +4383,15 @@
         "RunStartedPayload": {
           "additionalProperties": false,
           "properties": {
+            "analysis_kind": {
+              "default": "issue",
+              "enum": [
+                "issue",
+                "understanding"
+              ],
+              "title": "Analysis Kind",
+              "type": "string"
+            },
             "budget": {
               "$ref": "#/$defs/RunBudget"
             },
@@ -5181,6 +5460,67 @@
         "evidence"
       ],
       "title": "EvidenceResponse",
+      "type": "object"
+    },
+    "ExplanationStep": {
+      "additionalProperties": false,
+      "description": "One ordered, evidence-aware step in a code understanding report.",
+      "properties": {
+        "description": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "evidence_ids": {
+          "items": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Evidence Ids",
+          "type": "array"
+        },
+        "kind": {
+          "enum": [
+            "confirmed",
+            "inferred",
+            "unknown"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "step_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Step Id",
+          "type": "string"
+        },
+        "symbol_ids": {
+          "items": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Symbol Ids",
+          "type": "array"
+        },
+        "title": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "step_id",
+        "kind",
+        "title",
+        "description"
+      ],
+      "title": "ExplanationStep",
       "type": "object"
     },
     "Feature": {
@@ -9390,6 +9730,35 @@
           "title": "CodeEdge",
           "type": "object"
         },
+        "CodeExplanation": {
+          "additionalProperties": false,
+          "description": "Ordered process explanation separated from static graph facts.",
+          "properties": {
+            "coverage": {
+              "enum": [
+                "complete",
+                "partial"
+              ],
+              "title": "Coverage",
+              "type": "string"
+            },
+            "steps": {
+              "items": {
+                "$ref": "#/$defs/ExplanationStep"
+              },
+              "maxItems": 12,
+              "minItems": 1,
+              "title": "Steps",
+              "type": "array"
+            }
+          },
+          "required": [
+            "coverage",
+            "steps"
+          ],
+          "title": "CodeExplanation",
+          "type": "object"
+        },
         "EventSequence": {
           "additionalProperties": false,
           "properties": {
@@ -9535,6 +9904,67 @@
             "kind"
           ],
           "title": "Evidence",
+          "type": "object"
+        },
+        "ExplanationStep": {
+          "additionalProperties": false,
+          "description": "One ordered, evidence-aware step in a code understanding report.",
+          "properties": {
+            "description": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "title": "Description",
+              "type": "string"
+            },
+            "evidence_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 20,
+              "title": "Evidence Ids",
+              "type": "array"
+            },
+            "kind": {
+              "enum": [
+                "confirmed",
+                "inferred",
+                "unknown"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "step_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Step Id",
+              "type": "string"
+            },
+            "symbol_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 20,
+              "title": "Symbol Ids",
+              "type": "array"
+            },
+            "title": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Title",
+              "type": "string"
+            }
+          },
+          "required": [
+            "step_id",
+            "kind",
+            "title",
+            "description"
+          ],
+          "title": "ExplanationStep",
           "type": "object"
         },
         "Finding": {
@@ -10369,6 +10799,17 @@
               "title": "Evidence",
               "type": "array"
             },
+            "explanation": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/CodeExplanation"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
             "findings": {
               "items": {
                 "$ref": "#/$defs/Finding"
@@ -10402,6 +10843,7 @@
               "enum": [
                 "candidate_found",
                 "insufficient_evidence",
+                "explanation",
                 "failed",
                 "cancelled",
                 "interrupted"
@@ -10479,6 +10921,15 @@
         "Run": {
           "additionalProperties": false,
           "properties": {
+            "analysis_kind": {
+              "default": "issue",
+              "enum": [
+                "issue",
+                "understanding"
+              ],
+              "title": "Analysis Kind",
+              "type": "string"
+            },
             "budget": {
               "$ref": "#/$defs/RunBudget"
             },
@@ -10970,7 +11421,8 @@
             "outcome": {
               "enum": [
                 "candidate_found",
-                "insufficient_evidence"
+                "insufficient_evidence",
+                "explanation"
               ],
               "title": "Outcome",
               "type": "string"
@@ -11274,6 +11726,15 @@
         "RunStartedPayload": {
           "additionalProperties": false,
           "properties": {
+            "analysis_kind": {
+              "default": "issue",
+              "enum": [
+                "issue",
+                "understanding"
+              ],
+              "title": "Analysis Kind",
+              "type": "string"
+            },
             "budget": {
               "$ref": "#/$defs/RunBudget"
             },
@@ -22623,7 +23084,8 @@
             "outcome": {
               "enum": [
                 "candidate_found",
-                "insufficient_evidence"
+                "insufficient_evidence",
+                "explanation"
               ],
               "title": "Outcome",
               "type": "string"
@@ -22955,6 +23417,15 @@
         "RunStartedPayload": {
           "additionalProperties": false,
           "properties": {
+            "analysis_kind": {
+              "default": "issue",
+              "enum": [
+                "issue",
+                "understanding"
+              ],
+              "title": "Analysis Kind",
+              "type": "string"
+            },
             "budget": {
               "$ref": "#/$defs/RunBudget"
             },
@@ -24465,6 +24936,15 @@
         "Run": {
           "additionalProperties": false,
           "properties": {
+            "analysis_kind": {
+              "default": "issue",
+              "enum": [
+                "issue",
+                "understanding"
+              ],
+              "title": "Analysis Kind",
+              "type": "string"
+            },
             "budget": {
               "$ref": "#/$defs/RunBudget"
             },
@@ -25076,6 +25556,35 @@
           "title": "CodeEdge",
           "type": "object"
         },
+        "CodeExplanation": {
+          "additionalProperties": false,
+          "description": "Ordered process explanation separated from static graph facts.",
+          "properties": {
+            "coverage": {
+              "enum": [
+                "complete",
+                "partial"
+              ],
+              "title": "Coverage",
+              "type": "string"
+            },
+            "steps": {
+              "items": {
+                "$ref": "#/$defs/ExplanationStep"
+              },
+              "maxItems": 12,
+              "minItems": 1,
+              "title": "Steps",
+              "type": "array"
+            }
+          },
+          "required": [
+            "coverage",
+            "steps"
+          ],
+          "title": "CodeExplanation",
+          "type": "object"
+        },
         "Evidence": {
           "additionalProperties": false,
           "properties": {
@@ -25139,6 +25648,67 @@
             "kind"
           ],
           "title": "Evidence",
+          "type": "object"
+        },
+        "ExplanationStep": {
+          "additionalProperties": false,
+          "description": "One ordered, evidence-aware step in a code understanding report.",
+          "properties": {
+            "description": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "title": "Description",
+              "type": "string"
+            },
+            "evidence_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 20,
+              "title": "Evidence Ids",
+              "type": "array"
+            },
+            "kind": {
+              "enum": [
+                "confirmed",
+                "inferred",
+                "unknown"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "step_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Step Id",
+              "type": "string"
+            },
+            "symbol_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 20,
+              "title": "Symbol Ids",
+              "type": "array"
+            },
+            "title": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Title",
+              "type": "string"
+            }
+          },
+          "required": [
+            "step_id",
+            "kind",
+            "title",
+            "description"
+          ],
+          "title": "ExplanationStep",
           "type": "object"
         },
         "Finding": {
@@ -25312,6 +25882,17 @@
               "title": "Evidence",
               "type": "array"
             },
+            "explanation": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/CodeExplanation"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
             "findings": {
               "items": {
                 "$ref": "#/$defs/Finding"
@@ -25345,6 +25926,7 @@
               "enum": [
                 "candidate_found",
                 "insufficient_evidence",
+                "explanation",
                 "failed",
                 "cancelled",
                 "interrupted"
@@ -25727,6 +26309,15 @@
         "Run": {
           "additionalProperties": false,
           "properties": {
+            "analysis_kind": {
+              "default": "issue",
+              "enum": [
+                "issue",
+                "understanding"
+              ],
+              "title": "Analysis Kind",
+              "type": "string"
+            },
             "budget": {
               "$ref": "#/$defs/RunBudget"
             },
@@ -30839,6 +31430,35 @@
           "title": "CodeEdge",
           "type": "object"
         },
+        "CodeExplanation": {
+          "additionalProperties": false,
+          "description": "Ordered process explanation separated from static graph facts.",
+          "properties": {
+            "coverage": {
+              "enum": [
+                "complete",
+                "partial"
+              ],
+              "title": "Coverage",
+              "type": "string"
+            },
+            "steps": {
+              "items": {
+                "$ref": "#/$defs/ExplanationStep"
+              },
+              "maxItems": 12,
+              "minItems": 1,
+              "title": "Steps",
+              "type": "array"
+            }
+          },
+          "required": [
+            "coverage",
+            "steps"
+          ],
+          "title": "CodeExplanation",
+          "type": "object"
+        },
         "Evidence": {
           "additionalProperties": false,
           "properties": {
@@ -30902,6 +31522,67 @@
             "kind"
           ],
           "title": "Evidence",
+          "type": "object"
+        },
+        "ExplanationStep": {
+          "additionalProperties": false,
+          "description": "One ordered, evidence-aware step in a code understanding report.",
+          "properties": {
+            "description": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "title": "Description",
+              "type": "string"
+            },
+            "evidence_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 20,
+              "title": "Evidence Ids",
+              "type": "array"
+            },
+            "kind": {
+              "enum": [
+                "confirmed",
+                "inferred",
+                "unknown"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "step_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Step Id",
+              "type": "string"
+            },
+            "symbol_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 20,
+              "title": "Symbol Ids",
+              "type": "array"
+            },
+            "title": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Title",
+              "type": "string"
+            }
+          },
+          "required": [
+            "step_id",
+            "kind",
+            "title",
+            "description"
+          ],
+          "title": "ExplanationStep",
           "type": "object"
         },
         "Finding": {
@@ -31195,6 +31876,17 @@
           "title": "Evidence",
           "type": "array"
         },
+        "explanation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CodeExplanation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "findings": {
           "items": {
             "$ref": "#/$defs/Finding"
@@ -31228,6 +31920,7 @@
           "enum": [
             "candidate_found",
             "insufficient_evidence",
+            "explanation",
             "failed",
             "cancelled",
             "interrupted"
@@ -31427,6 +32120,35 @@
           "title": "CodeEdge",
           "type": "object"
         },
+        "CodeExplanation": {
+          "additionalProperties": false,
+          "description": "Ordered process explanation separated from static graph facts.",
+          "properties": {
+            "coverage": {
+              "enum": [
+                "complete",
+                "partial"
+              ],
+              "title": "Coverage",
+              "type": "string"
+            },
+            "steps": {
+              "items": {
+                "$ref": "#/$defs/ExplanationStep"
+              },
+              "maxItems": 12,
+              "minItems": 1,
+              "title": "Steps",
+              "type": "array"
+            }
+          },
+          "required": [
+            "coverage",
+            "steps"
+          ],
+          "title": "CodeExplanation",
+          "type": "object"
+        },
         "Evidence": {
           "additionalProperties": false,
           "properties": {
@@ -31490,6 +32212,67 @@
             "kind"
           ],
           "title": "Evidence",
+          "type": "object"
+        },
+        "ExplanationStep": {
+          "additionalProperties": false,
+          "description": "One ordered, evidence-aware step in a code understanding report.",
+          "properties": {
+            "description": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "title": "Description",
+              "type": "string"
+            },
+            "evidence_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 20,
+              "title": "Evidence Ids",
+              "type": "array"
+            },
+            "kind": {
+              "enum": [
+                "confirmed",
+                "inferred",
+                "unknown"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "step_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Step Id",
+              "type": "string"
+            },
+            "symbol_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 20,
+              "title": "Symbol Ids",
+              "type": "array"
+            },
+            "title": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Title",
+              "type": "string"
+            }
+          },
+          "required": [
+            "step_id",
+            "kind",
+            "title",
+            "description"
+          ],
+          "title": "ExplanationStep",
           "type": "object"
         },
         "Finding": {
@@ -31622,6 +32405,17 @@
               "title": "Evidence",
               "type": "array"
             },
+            "explanation": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/CodeExplanation"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
             "findings": {
               "items": {
                 "$ref": "#/$defs/Finding"
@@ -31655,6 +32449,7 @@
               "enum": [
                 "candidate_found",
                 "insufficient_evidence",
+                "explanation",
                 "failed",
                 "cancelled",
                 "interrupted"
@@ -32138,6 +32933,15 @@
       },
       "additionalProperties": false,
       "properties": {
+        "analysis_kind": {
+          "default": "issue",
+          "enum": [
+            "issue",
+            "understanding"
+          ],
+          "title": "Analysis Kind",
+          "type": "string"
+        },
         "budget": {
           "$ref": "#/$defs/RunBudget"
         },
@@ -33431,7 +34235,8 @@
             "outcome": {
               "enum": [
                 "candidate_found",
-                "insufficient_evidence"
+                "insufficient_evidence",
+                "explanation"
               ],
               "title": "Outcome",
               "type": "string"
@@ -33650,6 +34455,15 @@
         "RunStartedPayload": {
           "additionalProperties": false,
           "properties": {
+            "analysis_kind": {
+              "default": "issue",
+              "enum": [
+                "issue",
+                "understanding"
+              ],
+              "title": "Analysis Kind",
+              "type": "string"
+            },
             "budget": {
               "$ref": "#/$defs/RunBudget"
             },
@@ -35250,6 +36064,15 @@
         "Run": {
           "additionalProperties": false,
           "properties": {
+            "analysis_kind": {
+              "default": "issue",
+              "enum": [
+                "issue",
+                "understanding"
+              ],
+              "title": "Analysis Kind",
+              "type": "string"
+            },
             "budget": {
               "$ref": "#/$defs/RunBudget"
             },
@@ -35756,6 +36579,15 @@
         "Run": {
           "additionalProperties": false,
           "properties": {
+            "analysis_kind": {
+              "default": "issue",
+              "enum": [
+                "issue",
+                "understanding"
+              ],
+              "title": "Analysis Kind",
+              "type": "string"
+            },
             "budget": {
               "$ref": "#/$defs/RunBudget"
             },
@@ -39021,7 +39853,8 @@
             "outcome": {
               "enum": [
                 "candidate_found",
-                "insufficient_evidence"
+                "insufficient_evidence",
+                "explanation"
               ],
               "title": "Outcome",
               "type": "string"
@@ -39240,6 +40073,15 @@
         "RunStartedPayload": {
           "additionalProperties": false,
           "properties": {
+            "analysis_kind": {
+              "default": "issue",
+              "enum": [
+                "issue",
+                "understanding"
+              ],
+              "title": "Analysis Kind",
+              "type": "string"
+            },
             "budget": {
               "$ref": "#/$defs/RunBudget"
             },
