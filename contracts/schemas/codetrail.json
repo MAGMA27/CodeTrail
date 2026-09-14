@@ -20032,6 +20032,16 @@
               "title": "Reachable Modules",
               "type": "integer"
             },
+            "total_groups": {
+              "minimum": 0,
+              "title": "Total Groups",
+              "type": "integer"
+            },
+            "total_module_relations": {
+              "minimum": 0,
+              "title": "Total Module Relations",
+              "type": "integer"
+            },
             "total_modules": {
               "minimum": 0,
               "title": "Total Modules",
@@ -20047,6 +20057,16 @@
               "title": "Unresolved Count",
               "type": "integer"
             },
+            "visible_groups": {
+              "minimum": 0,
+              "title": "Visible Groups",
+              "type": "integer"
+            },
+            "visible_module_relations": {
+              "minimum": 0,
+              "title": "Visible Module Relations",
+              "type": "integer"
+            },
             "visible_modules": {
               "minimum": 0,
               "title": "Visible Modules",
@@ -20059,7 +20079,11 @@
             "reachable_modules",
             "unreachable_modules",
             "entry_point_count",
-            "unresolved_count"
+            "unresolved_count",
+            "total_groups",
+            "visible_groups",
+            "total_module_relations",
+            "visible_module_relations"
           ],
           "title": "OverviewCoverage",
           "type": "object"
@@ -20234,6 +20258,71 @@
           "title": "OverviewEntryPoint",
           "type": "object"
         },
+        "OverviewGroup": {
+          "additionalProperties": false,
+          "description": "A deterministic structural group, never a model-confirmed feature.",
+          "properties": {
+            "entry_point_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "title": "Entry Point Ids",
+              "type": "array"
+            },
+            "group_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Group Id",
+              "type": "string"
+            },
+            "group_key": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Group Key",
+              "type": "string"
+            },
+            "group_kind": {
+              "enum": [
+                "http_path",
+                "source_directory"
+              ],
+              "title": "Group Kind",
+              "type": "string"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "label": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Label",
+              "type": "string"
+            },
+            "module_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "title": "Module Ids",
+              "type": "array"
+            }
+          },
+          "required": [
+            "group_id",
+            "index_id",
+            "group_kind",
+            "group_key",
+            "label"
+          ],
+          "title": "OverviewGroup",
+          "type": "object"
+        },
         "OverviewModule": {
           "additionalProperties": false,
           "description": "A Python module classified by entry reachability, not by business meaning.",
@@ -20274,6 +20363,82 @@
             "symbol"
           ],
           "title": "OverviewModule",
+          "type": "object"
+        },
+        "OverviewModuleRelation": {
+          "additionalProperties": false,
+          "description": "Aggregated immutable module dependency with representative source edges.",
+          "properties": {
+            "edge_count": {
+              "exclusiveMinimum": 0,
+              "title": "Edge Count",
+              "type": "integer"
+            },
+            "edges": {
+              "items": {
+                "$ref": "#/$defs/CodeEdge"
+              },
+              "maxItems": 8,
+              "minItems": 1,
+              "title": "Edges",
+              "type": "array"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "relation_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Relation Id",
+              "type": "string"
+            },
+            "relation_kinds": {
+              "items": {
+                "enum": [
+                  "imports",
+                  "calls"
+                ],
+                "type": "string"
+              },
+              "maxItems": 2,
+              "minItems": 1,
+              "title": "Relation Kinds",
+              "type": "array"
+            },
+            "source_module": {
+              "$ref": "#/$defs/Symbol"
+            },
+            "source_module_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Source Module Id",
+              "type": "string"
+            },
+            "target_module": {
+              "$ref": "#/$defs/Symbol"
+            },
+            "target_module_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Target Module Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "relation_id",
+            "index_id",
+            "source_module_id",
+            "target_module_id",
+            "source_module",
+            "target_module",
+            "relation_kinds",
+            "edge_count",
+            "edges"
+          ],
+          "title": "OverviewModuleRelation",
           "type": "object"
         },
         "OverviewPath": {
@@ -20354,8 +20519,22 @@
               "title": "Entry Status",
               "type": "string"
             },
+            "groups": {
+              "items": {
+                "$ref": "#/$defs/OverviewGroup"
+              },
+              "title": "Groups",
+              "type": "array"
+            },
             "index": {
               "$ref": "#/$defs/IndexSnapshot"
+            },
+            "module_relations": {
+              "items": {
+                "$ref": "#/$defs/OverviewModuleRelation"
+              },
+              "title": "Module Relations",
+              "type": "array"
             },
             "modules": {
               "items": {
@@ -28957,6 +29136,16 @@
           "title": "Reachable Modules",
           "type": "integer"
         },
+        "total_groups": {
+          "minimum": 0,
+          "title": "Total Groups",
+          "type": "integer"
+        },
+        "total_module_relations": {
+          "minimum": 0,
+          "title": "Total Module Relations",
+          "type": "integer"
+        },
         "total_modules": {
           "minimum": 0,
           "title": "Total Modules",
@@ -28972,6 +29161,16 @@
           "title": "Unresolved Count",
           "type": "integer"
         },
+        "visible_groups": {
+          "minimum": 0,
+          "title": "Visible Groups",
+          "type": "integer"
+        },
+        "visible_module_relations": {
+          "minimum": 0,
+          "title": "Visible Module Relations",
+          "type": "integer"
+        },
         "visible_modules": {
           "minimum": 0,
           "title": "Visible Modules",
@@ -28984,7 +29183,11 @@
         "reachable_modules",
         "unreachable_modules",
         "entry_point_count",
-        "unresolved_count"
+        "unresolved_count",
+        "total_groups",
+        "visible_groups",
+        "total_module_relations",
+        "visible_module_relations"
       ],
       "title": "OverviewCoverage",
       "type": "object"
@@ -29737,6 +29940,16 @@
               "title": "Reachable Modules",
               "type": "integer"
             },
+            "total_groups": {
+              "minimum": 0,
+              "title": "Total Groups",
+              "type": "integer"
+            },
+            "total_module_relations": {
+              "minimum": 0,
+              "title": "Total Module Relations",
+              "type": "integer"
+            },
             "total_modules": {
               "minimum": 0,
               "title": "Total Modules",
@@ -29752,6 +29965,16 @@
               "title": "Unresolved Count",
               "type": "integer"
             },
+            "visible_groups": {
+              "minimum": 0,
+              "title": "Visible Groups",
+              "type": "integer"
+            },
+            "visible_module_relations": {
+              "minimum": 0,
+              "title": "Visible Module Relations",
+              "type": "integer"
+            },
             "visible_modules": {
               "minimum": 0,
               "title": "Visible Modules",
@@ -29764,7 +29987,11 @@
             "reachable_modules",
             "unreachable_modules",
             "entry_point_count",
-            "unresolved_count"
+            "unresolved_count",
+            "total_groups",
+            "visible_groups",
+            "total_module_relations",
+            "visible_module_relations"
           ],
           "title": "OverviewCoverage",
           "type": "object"
@@ -29939,6 +30166,71 @@
           "title": "OverviewEntryPoint",
           "type": "object"
         },
+        "OverviewGroup": {
+          "additionalProperties": false,
+          "description": "A deterministic structural group, never a model-confirmed feature.",
+          "properties": {
+            "entry_point_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "title": "Entry Point Ids",
+              "type": "array"
+            },
+            "group_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Group Id",
+              "type": "string"
+            },
+            "group_key": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Group Key",
+              "type": "string"
+            },
+            "group_kind": {
+              "enum": [
+                "http_path",
+                "source_directory"
+              ],
+              "title": "Group Kind",
+              "type": "string"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "label": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Label",
+              "type": "string"
+            },
+            "module_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "title": "Module Ids",
+              "type": "array"
+            }
+          },
+          "required": [
+            "group_id",
+            "index_id",
+            "group_kind",
+            "group_key",
+            "label"
+          ],
+          "title": "OverviewGroup",
+          "type": "object"
+        },
         "OverviewModule": {
           "additionalProperties": false,
           "description": "A Python module classified by entry reachability, not by business meaning.",
@@ -29979,6 +30271,82 @@
             "symbol"
           ],
           "title": "OverviewModule",
+          "type": "object"
+        },
+        "OverviewModuleRelation": {
+          "additionalProperties": false,
+          "description": "Aggregated immutable module dependency with representative source edges.",
+          "properties": {
+            "edge_count": {
+              "exclusiveMinimum": 0,
+              "title": "Edge Count",
+              "type": "integer"
+            },
+            "edges": {
+              "items": {
+                "$ref": "#/$defs/CodeEdge"
+              },
+              "maxItems": 8,
+              "minItems": 1,
+              "title": "Edges",
+              "type": "array"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "relation_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Relation Id",
+              "type": "string"
+            },
+            "relation_kinds": {
+              "items": {
+                "enum": [
+                  "imports",
+                  "calls"
+                ],
+                "type": "string"
+              },
+              "maxItems": 2,
+              "minItems": 1,
+              "title": "Relation Kinds",
+              "type": "array"
+            },
+            "source_module": {
+              "$ref": "#/$defs/Symbol"
+            },
+            "source_module_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Source Module Id",
+              "type": "string"
+            },
+            "target_module": {
+              "$ref": "#/$defs/Symbol"
+            },
+            "target_module_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Target Module Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "relation_id",
+            "index_id",
+            "source_module_id",
+            "target_module_id",
+            "source_module",
+            "target_module",
+            "relation_kinds",
+            "edge_count",
+            "edges"
+          ],
+          "title": "OverviewModuleRelation",
           "type": "object"
         },
         "OverviewPath": {
@@ -30220,8 +30588,22 @@
           "title": "Entry Status",
           "type": "string"
         },
+        "groups": {
+          "items": {
+            "$ref": "#/$defs/OverviewGroup"
+          },
+          "title": "Groups",
+          "type": "array"
+        },
         "index": {
           "$ref": "#/$defs/IndexSnapshot"
+        },
+        "module_relations": {
+          "items": {
+            "$ref": "#/$defs/OverviewModuleRelation"
+          },
+          "title": "Module Relations",
+          "type": "array"
         },
         "modules": {
           "items": {

@@ -71,6 +71,7 @@ import {
   type LocalImportResponse,
   type NeighborDirection,
   type OverviewEntryPoint,
+  type OverviewGroup,
   type OverviewModule,
   type ProjectOverview,
   type ProjectRecord,
@@ -508,6 +509,7 @@ export default function Workbench() {
   const [overview, setOverview] = useState<ProjectOverview | null>(null);
   const [overviewError, setOverviewError] = useState<string | null>(null);
   const [selectedOverviewEntryId, setSelectedOverviewEntryId] = useState<string | null>(null);
+  const [selectedOverviewGroupId, setSelectedOverviewGroupId] = useState<string | null>(null);
   const [featureStatus, setFeatureStatus] = useState<AsyncStatus>("idle");
   const [featureGeneration, setFeatureGeneration] = useState<FeatureGeneration | null>(null);
   const [featureError, setFeatureError] = useState<string | null>(null);
@@ -819,6 +821,7 @@ export default function Workbench() {
     setOverview(null);
     setOverviewError(null);
     setSelectedOverviewEntryId(null);
+    setSelectedOverviewGroupId(null);
     featureRequestId.current += 1;
     featureIdempotencyKey.current = null;
     setFeatureStatus("idle");
@@ -909,12 +912,13 @@ export default function Workbench() {
     setOverviewStatus("loading");
     setOverviewError(null);
     try {
-      const response = await getProjectOverview(projectId, indexId, 4, 40, 100, controller.signal);
+      const response = await getProjectOverview(projectId, indexId, 4, 40, 100, 80, 200, controller.signal);
       if (!isLatestRequest(requestId, overviewRequestId.current)) {
         return;
       }
       setOverview(response);
       setSelectedOverviewEntryId(response.entries[0]?.entry_point_id ?? null);
+      setSelectedOverviewGroupId(null);
       setOverviewStatus("success");
     } catch (error) {
       if (isAbortError(error) || !isLatestRequest(requestId, overviewRequestId.current)) {
@@ -2678,6 +2682,12 @@ export default function Workbench() {
     [indexResponse, loadNeighborhood, overview, selectSymbol],
   );
 
+  const selectOverviewGroup = useCallback((group: OverviewGroup) => {
+    setSelectedOverviewGroupId(group.group_id);
+    setSelectedOverviewEntryId(null);
+    setPanelMode("none");
+  }, []);
+
   const openOverviewModule = useCallback(
     (module: OverviewModule) => {
       if (!indexResponse) {
@@ -3251,7 +3261,10 @@ export default function Workbench() {
         overview,
         overviewError,
         selectedOverviewEntryId,
+        selectedOverviewGroupId,
         onSelectOverviewEntry: selectOverviewEntry,
+        onSelectOverviewGroup: selectOverviewGroup,
+        onClearOverviewGroup: () => setSelectedOverviewGroupId(null),
         onOpenOverviewGraph: openOverviewEntryGraph,
         onOpenOverviewModule: openOverviewModule,
         onRetryOverview: () => {

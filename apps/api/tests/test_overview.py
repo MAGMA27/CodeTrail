@@ -106,7 +106,7 @@ def test_overview_identifies_main_rules_paths_and_stays_on_snapshot(tmp_path: Pa
     )
     assert status == 200
     assert overview["entry_status"] == "identified"
-    assert overview["rules_version"] == "python-entry-v3"
+    assert overview["rules_version"] == "python-entry-v4"
     assert {entry["kind"] for entry in overview["entries"]} == {
         "python_main_module",
         "python_main_guard",
@@ -123,6 +123,14 @@ def test_overview_identifies_main_rules_paths_and_stays_on_snapshot(tmp_path: Pa
     assert any(item["reason"] == "dynamic_call_target" for item in overview["unresolved"])
     assert any(module["entry_reachable"] for module in overview["modules"])
     assert any(not module["entry_reachable"] for module in overview["modules"])
+    assert overview["coverage"]["total_groups"] >= overview["coverage"]["visible_groups"] > 0
+    assert overview["coverage"]["total_module_relations"] >= overview["coverage"]["visible_module_relations"]
+    assert any(group["group_kind"] == "source_directory" for group in overview["groups"])
+    assert all(
+        relation["source_module_id"] != relation["target_module_id"]
+        and relation["edge_count"] >= len(relation["edges"]) >= 1
+        for relation in overview["module_relations"]
+    )
 
     status, repeated = request(
         application,
@@ -227,6 +235,75 @@ def test_overview_identifies_confirmed_fastapi_routes_and_rejects_ambiguous_bind
         for entry in routes
     )
     assert any("声明路径" in note for note in overview["notes"])
+
+
+def test_overview_groups_routes_and_aggregates_module_relations(tmp_path: Path) -> None:
+    repository = tmp_path / "structure-demo"
+    package = repository / "demo"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "app.py").write_text(
+        "from fastapi import FastAPI\n"
+        "from .service import load_status\n"
+        "\n"
+        "app = FastAPI()\n"
+        "\n"
+        "@app.get('/api/health')\n"
+        "def health():\n"
+        "    return load_status()\n"
+        "\n"
+        "@app.get('/api/projects/{project_id}')\n"
+        "def project(project_id: str):\n"
+        "    return load_status()\n",
+        encoding="utf-8",
+    )
+    (package / "service.py").write_text(
+        "from .status import status\n"
+        "\n"
+        "def load_status():\n"
+        "    return status()\n",
+        encoding="utf-8",
+    )
+    (package / "status.py").write_text(
+        "def status():\n"
+        "    return {'ok': True}\n",
+        encoding="utf-8",
+    )
+    application = create_app({"structure-demo": repository})
+    project_id, index_id = _create_index(application, "Structure demo", "structure-demo")
+
+    status, overview = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/indexes/{index_id}/overview",
+    )
+    assert status == 200
+    http_groups = {
+        group["group_key"]: group
+        for group in overview["groups"]
+        if group["group_kind"] == "http_path"
+    }
+    assert {"/api/health", "/api/projects"} <= set(http_groups)
+    assert all(group["entry_point_ids"] and group["module_ids"] for group in http_groups.values())
+    assert any(
+        group["group_kind"] == "source_directory" and group["group_key"] == "demo"
+        for group in overview["groups"]
+    )
+
+    symbols = {
+        symbol["symbol_id"]: symbol["qualified_name"]
+        for module in overview["modules"]
+        for symbol in [module["symbol"]]
+    }
+    assert any(
+        relation["source_module"]["qualified_name"] == "demo.app"
+        and relation["target_module"]["qualified_name"] == "demo.service"
+        and {"imports", "calls"} & set(relation["relation_kinds"])
+        and relation["edges"]
+        and all(edge["source_location"]["path"] == "demo/app.py" for edge in relation["edges"])
+        for relation in overview["module_relations"]
+    )
+    assert symbols
 
 
 def test_overview_invalidates_skipped_bindings_without_cross_scope_pollution(tmp_path: Path) -> None:
@@ -364,7 +441,7 @@ def test_overview_invalidates_skipped_bindings_without_cross_scope_pollution(tmp
         ("GET", "/outer"),
         ("GET", "/before-star"),
     }
-    assert overview["rules_version"] == "python-entry-v3"
+    assert overview["rules_version"] == "python-entry-v4"
 
 
 def test_overview_does_not_promote_main_names_or_nested_guards(tmp_path: Path) -> None:
@@ -445,11 +522,13 @@ def test_overview_scope_and_budget_are_explicit(tmp_path: Path) -> None:
         application,
         "GET",
         f"/api/projects/{first_project['project_id']}/indexes/{index_id}/overview"
-        "?max_depth=1&max_paths=1&max_modules=1",
+        "?max_depth=1&max_paths=1&max_modules=1&max_groups=1&max_module_relations=1",
     )
     assert status == 200
     assert bounded["truncated"] is True
     assert bounded["truncation_reason"]
+    assert bounded["coverage"]["visible_groups"] <= bounded["coverage"]["total_groups"]
+    assert bounded["coverage"]["visible_module_relations"] <= bounded["coverage"]["total_module_relations"]
 
 
 def test_overview_keeps_cycles_bounded_without_inventing_edges(tmp_path: Path) -> None:

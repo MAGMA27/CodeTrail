@@ -13,7 +13,9 @@ from .contracts import (
     CodeEdge,
     Evidence,
     OverviewEntryPoint,
+    OverviewGroup,
     OverviewModule,
+    OverviewModuleRelation,
     OverviewPath,
     ProjectOverview,
     OverviewCoverage,
@@ -23,13 +25,16 @@ from .contracts import (
 from .relations import RelationIndex, relation_coverage_limitations
 
 
-RULES_VERSION = "python-entry-v3"
+RULES_VERSION = "python-entry-v4"
 DEFAULT_MAX_DEPTH = 4
 DEFAULT_MAX_PATHS = 40
 DEFAULT_MAX_MODULES = 100
+DEFAULT_MAX_GROUPS = 80
+DEFAULT_MAX_MODULE_RELATIONS = 200
 DEFAULT_MAX_SECONDS = 2.0
 _MAX_EVIDENCE_LINES = 200
 _MAX_ENTRY_CANDIDATES = 200
+_MAX_RELATION_EDGE_SAMPLES = 8
 _FASTAPI_ROUTE_METHODS = {
     "get": "GET",
     "post": "POST",
@@ -80,6 +85,16 @@ class _EntryCandidate:
         return f"entry-{hashlib.sha256(identity).hexdigest()[:32]}"
 
 
+@dataclass(frozen=True)
+class _OverviewGroupSpec:
+    group_kind: str
+    group_key: str
+    label: str
+    module_ids: tuple[str, ...]
+    entry_point_ids: tuple[str, ...]
+    sort_key: tuple[object, ...]
+
+
 def build_project_overview(
     project_id: str,
     relation: RelationIndex,
@@ -88,11 +103,20 @@ def build_project_overview(
     max_depth: int = DEFAULT_MAX_DEPTH,
     max_paths: int = DEFAULT_MAX_PATHS,
     max_modules: int = DEFAULT_MAX_MODULES,
+    max_groups: int = DEFAULT_MAX_GROUPS,
+    max_module_relations: int = DEFAULT_MAX_MODULE_RELATIONS,
     max_seconds: float = DEFAULT_MAX_SECONDS,
 ) -> ProjectOverview:
     """Build a bounded overview from persisted symbols, edges, and source text only."""
 
-    if max_depth < 1 or max_paths < 1 or max_modules < 1 or max_seconds <= 0:
+    if (
+        max_depth < 1
+        or max_paths < 1
+        or max_modules < 1
+        or max_groups < 1
+        or max_module_relations < 1
+        or max_seconds <= 0
+    ):
         raise ValueError("overview budgets must be positive")
 
     index = relation.snapshot.index
@@ -320,6 +344,37 @@ def build_project_overview(
         )
         for module in visible_modules
     ]
+    groups, total_groups = _build_overview_groups(
+        index_id=index.index_id,
+        entries=entries,
+        modules=modules,
+        module_entry_ids=module_entry_ids,
+        reachable_module_ids=reachable_module_ids,
+        module_by_path=module_by_path,
+        max_groups=max_groups,
+    )
+    if total_groups > len(groups):
+        reasons.append("max_groups reached")
+
+    (
+        module_relations,
+        total_module_relations,
+        relation_sample_truncated,
+        relation_timed_out,
+    ) = _build_module_relations(
+        index_id=index.index_id,
+        relation=relation,
+        symbols_by_id=symbols_by_id,
+        module_by_path=module_by_path,
+        max_relations=max_module_relations,
+        deadline=deadline,
+    )
+    if total_module_relations > len(module_relations) and not relation_timed_out:
+        reasons.append("max_module_relations reached")
+    if relation_sample_truncated:
+        reasons.append("module relation edge samples bounded")
+    if _deadline_reached(deadline):
+        reasons.append("max_seconds reached")
     entry_status = (
         "not_identified"
         if not entries
@@ -336,7 +391,9 @@ def build_project_overview(
         rules_version=RULES_VERSION,
         entry_status=entry_status,  # type: ignore[arg-type]
         entries=entries,
+        groups=groups,
         modules=module_models,
+        module_relations=module_relations,
         paths=paths,
         unresolved=visible_unresolved,
         coverage=OverviewCoverage(
@@ -346,11 +403,220 @@ def build_project_overview(
             unreachable_modules=total_modules - total_reachable_modules,
             entry_point_count=len(entries),
             unresolved_count=len(visible_unresolved),
+            total_groups=total_groups,
+            visible_groups=len(groups),
+            total_module_relations=total_module_relations,
+            visible_module_relations=len(module_relations),
         ),
         notes=notes,
         truncated=truncated,
         truncation_reason=truncation_reason,
     )
+
+
+def _build_overview_groups(
+    *,
+    index_id: str,
+    entries: list[OverviewEntryPoint],
+    modules: tuple[Symbol, ...],
+    module_entry_ids: dict[str, list[str]],
+    reachable_module_ids: set[str],
+    module_by_path: dict[str, Symbol],
+    max_groups: int,
+) -> tuple[list[OverviewGroup], int]:
+    http_entry_ids: dict[tuple[str, str], set[str]] = defaultdict(set)
+    http_module_ids: dict[tuple[str, str], set[str]] = defaultdict(set)
+    http_module_labels: dict[tuple[str, str], str] = {}
+    for entry in entries:
+        if entry.kind != "fastapi_route" or entry.declared_path is None:
+            continue
+        handler = entry.handler_symbol
+        handler_module = module_by_path.get(handler.path) if handler is not None else None
+        module_key = (
+            handler_module.symbol_id
+            if handler_module is not None
+            else f"unknown:{handler.path if handler is not None else entry.path}"
+        )
+        group_key = _http_path_prefix(entry.declared_path)
+        group_identity = (group_key, module_key)
+        http_entry_ids[group_identity].add(entry.entry_point_id)
+        if handler_module is not None:
+            http_module_ids[group_identity].add(handler_module.symbol_id)
+            http_module_labels[group_identity] = handler_module.qualified_name
+        elif handler is not None:
+            http_module_labels[group_identity] = handler.path
+        else:
+            http_module_labels[group_identity] = "unknown module"
+
+    specs: list[_OverviewGroupSpec] = []
+    for (group_key, module_key), entry_ids in http_entry_ids.items():
+        module_ids = tuple(sorted(http_module_ids[(group_key, module_key)]))
+        module_label = http_module_labels[(group_key, module_key)]
+        specs.append(
+            _OverviewGroupSpec(
+                group_kind="http_path",
+                group_key=group_key,
+                label=f"HTTP {group_key} · {module_label}",
+                module_ids=module_ids,
+                entry_point_ids=tuple(sorted(entry_ids)),
+                sort_key=(0, group_key, module_label, module_key),
+            )
+        )
+
+    source_modules: dict[str, list[Symbol]] = defaultdict(list)
+    for module in modules:
+        source_modules[_source_directory_key(module.path)].append(module)
+    for directory, directory_modules in source_modules.items():
+        directory_modules.sort(
+            key=lambda symbol: (
+                symbol.symbol_id not in reachable_module_ids,
+                symbol.path,
+                symbol.qualified_name,
+                symbol.symbol_id,
+            )
+        )
+        module_ids = tuple(module.symbol_id for module in directory_modules)
+        entry_ids = tuple(
+            sorted(
+                {
+                    entry_id
+                    for module in directory_modules
+                    for entry_id in module_entry_ids.get(module.symbol_id, [])
+                }
+            )
+        )
+        specs.append(
+            _OverviewGroupSpec(
+                group_kind="source_directory",
+                group_key=directory,
+                label=f"SOURCE {directory}",
+                module_ids=module_ids,
+                entry_point_ids=entry_ids,
+                sort_key=(
+                    1,
+                    not any(module.symbol_id in reachable_module_ids for module in directory_modules),
+                    directory,
+                ),
+            )
+        )
+
+    specs.sort(key=lambda spec: spec.sort_key)
+    groups: list[OverviewGroup] = []
+    for spec in specs[:max_groups]:
+        identity = "\0".join(
+            (
+                RULES_VERSION,
+                index_id,
+                spec.group_kind,
+                spec.group_key,
+                *spec.module_ids,
+                *spec.entry_point_ids,
+            )
+        ).encode("utf-8")
+        groups.append(
+            OverviewGroup(
+                group_id=f"group-{hashlib.sha256(identity).hexdigest()[:32]}",
+                index_id=index_id,
+                group_kind=spec.group_kind,  # type: ignore[arg-type]
+                group_key=spec.group_key,
+                label=spec.label,
+                module_ids=list(spec.module_ids),
+                entry_point_ids=list(spec.entry_point_ids),
+            )
+        )
+    return groups, len(specs)
+
+
+def _build_module_relations(
+    *,
+    index_id: str,
+    relation: RelationIndex,
+    symbols_by_id: dict[str, Symbol],
+    module_by_path: dict[str, Symbol],
+    max_relations: int,
+    deadline: float,
+) -> tuple[list[OverviewModuleRelation], int, bool, bool]:
+    edges_by_module_pair: dict[tuple[str, str], list[CodeEdge]] = defaultdict(list)
+    module_by_id = {module.symbol_id: module for module in module_by_path.values()}
+    timed_out = False
+    for edge in relation.edges:
+        if _deadline_reached(deadline):
+            timed_out = True
+            break
+        if edge.kind not in {"imports", "calls"}:
+            continue
+        source = symbols_by_id.get(edge.source_id)
+        target = symbols_by_id.get(edge.target_id)
+        if source is None or target is None:
+            continue
+        source_module = module_by_path.get(source.path)
+        target_module = module_by_path.get(target.path)
+        if source_module is None or target_module is None or source_module.symbol_id == target_module.symbol_id:
+            continue
+        edges_by_module_pair[(source_module.symbol_id, target_module.symbol_id)].append(edge)
+
+    module_pairs = sorted(
+        edges_by_module_pair,
+        key=lambda pair: (
+            module_by_id[pair[0]].qualified_name,
+            module_by_id[pair[1]].qualified_name,
+            pair,
+        ),
+    )
+    relations: list[OverviewModuleRelation] = []
+    sample_truncated = False
+    for source_module_id, target_module_id in module_pairs:
+        if len(relations) >= max_relations:
+            break
+        if _deadline_reached(deadline):
+            timed_out = True
+            break
+        source_module = module_by_id[source_module_id]
+        target_module = module_by_id[target_module_id]
+        pair_edges = sorted(
+            edges_by_module_pair[(source_module_id, target_module_id)],
+            key=lambda edge: (
+                edge.source_location.path,
+                edge.source_location.start_line,
+                edge.kind,
+                edge.target_id,
+                edge.edge_id,
+            ),
+        )
+        if len(pair_edges) > _MAX_RELATION_EDGE_SAMPLES:
+            sample_truncated = True
+        identity = "\0".join(
+            (RULES_VERSION, index_id, source_module_id, target_module_id)
+        ).encode("utf-8")
+        relations.append(
+            OverviewModuleRelation(
+                relation_id=f"module-relation-{hashlib.sha256(identity).hexdigest()[:32]}",
+                index_id=index_id,
+                source_module_id=source_module_id,
+                target_module_id=target_module_id,
+                source_module=source_module,
+                target_module=target_module,
+                relation_kinds=sorted({edge.kind for edge in pair_edges}),  # type: ignore[arg-type]
+                edge_count=len(pair_edges),
+                edges=pair_edges[:_MAX_RELATION_EDGE_SAMPLES],
+            )
+        )
+    return relations, len(module_pairs), sample_truncated, timed_out
+
+
+def _http_path_prefix(path: str) -> str:
+    prefix: list[str] = []
+    for segment in path.split("/"):
+        if not segment:
+            continue
+        if segment.startswith("{"):
+            break
+        prefix.append(segment)
+    return "/" + "/".join(prefix) if prefix else "/"
+
+
+def _source_directory_key(path: str) -> str:
+    return path.rsplit("/", 1)[0] if "/" in path else "/"
 
 
 def _find_entry_candidates(

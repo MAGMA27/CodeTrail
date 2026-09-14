@@ -28,7 +28,9 @@ import type {
   IndexSnapshot,
   NeighborDirection,
   OverviewEntryPoint,
+  OverviewGroup,
   OverviewModule,
+  OverviewModuleRelation,
   ProjectOverview,
   ProjectRecord,
   RunEvent,
@@ -168,7 +170,10 @@ type KnowledgeUi = {
   overview: ProjectOverview | null;
   overviewError: string | null;
   selectedOverviewEntryId: string | null;
+  selectedOverviewGroupId: string | null;
   onSelectOverviewEntry: (entry: OverviewEntryPoint) => void;
+  onSelectOverviewGroup: (group: OverviewGroup) => void;
+  onClearOverviewGroup: () => void;
   onOpenOverviewGraph: (entry: OverviewEntryPoint) => void;
   onOpenOverviewModule: (module: OverviewModule) => void;
   onRetryOverview: Action;
@@ -897,19 +902,136 @@ function FeatureGenerationResult({ generation, knowledge }: { generation: Featur
   );
 }
 
+function OverviewEntryRow({ entry, knowledge }: { entry: OverviewEntryPoint; knowledge: KnowledgeUi }) {
+  const isRoute = entry.kind === "fastapi_route";
+  return (
+    <div className={`ct-entry-row${knowledge.selectedOverviewEntryId === entry.entry_point_id ? " is-selected" : ""}`}>
+      <button type="button" className="ct-entry-main" onClick={() => knowledge.onSelectOverviewEntry(entry)}>
+        <span className="ct-kind-chip">{isRoute ? "HTTP" : entry.kind === "python_main_module" ? "MODULE" : "GUARD"}</span>
+        <span>
+          <strong>{isRoute ? `${entry.http_method} ${entry.declared_path}` : entry.label}</strong>
+          <small>{isRoute ? `处理函数 ${entry.handler_symbol?.qualified_name ?? entry.label} · ${entry.path}:L${entry.start_line}–L${entry.end_line} · 声明路径（未解析挂载前缀）` : `${entry.path}:L${entry.start_line}–L${entry.end_line} · ${entry.rule_id}`}</small>
+        </span>
+        <span aria-hidden="true">↗</span>
+      </button>
+      <button type="button" className="ct-link-button" onClick={() => knowledge.onOpenOverviewGraph(entry)} disabled={!entry.symbol_id}>关系图</button>
+    </div>
+  );
+}
+
+function OverviewModuleRow({ module, knowledge }: { module: OverviewModule; knowledge: KnowledgeUi }) {
+  return (
+    <button type="button" className="ct-module-row" onClick={() => knowledge.onOpenOverviewModule(module)}>
+      <span className={`ct-reachability${module.entry_reachable ? " is-reachable" : ""}`}>{module.entry_reachable ? "REACHABLE" : "OTHER"}</span>
+      <span>
+        <strong>{module.symbol.qualified_name}</strong>
+        <small>{module.symbol.path} · {module.entry_point_ids.length > 0 ? `${module.entry_point_ids.length} 个入口` : "未从入口路径到达"}</small>
+      </span>
+      <span aria-hidden="true">↗</span>
+    </button>
+  );
+}
+
+function OverviewModuleRelationList({ relations }: { relations: OverviewModuleRelation[] }) {
+  if (relations.length === 0) {
+    return <p className="ct-muted">当前可见结构没有可确认的跨模块 imports/calls 边。</p>;
+  }
+  return (
+    <div className="ct-structure-relation-list">
+      {relations.map((relation) => {
+        const locations = relation.edges
+          .slice(0, 3)
+          .map((edge) => `${edge.source_location.path}:L${edge.source_location.start_line}`)
+          .join(" · ");
+        const extraLocations = relation.edge_count - relation.edges.length;
+        return (
+          <article className="ct-structure-relation" key={relation.relation_id}>
+            <div className="ct-structure-relation-main">
+              <strong>{relation.source_module.qualified_name}</strong>
+              <span aria-hidden="true">→</span>
+              <strong>{relation.target_module.qualified_name}</strong>
+            </div>
+            <div className="ct-structure-relation-meta">
+              <span className="ct-kind-chip">{relation.relation_kinds.join(" + ")}</span>
+              <small>{relation.edge_count} 条静态边 · {locations}{extraLocations > 0 ? ` · 代表位置 +${extraLocations}` : ""}</small>
+            </div>
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
 function OverviewSections({ overview, knowledge }: { overview: ProjectOverview; knowledge: KnowledgeUi }) {
+  const entryById = new Map(overview.entries.map((entry) => [entry.entry_point_id, entry]));
+  const moduleById = new Map(overview.modules.map((module) => [module.module_id, module]));
+  const selectedGroup = overview.groups.find((group) => group.group_id === knowledge.selectedOverviewGroupId) ?? null;
+  const selectedEntries = selectedGroup
+    ? selectedGroup.entry_point_ids.map((entryId) => entryById.get(entryId)).filter((entry): entry is OverviewEntryPoint => entry !== undefined)
+    : [];
+  const selectedModules = selectedGroup
+    ? selectedGroup.module_ids.map((moduleId) => moduleById.get(moduleId)).filter((module): module is OverviewModule => module !== undefined)
+    : [];
+  const relatedRelations = selectedGroup
+    ? overview.module_relations.filter((relation) => selectedGroup.module_ids.includes(relation.source_module_id) || selectedGroup.module_ids.includes(relation.target_module_id))
+    : overview.module_relations;
+  const primaryModules = overview.modules.filter((module) => module.entry_reachable).slice(0, 12);
+  const modulePreview = primaryModules.length > 0 ? primaryModules : overview.modules.slice(0, 12);
+
   return (
     <>
-      <section className="ct-section" aria-label="入口候选">
-        <div className="ct-section-heading"><div><p className="ct-overline">ENTRY CANDIDATES</p><h3>入口路径</h3></div><span className="ct-count-label">{overview.entries.length}</span></div>
-        {overview.entries.length > 0 ? <div className="ct-entry-list">{overview.entries.map((entry) => {
-          const isRoute = entry.kind === "fastapi_route";
-          return <div className={`ct-entry-row${knowledge.selectedOverviewEntryId === entry.entry_point_id ? " is-selected" : ""}`} key={entry.entry_point_id}><button type="button" className="ct-entry-main" onClick={() => knowledge.onSelectOverviewEntry(entry)}><span className="ct-kind-chip">{isRoute ? "HTTP" : entry.kind === "python_main_module" ? "MODULE" : "GUARD"}</span><span><strong>{isRoute ? `${entry.http_method} ${entry.declared_path}` : entry.label}</strong><small>{isRoute ? `处理函数 ${entry.handler_symbol?.qualified_name ?? entry.label} · ${entry.path}:L${entry.start_line}–L${entry.end_line} · 声明路径（未解析挂载前缀）` : `${entry.path}:L${entry.start_line}–L${entry.end_line} · ${entry.rule_id}`}</small></span><span aria-hidden="true">↗</span></button><button type="button" className="ct-link-button" onClick={() => knowledge.onOpenOverviewGraph(entry)} disabled={!entry.symbol_id}>关系图</button></div>;
-        })}</div> : <p className="ct-muted">{overview.notes[0] ?? "当前规则没有识别到入口。"}</p>}
+      <section className="ct-section ct-structure-section" aria-label="项目结构总览">
+        <div className="ct-section-heading">
+          <div><p className="ct-overline">STRUCTURE / STATIC FACTS</p><h3>项目结构</h3></div>
+          <span className="ct-count-label">{overview.coverage.visible_groups}/{overview.coverage.total_groups} 组</span>
+        </div>
+        <p className="ct-section-lede">路径组和源码目录组只表示固定索引中的组织结构；它们不是模型确认的业务功能。选择一组后查看真实入口、模块和关系来源。</p>
+        {overview.groups.length > 0 ? (
+          <div className="ct-structure-group-list">
+            {overview.groups.map((group) => (
+              <button
+                type="button"
+                className={`ct-structure-group${selectedGroup?.group_id === group.group_id ? " is-selected" : ""}`}
+                key={group.group_id}
+                onClick={() => knowledge.onSelectOverviewGroup(group)}
+                aria-pressed={selectedGroup?.group_id === group.group_id}
+              >
+                <span className="ct-structure-group-kind">{group.group_kind === "http_path" ? "HTTP PATH" : "SOURCE DIRECTORY"}</span>
+                <strong>{group.label}</strong>
+                <small>{group.group_key} · {group.entry_point_ids.length} 个入口 · {group.module_ids.length} 个模块</small>
+              </button>
+            ))}
+          </div>
+        ) : <p className="ct-muted">当前索引没有可展示的结构分组。</p>}
+        {selectedGroup ? (
+          <div className="ct-structure-detail">
+            <div className="ct-structure-detail-heading">
+              <div><p className="ct-overline">SELECTED GROUP</p><h4>{selectedGroup.label}</h4></div>
+              <button type="button" className="ct-link-button" onClick={knowledge.onClearOverviewGroup}>返回结构总览</button>
+            </div>
+            {selectedGroup.group_kind === "http_path" ? (
+              selectedEntries.length > 0 ? <div className="ct-entry-list">{selectedEntries.map((entry) => <OverviewEntryRow entry={entry} knowledge={knowledge} key={entry.entry_point_id} />)}</div> : <p className="ct-muted">该组入口因当前概览预算未返回。</p>
+            ) : (
+              selectedModules.length > 0 ? <div className="ct-module-list">{selectedModules.map((module) => <OverviewModuleRow module={module} knowledge={knowledge} key={module.module_id} />)}</div> : <p className="ct-muted">该源码目录的模块未包含在当前可见模块预算中。</p>
+            )}
+            <div className="ct-structure-related">
+              <div className="ct-structure-subheading"><strong>相关模块依赖</strong><span>{relatedRelations.length} 条可见关系</span></div>
+              <OverviewModuleRelationList relations={relatedRelations.slice(0, 12)} />
+              {relatedRelations.length > 12 ? <p className="ct-muted">仅显示 12 条关系；可见关系仍受模块关系预算限制。</p> : null}
+            </div>
+          </div>
+        ) : null}
+        <div className="ct-structure-related">
+          <div className="ct-structure-subheading"><strong>静态模块依赖</strong><span>{overview.coverage.visible_module_relations}/{overview.coverage.total_module_relations}</span></div>
+          <OverviewModuleRelationList relations={overview.module_relations.slice(0, 10)} />
+          {overview.module_relations.length > 10 ? <p className="ct-muted">默认显示前 10 条；选择结构组可查看该组相关关系。</p> : null}
+        </div>
       </section>
-      <section className="ct-section" aria-label="模块覆盖">
-        <div className="ct-section-heading"><div><p className="ct-overline">MODULE COVERAGE</p><h3>模块覆盖</h3></div><span className="ct-count-label">{overview.modules.length}/{overview.coverage.total_modules}</span></div>
-        <div className="ct-module-list">{overview.modules.map((module) => <button type="button" className="ct-module-row" key={module.module_id} onClick={() => knowledge.onOpenOverviewModule(module)}><span className={`ct-reachability${module.entry_reachable ? " is-reachable" : ""}`}>{module.entry_reachable ? "REACHABLE" : "OTHER"}</span><span><strong>{module.symbol.qualified_name}</strong><small>{module.symbol.path} · {module.entry_point_ids.length > 0 ? `${module.entry_point_ids.length} 个入口` : "未从入口路径到达"}</small></span><span aria-hidden="true">↗</span></button>)}</div>
+      <section className="ct-section" aria-label="主要源码模块">
+        <div className="ct-section-heading"><div><p className="ct-overline">SOURCE MODULES</p><h3>主要源码模块</h3></div><span className="ct-count-label">{overview.modules.length}/{overview.coverage.total_modules}</span></div>
+        <p className="ct-section-lede">模块按固定源码路径归属，不代表业务功能；点击模块进入现有 React Flow 局部关系图。</p>
+        <div className="ct-module-list">{modulePreview.map((module) => <OverviewModuleRow module={module} knowledge={knowledge} key={module.module_id} />)}</div>
+        {overview.modules.length > modulePreview.length ? <p className="ct-muted">其余模块可从源码目录组下钻；当前概览显示主要入口可达模块。</p> : null}
       </section>
       <section className="ct-section ct-boundaries" aria-label="边界与限制">
         <div className="ct-section-heading"><div><p className="ct-overline">BOUNDARIES</p><h3>边界与限制</h3></div><span className="ct-count-label">{overview.notes.length}</span></div>

@@ -17,7 +17,7 @@
 
 ## 接口与依赖
 
-项目、索引、概览、Session/消息和 Run 均通过 `/api/projects/*` 调用；概览中的 FastAPI 路由入口显示 HTTP 方法、声明路径和处理函数，点击入口先打开装饰器到函数结束的同快照 evidence，关系图按钮则以处理函数作为既有静态图根节点。Run 使用同一 Session 的 list/detail/events、`events/stream`、tool-results/report/impact/cancel 端点。启动按钮只发送 Issue/模式/fixture 场景/固定 index_id，服务端独立冻结已保存消息；前端不把已加载的消息页当作 Run 输入。Codex external Run 不由网页创建，工作台在 Session history 成功后有界轮询 `execution_source=codex` 的活动 Run，再复用 detail/events/SSE 读取链。代码关系面板区分邻接查询 `truncated`、固定关系扫描 `index_truncated` 和 unresolved 详情 `index_unresolved_truncated`，并对旧索引的未知状态单独提示；大目录分组默认收起，展开后按选中节点及有限相邻节点聚焦。影响面板从报告候选或唯一 finding symbol 发起，重新查询 Run 固定 index 的静态 `calls`，方向/深度由用户控制且不修改 Run。HTTP 响应在 [lib/api.ts](lib/api.ts) 经过形状和 project/session/index/hash 边界校验，SSE 事件按 schema、Run 和连续 sequence 校验；`run.stream.end` 只接受 `succeeded`、`failed`、`cancelled`、`interrupted` 四类 Run 终态。
+项目、索引、概览、Session/消息和 Run 均通过 `/api/projects/*` 调用；概览先展示固定索引中的结构组：HTTP 路径按静态声明前缀与 handler 模块分组，源码按相对目录分组；选择分组后查看真实入口或可见模块。FastAPI 路由入口显示 HTTP 方法、声明路径和处理函数，点击入口先打开装饰器到函数结束的同快照 evidence，关系图按钮则以处理函数作为既有静态图根节点；模块关系区域展示聚合的静态 imports/calls、总边数和最多 8 条源码位置样本。结构组与模块关系是静态组织事实，不是语义功能，前端对组、模块和关系的可见/总量分别显示预算边界。Run 使用同一 Session 的 list/detail/events、`events/stream`、tool-results/report/impact/cancel 端点。启动按钮只发送 Issue/模式/fixture 场景/固定 index_id，服务端独立冻结已保存消息；前端不把已加载的消息页当作 Run 输入。Codex external Run 不由网页创建，工作台在 Session history 成功后有界轮询 `execution_source=codex` 的活动 Run，再复用 detail/events/SSE 读取链。代码关系面板区分邻接查询 `truncated`、固定关系扫描 `index_truncated` 和 unresolved 详情 `index_unresolved_truncated`，并对旧索引的未知状态单独提示；大目录分组默认收起，展开后按选中节点及有限相邻节点聚焦。影响面板从报告候选或唯一 finding symbol 发起，重新查询 Run 固定 index 的静态 `calls`，方向/深度由用户控制且不修改 Run。HTTP 响应在 [lib/api.ts](lib/api.ts) 经过形状和 project/session/index/hash 边界校验，SSE 事件按 schema、Run 和连续 sequence 校验；`run.stream.end` 只接受 `succeeded`、`failed`、`cancelled`、`interrupted` 四类 Run 终态。
 
 ## 数据与生命周期
 
@@ -45,7 +45,7 @@ API 离线、项目/Session/index 不属于当前范围、消息未保存、空 
 
 ## 验证
 
-从仓库根目录执行 `pnpm --dir apps/web test`、`pnpm web:typecheck` 和 `pnpm web:build`。本轮前端 22 项测试覆盖概览路由契约及既有订阅状态机；类型检查和生产构建通过。实际浏览器验证了 FastAPI 路由列表→入口 evidence→处理函数源码→同快照关系图，HTTP 与本地 stdio MCP 返回的路由字段、行号和 hash 一致；真实供应商语义质量仍未验证。
+从仓库根目录执行 `pnpm --dir apps/web test`、`pnpm web:typecheck` 和 `pnpm web:build`。本轮前端测试覆盖结构组、模块关系、概览路由契约及既有订阅状态机；类型检查和生产构建通过。实际浏览器验证结构组列表→选择/返回→入口 evidence→处理函数源码→同快照关系图，并核对 HTTP 与本地 stdio MCP 的结构组和模块关系字段；真实供应商语义质量仍未验证。
 
 ## 关联文档
 
@@ -57,3 +57,4 @@ API 离线、项目/Session/index 不属于当前范围、消息未保存、空 
 - [Codex 外部 Agent Run 决策](../../docs/decisions/2026-09-13-external-agent-run.md)
 - [关系扫描与 unresolved 覆盖语义](../../docs/decisions/2026-09-13-relation-coverage.md)
 - [FastAPI 路由入口概览](../../docs/decisions/2026-09-14-fastapi-route-overview.md)
+- [项目结构总览](../../docs/decisions/2026-09-14-project-structure-overview.md)

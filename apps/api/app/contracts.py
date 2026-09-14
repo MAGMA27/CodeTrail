@@ -1178,6 +1178,8 @@ OverviewHttpMethod: TypeAlias = Literal[
     "TRACE",
 ]
 OverviewEntryStatus: TypeAlias = Literal["identified", "not_identified", "partial"]
+OverviewGroupKind: TypeAlias = Literal["http_path", "source_directory"]
+OverviewModuleRelationKind: TypeAlias = Literal["imports", "calls"]
 
 
 class OverviewEntryPoint(LineRangeModel):
@@ -1256,6 +1258,71 @@ class OverviewModule(ContractModel):
         return self
 
 
+class OverviewGroup(ContractModel):
+    """A deterministic structural group, never a model-confirmed feature."""
+
+    group_id: Identifier
+    index_id: Identifier
+    group_kind: OverviewGroupKind
+    group_key: str = Field(min_length=1, max_length=500)
+    label: str = Field(min_length=1, max_length=500)
+    module_ids: list[Identifier] = Field(default_factory=list)
+    entry_point_ids: list[Identifier] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_group_shape(self) -> OverviewGroup:
+        if len(set(self.module_ids)) != len(self.module_ids):
+            raise ValueError("overview group module IDs must be unique")
+        if len(set(self.entry_point_ids)) != len(self.entry_point_ids):
+            raise ValueError("overview group entry IDs must be unique")
+        if self.group_kind == "http_path":
+            if not self.group_key.startswith("/"):
+                raise ValueError("HTTP overview group keys must be path prefixes")
+            if not self.entry_point_ids:
+                raise ValueError("HTTP overview groups must contain entries")
+        elif not self.module_ids:
+            raise ValueError("source directory overview groups must contain modules")
+        return self
+
+
+class OverviewModuleRelation(ContractModel):
+    """Aggregated immutable module dependency with representative source edges."""
+
+    relation_id: Identifier
+    index_id: Identifier
+    source_module_id: Identifier
+    target_module_id: Identifier
+    source_module: Symbol
+    target_module: Symbol
+    relation_kinds: list[OverviewModuleRelationKind] = Field(min_length=1, max_length=2)
+    edge_count: PositiveInt
+    edges: list[CodeEdge] = Field(min_length=1, max_length=8)
+
+    @model_validator(mode="after")
+    def validate_relation_shape(self) -> OverviewModuleRelation:
+        if self.source_module_id == self.target_module_id:
+            raise ValueError("overview module relations cannot be self edges")
+        if (
+            self.source_module.index_id != self.index_id
+            or self.target_module.index_id != self.index_id
+            or self.source_module.symbol_id != self.source_module_id
+            or self.target_module.symbol_id != self.target_module_id
+            or self.source_module.kind != "module"
+            or self.target_module.kind != "module"
+        ):
+            raise ValueError("overview module relation modules must match the snapshot")
+        if len(set(self.relation_kinds)) != len(self.relation_kinds):
+            raise ValueError("overview module relation kinds must be unique")
+        if len(set(edge.edge_id for edge in self.edges)) != len(self.edges):
+            raise ValueError("overview module relation edges must be unique")
+        if self.edge_count < len(self.edges):
+            raise ValueError("overview module relation edge_count cannot undercount samples")
+        for edge in self.edges:
+            if edge.index_id != self.index_id or edge.kind not in self.relation_kinds:
+                raise ValueError("overview module relation edges must match the snapshot and kinds")
+        return self
+
+
 class OverviewPath(ContractModel):
     """One bounded static path from an entry symbol to a reached symbol."""
 
@@ -1287,6 +1354,10 @@ class OverviewCoverage(ContractModel):
     unreachable_modules: NonNegativeInt
     entry_point_count: NonNegativeInt
     unresolved_count: NonNegativeInt
+    total_groups: NonNegativeInt
+    visible_groups: NonNegativeInt
+    total_module_relations: NonNegativeInt
+    visible_module_relations: NonNegativeInt
 
     @model_validator(mode="after")
     def validate_counts(self) -> OverviewCoverage:
@@ -1294,6 +1365,10 @@ class OverviewCoverage(ContractModel):
             raise ValueError("visible overview modules cannot exceed total modules")
         if self.reachable_modules + self.unreachable_modules != self.total_modules:
             raise ValueError("overview module reachability counts must cover all modules")
+        if self.visible_groups > self.total_groups:
+            raise ValueError("visible overview groups cannot exceed total groups")
+        if self.visible_module_relations > self.total_module_relations:
+            raise ValueError("visible overview module relations cannot exceed total relations")
         return self
 
 
@@ -1305,7 +1380,9 @@ class ProjectOverview(VersionedModel):
     rules_version: Identifier
     entry_status: OverviewEntryStatus
     entries: list[OverviewEntryPoint] = Field(default_factory=list)
+    groups: list[OverviewGroup] = Field(default_factory=list)
     modules: list[OverviewModule] = Field(default_factory=list)
+    module_relations: list[OverviewModuleRelation] = Field(default_factory=list)
     paths: list[OverviewPath] = Field(default_factory=list)
     unresolved: list[UnresolvedReference] = Field(default_factory=list)
     coverage: OverviewCoverage
@@ -1321,19 +1398,31 @@ class ProjectOverview(VersionedModel):
             raise ValueError("an identified overview must contain entry points")
         if len({entry.entry_point_id for entry in self.entries}) != len(self.entries):
             raise ValueError("overview entry IDs must be unique")
+        if len({group.group_id for group in self.groups}) != len(self.groups):
+            raise ValueError("overview group IDs must be unique")
         if len({module.module_id for module in self.modules}) != len(self.modules):
             raise ValueError("overview module IDs must be unique")
+        if len({relation.relation_id for relation in self.module_relations}) != len(self.module_relations):
+            raise ValueError("overview module relation IDs must be unique")
         if len({path.path_id for path in self.paths}) != len(self.paths):
             raise ValueError("overview path IDs must be unique")
         entry_ids = {entry.entry_point_id for entry in self.entries}
         for entry in self.entries:
             if entry.index_id != self.index.index_id:
                 raise ValueError("overview entry belongs to a different index_id")
+        for group in self.groups:
+            if group.index_id != self.index.index_id:
+                raise ValueError("overview group belongs to a different index_id")
+            if not set(group.entry_point_ids).issubset(entry_ids):
+                raise ValueError("overview group references an unknown entry point")
         for module in self.modules:
             if module.index_id != self.index.index_id:
                 raise ValueError("overview module belongs to a different index_id")
             if not set(module.entry_point_ids).issubset(entry_ids):
                 raise ValueError("overview module references an unknown entry point")
+        for relation in self.module_relations:
+            if relation.index_id != self.index.index_id:
+                raise ValueError("overview module relation belongs to a different index_id")
         for path in self.paths:
             if path.index_id != self.index.index_id or path.entry_point_id not in entry_ids:
                 raise ValueError("overview path has an invalid snapshot or entry reference")

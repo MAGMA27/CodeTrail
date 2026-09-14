@@ -636,6 +636,8 @@ def create_app(
         max_depth: int = Query(default=4, ge=1, le=8),
         max_paths: int = Query(default=40, ge=1, le=40),
         max_modules: int = Query(default=100, ge=1, le=200),
+        max_groups: int = Query(default=80, ge=1, le=200),
+        max_module_relations: int = Query(default=200, ge=1, le=400),
     ) -> ProjectOverview:
         return await run_in_threadpool(
             workspace_service.get_overview,
@@ -644,6 +646,8 @@ def create_app(
             max_depth=max_depth,
             max_paths=max_paths,
             max_modules=max_modules,
+            max_groups=max_groups,
+            max_module_relations=max_module_relations,
         )
 
     @application.post(

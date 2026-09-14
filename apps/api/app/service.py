@@ -1960,6 +1960,8 @@ class WorkspaceService:
         max_depth: int = 4,
         max_paths: int = 40,
         max_modules: int = 100,
+        max_groups: int = 80,
+        max_module_relations: int = 200,
     ) -> ProjectOverview:
         """Build a deterministic entry/module overview from one persisted snapshot."""
 
@@ -1975,6 +1977,8 @@ class WorkspaceService:
                     max_depth=max_depth,
                     max_paths=max_paths,
                     max_modules=max_modules,
+                    max_groups=max_groups,
+                    max_module_relations=max_module_relations,
                 )
         except ServiceError:
             raise

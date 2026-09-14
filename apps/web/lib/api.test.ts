@@ -60,6 +60,17 @@ function overview() {
         unresolved_ids: [],
       },
     ],
+    groups: [
+      {
+        group_id: "group-source",
+        index_id: indexId,
+        group_kind: "source_directory",
+        group_key: "pkg",
+        label: "SOURCE pkg",
+        module_ids: [moduleId],
+        entry_point_ids: [entryId],
+      },
+    ],
     modules: [
       {
         module_id: moduleId,
@@ -77,6 +88,7 @@ function overview() {
         entry_reachable: true,
       },
     ],
+    module_relations: [],
     paths: [
       {
         path_id: "path-main",
@@ -109,6 +121,10 @@ function overview() {
       unreachable_modules: 0,
       entry_point_count: 1,
       unresolved_count: 0,
+      total_groups: 1,
+      visible_groups: 1,
+      total_module_relations: 0,
+      visible_module_relations: 0,
     },
     notes: [],
     truncated: false,
@@ -118,6 +134,55 @@ function overview() {
 
 test("project overview validator accepts bounded snapshot-linked data", () => {
   assert.equal(isProjectOverviewResponse(overview()), true);
+});
+
+test("project overview validator accepts aggregated module relations and rejects mismatched edge kinds", () => {
+  const value = structuredClone(overview()) as any;
+  const targetModule = {
+    ...overview().modules[0].symbol,
+    symbol_id: "symbol-target-module",
+    path: "pkg/service.py",
+    qualified_name: "pkg.service",
+  };
+  value.modules.push({
+    module_id: targetModule.symbol_id,
+    index_id: indexId,
+    symbol: targetModule,
+    entry_point_ids: [],
+    entry_reachable: false,
+  });
+  value.coverage.total_modules = 2;
+  value.coverage.visible_modules = 2;
+  value.coverage.unreachable_modules = 1;
+  value.module_relations = [
+    {
+      relation_id: "module-relation-main-service",
+      index_id: indexId,
+      source_module_id: moduleId,
+      target_module_id: targetModule.symbol_id,
+      source_module: overview().modules[0].symbol,
+      target_module: targetModule,
+      relation_kinds: ["imports"],
+      edge_count: 1,
+      edges: [
+        {
+          edge_id: "edge-module-import",
+          index_id: indexId,
+          source_id: moduleId,
+          target_id: targetModule.symbol_id,
+          kind: "imports",
+          extraction_method: "ast",
+          source_location: { path: "pkg/__main__.py", start_line: 1, end_line: 1 },
+        },
+      ],
+    },
+  ];
+  value.coverage.total_module_relations = 1;
+  value.coverage.visible_module_relations = 1;
+  assert.equal(isProjectOverviewResponse(value), true);
+
+  value.module_relations[0].edges[0].kind = "calls";
+  assert.equal(isProjectOverviewResponse(value), false);
 });
 
 test("project overview validator rejects broken path or evidence shape", () => {

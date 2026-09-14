@@ -530,6 +530,28 @@ export type OverviewModule = {
   entry_reachable: boolean;
 };
 
+export type OverviewGroup = {
+  group_id: string;
+  index_id: string;
+  group_kind: "http_path" | "source_directory";
+  group_key: string;
+  label: string;
+  module_ids: string[];
+  entry_point_ids: string[];
+};
+
+export type OverviewModuleRelation = {
+  relation_id: string;
+  index_id: string;
+  source_module_id: string;
+  target_module_id: string;
+  source_module: SymbolRecord;
+  target_module: SymbolRecord;
+  relation_kinds: Array<"imports" | "calls">;
+  edge_count: number;
+  edges: CodeEdge[];
+};
+
 export type OverviewPath = {
   path_id: string;
   index_id: string;
@@ -546,6 +568,10 @@ export type OverviewCoverage = {
   unreachable_modules: number;
   entry_point_count: number;
   unresolved_count: number;
+  total_groups: number;
+  visible_groups: number;
+  total_module_relations: number;
+  visible_module_relations: number;
 };
 
 export type ProjectOverview = {
@@ -555,7 +581,9 @@ export type ProjectOverview = {
   rules_version: string;
   entry_status: "identified" | "not_identified" | "partial";
   entries: OverviewEntryPoint[];
+  groups: OverviewGroup[];
   modules: OverviewModule[];
+  module_relations: OverviewModuleRelation[];
   paths: OverviewPath[];
   unresolved: UnresolvedReference[];
   coverage: OverviewCoverage;
@@ -1659,6 +1687,50 @@ function isOverviewModule(value: unknown): value is OverviewModule {
   );
 }
 
+function isOverviewGroup(value: unknown): value is OverviewGroup {
+  return (
+    isRecord(value) &&
+    isString(value.group_id) &&
+    isString(value.index_id) &&
+    ["http_path", "source_directory"].includes(String(value.group_kind)) &&
+    isString(value.group_key) &&
+    isString(value.label) &&
+    isStringArray(value.module_ids) &&
+    isStringArray(value.entry_point_ids) &&
+    (value.group_kind !== "http_path" || (value.group_key.startsWith("/") && value.entry_point_ids.length > 0)) &&
+    (value.group_kind !== "source_directory" || value.module_ids.length > 0)
+  );
+}
+
+function isOverviewModuleRelation(value: unknown): value is OverviewModuleRelation {
+  return (
+    isRecord(value) &&
+    isString(value.relation_id) &&
+    isString(value.index_id) &&
+    isString(value.source_module_id) &&
+    isString(value.target_module_id) &&
+    value.source_module_id !== value.target_module_id &&
+    isSymbolRecord(value.source_module) &&
+    isSymbolRecord(value.target_module) &&
+    value.source_module.symbol_id === value.source_module_id &&
+    value.target_module.symbol_id === value.target_module_id &&
+    value.source_module.index_id === value.index_id &&
+    value.target_module.index_id === value.index_id &&
+    value.source_module.kind === "module" &&
+    value.target_module.kind === "module" &&
+    Array.isArray(value.relation_kinds) &&
+    value.relation_kinds.length > 0 &&
+    value.relation_kinds.length <= 2 &&
+    value.relation_kinds.every((kind) => ["imports", "calls"].includes(String(kind))) &&
+    isNumber(value.edge_count) &&
+    value.edge_count >= 1 &&
+    Array.isArray(value.edges) &&
+    value.edges.length > 0 &&
+    value.edges.length <= 8 &&
+    value.edges.every((edge) => isCodeEdge(edge) && edge.index_id === value.index_id && (value.relation_kinds as Array<"imports" | "calls">).includes(edge.kind as "imports" | "calls"))
+  );
+}
+
 function isOverviewPath(value: unknown): value is OverviewPath {
   return (
     isRecord(value) &&
@@ -1682,7 +1754,13 @@ function isOverviewCoverage(value: unknown): value is OverviewCoverage {
     isNumber(value.reachable_modules) &&
     isNumber(value.unreachable_modules) &&
     isNumber(value.entry_point_count) &&
-    isNumber(value.unresolved_count)
+    isNumber(value.unresolved_count) &&
+    isNumber(value.total_groups) &&
+    isNumber(value.visible_groups) &&
+    value.visible_groups <= value.total_groups &&
+    isNumber(value.total_module_relations) &&
+    isNumber(value.visible_module_relations) &&
+    value.visible_module_relations <= value.total_module_relations
   );
 }
 
@@ -1696,8 +1774,12 @@ export function isProjectOverviewResponse(value: unknown): value is ProjectOverv
     ["identified", "not_identified", "partial"].includes(String(value.entry_status)) &&
     Array.isArray(value.entries) &&
     value.entries.every(isOverviewEntryPoint) &&
+    Array.isArray(value.groups) &&
+    value.groups.every(isOverviewGroup) &&
     Array.isArray(value.modules) &&
     value.modules.every(isOverviewModule) &&
+    Array.isArray(value.module_relations) &&
+    value.module_relations.every(isOverviewModuleRelation) &&
     Array.isArray(value.paths) &&
     value.paths.every(isOverviewPath) &&
     Array.isArray(value.unresolved) &&
@@ -2736,12 +2818,16 @@ export function getProjectOverview(
   maxDepth = 4,
   maxPaths = 40,
   maxModules = 100,
+  maxGroups = 80,
+  maxModuleRelations = 200,
   signal?: AbortSignal,
 ): Promise<ProjectOverview> {
   const params = new URLSearchParams({
     max_depth: String(maxDepth),
     max_paths: String(maxPaths),
     max_modules: String(maxModules),
+    max_groups: String(maxGroups),
+    max_module_relations: String(maxModuleRelations),
   });
   return requestJson(
     `/api/projects/${encodeURIComponent(projectId)}/indexes/${encodeURIComponent(indexId)}/overview?${params.toString()}`,

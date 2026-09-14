@@ -21,7 +21,7 @@
 
 契约位于 [contracts.py](app/contracts.py)，Schema 由 [export_schema.py](app/export_schema.py) 生成。旧 `/api/indexes/*` 保留兼容；项目工作区使用 `/api/projects/*`。Run 的 HTTP 入口为 `/api/projects/{project_id}/sessions/{session_id}/runs` 及其 detail、events、`events/stream`、tool-results、report、impact、cancel 子路径；fixture/real 创建只做边界校验、冻结、容量预留和提交，worker 启动成功后返回 queued 的 run_id。external Run 只从 MCP `start_external_run` 创建，冻结同样的 Session 输入但不占内部 worker；`run_search_code`、`run_read_source`、`run_get_neighbors` 记录服务端实际结果，`get_neighbors` 的 `truncated` 表示查询预算，`index_truncated` 表示固定关系扫描覆盖，`index_unresolved_truncated` 表示 unresolved 详情覆盖。`submit_external_run` 只接受本 Run 返回的同快照证据/符号。容量满时内部 Run 返回可重试的 `budget_exceeded`/429，不写入 Run。`events/stream` 在握手前校验 project/session/run 与 `after_sequence`/`Last-Event-ID`，按 `{run_id}:{sequence}` 逐帧回放持久化公开事件，终态后关闭，SSE 不可用时由工作台自行回退轮询。`impact` 只按已保存报告中的一个 candidate/finding ID 查询 Run 固定 index 上的静态 `calls`，并返回固定索引覆盖事实；限制方向、深度、节点、路径和 unresolved 输出，不修改 Run。执行由 [Run 执行子系统](../../docs/subsystems/execution.md)负责。所有项目索引、Session 和 Run 操作都复用 WorkspaceService 的归属校验。
 
-`GET /api/projects/{project_id}/indexes/{index_id}/overview` 从同一不可变快照生成确定性的 `python-entry-v3` 概览。除 `__main__.py`/main guard 外，`fastapi_route` 入口还会保存已确认的 HTTP 方法、声明路径、处理函数 symbol、装饰器到函数结束的 evidence；处理函数继续沿既有静态 `calls`/`imports` 图展开，入口绑定本身不新增 CodeEdge。只识别已知 `FastAPI()` 实例、字面量路径和静态方法，声明路径不包含未解析的 router/部署前缀；未展开语句中的可能绑定写入会保守使已知绑定失效，不把后续不确定装饰器升级为路由。
+`GET /api/projects/{project_id}/indexes/{index_id}/overview` 从同一不可变快照生成确定性的 `python-entry-v4` 概览。除 `__main__.py`/main guard 外，`fastapi_route` 入口还会保存已确认的 HTTP 方法、声明路径、处理函数 symbol、装饰器到函数结束的 evidence；概览同时生成 `http_path` 和 `source_directory` 结构组，并把固定快照中可映射的跨模块 `imports`/`calls` 聚合为带代表源码位置的模块关系。处理函数仍沿既有静态图展开，入口绑定本身不新增 CodeEdge；结构组和聚合关系也不会写回静态边。HTTP 组按首个 `{parameter}` 前的声明路径静态前缀及 handler 模块分组，源码组按相对目录分组；它们都不是业务功能。只识别已知 `FastAPI()` 实例、字面量路径和静态方法，声明路径不包含未解析的 router/部署前缀；未展开语句中的可能绑定写入会保守使已知绑定失效，不把后续不确定装饰器升级为路由。结构输出由 `max_groups`（默认 80、最大 200）和 `max_module_relations`（默认 200、最大 400）独立限制，代表边最多保留 8 条并以 `edge_count` 说明总量。
 
 ## 数据与生命周期
 
@@ -48,7 +48,7 @@ API 健康检查为 `GET /api/health`。前端或测试先创建 Project、建�
 
 本地/GitHub 导入继续执行绝对路径、allow-list、符号链接/junction、官方 URL、归档安全、时间和大小边界；HTTP 写入口只接受 loopback 客户端。未知项目、非所属索引/Session/Run 返回 `not_found`，参数、预算和执行容量边界返回 `invalid_input` 或可重试的 `budget_exceeded`，失败不泄露宿主路径。
 
-Run 拒绝未开启能力的 `mode=real` 或 `CODETRAIL_MCP_EXTERNAL_RUN_ENABLED`、拒绝空 Session、跨项目/Session/index/generation，冻结完整消息前缀而不是前端已加载页；草稿不会进入输入。单次/总源码行、工具调用、模型调用/修复、模型输入/输出字符、输入/输出字符、事件、总时间和进程并发均有服务端上限；状态只能从 queued/running 进入一个终态，终态事件不可重复，取消幂等，重启中的 Run 标为 interrupted。关系扫描和 unresolved 详情分别受有界预算控制；前者未完成与后者未知/截断都不能被空邻接解释为没有关系，旧 index 的 NULL 只表示尚未记录。概览路由识别另受总计算时间和 200 个入口候选上限约束；只支持模块/函数体直接语句中的已声明 FastAPI 实例路由，不展开控制流块或类体，也不解析 `APIRouter`、`include_router`、`mount`、动态路径或运行时注册，未识别入口不表示项目没有路由。external 不执行内部模型，且结论不能引用本 Run 未实际返回的证据或符号；终态拒绝迟到工具和结论。模型供应商缺失、请求失败、非法结构化输出和预算耗尽明确失败，不回退 fixture；Run 历史、事件和工具结果分页均有上限并带作用域游标。SSE 的跨 Run、未来游标、游标冲突和订阅容量拒绝在流建立前返回结构化错误；断线只释放订阅，不取消或重启 Run，终态游标收到 `run.stream.end` 控制帧后有限结束；容量满不落库且不影响查询/取消/health；取消/中断报告无候选结论，失败报告保留已持久化的同快照 evidence。影响查询要求报告中的 candidate/finding 精确归属；找不到唯一源符号时返回有解释的空 unmapped 结果，找到后只遍历同快照 `calls`，最大深度 2、默认节点 40，并保留 cycles 的静态边和 unresolved 未知边界。
+Run 拒绝未开启能力的 `mode=real` 或 `CODETRAIL_MCP_EXTERNAL_RUN_ENABLED`、拒绝空 Session、跨项目/Session/index/generation，冻结完整消息前缀而不是前端已加载页；草稿不会进入输入。单次/总源码行、工具调用、模型调用/修复、模型输入/输出字符、输入/输出字符、事件、总时间和进程并发均有服务端上限；状态只能从 queued/running 进入一个终态，终态事件不可重复，取消幂等，重启中的 Run 标为 interrupted。关系扫描和 unresolved 详情分别受有界预算控制；前者未完成与后者未知/截断都不能被空邻接解释为没有关系，旧 index 的 NULL 只表示尚未记录。概览另受总计算时间、200 个入口候选、模块/组/模块关系上限约束；模块关系只显示两个端点都能映射到同一固定快照模块的静态边，unresolved、无法映射和自模块边不进入聚合；源码目录组即使包含因 `max_modules` 未返回的模块，也会在下钻时明确显示预算遗漏。只支持模块/函数体直接语句中的已声明 FastAPI 实例路由，不展开控制流块或类体，也不解析 `APIRouter`、`include_router`、`mount`、动态路径或运行时注册，未识别入口不表示项目没有路由。external 不执行内部模型，且结论不能引用本 Run 未实际返回的证据或符号；终态拒绝迟到工具和结论。模型供应商缺失、请求失败、非法结构化输出和预算耗尽明确失败，不回退 fixture；Run 历史、事件和工具结果分页均有上限并带作用域游标。SSE 的跨 Run、未来游标、游标冲突和订阅容量拒绝在流建立前返回结构化错误；断线只释放订阅，不取消或重启 Run，终态游标收到 `run.stream.end` 控制帧后有限结束；容量满不落库且不影响查询/取消/health；取消/中断报告无候选结论，失败报告保留已持久化的同快照 evidence。影响查询要求报告中的 candidate/finding 精确归属；找不到唯一源符号时返回有解释的空 unmapped 结果，找到后只遍历同快照 `calls`，最大深度 2、默认节点 40，并保留 cycles 的静态边和 unresolved 未知边界。
 
 ## 验证
 
@@ -67,6 +67,7 @@ Run 拒绝未开启能力的 `mode=real` 或 `CODETRAIL_MCP_EXTERNAL_RUN_ENABLED
 - [Run SSE 决策](../../docs/decisions/2026-09-12-run-sse.md)
 - [关系扫描与 unresolved 覆盖语义](../../docs/decisions/2026-09-13-relation-coverage.md)
 - [FastAPI 路由入口概览](../../docs/decisions/2026-09-14-fastapi-route-overview.md)
+- [项目结构总览](../../docs/decisions/2026-09-14-project-structure-overview.md)
 
 ## 本地 MCP 入口
 

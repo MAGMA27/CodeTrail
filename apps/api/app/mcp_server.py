@@ -105,6 +105,11 @@ _DiscoveryLimit = Annotated[int, Field(ge=1, le=_MAX_DISCOVERY_ITEMS, descriptio
 _OverviewDepth = Annotated[int, Field(ge=1, le=8, description="Maximum static overview path depth.")]
 _OverviewPaths = Annotated[int, Field(ge=1, le=40, description="Maximum returned overview paths.")]
 _OverviewModules = Annotated[int, Field(ge=1, le=200, description="Maximum returned overview modules.")]
+_OverviewGroups = Annotated[int, Field(ge=1, le=200, description="Maximum returned overview groups.")]
+_OverviewModuleRelations = Annotated[
+    int,
+    Field(ge=1, le=400, description="Maximum returned aggregated module relations."),
+]
 _FeatureHistoryCursor = Annotated[str | None, Field(max_length=500, description="Opaque history cursor from a previous page.")]
 _FeatureGraphNodes = Annotated[int, Field(ge=1, le=40, description="Maximum feature graph nodes.")]
 _FeatureGraphEdges = Annotated[int, Field(ge=1, le=120, description="Maximum feature graph edges.")]
@@ -421,10 +426,11 @@ def create_mcp_server(
         name="get_overview",
         title="Get a project overview",
         description=(
-            "Build a deterministic entry-point and module overview for one explicitly selected immutable index. "
+            "Build a deterministic entry-point, structural group, and module overview for one explicitly selected immutable index. "
             "Rules cover Python __main__.py, top-level __name__ == __main__ guards, and conservatively confirmed "
-            "FastAPI routes with literal declared paths; unresolved calls and unsupported dynamic registration "
-            "remain explicit and the result is bounded."
+            "FastAPI routes with literal declared paths; structural groups and aggregated imports/calls remain "
+            "separate from semantic features, unresolved calls and unsupported dynamic registration remain explicit, "
+            "and the result is bounded."
         ),
         structured_output=True,
     )
@@ -434,6 +440,8 @@ def create_mcp_server(
         max_depth: _OverviewDepth = 4,
         max_paths: _OverviewPaths = 40,
         max_modules: _OverviewModules = 100,
+        max_groups: _OverviewGroups = 80,
+        max_module_relations: _OverviewModuleRelations = 200,
     ) -> McpOverviewResponse:
         try:
             result = service.get_overview(
@@ -442,6 +450,8 @@ def create_mcp_server(
                 max_depth=max_depth,
                 max_paths=max_paths,
                 max_modules=max_modules,
+                max_groups=max_groups,
+                max_module_relations=max_module_relations,
             )
             return _mcp_overview_response(result, citation_url)
         except ServiceError as exc:
