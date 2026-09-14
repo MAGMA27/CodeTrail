@@ -23,7 +23,7 @@ from .contracts import (
 from .relations import RelationIndex, relation_coverage_limitations
 
 
-RULES_VERSION = "python-entry-v2"
+RULES_VERSION = "python-entry-v3"
 DEFAULT_MAX_DEPTH = 4
 DEFAULT_MAX_PATHS = 40
 DEFAULT_MAX_MODULES = 100
@@ -527,11 +527,13 @@ class _FastApiRouteScanner:
             if isinstance(statement, ast.Import | ast.ImportFrom):
                 self._apply_import(statement, bindings)
             elif isinstance(statement, ast.Assign):
+                self._invalidate_statement(statement, bindings)
                 binding = self._binding_for_expression(statement.value, bindings)
                 for target in statement.targets:
                     for name in _target_names(target):
                         bindings[name] = binding
             elif isinstance(statement, ast.AnnAssign):
+                self._invalidate_statement(statement, bindings)
                 binding = (
                     self._binding_for_expression(statement.value, bindings)
                     if statement.value is not None
@@ -540,20 +542,46 @@ class _FastApiRouteScanner:
                 for name in _target_names(statement.target):
                     bindings[name] = binding
             elif isinstance(statement, ast.NamedExpr):
+                self._invalidate_statement(statement, bindings)
                 binding = self._binding_for_expression(statement.value, bindings)
                 for name in _target_names(statement.target):
                     bindings[name] = binding
             elif isinstance(statement, ast.Delete):
-                for target in statement.targets:
-                    for name in _target_names(target):
-                        bindings[name] = _UNKNOWN_BINDING
+                self._invalidate_statement(statement, bindings)
             elif isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                self._invalidate_definition_time_effects(statement, bindings)
                 route_found = self._append_route_candidates(statement, bindings)
                 if not route_found:
                     self._scan_function(statement, bindings)
                 bindings[statement.name] = _UNKNOWN_BINDING
             elif isinstance(statement, ast.ClassDef):
+                self._invalidate_definition_time_effects(statement, bindings)
                 bindings[statement.name] = _UNKNOWN_BINDING
+            else:
+                self._invalidate_statement(statement, bindings)
+
+    @staticmethod
+    def _invalidate_statement(statement: ast.AST, bindings: dict[str, str]) -> None:
+        collector = _BindingWriteCollector()
+        collector.visit(statement)
+        if collector.invalidate_all:
+            bindings.clear()
+            return
+        for name in collector.names:
+            bindings[name] = _UNKNOWN_BINDING
+
+    @staticmethod
+    def _invalidate_definition_time_effects(
+        statement: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef,
+        bindings: dict[str, str],
+    ) -> None:
+        collector = _BindingWriteCollector(include_definition_names=False)
+        collector.visit(statement)
+        if collector.invalidate_all:
+            bindings.clear()
+            return
+        for name in collector.names:
+            bindings[name] = _UNKNOWN_BINDING
 
     def _scan_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef, bindings: dict[str, str]) -> None:
         collector = _LocalBindingCollector()
@@ -667,6 +695,9 @@ class _FastApiRouteScanner:
     def _apply_import(statement: ast.Import | ast.ImportFrom, bindings: dict[str, str]) -> None:
         if isinstance(statement, ast.Import):
             for alias in statement.names:
+                if alias.name == "*":
+                    bindings.clear()
+                    continue
                 local_name = alias.asname or alias.name.split(".", 1)[0]
                 bindings[local_name] = (
                     _FASTAPI_BINDING_MODULE if alias.name == "fastapi" else _UNKNOWN_BINDING
@@ -674,6 +705,7 @@ class _FastApiRouteScanner:
             return
         for alias in statement.names:
             if alias.name == "*":
+                bindings.clear()
                 continue
             local_name = alias.asname or alias.name
             bindings[local_name] = (
@@ -681,6 +713,86 @@ class _FastApiRouteScanner:
                 if statement.level == 0 and statement.module == "fastapi" and alias.name == "FastAPI"
                 else _UNKNOWN_BINDING
             )
+
+
+class _BindingWriteCollector(ast.NodeVisitor):
+    """Collect possible binding writes without entering child function/class bodies."""
+
+    def __init__(self, *, include_definition_names: bool = True) -> None:
+        self.include_definition_names = include_definition_names
+        self.names: set[str] = set()
+        self.invalidate_all = False
+
+    def visit_Name(self, node: ast.Name) -> None:
+        if isinstance(node.ctx, (ast.Store, ast.Del)):
+            self.names.add(node.id)
+
+    def visit_Import(self, node: ast.Import) -> None:
+        for alias in node.names:
+            if alias.name == "*":
+                self.invalidate_all = True
+            else:
+                self.names.add(alias.asname or alias.name.split(".", 1)[0])
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        for alias in node.names:
+            if alias.name == "*":
+                self.invalidate_all = True
+            else:
+                self.names.add(alias.asname or alias.name)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        if self.include_definition_names:
+            self.names.add(node.name)
+        self._visit_definition_time_expressions(node)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        if self.include_definition_names:
+            self.names.add(node.name)
+        self._visit_definition_time_expressions(node)
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        if self.include_definition_names:
+            self.names.add(node.name)
+        for decorator in node.decorator_list:
+            self.visit(decorator)
+        for base in node.bases:
+            self.visit(base)
+        for keyword in node.keywords:
+            self.visit(keyword.value)
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:
+        self.visit(node.args)
+
+    def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
+        if isinstance(node.name, str):
+            self.names.add(node.name)
+        self.generic_visit(node)
+
+    def visit_MatchAs(self, node: ast.MatchAs) -> None:
+        if node.name is not None:
+            self.names.add(node.name)
+        self.generic_visit(node)
+
+    def visit_MatchStar(self, node: ast.MatchStar) -> None:
+        if node.name is not None:
+            self.names.add(node.name)
+        self.generic_visit(node)
+
+    def visit_MatchMapping(self, node: ast.MatchMapping) -> None:
+        if node.rest is not None:
+            self.names.add(node.rest)
+        self.generic_visit(node)
+
+    def _visit_definition_time_expressions(
+        self,
+        node: ast.FunctionDef | ast.AsyncFunctionDef,
+    ) -> None:
+        for decorator in node.decorator_list:
+            self.visit(decorator)
+        self.visit(node.args)
+        if node.returns is not None:
+            self.visit(node.returns)
 
 
 def _target_names(target: ast.expr) -> list[str]:

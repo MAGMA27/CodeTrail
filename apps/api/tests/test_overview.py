@@ -106,7 +106,7 @@ def test_overview_identifies_main_rules_paths_and_stays_on_snapshot(tmp_path: Pa
     )
     assert status == 200
     assert overview["entry_status"] == "identified"
-    assert overview["rules_version"] == "python-entry-v2"
+    assert overview["rules_version"] == "python-entry-v3"
     assert {entry["kind"] for entry in overview["entries"]} == {
         "python_main_module",
         "python_main_guard",
@@ -227,6 +227,144 @@ def test_overview_identifies_confirmed_fastapi_routes_and_rejects_ambiguous_bind
         for entry in routes
     )
     assert any("声明路径" in note for note in overview["notes"])
+
+
+def test_overview_invalidates_skipped_bindings_without_cross_scope_pollution(tmp_path: Path) -> None:
+    repository = tmp_path / "binding-demo"
+    package = repository / "demo"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "app.py").write_text(
+        "from fastapi import FastAPI as Api\n"
+        "import fastapi as fastapi_alias\n"
+        "\n"
+        "early_app = Api()\n"
+        "@early_app.get('/early')\n"
+        "def early_handler():\n"
+        "    return {'ok': True}\n"
+        "\n"
+        "conditional_app = Api()\n"
+        "if True:\n"
+        "    conditional_app = object()\n"
+        "@conditional_app.get('/conditional')\n"
+        "def conditional_handler():\n"
+        "    return {'ok': True}\n"
+        "\n"
+        "ApiAlias = Api\n"
+        "if True:\n"
+        "    ApiAlias = object()\n"
+        "alias_app = ApiAlias()\n"
+        "@alias_app.get('/constructor-alias')\n"
+        "def constructor_alias_handler():\n"
+        "    return {'ok': True}\n"
+        "\n"
+        "module_alias = fastapi_alias\n"
+        "if True:\n"
+        "    module_alias = object()\n"
+        "module_app = module_alias.FastAPI()\n"
+        "@module_app.get('/module-alias')\n"
+        "def module_alias_handler():\n"
+        "    return {'ok': True}\n"
+        "\n"
+        "aug_app = Api()\n"
+        "aug_app += object()\n"
+        "@aug_app.get('/aug-assign')\n"
+        "def aug_handler():\n"
+        "    return {'ok': True}\n"
+        "\n"
+        "walrus_app = Api()\n"
+        "if (walrus_app := object()):\n"
+        "    pass\n"
+        "@walrus_app.get('/walrus')\n"
+        "def walrus_handler():\n"
+        "    return {'ok': True}\n"
+        "\n"
+        "try_app = Api()\n"
+        "try:\n"
+        "    try_app = object()\n"
+        "except Exception:\n"
+        "    pass\n"
+        "@try_app.get('/try-assign')\n"
+        "def try_handler():\n"
+        "    return {'ok': True}\n"
+        "\n"
+        "for_app = Api()\n"
+        "for for_app in []:\n"
+        "    pass\n"
+        "@for_app.get('/for-target')\n"
+        "def for_handler():\n"
+        "    return {'ok': True}\n"
+        "\n"
+        "with_app = Api()\n"
+        "with open('unused') as with_app:\n"
+        "    pass\n"
+        "@with_app.get('/with-target')\n"
+        "def with_handler():\n"
+        "    return {'ok': True}\n"
+        "\n"
+        "except_app = Api()\n"
+        "try:\n"
+        "    pass\n"
+        "except Exception as except_app:\n"
+        "    pass\n"
+        "@except_app.get('/except-target')\n"
+        "def except_handler():\n"
+        "    return {'ok': True}\n"
+        "\n"
+        "outer_app = Api()\n"
+        "def factory():\n"
+        "    inner_app = Api()\n"
+        "    @inner_app.get('/factory')\n"
+        "    def factory_handler():\n"
+        "        return {'ok': True}\n"
+        "    return inner_app\n"
+        "\n"
+        "def nested_valid():\n"
+        "    @outer_app.get('/nested-valid')\n"
+        "    def nested_handler():\n"
+        "        return {'ok': True}\n"
+        "    return outer_app\n"
+        "\n"
+        "def nested_shadow():\n"
+        "    if True:\n"
+        "        outer_app = object()\n"
+        "    @outer_app.get('/nested-shadow')\n"
+        "    def nested_shadow_handler():\n"
+        "        return {'ok': True}\n"
+        "\n"
+        "@outer_app.get('/outer')\n"
+        "def outer_handler():\n"
+        "    return {'ok': True}\n"
+        "\n"
+        "star_app = Api()\n"
+        "@star_app.get('/before-star')\n"
+        "def before_star_handler():\n"
+        "    return {'ok': True}\n"
+        "\n"
+        "from arbitrary import *\n"
+        "@star_app.get('/after-star')\n"
+        "def after_star_handler():\n"
+        "    return {'ok': True}\n",
+        encoding="utf-8",
+    )
+    application = create_app({"binding-demo": repository})
+    project_id, index_id = _create_index(application, "Binding demo", "binding-demo")
+
+    status, overview = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/indexes/{index_id}/overview",
+    )
+    assert status == 200
+    routes = [entry for entry in overview["entries"] if entry["kind"] == "fastapi_route"]
+    assert {(entry["http_method"], entry["declared_path"]) for entry in routes} == {
+        ("GET", "/early"),
+        ("GET", "/factory"),
+        ("GET", "/nested-valid"),
+        ("GET", "/outer"),
+        ("GET", "/before-star"),
+    }
+    assert overview["rules_version"] == "python-entry-v3"
 
 
 def test_overview_does_not_promote_main_names_or_nested_guards(tmp_path: Path) -> None:

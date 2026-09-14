@@ -2,7 +2,7 @@
 
 ## 状态
 
-已实现 Project/Index/Session、来源导入、O1 概览（含 `python-entry-v2` 的 FastAPI 路由入口）、O2/O3 功能生成与 P2-R1/P2-R2 fixture/real Run 的 HTTP 和本地 MCP 入口。Run 已覆盖冻结输入、受限工具执行、单 Agent 有界模型循环、公开事件、持久化 SSE 回放/续接、报告、取消和重启中断；P3-I1 已增加从保存报告候选/发现读取固定快照的有界静态影响查询；Codex external Agent 已能通过本地 MCP 创建并驱动同一持久化 Run。真实供应商语义质量和实际 Codex 主机热加载仍未验证。
+已实现 Project/Index/Session、来源导入、O1 概览（含 `python-entry-v3` 的 FastAPI 路由入口）、O2/O3 功能生成与 P2-R1/P2-R2 fixture/real Run 的 HTTP 和本地 MCP 入口。Run 已覆盖冻结输入、受限工具执行、单 Agent 有界模型循环、公开事件、持久化 SSE 回放/续接、报告、取消和重启中断；P3-I1 已增加从保存报告候选/发现读取固定快照的有界静态影响查询；Codex external Agent 已能通过本地 MCP 创建并驱动同一持久化 Run。真实供应商语义质量和实际 Codex 主机热加载仍未验证。
 
 ## 职责与范围
 
@@ -28,7 +28,7 @@ Run 拒绝空消息、跨 Project/Session/Index/Generation、不合法 cutoff �
 
 ## 验证
 
-`apps/api/tests/test_runs.py` 验证 fixture 生命周期和固定报告影响查询；`apps/api/tests/test_storage.py` 验证有界静态路径、环、去重和未知边界；`apps/api/tests/test_run_sse.py` 验证持久化逐帧回放、双游标续接、终态控制帧、未来/跨 Run 拒绝、断开释放容量和 health 并发；`apps/api/tests/test_issue_runs.py` 验证 real 的模型工具协议、不同问题的工具计划、证据不足、非法引用/工具、有限修复、预算、持久化配置和 OpenAI-compatible 请求、供应商失败、取消与终态容量；`apps/api/tests/test_mcp.py` 验证 HTTP/MCP 同一 Run、影响结果、独立 real 写能力和 Codex external 的实际工具结果、证据拒绝、幂等、时间预算、取消与终态拒写。另运行 `uv run --directory apps/api pytest -q`（128 passed）、`uv run --directory apps/api python -m compileall -q app` 和本轮 FastAPI 概览的 HTTP/本地 stdio MCP/浏览器路由→源码→关系图流程；本轮 `pnpm contracts:check` 为 21 passed，前端测试为 22 passed，类型检查、生产构建、文档检查和本地文档检查均通过。真实 DeepSeek 语义质量为 UNVERIFIED。
+`apps/api/tests/test_runs.py` 验证 fixture 生命周期和固定报告影响查询；`apps/api/tests/test_storage.py` 验证有界静态路径、环、去重和未知边界；`apps/api/tests/test_run_sse.py` 验证持久化逐帧回放、双游标续接、终态控制帧、未来/跨 Run 拒绝、断开释放容量和 health 并发；`apps/api/tests/test_issue_runs.py` 验证 real 的模型工具协议、不同问题的工具计划、证据不足、非法引用/工具、有限修复、预算、持久化配置和 OpenAI-compatible 请求、供应商失败、取消与终态容量；`apps/api/tests/test_mcp.py` 验证 HTTP/MCP 同一 Run、影响结果、独立 real 写能力和 Codex external 的实际工具结果、证据拒绝、幂等、时间预算、取消与终态拒写。另运行 `uv run --directory apps/api pytest -q`（129 passed）、`uv run --directory apps/api python -m compileall -q app` 和本轮 FastAPI 概览的 HTTP/本地 stdio MCP/浏览器路由→源码→关系图流程；本轮 `pnpm contracts:check` 为 21 passed，前端测试为 22 passed，类型检查、生产构建、文档检查和本地文档检查均通过。真实 DeepSeek 语义质量为 UNVERIFIED。
 
 ## 相关决策
 

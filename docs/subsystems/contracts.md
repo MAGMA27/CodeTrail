@@ -22,7 +22,7 @@ Run contract 要求 project/session/index 同时出现，输入消息是从 1 �
 
 ## 验证
 
-修改契约后运行 `uv run --directory apps/api python -m app.export_schema` 和 `pnpm contracts:check`；`apps/api/tests/test_contracts.py` 覆盖 Run/fixture/external/impact 响应、事件序列、SSE 帧、工具结果、报告和非法引用，`apps/api/tests/test_run_sse.py` 覆盖实际 SSE 传输，`apps/api/tests/test_issue_runs.py` 覆盖 real 输出协议，`apps/api/tests/test_runs.py` 覆盖实际生命周期与固定快照影响读取，`apps/api/tests/test_storage.py` 覆盖静态影响路径，`apps/web` 单测和 typecheck 覆盖消费边界。当前 Schema 已由生成器重新生成；本轮 `pnpm contracts:check` 为 21 passed，后端全量为 128 passed，前端测试为 22 passed，类型检查、生产构建、文档检查和本地 stdio MCP/浏览器 FastAPI 路由联动均通过；真实 DeepSeek 语义质量仍为 UNVERIFIED。
+修改契约后运行 `uv run --directory apps/api python -m app.export_schema` 和 `pnpm contracts:check`；`apps/api/tests/test_contracts.py` 覆盖 Run/fixture/external/impact 响应、事件序列、SSE 帧、工具结果、报告和非法引用，`apps/api/tests/test_run_sse.py` 覆盖实际 SSE 传输，`apps/api/tests/test_issue_runs.py` 覆盖 real 输出协议，`apps/api/tests/test_runs.py` 覆盖实际生命周期与固定快照影响读取，`apps/api/tests/test_storage.py` 覆盖静态影响路径，`apps/web` 单测和 typecheck 覆盖消费边界。当前 Schema 已由生成器重新生成；本轮 `pnpm contracts:check` 为 21 passed，后端全量为 129 passed，前端测试为 22 passed，类型检查、生产构建、文档检查和本地 stdio MCP/浏览器 FastAPI 路由联动均通过；真实 DeepSeek 语义质量仍为 UNVERIFIED。
 
 ## 相关决策
 

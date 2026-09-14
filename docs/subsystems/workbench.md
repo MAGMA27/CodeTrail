@@ -30,7 +30,7 @@ Session 草稿按 project/session 保存到 localStorage，消息保存旧响应
 
 ## 验证
 
-本轮前端测试 22 passed、类型检查和生产构建通过，后端全量 128 passed，契约 21 passed，文档检查和本地文档检查通过；本轮浏览器验证了 FastAPI 路由入口列表、声明路径、入口 evidence、处理函数源码和同快照关系图联动。HTTP 与本地 stdio MCP 对照返回相同的路由方法、声明路径、handler symbol、行号和源码 hash；真实供应商语义质量仍为 UNVERIFIED。
+本轮前端测试 22 passed、类型检查和生产构建通过，后端全量 129 passed，契约 21 passed，文档检查和本地文档检查通过；本轮浏览器验证了 `python-entry-v3` FastAPI 路由入口列表、声明路径、入口 evidence、处理函数源码和同快照关系图联动。HTTP 与本地 stdio MCP 对照返回相同的路由方法、声明路径、handler symbol、行号和源码 hash；真实供应商语义质量仍为 UNVERIFIED。
 
 ## 相关决策
 
