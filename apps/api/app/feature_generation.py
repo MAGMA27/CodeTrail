@@ -244,9 +244,15 @@ class FeatureContext:
         for entry in self.overview.entries:
             if entry.entry_point_id not in self.observed_entry_point_ids:
                 continue
+            route_detail = (
+                f" method={entry.http_method} declared_path={entry.declared_path} "
+                f"handler_symbol={entry.handler_symbol.symbol_id if entry.handler_symbol is not None else entry.symbol_id}"
+                if entry.kind == "fastapi_route"
+                else ""
+            )
             if not add_block(
                 f"- entry_id={entry.entry_point_id} path={entry.path} lines={entry.start_line}-{entry.end_line} "
-                f"kind={entry.kind} label={entry.label}"
+                f"kind={entry.kind} label={entry.label}{route_detail}"
             ):
                 omitted_entries += 1
 

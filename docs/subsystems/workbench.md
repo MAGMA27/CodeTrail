@@ -2,11 +2,11 @@
 
 ## 状态
 
-已实现多项目真实工作台、Project/Index/Session/消息、O1/O2/O3 浏览和 P2-R1/P2-R2 Session 内显式 fixture/real Run 面板。Run 面板支持模式选择、真实模式警告、启动、状态同步、持久化 SSE 事件流、有限重连/轮询回退、工具结果、报告 evidence、候选位置与有界静态影响、取消、历史选择和刷新/切换恢复；Codex external Run 会从 Session history 自动发现、选择并订阅。
+已实现多项目真实工作台、Project/Index/Session/消息、O1/O2/O3 浏览和 P2-R1/P2-R2 Session 内显式 fixture/real Run 面板。概览入口列表现在展示 `fastapi_route` 的 HTTP 方法、声明路径和处理函数，并可从入口证据进入源码或从处理函数进入既有关系图。Run 面板支持模式选择、真实模式警告、启动、状态同步、持久化 SSE 事件流、有限重连/轮询回退、工具结果、报告 evidence、候选位置与有界静态影响、取消、历史选择和刷新/切换恢复；Codex external Run 会从 Session history 自动发现、选择并订阅。
 
 ## 职责与范围
 
-通过公开 HTTP API 创建/列出/切换项目、建立索引、读取概览/功能/图/源码证据，管理 Session 消息并显式启动 fixture 或 real Run；可从已保存 Run 报告的 candidate/finding 进入固定快照影响面板，并自动发现 MCP 创建的 Codex external Run。代码关系面板把查询截断与固定关系索引未完成分开显示；大目录分组默认收起，展开后聚焦选中节点及有限相邻节点，仍可通过平移/展开查看已加载的其余内容。前端负责当前视图、请求取消/过期响应、草稿和 Run 展示，不负责冻结消息、执行工具、鉴权、预算或组装报告；这些由 API 应用服务拥有。
+通过公开 HTTP API 创建/列出/切换项目、建立索引、读取概览/功能/图/源码证据，管理 Session 消息并显式启动 fixture 或 real Run；可从 FastAPI 路由入口查看声明路径及处理函数的同快照证据，并从处理函数打开既有关系图；也可从已保存 Run 报告的 candidate/finding 进入固定快照影响面板，并自动发现 MCP 创建的 Codex external Run。代码关系面板把查询截断与固定关系索引未完成分开显示；大目录分组默认收起，展开后聚焦选中节点及有限相邻节点，仍可通过平移/展开查看已加载的其余内容。前端负责当前视图、请求取消/过期响应、草稿和 Run 展示，不负责冻结消息、执行工具、鉴权、预算或组装报告；这些由 API 应用服务拥有。
 
 ## 接口与依赖
 
@@ -30,7 +30,7 @@ Session 草稿按 project/session 保存到 localStorage，消息保存旧响应
 
 ## 验证
 
-本轮前端测试 19 passed、类型检查和生产构建通过，后端全量 123 passed，契约 21 passed，文档检查通过；当前 Codex 主机已实际调用 external MCP，工作台自动发现并展示 `run-1648e725f3424dc590a5298e2baee1a0` 的 11 条公开事件、4 项工具结果、同快照证据和候选报告。浏览器还验证了证据源码面板、候选影响面板、历史完成 Run 打开、Session 切换回原 Run、刷新恢复和无重复 Run；真实供应商语义质量仍为 UNVERIFIED。
+本轮前端测试 22 passed、类型检查和生产构建通过，后端全量 128 passed，契约 21 passed，文档检查和本地文档检查通过；本轮浏览器验证了 FastAPI 路由入口列表、声明路径、入口 evidence、处理函数源码和同快照关系图联动。HTTP 与本地 stdio MCP 对照返回相同的路由方法、声明路径、handler symbol、行号和源码 hash；真实供应商语义质量仍为 UNVERIFIED。
 
 ## 相关决策
 
@@ -42,3 +42,4 @@ Session 草稿按 project/session 保存到 localStorage，消息保存旧响应
 - [工作区 UI 规范](../design/workspace-ui-spec.md)
 - [Codex 外部 Agent Run 决策](../decisions/2026-09-13-external-agent-run.md)
 - [关系扫描与 unresolved 覆盖语义](../decisions/2026-09-13-relation-coverage.md)
+- [FastAPI 路由入口概览](../decisions/2026-09-14-fastapi-route-overview.md)

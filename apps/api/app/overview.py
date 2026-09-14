@@ -17,17 +17,33 @@ from .contracts import (
     OverviewPath,
     ProjectOverview,
     OverviewCoverage,
+    Symbol,
     UnresolvedReference,
 )
 from .relations import RelationIndex, relation_coverage_limitations
 
 
-RULES_VERSION = "python-entry-v1"
+RULES_VERSION = "python-entry-v2"
 DEFAULT_MAX_DEPTH = 4
 DEFAULT_MAX_PATHS = 40
 DEFAULT_MAX_MODULES = 100
 DEFAULT_MAX_SECONDS = 2.0
 _MAX_EVIDENCE_LINES = 200
+_MAX_ENTRY_CANDIDATES = 200
+_FASTAPI_ROUTE_METHODS = {
+    "get": "GET",
+    "post": "POST",
+    "put": "PUT",
+    "patch": "PATCH",
+    "delete": "DELETE",
+    "options": "OPTIONS",
+    "head": "HEAD",
+    "trace": "TRACE",
+}
+_FASTAPI_BINDING_CLASS = "fastapi_class"
+_FASTAPI_BINDING_MODULE = "fastapi_module"
+_FASTAPI_BINDING_INSTANCE = "fastapi_instance"
+_UNKNOWN_BINDING = "unknown"
 
 
 EvidenceReader = Callable[[str, str, int, int], Evidence]
@@ -43,12 +59,24 @@ class _EntryCandidate:
     label: str
     symbol_id: str
     guard: bool
+    http_method: str | None = None
+    declared_path: str | None = None
+    handler_symbol: Symbol | None = None
 
     @property
     def entry_point_id(self) -> str:
-        identity = "\0".join(
-            [RULES_VERSION, self.path, self.kind, self.rule_id, str(self.start_line)]
-        ).encode("utf-8")
+        identity_parts = [RULES_VERSION, self.path, self.kind, self.rule_id]
+        if self.kind == "fastapi_route":
+            identity_parts.extend(
+                [
+                    self.http_method or "",
+                    self.declared_path or "",
+                    self.handler_symbol.symbol_id if self.handler_symbol is not None else self.symbol_id,
+                ]
+            )
+        else:
+            identity_parts.append(str(self.start_line))
+        identity = "\0".join(identity_parts).encode("utf-8")
         return f"entry-{hashlib.sha256(identity).hexdigest()[:32]}"
 
 
@@ -96,7 +124,7 @@ def build_project_overview(
     for references in unresolved_by_source.values():
         references.sort(key=lambda item: (item.start_line, item.end_line, item.unresolved_id))
 
-    candidates = _find_entry_candidates(relation, deadline)
+    candidates, entry_candidates_truncated = _find_entry_candidates(relation, deadline)
     entries: list[OverviewEntryPoint] = []
     paths: list[OverviewPath] = []
     reachable_symbol_ids: set[str] = set()
@@ -116,6 +144,8 @@ def build_project_overview(
     )
     if relation.unresolved_truncated is True:
         reasons.extend(f"relation index: {item}" for item in unresolved_limitations)
+    if entry_candidates_truncated:
+        reasons.append("max_entries reached")
     if _deadline_reached(deadline):
         reasons.append("max_seconds reached")
 
@@ -160,6 +190,9 @@ def build_project_overview(
                 rule_id=candidate.rule_id,
                 label=candidate.label,
                 symbol_id=root_id,
+                http_method=candidate.http_method,  # type: ignore[arg-type]
+                declared_path=candidate.declared_path,
+                handler_symbol=candidate.handler_symbol,
                 evidence=evidence,
                 evidence_error=evidence_error,
                 direct_symbol_ids=[],
@@ -227,15 +260,21 @@ def build_project_overview(
                 queue.append((target.symbol_id, next_symbols, next_edges))
         direct_symbol_ids_by_entry[entry_id] = direct_symbols
 
+    has_fastapi_routes = any(candidate.kind == "fastapi_route" for candidate in candidates)
     if not candidates and not _deadline_reached(deadline):
         notes = [
             "未识别入口；这不表示项目没有入口。",
-            "当前规则只覆盖 __main__.py 和顶层 __name__ == __main__ 条件。",
+            "当前规则覆盖 __main__.py、顶层 __name__ == __main__ 条件，以及可静态确认的 FastAPI 路由。",
         ]
     else:
         notes = [
-            "当前规则只覆盖 __main__.py 和顶层 __name__ == __main__ 条件。",
-            "框架路由、插件入口和 pyproject 脚本元数据尚未纳入规则。",
+            "当前规则覆盖 __main__.py、顶层 __name__ == __main__ 条件，以及可静态确认的 FastAPI 路由。",
+            (
+                "FastAPI 入口显示声明路径；未解析 APIRouter、挂载前缀或动态注册，因此不能视为最终 URL。"
+                if has_fastapi_routes
+                else "FastAPI 入口仅接受已知 FastAPI 实例、字面量路径和静态方法；未识别路由不表示项目没有入口。"
+            ),
+            "插件入口和 pyproject 脚本元数据尚未纳入规则。",
         ]
     if cycle_skipped:
         notes.append("循环调用只保留首次有界路径，未继续展开循环。")
@@ -317,13 +356,19 @@ def build_project_overview(
 def _find_entry_candidates(
     relation: RelationIndex,
     deadline: float,
-) -> list[_EntryCandidate]:
+) -> tuple[list[_EntryCandidate], bool]:
     candidates: list[_EntryCandidate] = []
     symbols_by_path = {
         symbol.path: symbol
         for symbol in relation.symbols
         if symbol.kind == "module"
     }
+    function_symbols_by_location: dict[tuple[str, int, int], list[Symbol]] = defaultdict(list)
+    for symbol in relation.symbols:
+        if symbol.kind == "function":
+            function_symbols_by_location[(symbol.path, symbol.start_line, symbol.end_line)].append(symbol)
+    for symbols in function_symbols_by_location.values():
+        symbols.sort(key=lambda symbol: (symbol.qualified_name, symbol.symbol_id))
     for source_file in sorted(relation.snapshot.files, key=lambda item: item.path):
         if _deadline_reached(deadline):
             break
@@ -348,6 +393,14 @@ def _find_entry_candidates(
             tree = ast.parse(source_file.text, filename=source_file.path, type_comments=True)
         except SyntaxError:
             continue
+        candidates.extend(
+            _find_fastapi_route_candidates(
+                source_file.path,
+                tree,
+                function_symbols_by_location,
+                deadline,
+            )
+        )
         for node in tree.body:
             if not isinstance(node, ast.If) or not _is_main_guard(node.test):
                 continue
@@ -364,8 +417,294 @@ def _find_entry_candidates(
                     guard=True,
                 )
             )
-    candidates.sort(key=lambda item: (item.path, item.start_line, item.kind, item.rule_id))
-    return candidates
+    candidates.sort(
+        key=lambda item: (
+            item.path,
+            item.start_line,
+            item.end_line,
+            item.kind,
+            item.rule_id,
+            item.http_method or "",
+            item.declared_path or "",
+            item.symbol_id,
+        )
+    )
+    unique_candidates: list[_EntryCandidate] = []
+    seen: set[tuple[str, ...]] = set()
+    for candidate in candidates:
+        key = (
+            candidate.path,
+            candidate.kind,
+            candidate.rule_id,
+            candidate.http_method or "",
+            candidate.declared_path or "",
+            candidate.handler_symbol.symbol_id if candidate.handler_symbol is not None else candidate.symbol_id,
+            str(candidate.start_line),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_candidates.append(candidate)
+    return unique_candidates[:_MAX_ENTRY_CANDIDATES], len(unique_candidates) > _MAX_ENTRY_CANDIDATES
+
+
+def _find_fastapi_route_candidates(
+    path: str,
+    tree: ast.Module,
+    function_symbols_by_location: dict[tuple[str, int, int], list[Symbol]],
+    deadline: float,
+) -> list[_EntryCandidate]:
+    scanner = _FastApiRouteScanner(path, function_symbols_by_location, deadline)
+    scanner.scan(tree.body)
+    return scanner.candidates
+
+
+class _LocalBindingCollector(ast.NodeVisitor):
+    """Collect names that are local to one function without descending into child scopes."""
+
+    def __init__(self) -> None:
+        self.names: set[str] = set()
+        self.escaped: set[str] = set()
+
+    def visit_Name(self, node: ast.Name) -> None:
+        if isinstance(node.ctx, (ast.Store, ast.Del)):
+            self.names.add(node.id)
+
+    def visit_Import(self, node: ast.Import) -> None:
+        for alias in node.names:
+            self.names.add(alias.asname or alias.name.split(".", 1)[0])
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        for alias in node.names:
+            if alias.name != "*":
+                self.names.add(alias.asname or alias.name)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self.names.add(node.name)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self.names.add(node.name)
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        self.names.add(node.name)
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:
+        return
+
+    def visit_Global(self, node: ast.Global) -> None:
+        self.escaped.update(node.names)
+
+    def visit_Nonlocal(self, node: ast.Nonlocal) -> None:
+        self.escaped.update(node.names)
+
+    def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
+        if isinstance(node.name, str):
+            self.names.add(node.name)
+        self.generic_visit(node)
+
+
+class _FastApiRouteScanner:
+    """Conservatively identify FastAPI decorators under lexical binding rules."""
+
+    def __init__(
+        self,
+        path: str,
+        function_symbols_by_location: dict[tuple[str, int, int], list[Symbol]],
+        deadline: float,
+    ) -> None:
+        self.path = path
+        self.function_symbols_by_location = function_symbols_by_location
+        self.deadline = deadline
+        self.candidates: list[_EntryCandidate] = []
+
+    def scan(self, statements: list[ast.stmt]) -> None:
+        self._scan_statements(statements, {})
+
+    def _scan_statements(self, statements: list[ast.stmt], bindings: dict[str, str]) -> None:
+        for statement in statements:
+            if _deadline_reached(self.deadline):
+                return
+            if isinstance(statement, ast.Import | ast.ImportFrom):
+                self._apply_import(statement, bindings)
+            elif isinstance(statement, ast.Assign):
+                binding = self._binding_for_expression(statement.value, bindings)
+                for target in statement.targets:
+                    for name in _target_names(target):
+                        bindings[name] = binding
+            elif isinstance(statement, ast.AnnAssign):
+                binding = (
+                    self._binding_for_expression(statement.value, bindings)
+                    if statement.value is not None
+                    else _UNKNOWN_BINDING
+                )
+                for name in _target_names(statement.target):
+                    bindings[name] = binding
+            elif isinstance(statement, ast.NamedExpr):
+                binding = self._binding_for_expression(statement.value, bindings)
+                for name in _target_names(statement.target):
+                    bindings[name] = binding
+            elif isinstance(statement, ast.Delete):
+                for target in statement.targets:
+                    for name in _target_names(target):
+                        bindings[name] = _UNKNOWN_BINDING
+            elif isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                route_found = self._append_route_candidates(statement, bindings)
+                if not route_found:
+                    self._scan_function(statement, bindings)
+                bindings[statement.name] = _UNKNOWN_BINDING
+            elif isinstance(statement, ast.ClassDef):
+                bindings[statement.name] = _UNKNOWN_BINDING
+
+    def _scan_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef, bindings: dict[str, str]) -> None:
+        collector = _LocalBindingCollector()
+        for statement in node.body:
+            collector.visit(statement)
+        for argument in (
+            *node.args.posonlyargs,
+            *node.args.args,
+            *node.args.kwonlyargs,
+        ):
+            collector.names.add(argument.arg)
+        if node.args.vararg is not None:
+            collector.names.add(node.args.vararg.arg)
+        if node.args.kwarg is not None:
+            collector.names.add(node.args.kwarg.arg)
+        child_bindings = dict(bindings)
+        for name in collector.names - collector.escaped:
+            child_bindings[name] = _UNKNOWN_BINDING
+        self._scan_statements(node.body, child_bindings)
+
+    def _append_route_candidates(
+        self,
+        node: ast.FunctionDef | ast.AsyncFunctionDef,
+        bindings: dict[str, str],
+    ) -> bool:
+        recognized = False
+        end_line = getattr(node, "end_lineno", None) or node.lineno
+        handler_symbols = self.function_symbols_by_location.get(
+            (self.path, node.lineno, end_line),
+            [],
+        )
+        handler = handler_symbols[0] if handler_symbols else None
+        for decorator in node.decorator_list:
+            call = decorator if isinstance(decorator, ast.Call) else None
+            if call is None or not isinstance(call.func, ast.Attribute):
+                continue
+            receiver = call.func.value
+            if not isinstance(receiver, ast.Name) or bindings.get(receiver.id) != _FASTAPI_BINDING_INSTANCE:
+                continue
+            methods = self._route_methods(call.func.attr, call)
+            path_value = self._literal_route_path(call)
+            if not methods or path_value is None:
+                continue
+            recognized = True
+            if handler is None:
+                continue
+            start_line = min(
+                getattr(item, "lineno", node.lineno)
+                for item in node.decorator_list
+            )
+            for method in methods:
+                self.candidates.append(
+                    _EntryCandidate(
+                        path=self.path,
+                        start_line=start_line,
+                        end_line=end_line,
+                        kind="fastapi_route",
+                        rule_id="fastapi.decorator.route",
+                        label=f"{method} {path_value} → {handler.qualified_name}",
+                        symbol_id=handler.symbol_id,
+                        guard=False,
+                        http_method=method,
+                        declared_path=path_value,
+                        handler_symbol=handler,
+                    )
+                )
+        return recognized
+
+    def _route_methods(self, decorator_name: str, call: ast.Call) -> list[str]:
+        if decorator_name in _FASTAPI_ROUTE_METHODS:
+            return [_FASTAPI_ROUTE_METHODS[decorator_name]]
+        if decorator_name != "api_route":
+            return []
+        methods_node = next(
+            (keyword.value for keyword in call.keywords if keyword.arg == "methods"),
+            None,
+        )
+        if not isinstance(methods_node, (ast.List, ast.Set, ast.Tuple)):
+            return []
+        methods: set[str] = set()
+        for item in methods_node.elts:
+            if not isinstance(item, ast.Constant) or not isinstance(item.value, str):
+                return []
+            method = item.value.upper()
+            if method not in _FASTAPI_ROUTE_METHODS.values():
+                return []
+            methods.add(method)
+        return sorted(methods)
+
+    @staticmethod
+    def _literal_route_path(call: ast.Call) -> str | None:
+        path_node = call.args[0] if call.args else next(
+            (keyword.value for keyword in call.keywords if keyword.arg == "path"),
+            None,
+        )
+        if not isinstance(path_node, ast.Constant) or not isinstance(path_node.value, str):
+            return None
+        if not path_node.value.startswith("/"):
+            return None
+        return path_node.value
+
+    @staticmethod
+    def _binding_for_expression(expression: ast.expr, bindings: dict[str, str]) -> str:
+        if isinstance(expression, ast.Call) and _is_fastapi_constructor(expression.func, bindings):
+            return _FASTAPI_BINDING_INSTANCE
+        if isinstance(expression, ast.Name):
+            return bindings.get(expression.id, _UNKNOWN_BINDING)
+        return _UNKNOWN_BINDING
+
+    @staticmethod
+    def _apply_import(statement: ast.Import | ast.ImportFrom, bindings: dict[str, str]) -> None:
+        if isinstance(statement, ast.Import):
+            for alias in statement.names:
+                local_name = alias.asname or alias.name.split(".", 1)[0]
+                bindings[local_name] = (
+                    _FASTAPI_BINDING_MODULE if alias.name == "fastapi" else _UNKNOWN_BINDING
+                )
+            return
+        for alias in statement.names:
+            if alias.name == "*":
+                continue
+            local_name = alias.asname or alias.name
+            bindings[local_name] = (
+                _FASTAPI_BINDING_CLASS
+                if statement.level == 0 and statement.module == "fastapi" and alias.name == "FastAPI"
+                else _UNKNOWN_BINDING
+            )
+
+
+def _target_names(target: ast.expr) -> list[str]:
+    if isinstance(target, ast.Name):
+        return [target.id]
+    if isinstance(target, (ast.List, ast.Tuple)):
+        names: list[str] = []
+        for item in target.elts:
+            names.extend(_target_names(item))
+        return names
+    if isinstance(target, ast.Starred):
+        return _target_names(target.value)
+    return []
+
+
+def _is_fastapi_constructor(expression: ast.expr, bindings: dict[str, str]) -> bool:
+    if isinstance(expression, ast.Name):
+        return bindings.get(expression.id) == _FASTAPI_BINDING_CLASS
+    return (
+        isinstance(expression, ast.Attribute)
+        and expression.attr == "FastAPI"
+        and isinstance(expression.value, ast.Name)
+        and bindings.get(expression.value.id) == _FASTAPI_BINDING_MODULE
+    )
 
 
 def _is_main_guard(test: ast.expr) -> bool:

@@ -20066,8 +20066,22 @@
         },
         "OverviewEntryPoint": {
           "additionalProperties": false,
-          "description": "One rule-supported Python entry candidate in an immutable snapshot.",
+          "description": "One rule-supported Python or FastAPI entry candidate in an immutable snapshot.",
           "properties": {
+            "declared_path": {
+              "anyOf": [
+                {
+                  "maxLength": 2000,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Declared Path"
+            },
             "direct_symbol_ids": {
               "items": {
                 "maxLength": 200,
@@ -20112,6 +20126,39 @@
               "default": null,
               "title": "Evidence Error"
             },
+            "handler_symbol": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Symbol"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "http_method": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "GET",
+                    "POST",
+                    "PUT",
+                    "PATCH",
+                    "DELETE",
+                    "OPTIONS",
+                    "HEAD",
+                    "TRACE"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Http Method"
+            },
             "index_id": {
               "maxLength": 200,
               "minLength": 1,
@@ -20121,7 +20168,8 @@
             "kind": {
               "enum": [
                 "python_main_module",
-                "python_main_guard"
+                "python_main_guard",
+                "fastapi_route"
               ],
               "title": "Kind",
               "type": "string"
@@ -20230,7 +20278,7 @@
         },
         "OverviewPath": {
           "additionalProperties": false,
-          "description": "One bounded static path from an entry module to a reached symbol.",
+          "description": "One bounded static path from an entry symbol to a reached symbol.",
           "properties": {
             "depth": {
               "minimum": 0,
@@ -29007,11 +29055,86 @@
           ],
           "title": "Evidence",
           "type": "object"
+        },
+        "Symbol": {
+          "additionalProperties": false,
+          "properties": {
+            "end_line": {
+              "exclusiveMinimum": 0,
+              "title": "End Line",
+              "type": "integer"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "module",
+                "file",
+                "class",
+                "function",
+                "test"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "qualified_name": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Qualified Name",
+              "type": "string"
+            },
+            "start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Start Line",
+              "type": "integer"
+            },
+            "symbol_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Symbol Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "start_line",
+            "end_line",
+            "symbol_id",
+            "index_id",
+            "path",
+            "qualified_name",
+            "kind"
+          ],
+          "title": "Symbol",
+          "type": "object"
         }
       },
       "additionalProperties": false,
-      "description": "One rule-supported Python entry candidate in an immutable snapshot.",
+      "description": "One rule-supported Python or FastAPI entry candidate in an immutable snapshot.",
       "properties": {
+        "declared_path": {
+          "anyOf": [
+            {
+              "maxLength": 2000,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Declared Path"
+        },
         "direct_symbol_ids": {
           "items": {
             "maxLength": 200,
@@ -29056,6 +29179,39 @@
           "default": null,
           "title": "Evidence Error"
         },
+        "handler_symbol": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Symbol"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "http_method": {
+          "anyOf": [
+            {
+              "enum": [
+                "GET",
+                "POST",
+                "PUT",
+                "PATCH",
+                "DELETE",
+                "OPTIONS",
+                "HEAD",
+                "TRACE"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Http Method"
+        },
         "index_id": {
           "maxLength": 200,
           "minLength": 1,
@@ -29065,7 +29221,8 @@
         "kind": {
           "enum": [
             "python_main_module",
-            "python_main_guard"
+            "python_main_guard",
+            "fastapi_route"
           ],
           "title": "Kind",
           "type": "string"
@@ -29328,7 +29485,7 @@
         }
       },
       "additionalProperties": false,
-      "description": "One bounded static path from an entry module to a reached symbol.",
+      "description": "One bounded static path from an entry symbol to a reached symbol.",
       "properties": {
         "depth": {
           "minimum": 0,
@@ -29614,8 +29771,22 @@
         },
         "OverviewEntryPoint": {
           "additionalProperties": false,
-          "description": "One rule-supported Python entry candidate in an immutable snapshot.",
+          "description": "One rule-supported Python or FastAPI entry candidate in an immutable snapshot.",
           "properties": {
+            "declared_path": {
+              "anyOf": [
+                {
+                  "maxLength": 2000,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Declared Path"
+            },
             "direct_symbol_ids": {
               "items": {
                 "maxLength": 200,
@@ -29660,6 +29831,39 @@
               "default": null,
               "title": "Evidence Error"
             },
+            "handler_symbol": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Symbol"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "http_method": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "GET",
+                    "POST",
+                    "PUT",
+                    "PATCH",
+                    "DELETE",
+                    "OPTIONS",
+                    "HEAD",
+                    "TRACE"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Http Method"
+            },
             "index_id": {
               "maxLength": 200,
               "minLength": 1,
@@ -29669,7 +29873,8 @@
             "kind": {
               "enum": [
                 "python_main_module",
-                "python_main_guard"
+                "python_main_guard",
+                "fastapi_route"
               ],
               "title": "Kind",
               "type": "string"
@@ -29778,7 +29983,7 @@
         },
         "OverviewPath": {
           "additionalProperties": false,
-          "description": "One bounded static path from an entry module to a reached symbol.",
+          "description": "One bounded static path from an entry symbol to a reached symbol.",
           "properties": {
             "depth": {
               "minimum": 0,

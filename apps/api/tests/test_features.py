@@ -162,7 +162,7 @@ def test_fixture_generation_uses_real_tools_persists_and_reuses_idempotency(tmp_
     assert status == 200
     generation = generated["generation"]
     assert generation["mode"] == "fixture"
-    assert generation["rules_version"] == "python-entry-v1"
+    assert generation["rules_version"] == "python-entry-v2"
     assert generation["status"] in {"succeeded", "partial"}
     assert generation["features"]
     assert generation["usage"]["tool_calls"] >= 3

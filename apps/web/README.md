@@ -17,7 +17,7 @@
 
 ## 接口与依赖
 
-项目、索引、概览、Session/消息和 Run 均通过 `/api/projects/*` 调用；Run 使用同一 Session 的 list/detail/events、`events/stream`、tool-results/report/impact/cancel 端点。启动按钮只发送 Issue/模式/fixture 场景/固定 index_id，服务端独立冻结已保存消息；前端不把已加载的消息页当作 Run 输入。Codex external Run 不由网页创建，工作台在 Session history 成功后有界轮询 `execution_source=codex` 的活动 Run，再复用 detail/events/SSE 读取链。代码关系面板区分邻接查询 `truncated`、固定关系扫描 `index_truncated` 和 unresolved 详情 `index_unresolved_truncated`，并对旧索引的未知状态单独提示；大目录分组默认收起，展开后按选中节点及有限相邻节点聚焦。影响面板从报告候选或唯一 finding symbol 发起，重新查询 Run 固定 index 的静态 `calls`，方向/深度由用户控制且不修改 Run。HTTP 响应在 [lib/api.ts](lib/api.ts) 经过形状和 project/session/index/hash 边界校验，SSE 事件按 schema、Run 和连续 sequence 校验；`run.stream.end` 只接受 `succeeded`、`failed`、`cancelled`、`interrupted` 四类 Run 终态。
+项目、索引、概览、Session/消息和 Run 均通过 `/api/projects/*` 调用；概览中的 FastAPI 路由入口显示 HTTP 方法、声明路径和处理函数，点击入口先打开装饰器到函数结束的同快照 evidence，关系图按钮则以处理函数作为既有静态图根节点。Run 使用同一 Session 的 list/detail/events、`events/stream`、tool-results/report/impact/cancel 端点。启动按钮只发送 Issue/模式/fixture 场景/固定 index_id，服务端独立冻结已保存消息；前端不把已加载的消息页当作 Run 输入。Codex external Run 不由网页创建，工作台在 Session history 成功后有界轮询 `execution_source=codex` 的活动 Run，再复用 detail/events/SSE 读取链。代码关系面板区分邻接查询 `truncated`、固定关系扫描 `index_truncated` 和 unresolved 详情 `index_unresolved_truncated`，并对旧索引的未知状态单独提示；大目录分组默认收起，展开后按选中节点及有限相邻节点聚焦。影响面板从报告候选或唯一 finding symbol 发起，重新查询 Run 固定 index 的静态 `calls`，方向/深度由用户控制且不修改 Run。HTTP 响应在 [lib/api.ts](lib/api.ts) 经过形状和 project/session/index/hash 边界校验，SSE 事件按 schema、Run 和连续 sequence 校验；`run.stream.end` 只接受 `succeeded`、`failed`、`cancelled`、`interrupted` 四类 Run 终态。
 
 ## 数据与生命周期
 
@@ -45,7 +45,7 @@ API 离线、项目/Session/index 不属于当前范围、消息未保存、空 
 
 ## 验证
 
-从仓库根目录执行 `pnpm --dir apps/web test`、`pnpm web:typecheck` 和 `pnpm web:build`。本轮前端测试覆盖订阅状态机的四类终态控制帧、错误终态、去重/缺号、连续 open-error 上限、按最后 sequence 续接以及旧回调清理；Run 的 HTTP 生命周期、取消、终态报告/evidence 联动、固定快照影响查询、刷新/切换恢复和本地受限 SSE 生命周期断流后的浏览器续接已用假供应商复核。当前 Codex 主机已实际调用 external MCP，工作台已自动发现并展示 `run-1648e725f3424dc590a5298e2baee1a0` 的 11 条公开事件、4 项工具结果和同快照报告，且已验证源码证据、影响面板、历史 Run、Session 切换和刷新恢复；真实供应商语义质量仍未验证。
+从仓库根目录执行 `pnpm --dir apps/web test`、`pnpm web:typecheck` 和 `pnpm web:build`。本轮前端 22 项测试覆盖概览路由契约及既有订阅状态机；类型检查和生产构建通过。实际浏览器验证了 FastAPI 路由列表→入口 evidence→处理函数源码→同快照关系图，HTTP 与本地 stdio MCP 返回的路由字段、行号和 hash 一致；真实供应商语义质量仍未验证。
 
 ## 关联文档
 
@@ -56,3 +56,4 @@ API 离线、项目/Session/index 不属于当前范围、消息未保存、空 
 - [P2-R2 模型驱动 Issue 分析决策](../../docs/decisions/2026-09-12-run-model-analysis.md)
 - [Codex 外部 Agent Run 决策](../../docs/decisions/2026-09-13-external-agent-run.md)
 - [关系扫描与 unresolved 覆盖语义](../../docs/decisions/2026-09-13-relation-coverage.md)
+- [FastAPI 路由入口概览](../../docs/decisions/2026-09-14-fastapi-route-overview.md)

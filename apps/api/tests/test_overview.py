@@ -72,12 +72,16 @@ def _copy_fixture(tmp_path: Path) -> Path:
     return destination
 
 
-def _create_index(application, project_name: str = "Overview project") -> tuple[str, str]:
+def _create_index(
+    application,
+    project_name: str = "Overview project",
+    repository_id: str = "timeout-demo",
+) -> tuple[str, str]:
     status, project = request(
         application,
         "POST",
         "/api/projects",
-        {"name": project_name, "repository_id": "timeout-demo"},
+        {"name": project_name, "repository_id": repository_id},
     )
     assert status == 200
     status, created = request(
@@ -102,7 +106,7 @@ def test_overview_identifies_main_rules_paths_and_stays_on_snapshot(tmp_path: Pa
     )
     assert status == 200
     assert overview["entry_status"] == "identified"
-    assert overview["rules_version"] == "python-entry-v1"
+    assert overview["rules_version"] == "python-entry-v2"
     assert {entry["kind"] for entry in overview["entries"]} == {
         "python_main_module",
         "python_main_guard",
@@ -139,6 +143,90 @@ def test_overview_identifies_main_rules_paths_and_stays_on_snapshot(tmp_path: Pa
     )
     assert status == 200
     assert old_snapshot == overview
+
+
+def test_overview_identifies_confirmed_fastapi_routes_and_rejects_ambiguous_bindings(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "fastapi-demo"
+    package = repository / "demo"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "app.py").write_text(
+        "from fastapi import FastAPI as Api\n"
+        "import fastapi as fastapi_alias\n"
+        "\n"
+        "application = Api()\n"
+        "module_application = fastapi_alias.FastAPI()\n"
+        "\n"
+        "@application.get('/sync')\n"
+        "def sync_handler():\n"
+        "    return {'ok': True}\n"
+        "\n"
+        "@module_application.get('/module-alias')\n"
+        "async def async_handler():\n"
+        "    return {'ok': True}\n"
+        "\n"
+        "@application.api_route('/multi', methods=['POST', 'GET'])\n"
+        "async def multi_handler():\n"
+        "    return {'ok': True}\n"
+        "\n"
+        "DYNAMIC_PATH = '/dynamic'\n"
+        "@application.get(DYNAMIC_PATH)\n"
+        "def dynamic_handler():\n"
+        "    return {'ok': True}\n"
+        "\n"
+        "ordinary = object()\n"
+        "@ordinary.get('/ordinary')\n"
+        "def ordinary_handler():\n"
+        "    return {'ok': True}\n"
+        "\n"
+        "def shadowed(application):\n"
+        "    @application.get('/shadowed')\n"
+        "    def shadowed_handler():\n"
+        "        return {'ok': True}\n"
+        "\n"
+        "application = object()\n"
+        "@application.get('/rebound')\n"
+        "def rebound_handler():\n"
+        "    return {'ok': True}\n",
+        encoding="utf-8",
+    )
+    application = create_app({"fastapi-demo": repository})
+    project_id, index_id = _create_index(application, "FastAPI demo", "fastapi-demo")
+
+    status, overview = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/indexes/{index_id}/overview",
+    )
+    assert status == 200
+    routes = [entry for entry in overview["entries"] if entry["kind"] == "fastapi_route"]
+    assert {
+        (entry["http_method"], entry["declared_path"], entry["handler_symbol"]["qualified_name"])
+        for entry in routes
+    } == {
+        ("GET", "/sync", "demo.app.sync_handler"),
+        ("GET", "/module-alias", "demo.app.async_handler"),
+        ("GET", "/multi", "demo.app.multi_handler"),
+        ("POST", "/multi", "demo.app.multi_handler"),
+    }
+    for entry in routes:
+        assert entry["symbol_id"] == entry["handler_symbol"]["symbol_id"]
+        assert entry["handler_symbol"]["kind"] == "function"
+        assert entry["start_line"] <= entry["handler_symbol"]["start_line"] <= entry["end_line"]
+        assert entry["evidence"]["start_line"] == entry["start_line"]
+        assert entry["evidence"]["end_line"] <= entry["end_line"]
+        assert all(
+            path["symbol_ids"][0] == entry["symbol_id"]
+            for path in overview["paths"]
+            if path["entry_point_id"] == entry["entry_point_id"]
+        )
+    assert not any(
+        entry["declared_path"] in {"/dynamic", "/ordinary", "/shadowed", "/rebound"}
+        for entry in routes
+    )
+    assert any("声明路径" in note for note in overview["notes"])
 
 
 def test_overview_does_not_promote_main_names_or_nested_guards(tmp_path: Path) -> None:

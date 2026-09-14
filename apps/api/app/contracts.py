@@ -1166,12 +1166,22 @@ class RunImpactResponse(VersionedModel):
         return self
 
 
-OverviewEntryKind: TypeAlias = Literal["python_main_module", "python_main_guard"]
+OverviewEntryKind: TypeAlias = Literal["python_main_module", "python_main_guard", "fastapi_route"]
+OverviewHttpMethod: TypeAlias = Literal[
+    "GET",
+    "POST",
+    "PUT",
+    "PATCH",
+    "DELETE",
+    "OPTIONS",
+    "HEAD",
+    "TRACE",
+]
 OverviewEntryStatus: TypeAlias = Literal["identified", "not_identified", "partial"]
 
 
 class OverviewEntryPoint(LineRangeModel):
-    """One rule-supported Python entry candidate in an immutable snapshot."""
+    """One rule-supported Python or FastAPI entry candidate in an immutable snapshot."""
 
     entry_point_id: Identifier
     index_id: Identifier
@@ -1180,6 +1190,9 @@ class OverviewEntryPoint(LineRangeModel):
     rule_id: Identifier
     label: str = Field(min_length=1, max_length=500)
     symbol_id: Identifier | None = None
+    http_method: OverviewHttpMethod | None = None
+    declared_path: str | None = Field(default=None, min_length=1, max_length=2_000)
+    handler_symbol: Symbol | None = None
     evidence: Evidence | None = None
     evidence_error: str | None = Field(default=None, max_length=1_000)
     direct_symbol_ids: list[Identifier] = Field(default_factory=list)
@@ -1199,6 +1212,23 @@ class OverviewEntryPoint(LineRangeModel):
                 or self.evidence.end_line > self.end_line
             ):
                 raise ValueError("overview entry evidence must belong to the entry range")
+        if self.kind == "fastapi_route":
+            if self.http_method is None or self.declared_path is None or self.handler_symbol is None:
+                raise ValueError("FastAPI route entries must include method, declared path, and handler symbol")
+            if not self.declared_path.startswith("/"):
+                raise ValueError("FastAPI route declared paths must start with '/'")
+            if self.symbol_id != self.handler_symbol.symbol_id:
+                raise ValueError("FastAPI route symbol_id must identify the handler symbol")
+            if (
+                self.handler_symbol.index_id != self.index_id
+                or self.handler_symbol.path != self.path
+                or self.handler_symbol.kind != "function"
+                or self.handler_symbol.start_line < self.start_line
+                or self.handler_symbol.end_line > self.end_line
+            ):
+                raise ValueError("FastAPI route handler must belong to the entry source range")
+        elif self.http_method is not None or self.declared_path is not None or self.handler_symbol is not None:
+            raise ValueError("non-route overview entries cannot include FastAPI route fields")
         if len(set(self.direct_symbol_ids)) != len(self.direct_symbol_ids):
             raise ValueError("overview entry direct symbols must be unique")
         if len(set(self.unresolved_ids)) != len(self.unresolved_ids):
@@ -1227,7 +1257,7 @@ class OverviewModule(ContractModel):
 
 
 class OverviewPath(ContractModel):
-    """One bounded static path from an entry module to a reached symbol."""
+    """One bounded static path from an entry symbol to a reached symbol."""
 
     path_id: Identifier
     index_id: Identifier

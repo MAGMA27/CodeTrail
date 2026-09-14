@@ -20,6 +20,12 @@ uv run --directory apps/api uvicorn app.main:app --host 127.0.0.1 --port 8000
 pnpm --dir apps/web dev
 ```
 
+## 从 HTTP 入口理解项目
+
+选择一个 ready index 后，工作台会在项目概览的“入口路径”中列出可静态确认的 FastAPI 路由。`HTTP` 行显示方法、声明路径和处理函数；点击入口打开装饰器到函数结束的同快照源码证据，点击“关系图”则以处理函数为根进入既有静态关系图。MCP 的 `get_overview` 返回同一 `project_id/index_id` 下的入口和 evidence 引用，可用 `/api/health` 或项目概览路由核对行号与源码 hash。
+
+这里的路径是装饰器声明值，不是解析过 router 或部署前缀后的最终 URL。当前规则只扫描模块/函数体的直接语句，不展开控制流块或类体；也不识别 `APIRouter`、`include_router`、`mount`、动态路径和运行时注册。未识别路由不代表项目没有 HTTP 入口。
+
 ## 加载 Codex MCP
 
 把 `apps/api/README.md` 中的 Windows stdio 配置写入当前 Codex 主机的配置文件，确保 `CODETRAIL_DATA_DIR` 与 API 完全一致；启用 `CODETRAIL_MCP_EXTERNAL_RUN_ENABLED=1` 后重启或重载 Codex 主机。external Run 不需要真实模型供应商密钥。

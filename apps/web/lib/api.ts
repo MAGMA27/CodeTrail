@@ -509,10 +509,13 @@ export type OverviewEntryPoint = {
   entry_point_id: string;
   index_id: string;
   path: string;
-  kind: "python_main_module" | "python_main_guard";
+  kind: "python_main_module" | "python_main_guard" | "fastapi_route";
   rule_id: string;
   label: string;
   symbol_id: string | null;
+  http_method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | "HEAD" | "TRACE" | null;
+  declared_path?: string | null;
+  handler_symbol?: SymbolRecord | null;
   evidence: Evidence | null;
   evidence_error: string | null;
   direct_symbol_ids: string[];
@@ -1602,16 +1605,39 @@ export function isNeighborsResponse(value: unknown): value is NeighborsResponse 
 }
 
 function isOverviewEntryPoint(value: unknown): value is OverviewEntryPoint {
+  if (!isRecord(value) || !isLineRange(value)) {
+    return false;
+  }
+  const kind = String(value.kind);
+  const routeFieldsValid = kind === "fastapi_route"
+    ? (
+      ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD", "TRACE"].includes(String(value.http_method)) &&
+      isString(value.declared_path) &&
+      value.declared_path.startsWith("/") &&
+      isSymbolRecord(value.handler_symbol) &&
+      value.handler_symbol.kind === "function" &&
+      value.handler_symbol.index_id === value.index_id &&
+      value.handler_symbol.path === value.path &&
+      value.symbol_id === value.handler_symbol.symbol_id &&
+      isNumber(value.start_line) &&
+      isNumber(value.end_line) &&
+      value.handler_symbol.start_line >= value.start_line &&
+      value.handler_symbol.end_line <= value.end_line
+    )
+    : (
+      (value.http_method === undefined || value.http_method === null) &&
+      (value.declared_path === undefined || value.declared_path === null) &&
+      (value.handler_symbol === undefined || value.handler_symbol === null)
+    );
   return (
-    isRecord(value) &&
-    isLineRange(value) &&
     isString(value.entry_point_id) &&
     isString(value.index_id) &&
     isString(value.path) &&
-    ["python_main_module", "python_main_guard"].includes(String(value.kind)) &&
+    ["python_main_module", "python_main_guard", "fastapi_route"].includes(kind) &&
     isString(value.rule_id) &&
     isString(value.label) &&
     (value.symbol_id === null || isString(value.symbol_id)) &&
+    routeFieldsValid &&
     (value.evidence === null || isEvidence(value.evidence)) &&
     (value.evidence_error === null || isString(value.evidence_error)) &&
     isStringArray(value.direct_symbol_ids) &&

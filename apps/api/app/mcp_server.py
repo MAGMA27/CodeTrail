@@ -422,8 +422,9 @@ def create_mcp_server(
         title="Get a project overview",
         description=(
             "Build a deterministic entry-point and module overview for one explicitly selected immutable index. "
-            "The first rule set covers Python __main__.py and top-level __name__ == __main__ guards; "
-            "unresolved calls remain unresolved and the result is bounded."
+            "Rules cover Python __main__.py, top-level __name__ == __main__ guards, and conservatively confirmed "
+            "FastAPI routes with literal declared paths; unresolved calls and unsupported dynamic registration "
+            "remain explicit and the result is bounded."
         ),
         structured_output=True,
     )

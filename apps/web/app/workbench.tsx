@@ -2662,17 +2662,18 @@ export default function Workbench() {
 
   const openOverviewEntryGraph = useCallback(
     (entry: OverviewEntryPoint) => {
-      if (!indexResponse || !overview || !entry.symbol_id) {
+      if (!indexResponse || !overview) {
         return;
       }
-      const module = overview.modules.find((candidate) => candidate.module_id === entry.symbol_id);
-      if (!module) {
+      const symbol = entry.handler_symbol
+        ?? overview.modules.find((candidate) => candidate.module_id === entry.symbol_id)?.symbol;
+      if (!symbol) {
         return;
       }
-      selectSymbol(module.symbol);
+      selectSymbol(symbol);
       setViewMode("overview");
       setPanelMode("graph");
-      void loadNeighborhood(indexResponse.index.index_id, module.symbol.symbol_id, true);
+      void loadNeighborhood(indexResponse.index.index_id, symbol.symbol_id, true);
     },
     [indexResponse, loadNeighborhood, overview, selectSymbol],
   );

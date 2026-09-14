@@ -132,6 +132,32 @@ test("project overview validator rejects broken path or evidence shape", () => {
   assert.equal(isProjectOverviewResponse(brokenEvidence), false);
 });
 
+test("project overview validator accepts a FastAPI route while preserving legacy entries", () => {
+  const routeOverview = structuredClone(overview()) as unknown as {
+    entries: Array<Record<string, unknown>>;
+  } & Record<string, unknown>;
+  routeOverview.entries[0] = {
+    ...routeOverview.entries[0],
+    kind: "fastapi_route",
+    label: "GET /health → pkg.__main__.health",
+    symbol_id: functionId,
+    http_method: "GET",
+    declared_path: "/health",
+    handler_symbol: {
+      ...overview().modules[0].symbol,
+      symbol_id: functionId,
+      qualified_name: "pkg.__main__.health",
+      kind: "function",
+      start_line: 2,
+      end_line: 2,
+    },
+  };
+  assert.equal(isProjectOverviewResponse(routeOverview), true);
+
+  routeOverview.entries[0].declared_path = "dynamic-path";
+  assert.equal(isProjectOverviewResponse(routeOverview), false);
+});
+
 test("neighbor validator keeps query and index truncation states separate", () => {
   const symbol = {
     symbol_id: "symbol-neighbor",

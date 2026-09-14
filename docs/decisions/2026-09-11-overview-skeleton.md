@@ -8,12 +8,12 @@ CodeTrail 已能保存 Python 快照、符号、静态导入/调用边和 unreso
 
 ## 决定
 
-O1 不新增概览持久化表；应用服务每次从指定项目和 `index_id` 读取同一不可变 `RelationIndex`，按 `python-entry-v1` 规则确定性生成 `ProjectOverview`。入口规则只接受：
+O1 不新增概览持久化表；应用服务每次从指定项目和 `index_id` 读取同一不可变 `RelationIndex`，按规则版本确定性生成 `ProjectOverview`。初始骨架使用 `python-entry-v1`；当前的 FastAPI 路由扩展见 [FastAPI 路由入口概览](2026-09-14-fastapi-route-overview.md)。入口规则只接受：
 
 - 路径末段为 `__main__.py` 的 Python 模块；
 - 模块顶层 AST 的 `if __name__ == "__main__"` 或反向等价比较。
 
-仅名为 `main` 的函数、嵌套条件、注释文本、框架路由、插件入口和 `pyproject` 脚本不构成首轮入口。入口证据从持久快照读取；静态路径只使用已有 `calls`/`imports` `CodeEdge`，动态或未解析调用保留原 `UnresolvedReference`，不升级为确定关系。
+仅名为 `main` 的函数、嵌套条件、注释文本、插件入口和 `pyproject` 脚本不构成首轮骨架入口；FastAPI 路由不属于这条历史规则。入口证据从持久快照读取；静态路径只使用已有 `calls`/`imports` `CodeEdge`，动态或未解析调用保留原 `UnresolvedReference`，不升级为确定关系。
 
 响应包含规则版本、入口、全部或受限可见模块、入口到符号的静态路径、unresolved、覆盖计数、截断原因和同一快照的 `IndexSnapshot`。预算限制入口路径深度、路径数量、模块数量和总计算时间；无匹配入口返回明确的 `not_identified` 状态，不推断项目没有入口。`get_overview` 通过项目作用域 HTTP 和默认只读 MCP 暴露，MCP 仅额外生成现有快照证据的工作台引用。
 
@@ -27,4 +27,4 @@ O1 不新增概览持久化表；应用服务每次从指定项目和 `index_id`
 
 ## 后果
 
-O1 只提供规则骨架和静态可达上下文，不声称主要功能识别、不生成 `Feature` 或模型假设、不覆盖框架/插件/脚本入口。O2 可在不改变静态边语义的前提下复用 `ProjectOverview` 的快照和证据边界扩展语义层。
+O1 只提供规则骨架和静态可达上下文，不声称主要功能识别、不生成 `Feature` 或模型假设、不覆盖插件/脚本入口。FastAPI 路由入口的当前限制由 [FastAPI 路由入口概览](2026-09-14-fastapi-route-overview.md) 拥有。O2 可在不改变静态边语义的前提下复用 `ProjectOverview` 的快照和证据边界扩展语义层。
