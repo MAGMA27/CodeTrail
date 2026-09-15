@@ -13,7 +13,7 @@ Status: implemented
 1. 在 `IndexSnapshot` 中记录可影响索引结果的规则版本和配置指纹；旧数据库通过 nullable 字段兼容，缺失时新鲜度只能报告 `unknown`，不能假定一致。
 2. 应用服务提供共享的新鲜度检查。HTTP 路由和 MCP 只读工具均调用同一业务方法，检查绑定 `project_id` 与基准 `index_id`，读取本地来源但不创建索引、不修改源码。检查对纳入索引范围的 Python 文件读取内容 hash，并同步比较新增、修改、删除、快照问题、规则版本和配置指纹。
 3. 检查结果区分 `consistent`、`changed`、`unknown`；契约保留 `unchecked` 供未执行检查的工作台状态使用。结果包含检查时间、基准身份、变化计数、受限路径、路径列表截断与扫描不完整的独立字段、扫描统计和机器可读原因。预算耗尽、读取失败、符号链接/边界异常、来源消失或文件在读取期间变化都不能返回一致。
-4. 工作台提供“检查更新”和“更新索引”。更新接口以路径中的基准索引为准，在服务端重新核对：内容和当前规则均一致时直接返回 `reused`；发生变化或仅因旧元数据缺失而无法确认时，从一次新的源码捕获生成新不可变快照；检查不完整或来源无法安全读取时失败并保留旧 `latest`。
+4. 工作台提供“检查更新”和“更新索引”。更新接口以路径中的基准索引为准，在服务端重新核对：内容和当前规则均一致时直接返回 `reused`；完整且安全扫描下发生源码/规则/配置变化，或旧元数据缺失（可与这些可重建原因同时出现）时，从一次新的源码捕获生成新不可变快照；检查不完整或来源无法安全读取时失败并保留旧 `latest`。旧 metadata 场景仍报告 `unknown`，不冒充 `consistent`。
 5. 更新只允许推进调用时仍为项目 `latest_index_id` 的基准，完成写入时再次校验，避免并发请求以较晚完成的旧结果覆盖较新的 latest。旧 Session/Run/source evidence 继续绑定原 index/hash/行号。HTTP 更新沿用 loopback 写约束；MCP 更新工具单独受显式写开关控制，默认不注册。
 6. 本地来源的索引构建使用新的身份版本，使旧索引即使与源码内容相同也不会被错误地当作已经写入了当前规则元数据。不会迁移、复制或删除旧存储；GitHub 来源的检查明确返回“远端未检查”，不访问已清理的临时目录。
 
@@ -37,7 +37,8 @@ Status: implemented
 
 ## 实际证据（2026-09-15）
 
-- `apps/api/tests/test_freshness.py` 覆盖同大小且恢复 mtime 的内容修改、排除文件、新增/删除、无变化复用、变化重建、预算未知、旧元数据修复后再次一致/复用；后端全量 `uv run pytest -q` 为 145 passed。
+- `apps/api/tests/test_freshness.py` 覆盖同大小且恢复 mtime 的内容修改、排除文件、新增/删除、无变化复用、变化重建、预算未知、旧元数据修复后再次一致/复用，以及旧 metadata 与源码变化组合的安全重建/不安全拒绝；后端全量 `uv run pytest -q` 为 149 passed。
 - `apps/api/tests/test_mcp.py` 覆盖 HTTP/MCP 新鲜度结果对照和 MCP index 写能力默认关闭/显式开启；`uv run python -m compileall -q app`、前端 25 项测试、严格类型检查、生产构建、契约 23 项测试、`pnpm doc-sync` 和 `pnpm docs:check:local` 均通过。
-- 实际工作台浏览器使用共享运行目录中的旧 latest：源码已发生变化且该旧索引缺少规则/配置元数据。索引管理正确显示 `无法确定`、1 个新增/16 个修改/0 个删除、扫描 121 个文件/1,395,093 bytes 和机器可读原因；点击“更新索引”返回 `source freshness could not be established; the existing index was kept`，旧 latest 未被替换，浏览器无 console error/warning。变化后生成新快照、无变化复用和重复 legacy 修复由离线业务回归覆盖。
+- 实际工作台浏览器使用共享运行目录中的旧 latest：源码已发生变化且该旧索引缺少规则/配置元数据。索引管理显示 `无法确定`、1 个新增/16 个修改/0 个删除、扫描 121 个文件/1,404,324 bytes 和机器可读原因，并提示完整安全扫描可全量重建；点击“更新索引”创建 `index-import-c929f2f2b7a3e5b435ddaee3859158fe-relations-v3-rebuild-3378e41e1001cbce`，旧 v2 latest 仍保留。对新快照再次“检查更新”显示 `源码一致`，再次“更新索引”显示“复用原快照，未重新解析”；原 `session-aad58cde386e4b48868fca082ae6b94e` 及其历史 Run/evidence 仍可读取。
+- 实际宿主 `check_index_freshness` 与 HTTP freshness 对照一致：旧 v2 均为 `unknown`（`source_changed` + `missing_index_metadata`），新 v3 均为 `consistent`；当前宿主工具目录未注册 `refresh_index`，因此只做宿主读检查，写入路径由工作台闭环验证。
 - GitHub 检查保持 `remote_not_checked` 的未知语义；真实供应商语义质量未在本步验证。未修改用户控制的 `memory-bank/next.md`，`memory-bank/` 也未纳入 Git。

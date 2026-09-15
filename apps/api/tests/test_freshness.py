@@ -14,6 +14,7 @@ from app.contracts import (
     CreateProjectRequest,
     RefreshProjectIndexRequest,
 )
+from app.indexing import SnapshotIssue, SourceManifestScan
 from app.main import create_app
 from app.service import ServiceError
 
@@ -195,3 +196,126 @@ def test_legacy_metadata_requires_rebuild(tmp_path: Path) -> None:
     )
     assert reused.mode == "reused"
     assert reused.index.index.index_id == refreshed.index.index.index_id
+
+
+def test_legacy_metadata_and_source_changes_can_rebuild(tmp_path: Path) -> None:
+    application, repository, project, index = _workspace(tmp_path)
+    source = repository / "timeout_demo" / "config.py"
+    source.write_text(
+        source.read_text(encoding="utf-8").replace("DEFAULT_TIMEOUT = 30", "DEFAULT_TIMEOUT = 99"),
+        encoding="utf-8",
+    )
+    with application.state.registry.store_for_repository("timeout-demo") as store:
+        store.connection.execute(
+            "UPDATE index_snapshots SET rules_version = NULL, configuration_hash = NULL WHERE index_id = ?",
+            (index.index.index_id,),
+        )
+
+    freshness = application.state.workspace_service.check_index_freshness(
+        project.project_id,
+        index.index.index_id,
+    )
+    assert freshness.status == "unknown"
+    assert freshness.scan_complete is True
+    assert freshness.scan_truncated is False
+    assert freshness.reasons == ["source_changed", "missing_index_metadata"]
+
+    refreshed = application.state.workspace_service.refresh_project_index(
+        project.project_id,
+        index.index.index_id,
+        RefreshProjectIndexRequest(revision="legacy-repair-v1", dirty=True),
+    )
+    assert refreshed.mode == "created"
+    assert refreshed.freshness.status == "unknown"
+    assert refreshed.index.index.index_id != index.index.index_id
+
+    current = application.state.workspace_service.get_project(project.project_id)
+    assert current.latest_index_id == refreshed.index.index.index_id
+    assert index.index.index_id in current.available_index_ids
+
+    repaired_freshness = application.state.workspace_service.check_index_freshness(
+        project.project_id,
+        refreshed.index.index.index_id,
+    )
+    assert repaired_freshness.status == "consistent"
+    reused = application.state.workspace_service.refresh_project_index(
+        project.project_id,
+        refreshed.index.index.index_id,
+        RefreshProjectIndexRequest(),
+    )
+    assert reused.mode == "reused"
+    assert reused.index.index.index_id == refreshed.index.index.index_id
+
+
+def test_legacy_metadata_with_budget_exhaustion_keeps_latest(tmp_path: Path) -> None:
+    application, _repository, project, index = _workspace(tmp_path)
+    with application.state.registry.store_for_repository("timeout-demo") as store:
+        store.connection.execute(
+            "UPDATE index_snapshots SET rules_version = NULL, configuration_hash = NULL WHERE index_id = ?",
+            (index.index.index_id,),
+        )
+    application.state.index_service.freshness_max_files = 1
+
+    freshness = application.state.workspace_service.check_index_freshness(
+        project.project_id,
+        index.index.index_id,
+    )
+    assert freshness.status == "unknown"
+    assert "missing_index_metadata" in freshness.reasons
+    assert "budget_exceeded" in freshness.reasons
+
+    with pytest.raises(ServiceError, match="bounded scan budget"):
+        application.state.workspace_service.refresh_project_index(
+            project.project_id,
+            index.index.index_id,
+            RefreshProjectIndexRequest(),
+        )
+    current = application.state.workspace_service.get_project(project.project_id)
+    assert current.latest_index_id == index.index.index_id
+
+
+@pytest.mark.parametrize(
+    ("issue_kind", "expected_reason", "scan_complete"),
+    [("read_error", "source_read_error", False), ("outside_root", "outside_root", True)],
+)
+def test_legacy_metadata_with_unsafe_scan_reason_keeps_latest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    issue_kind: str,
+    expected_reason: str,
+    scan_complete: bool,
+) -> None:
+    application, _repository, project, index = _workspace(tmp_path)
+    with application.state.registry.store_for_repository("timeout-demo") as store:
+        store.connection.execute(
+            "UPDATE index_snapshots SET rules_version = NULL, configuration_hash = NULL WHERE index_id = ?",
+            (index.index.index_id,),
+        )
+
+    def fake_scan(*_args, **_kwargs) -> SourceManifestScan:
+        return SourceManifestScan(
+            files=(),
+            issues=(SnapshotIssue("timeout_demo/blocked.py", issue_kind, "blocked"),),  # type: ignore[arg-type]
+            scanned_files=0,
+            scanned_bytes=0,
+            scan_complete=scan_complete,
+            scan_truncated=False,
+            scan_truncation_reason=None,
+        )
+
+    monkeypatch.setattr(service_module, "scan_source_manifest", fake_scan)
+    freshness = application.state.workspace_service.check_index_freshness(
+        project.project_id,
+        index.index.index_id,
+    )
+    assert freshness.status == "unknown"
+    assert expected_reason in freshness.reasons
+
+    with pytest.raises(ServiceError, match="freshness could not be established"):
+        application.state.workspace_service.refresh_project_index(
+            project.project_id,
+            index.index.index_id,
+            RefreshProjectIndexRequest(),
+        )
+    current = application.state.workspace_service.get_project(project.project_id)
+    assert current.latest_index_id == index.index.index_id

@@ -466,6 +466,47 @@ def test_mcp_index_refresh_is_separately_opt_in(tmp_path: Path) -> None:
     assert status == 200
     index_id = index["index"]["index_id"]
 
+    source = repository / "timeout_demo" / "config.py"
+    source.write_text(
+        source.read_text(encoding="utf-8").replace("DEFAULT_TIMEOUT = 30", "DEFAULT_TIMEOUT = 99"),
+        encoding="utf-8",
+    )
+    with application.state.registry.store_for_repository("timeout-demo") as store:
+        store.connection.execute(
+            "UPDATE index_snapshots SET rules_version = NULL, configuration_hash = NULL WHERE index_id = ?",
+            (index_id,),
+        )
+
+    status, http_freshness = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/indexes/{index_id}/freshness",
+    )
+    assert status == 200
+    assert http_freshness["status"] == "unknown"
+    assert http_freshness["reasons"] == ["source_changed", "missing_index_metadata"]
+    status, http_refreshed = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/indexes/{index_id}/refresh",
+        {"revision": "http-legacy-repair", "dirty": True},
+    )
+    assert status == 200
+    assert http_refreshed["mode"] == "created"
+    assert http_refreshed["freshness"]["status"] == "unknown"
+    http_index_id = http_refreshed["index"]["index"]["index_id"]
+    assert http_index_id != index_id
+
+    source.write_text(
+        source.read_text(encoding="utf-8").replace("DEFAULT_TIMEOUT = 99", "DEFAULT_TIMEOUT = 88"),
+        encoding="utf-8",
+    )
+    with application.state.registry.store_for_repository("timeout-demo") as store:
+        store.connection.execute(
+            "UPDATE index_snapshots SET rules_version = NULL, configuration_hash = NULL WHERE index_id = ?",
+            (http_index_id,),
+        )
+
     base_environment = {
         "CODETRAIL_REPOSITORIES": json.dumps({"timeout-demo": str(repository)}),
         "CODETRAIL_WORKBENCH_URL": "http://localhost:3000",
@@ -494,17 +535,52 @@ def test_mcp_index_refresh_is_separately_opt_in(tmp_path: Path) -> None:
             assert "refresh_index" in names
             checked = await client.call_tool(
                 "check_index_freshness",
-                {"project_id": project_id, "index_id": index_id},
+                {"project_id": project_id, "index_id": http_index_id},
             )
-            assert checked.structured_content["result"]["status"] == "consistent"
+            assert checked.structured_content["result"]["status"] == "unknown"
+            assert checked.structured_content["result"]["reasons"] == [
+                "source_changed",
+                "missing_index_metadata",
+            ]
             refreshed = await client.call_tool(
                 "refresh_index",
-                {"project_id": project_id, "index_id": index_id, "revision": "mcp-refresh-v2", "dirty": True},
+                {
+                    "project_id": project_id,
+                    "index_id": http_index_id,
+                    "revision": "mcp-legacy-repair",
+                    "dirty": True,
+                },
             )
             assert refreshed.structured_content["ok"] is True
-            assert refreshed.structured_content["result"]["mode"] == "reused"
+            assert refreshed.structured_content["result"]["mode"] == "created"
+            mcp_index_id = refreshed.structured_content["result"]["index"]["index"]["index_id"]
+            assert mcp_index_id != http_index_id
 
-    asyncio.run(exercise())
+            repaired = await client.call_tool(
+                "check_index_freshness",
+                {"project_id": project_id, "index_id": mcp_index_id},
+            )
+            assert repaired.structured_content["result"]["status"] == "consistent"
+            reused = await client.call_tool(
+                "refresh_index",
+                {"project_id": project_id, "index_id": mcp_index_id},
+            )
+            assert reused.structured_content["ok"] is True
+            assert reused.structured_content["result"]["mode"] == "reused"
+            assert reused.structured_content["result"]["index"]["index"]["index_id"] == mcp_index_id
+            return mcp_index_id
+
+    mcp_index_id = asyncio.run(exercise())
+    status, http_repaired = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/indexes/{mcp_index_id}/freshness",
+    )
+    assert status == 200
+    assert http_repaired["status"] == "consistent"
+    status, current_project = request(application, "GET", f"/api/projects/{project_id}")
+    assert status == 200
+    assert current_project["latest_index_id"] == mcp_index_id
 
 
 def test_mcp_feature_generation_is_separately_opt_in_and_returns_citations(tmp_path: Path) -> None:

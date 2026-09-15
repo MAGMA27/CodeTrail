@@ -350,6 +350,23 @@ function freshnessReasonLabel(reason: string): string {
   }[reason] ?? reason;
 }
 
+const SAFE_LEGACY_REBUILD_REASONS = new Set<IndexFreshness["reasons"][number]>([
+  "missing_index_metadata",
+  "rules_changed",
+  "configuration_changed",
+  "source_changed",
+]);
+
+function canSafelyRebuildLegacyIndex(freshness: IndexFreshness): boolean {
+  return (
+    freshness.status === "unknown" &&
+    freshness.scan_complete &&
+    !freshness.scan_truncated &&
+    freshness.reasons.includes("missing_index_metadata") &&
+    freshness.reasons.every((reason) => SAFE_LEGACY_REBUILD_REASONS.has(reason))
+  );
+}
+
 function importStatusLabel(status: ImportStatus | null): string {
   if (!status) {
     return "未开始";
@@ -733,6 +750,7 @@ function OperationPanel({
                       <span><strong>{index.freshness.scanned_files}</strong> 文件 / {index.freshness.scanned_bytes} bytes</span>
                     </div>
                     {!index.freshness.scan_complete ? <p className="ct-warning">扫描未完成{index.freshness.scan_truncation_reason ? "：" + index.freshness.scan_truncation_reason : ""}，不能据此判定一致。</p> : null}
+                    {canSafelyRebuildLegacyIndex(index.freshness) ? <p className="ct-card-note">旧索引缺少规则/配置元数据；当前来源已完整安全扫描，可通过“更新索引”完成一次全量重建。</p> : null}
                     {index.freshness.changed_paths.length > 0 ? (
                       <div className="ct-freshness-paths">
                         {index.freshness.changed_paths.map((path) => <code key={path}>{path}</code>)}

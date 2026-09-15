@@ -18,7 +18,7 @@
 
 ## 数据与生命周期
 
-打开项目后可在索引管理中显式执行“检查更新”或“更新索引”。检查结果显示 `consistent`、`changed` 或 `unknown`、检查时间、变化统计、扫描预算和有界路径；更新只针对当前 latest，consistent 直接复用，changed 或旧 metadata 生成新 immutable index，失败不替换旧 latest。GitHub 来源明确显示远端未检查。
+打开项目后可在索引管理中显式执行“检查更新”或“更新索引”。检查结果显示 `consistent`、`changed` 或 `unknown`、检查时间、变化统计、扫描预算和有界路径；更新只针对当前 latest，consistent 直接复用，完整安全扫描下的 changed 或旧 metadata 组合生成新 immutable index，失败不替换旧 latest。GitHub 来源明确显示远端未检查。
 
 代码理解报告使用 `outcome=explanation`：结果区域显示 `complete/partial` 覆盖和最多 12 个有序步骤，按 confirmed/inferred/unknown 区分证据强度；步骤 evidence 只能打开报告内同快照源码，唯一 symbol 可进入现有局部关系图，多符号或无符号步骤说明原因，不派生候选影响。
 
@@ -28,7 +28,7 @@
 
 ## 错误与限制
 
-索引检查的 `changed_paths_truncated` 与 `scan_truncated` 分开显示；unknown 不能被渲染为一致，refresh 失败会明确保留旧 latest。索引更新按钮只在当前项目有 ready latest 时可用，避免隐式创建或跨项目操作。
+索引检查的 `changed_paths_truncated` 与 `scan_truncated` 分开显示；unknown 不能被渲染为一致，完整安全扫描且仅含 metadata/源码/规则/配置变化时会提示可全量重建，其他 refresh 失败会明确保留旧 latest。索引更新按钮只在当前项目有 ready latest 时可用，避免隐式创建或跨项目操作。
 
 API 离线、归属错误、消息为空、活动 Run 冲突、预算或执行容量拒绝、模型不可用/失败、结构化输出失败、取消和 interrupted 状态显示为明确错误或状态；容量拒绝不创建本地 Run，提示可稍后重试。结构组/模块关系和入口路径受各自预算限制，工作台显示可见/总量与代表边样本边界；源码目录组可能包含因 `max_modules` 未载入的模块，下钻时明确说明。固定关系索引扫描未完成会显示“关系提取未完成”，unresolved 详情截断会显示独立告警，旧索引未记录该状态会显示未知，查询自身达到节点/边/时间/输出边界则另显示“查询已截断”；这些状态同时存在时不把空邻接当成否定证据。real Run 仍需服务端显式能力开关和持久化配置，失败不回退 fixture；fixture、real 和 external 都不执行仓库源码或 shell，external 的公开工具/报告状态只从服务端持久化事实读取。影响请求失败、无唯一映射、超出深度/节点/路径边界和 unresolved 均显示明确状态，不猜测同名符号。前端读取 Run history/events/tool-results 受服务端页大小限制，报告和证据必须绑定同一 index；请求失败不会用旧项目、旧 Session 或 latest index 的数据填补。
 
@@ -36,7 +36,7 @@ Session 草稿按 project/session 保存到 localStorage，消息保存旧响应
 
 ## 验证
 
-本轮前端新鲜度契约/交互、类型检查和生产构建，以及后端新鲜度、HTTP/MCP 对照、全量回归和契约检查通过。实际浏览器验证了检查→变化摘要，并在旧索引缺元数据且源码变化时将状态显示为 unknown、拒绝不安全更新并保留旧 latest；变化更新切换为新快照由后端业务回归覆盖。真实供应商语义质量仍为 UNVERIFIED。
+本轮前端新鲜度契约/交互、类型检查和生产构建，以及后端新鲜度、HTTP/MCP 对照、全量回归和文档检查通过。实际浏览器验证了旧索引缺元数据且源码变化时的 `unknown` 与安全重建提示、更新后新快照、再次检查 `consistent`、再次更新 `reused`，并确认旧 latest、Session 和 evidence 仍可读取。真实供应商语义质量仍为 UNVERIFIED。
 
 ## 相关决策
 

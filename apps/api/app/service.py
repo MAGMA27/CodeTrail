@@ -567,6 +567,14 @@ _FRESHNESS_MAX_FILES = 2_000
 _FRESHNESS_MAX_TOTAL_BYTES = 20 * 1024 * 1024
 _FRESHNESS_MAX_SECONDS = 2.0
 _FRESHNESS_MAX_CHANGED_PATHS = 100
+_LEGACY_REBUILDABLE_FRESHNESS_REASONS: frozenset[FreshnessReasonCode] = frozenset(
+    {
+        "missing_index_metadata",
+        "rules_changed",
+        "configuration_changed",
+        "source_changed",
+    }
+)
 
 
 class IndexService:
@@ -2257,9 +2265,13 @@ class WorkspaceService:
                 set(freshness.reasons)
                 & {"missing_index_metadata", "rules_changed", "configuration_changed"}
             )
-            legacy_metadata_only = freshness.status == "unknown" and set(freshness.reasons) <= {
-                "missing_index_metadata"
-            }
+            legacy_metadata_rebuildable = (
+                freshness.status == "unknown"
+                and "missing_index_metadata" in freshness.reasons
+                and freshness.scan_complete
+                and not freshness.scan_truncated
+                and set(freshness.reasons) <= _LEGACY_REBUILDABLE_FRESHNESS_REASONS
+            )
             if freshness.status == "consistent":
                 return IndexRefreshResponse(
                     project_id=project_id,
@@ -2268,7 +2280,7 @@ class WorkspaceService:
                     index=self.index_service.get_index(index_id),
                     freshness=freshness,
                 )
-            if freshness.status == "unknown" and not legacy_metadata_only:
+            if freshness.status == "unknown" and not legacy_metadata_rebuildable:
                 if "budget_exceeded" in freshness.reasons:
                     raise ServiceError(
                         "budget_exceeded",
