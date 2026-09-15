@@ -8,7 +8,7 @@
 
 [IndexStore](../../apps/api/app/storage.py) 拥有不可变 Index、Project 关联、Session/消息和 Run 生命周期数据；[ManagementStore](../../apps/api/app/storage.py) 拥有动态来源和 ImportAttempt。存储层负责事务、唯一约束、作用域读取、游标、契约反序列化和同快照静态 `calls` 影响遍历，不负责 HTTP 错误呈现、模型推理或工具计划；影响查询只读取已有 symbols/static_edges/unresolved，不修改 Run 或推断模型影响；real Run 的模型调用只通过这里原子预留/记录有界用量，不保存原始 prompt/response；external Run 的请求事件、实际 ToolResult、超时中断和 Report 也由同一事务边界拥有。
 
-搜索的 `symbol_fts` 保持文件级 `qualified_name/source_text` 候选索引，以兼容已有不可变快照；`search_symbols_bounded` 会在应用 `limit` 前对完整候选集排序。完整限定名（或限定名后缀）优先于叶子名精确匹配，随后是名称部分匹配和正文匹配；正文候选必须在该 Symbol 的 `start_line/end_line` 范围内再次命中。模块 Symbol 保留整文件范围用于导航，函数/类不继承同文件其他 Symbol 的正文命中；同层使用限定名、路径、`symbol_id` 稳定排序，同名定义不合并，`truncated` 反映排序后的候选是否超过上限。该查询修复不修改 FTS 格式、快照 hash、Symbol ID 或历史 Run，不需要重建旧索引。
+搜索的 `symbol_fts` 保持文件级 `qualified_name/source_text` 候选索引，以兼容已有不可变快照；`search_symbols_bounded` 先执行完整限定名/后缀、叶子名精确和名称部分三层有界查询，再以小批次读取 FTS 正文候选。正文候选只读取 `symbol_id/path/bm25`，再按 Symbol 的 `start_line/end_line` 从 `snapshot_files` 复核；同一文件在一次查询中只读取、切分和缓存一次。每次搜索最多检查 256 个候选、正文批次为 32、源码最多 32 个文件和 256 KiB UTF-8，并为每条 SQL 安装 SQLite progress handler，Python 循环也共享 0.5 秒预算；预算停止时保留已确认结果并返回 `search budget exceeded: ...`，与确认仍有更多结果的 `max_results reached` 区分。模块 Symbol 保留整文件范围用于导航，函数/类不继承同文件其他 Symbol 的正文命中；同层使用限定名、路径、`symbol_id` 稳定排序，同名定义不合并。该查询修复不修改 FTS 格式、快照 hash、Symbol ID 或历史 Run，不需要重建旧索引。
 
 ## 接口与依赖
 

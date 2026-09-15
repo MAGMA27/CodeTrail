@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from app import storage as storage_module
 from app.contracts import CodeEdge, SourceLocation
 from app.indexing import build_source_snapshot, extract_definitions
 from app.relations import RelationIndex, extract_relations
@@ -313,6 +314,109 @@ def test_search_prioritizes_exact_names_and_scopes_body_matches_to_symbols(tmp_p
         assert "pkg.one.sibling" not in body_names
         assert "pkg.two.handle" not in body_names
         assert body_matches == store.search_symbols(index_id, "needle", limit=4)
+
+
+def test_search_bounds_candidate_batches_and_reads_each_source_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = tmp_path / "large-search"
+    repository.mkdir()
+    functions = []
+    for index in range(180):
+        body = "rare_body" if index == 179 else "common_body"
+        functions.append(
+            f"def function_{index:03d}() -> str:\n"
+            f"    return {body!r}\n\n"
+        )
+    (repository / "module.py").write_text("".join(functions), encoding="utf-8")
+    relation = relation_for_repository(repository, repository_id="large-search")
+    index_id = relation.snapshot.index.index_id
+    monkeypatch.setattr(storage_module, "_SEARCH_MAX_CANDIDATES", 64)
+
+    statements: list[str] = []
+    with IndexStore(tmp_path / "index.sqlite3") as store:
+        store.write_index(relation)
+        store.connection.set_trace_callback(statements.append)
+        result = store.search_symbols_bounded(index_id, "rare_body", limit=3)
+        store.connection.set_trace_callback(None)
+
+        assert result.matches
+        assert result.truncated is True
+        assert result.truncation_reason == "search budget exceeded: max_candidates"
+        source_reads = [
+            statement
+            for statement in statements
+            if "FROM SNAPSHOT_FILES" in statement.upper() and "SOURCE_TEXT" in statement.upper()
+        ]
+        assert len(source_reads) == 1
+        symbol_reads = [statement for statement in statements if "FROM SYMBOLS" in statement.upper()]
+        fts_reads = [statement for statement in statements if "FROM SYMBOL_FTS" in statement.upper()]
+        assert symbol_reads and all("LIMIT" in statement.upper() for statement in symbol_reads)
+        assert fts_reads and all("LIMIT" in statement.upper() for statement in fts_reads)
+
+        exact_target = store.search_symbols_bounded(index_id, "function_179", limit=1)
+        assert exact_target.matches[0].symbol.qualified_name == "module.function_179"
+
+
+def test_search_reports_source_budget_without_loading_an_oversized_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = tmp_path / "source-budget"
+    repository.mkdir()
+    source = "def target() -> str:\n    return 'source_budget_token'\n"
+    (repository / "module.py").write_text(source, encoding="utf-8")
+    relation = relation_for_repository(repository, repository_id="source-budget")
+    index_id = relation.snapshot.index.index_id
+    monkeypatch.setattr(storage_module, "_SEARCH_MAX_SOURCE_BYTES", 8)
+
+    statements: list[str] = []
+    with IndexStore(tmp_path / "index.sqlite3") as store:
+        store.write_index(relation)
+        store.connection.set_trace_callback(statements.append)
+        result = store.search_symbols_bounded(index_id, "source_budget_token", limit=3)
+        store.connection.set_trace_callback(None)
+
+    assert result.matches == ()
+    assert result.truncated is True
+    assert result.truncation_reason == "search budget exceeded: max_source_bytes"
+    source_reads = [
+        statement
+        for statement in statements
+        if "FROM SNAPSHOT_FILES" in statement.upper() and "SOURCE_TEXT" in statement.upper()
+    ]
+    assert source_reads == []
+
+
+def test_search_sql_progress_handler_interrupts_and_connection_recovers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class StepClock:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def __call__(self) -> float:
+            self.calls += 1
+            return 0.0 if self.calls <= 2 else 1.0
+
+    relation = fixture_relation(index_id="search-time-budget")
+    index_id = relation.snapshot.index.index_id
+    monkeypatch.setattr(storage_module, "_SEARCH_PROGRESS_OPS", 1)
+
+    with IndexStore(tmp_path / "index.sqlite3") as store:
+        store.write_index(relation)
+        budget = storage_module._SearchBudget(clock=StepClock())
+        rows = store._search_query_rows(
+            budget,
+            "SELECT symbol_id FROM symbols WHERE index_id = ? ORDER BY symbol_id LIMIT ?",
+            (index_id, 64),
+        )
+
+        assert rows is None
+        assert budget.reason == "search budget exceeded: max_seconds"
+        assert store.connection.execute("SELECT 1").fetchone()[0] == 1
 
 
 def test_read_evidence_uses_the_persisted_snapshot_after_worktree_changes(tmp_path: Path) -> None:

@@ -15,7 +15,7 @@ from collections import Counter, deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Literal
+from typing import Callable, Literal
 
 from pydantic import TypeAdapter, ValidationError
 
@@ -60,6 +60,12 @@ _RUN_TOOL_RESULT_PAGE_SIZE = 40
 logger = logging.getLogger(__name__)
 _EVENT_ADAPTER = TypeAdapter(Event)
 _TOOL_RESULT_ADAPTER = TypeAdapter(ToolResult)
+_SEARCH_MAX_SECONDS = 0.5
+_SEARCH_MAX_CANDIDATES = 256
+_SEARCH_BODY_BATCH_SIZE = 32
+_SEARCH_MAX_SOURCE_FILES = 32
+_SEARCH_MAX_SOURCE_BYTES = 256 * 1024
+_SEARCH_PROGRESS_OPS = 1_000
 
 
 def _feature_generation_from_json(result_json: str) -> FeatureGeneration:
@@ -139,13 +145,76 @@ class SearchQueryResult:
 
 
 @dataclass(frozen=True)
+class _SearchSource:
+    """One query-local, line-split source file held within the search budget."""
+
+    lines: tuple[str, ...]
+    size: int
+
+
+class _SearchBudget:
+    """Fixed server-side limits shared by SQL reads and Python post-processing."""
+
+    def __init__(self, *, clock: Callable[[], float] | None = None) -> None:
+        self.max_seconds = _SEARCH_MAX_SECONDS
+        self.max_candidates = _SEARCH_MAX_CANDIDATES
+        self.max_source_files = _SEARCH_MAX_SOURCE_FILES
+        self.max_source_bytes = _SEARCH_MAX_SOURCE_BYTES
+        self._clock = clock or time.monotonic
+        self._deadline = self._clock() + self.max_seconds
+        self.candidates_seen = 0
+        self.source_files = 0
+        self.source_bytes = 0
+        self.reason: str | None = None
+
+    @property
+    def remaining_candidates(self) -> int:
+        return max(0, self.max_candidates - self.candidates_seen)
+
+    def check_time(self) -> bool:
+        if self.reason is not None:
+            return False
+        if self._clock() >= self._deadline:
+            self.reason = "search budget exceeded: max_seconds"
+            return False
+        return True
+
+    def progress(self) -> int:
+        return 0 if self.check_time() else 1
+
+    def record_candidates(self, count: int) -> bool:
+        if self.reason is not None:
+            return False
+        if count < 0 or self.candidates_seen + count > self.max_candidates:
+            self.set_reason("search budget exceeded: max_candidates")
+            return False
+        self.candidates_seen += count
+        return True
+
+    def source_limit_reason(self, size: int) -> str | None:
+        if self.source_files >= self.max_source_files:
+            return "search budget exceeded: max_source_files"
+        if self.source_bytes + size > self.max_source_bytes:
+            return "search budget exceeded: max_source_bytes"
+        return None
+
+    def reserve_source(self, size: int) -> None:
+        self.source_files += 1
+        self.source_bytes += size
+
+    def set_reason(self, reason: str | None) -> None:
+        if self.reason is None and reason is not None:
+            self.reason = reason
+
+
+@dataclass(frozen=True)
 class _SearchCandidate:
-    """An unbounded candidate considered before applying the public result cap."""
+    """A candidate accepted before applying the public result cap."""
 
     symbol: Symbol
     priority: int
     body_score: float
-    source_text: str | None
+    source_path: str | None
 
 
 @dataclass(frozen=True)
@@ -2850,12 +2919,14 @@ class IndexStore:
         *,
         limit: int = 40,
     ) -> SearchQueryResult:
-        """Rank symbol names before scoped body matches, then apply the result cap.
+        """Search names first, then scoped body matches within fixed budgets.
 
         The file-level FTS rows are only a candidate index. Body matches are
         rechecked against each symbol's immutable source span so a token in one
         function does not make every function in that file a match. Module
-        symbols intentionally retain the full-file span for navigation.
+        symbols intentionally retain the full-file span for navigation. Every
+        database read and source-file load is bounded by the query-local budget;
+        a partial result explains which budget stopped the search.
         """
 
         self._require_index(index_id)
@@ -2868,105 +2939,276 @@ class IndexStore:
             return SearchQueryResult((), False, None)
         fts_query = " AND ".join(f'"{token.replace(chr(34), chr(34) * 2)}"' for token in tokens)
         name_query = ".".join(tokens)
-        try:
-            symbol_rows = self._connection.execute(
+        budget = _SearchBudget()
+        name_candidates: dict[str, _SearchCandidate] = {}
+
+        def name_layer(where_sql: str, where_params: tuple[object, ...], priority: int) -> bool:
+            """Load one deterministic, bounded name layer.
+
+            ``True`` means the public result probe is full and the body layer
+            must not run. A full probe is enough to report max_results without
+            reading lower-priority candidates.
+            """
+
+            target = params.limit + 1
+            remaining = budget.remaining_candidates
+            if remaining <= 0:
+                budget.set_reason("search budget exceeded: max_candidates")
+                return True
+            read_limit = min(target, remaining)
+            excluded = tuple(name_candidates)
+            exclusion_sql = ""
+            if excluded:
+                placeholders = ", ".join("?" for _ in excluded)
+                exclusion_sql = f" AND symbol_id NOT IN ({placeholders})"
+            rows = self._search_query_rows(
+                budget,
                 "SELECT symbol_id, path, qualified_name, kind, start_line, end_line FROM symbols "
-                "WHERE index_id = ? ORDER BY path COLLATE BINARY, start_line, end_line, kind, qualified_name, symbol_id",
-                (index_id,),
-            ).fetchall()
-            fts_rows = self._connection.execute(
-                "SELECT symbol_fts.symbol_id, bm25(symbol_fts) AS body_score, "
-                "snapshot_files.source_text "
-                "FROM symbol_fts "
-                "JOIN symbols ON symbols.index_id = symbol_fts.index_id "
-                "AND symbols.symbol_id = symbol_fts.symbol_id "
-                "JOIN snapshot_files ON snapshot_files.index_id = symbols.index_id "
-                "AND snapshot_files.path = symbols.path "
-                "WHERE symbol_fts.index_id = ? AND symbol_fts MATCH ?",
-                (index_id, fts_query),
-            ).fetchall()
-        except sqlite3.OperationalError as exc:
-            raise StorageError(f"symbol search failed: {exc}") from exc
-
-        symbols = {
-            row["symbol_id"]: _symbol_from_row(index_id, row)
-            for row in symbol_rows
-        }
-        name_priorities: dict[str, int] = {}
-        for symbol in symbols.values():
-            folded_name = symbol.qualified_name.casefold()
-            leaf_name = folded_name.rsplit(".", 1)[-1]
-            if folded_name == name_query or (
-                len(tokens) > 1 and folded_name.endswith(f".{name_query}")
-            ):
-                name_priorities[symbol.symbol_id] = 0
-            elif len(tokens) == 1 and leaf_name == name_query:
-                name_priorities[symbol.symbol_id] = 1
-            elif all(token in folded_name for token in tokens):
-                name_priorities[symbol.symbol_id] = 2
-
-        body_candidates: dict[str, tuple[float, str]] = {}
-        token_set = set(tokens)
-        for row in fts_rows:
-            symbol = symbols.get(row["symbol_id"])
-            if symbol is None:
-                continue
-            scoped_source = _symbol_source_text(row["source_text"], symbol)
-            if token_set.issubset(set(_search_tokens(scoped_source))):
-                body_candidates[symbol.symbol_id] = (float(row["body_score"]), scoped_source)
-
-        candidates: list[_SearchCandidate] = []
-        for symbol_id in set(name_priorities) | set(body_candidates):
-            symbol = symbols[symbol_id]
-            body_candidate = body_candidates.get(symbol_id)
-            body_score = body_candidate[0] if body_candidate is not None else math.inf
-            scoped_source = body_candidate[1] if body_candidate is not None else None
-            candidates.append(
-                _SearchCandidate(
-                    symbol=symbol,
-                    priority=name_priorities.get(symbol_id, 3),
-                    body_score=body_score,
-                    source_text=scoped_source,
-                )
+                f"WHERE index_id = ? AND ({where_sql}){exclusion_sql} "
+                "ORDER BY qualified_name COLLATE NOCASE, path COLLATE BINARY, symbol_id COLLATE BINARY "
+                "LIMIT ?",
+                (index_id, *where_params, *excluded, read_limit),
             )
+            if rows is None or budget.reason is not None:
+                return True
+            if not budget.record_candidates(len(rows)):
+                return True
+            for row in rows:
+                symbol = _symbol_from_row(index_id, row)
+                name_candidates[symbol.symbol_id] = _SearchCandidate(
+                    symbol=symbol,
+                    priority=priority,
+                    body_score=math.inf,
+                    source_path=None,
+                )
+            if len(rows) >= read_limit:
+                if read_limit < target:
+                    budget.set_reason("search budget exceeded: max_candidates")
+                else:
+                    budget.set_reason("max_results reached")
+                return True
+            return False
+
+        escaped_name = _escape_search_like(name_query)
+        if len(tokens) > 1:
+            exact_where = (
+                "qualified_name COLLATE NOCASE = ? OR "
+                "qualified_name LIKE ? ESCAPE '\\' COLLATE NOCASE"
+            )
+            if name_layer(exact_where, (name_query, f"%.{escaped_name}"), priority=0):
+                return self._finish_symbol_search(budget, tokens, params.limit, name_candidates, {})
+        else:
+            leaf_where = (
+                "qualified_name COLLATE NOCASE = ? OR "
+                "qualified_name LIKE ? ESCAPE '\\' COLLATE NOCASE"
+            )
+            if name_layer(leaf_where, (name_query, f"%.{escaped_name}"), priority=1):
+                return self._finish_symbol_search(budget, tokens, params.limit, name_candidates, {})
+
+        partial_where = " AND ".join(
+            "qualified_name LIKE ? ESCAPE '\\' COLLATE NOCASE"
+            for _ in tokens
+        )
+        partial_params = tuple(f"%{_escape_search_like(token)}%" for token in tokens)
+        if name_layer(partial_where, partial_params, priority=2):
+            return self._finish_symbol_search(budget, tokens, params.limit, name_candidates, {})
+
+        body_candidates: dict[str, _SearchCandidate] = {}
+        source_cache: dict[str, _SearchSource] = {}
+        token_set = set(tokens)
+        body_offset = 0
+        body_exhausted = False
+        while not body_exhausted and len(name_candidates) + len(body_candidates) < params.limit + 1:
+            if not budget.check_time():
+                break
+            remaining = budget.remaining_candidates
+            if remaining <= 0:
+                budget.set_reason("search budget exceeded: max_candidates")
+                break
+            batch_limit = min(_SEARCH_BODY_BATCH_SIZE, remaining)
+            excluded = tuple(name_candidates)
+            exclusion_sql = ""
+            if excluded:
+                placeholders = ", ".join("?" for _ in excluded)
+                exclusion_sql = f" AND symbols.symbol_id NOT IN ({placeholders})"
+            body_rows = self._search_query_rows(
+                budget,
+                "SELECT symbol_fts.symbol_id, symbols.path, symbols.qualified_name, symbols.kind, "
+                "symbols.start_line, symbols.end_line, bm25(symbol_fts) AS body_score "
+                "FROM symbol_fts JOIN symbols ON symbols.index_id = symbol_fts.index_id "
+                "AND symbols.symbol_id = symbol_fts.symbol_id "
+                "WHERE symbol_fts.index_id = ? AND symbol_fts MATCH ?"
+                f"{exclusion_sql} "
+                "ORDER BY body_score, symbols.qualified_name COLLATE NOCASE, "
+                "symbols.path COLLATE BINARY, symbols.symbol_id COLLATE BINARY "
+                "LIMIT ? OFFSET ?",
+                (index_id, fts_query, *excluded, batch_limit, body_offset),
+            )
+            if body_rows is None or budget.reason is not None:
+                break
+            if not budget.record_candidates(len(body_rows)):
+                break
+            if not body_rows:
+                body_exhausted = True
+                break
+
+            source_paths = [row["path"] for row in body_rows if row["symbol_id"] not in name_candidates]
+            self._load_search_sources(index_id, source_paths, source_cache, budget)
+            if budget.reason == "search budget exceeded: max_seconds":
+                break
+            for row in body_rows:
+                if budget.reason == "search budget exceeded: max_seconds":
+                    break
+                if budget.reason is None and not budget.check_time():
+                    break
+                symbol_id = row["symbol_id"]
+                if symbol_id in name_candidates or symbol_id in body_candidates:
+                    continue
+                source = source_cache.get(row["path"])
+                if source is None:
+                    continue
+                symbol = _symbol_from_row(index_id, row)
+                if not token_set.issubset(_symbol_source_tokens(source.lines, symbol)):
+                    continue
+                body_candidates[symbol_id] = _SearchCandidate(
+                    symbol=symbol,
+                    priority=3,
+                    body_score=float(row["body_score"]),
+                    source_path=symbol.path,
+                )
+            body_offset += len(body_rows)
+            if (
+                budget.reason is None
+                and len(name_candidates) + len(body_candidates) >= params.limit + 1
+            ):
+                budget.set_reason("max_results reached")
+            elif len(body_rows) < batch_limit:
+                body_exhausted = True
+            elif budget.remaining_candidates <= 0:
+                budget.set_reason("search budget exceeded: max_candidates")
+
+        return self._finish_symbol_search(budget, tokens, params.limit, name_candidates, body_candidates, source_cache)
+
+    def _search_query_rows(
+        self,
+        budget: _SearchBudget,
+        statement: str,
+        parameters: tuple[object, ...],
+    ) -> list[sqlite3.Row] | None:
+        """Run one bounded search query with a SQLite-level deadline hook."""
+
+        if not budget.check_time():
+            return None
+        try:
+            self._connection.set_progress_handler(budget.progress, _SEARCH_PROGRESS_OPS)
+            rows = self._connection.execute(statement, parameters).fetchall()
+        except sqlite3.OperationalError as exc:
+            if budget.reason is not None:
+                return None
+            raise StorageError(f"symbol search failed: {exc}") from exc
+        finally:
+            self._connection.set_progress_handler(None, 0)
+        budget.check_time()
+        return rows
+
+    def _load_search_sources(
+        self,
+        index_id: str,
+        paths: list[str],
+        cache: dict[str, _SearchSource],
+        budget: _SearchBudget,
+    ) -> None:
+        """Load each body-candidate file at most once within source budgets."""
+
+        pending_paths = list(dict.fromkeys(path for path in paths if path not in cache))
+        if not pending_paths or not budget.check_time():
+            return
+        placeholders = ", ".join("?" for _ in pending_paths)
+        metadata_rows = self._search_query_rows(
+            budget,
+            "SELECT path, size FROM snapshot_files "
+            f"WHERE index_id = ? AND path IN ({placeholders}) "
+            "ORDER BY path COLLATE BINARY LIMIT ?",
+            (index_id, *pending_paths, len(pending_paths)),
+        )
+        if metadata_rows is None or budget.reason == "search budget exceeded: max_seconds":
+            return
+        sizes = {row["path"]: int(row["size"]) for row in metadata_rows}
+        allowed: list[str] = []
+        deferred_reason: str | None = None
+        for path in pending_paths:
+            size = sizes.get(path)
+            if size is None:
+                continue
+            reason = budget.source_limit_reason(size)
+            if reason is not None:
+                deferred_reason = reason
+                break
+            budget.reserve_source(size)
+            allowed.append(path)
+        if not allowed:
+            budget.set_reason(deferred_reason)
+            return
+        if not budget.check_time():
+            return
+        allowed_placeholders = ", ".join("?" for _ in allowed)
+        source_rows = self._search_query_rows(
+            budget,
+            "SELECT path, size, source_text FROM snapshot_files "
+            f"WHERE index_id = ? AND path IN ({allowed_placeholders}) "
+            "ORDER BY path COLLATE BINARY LIMIT ?",
+            (index_id, *allowed, len(allowed)),
+        )
+        if source_rows is None or budget.reason == "search budget exceeded: max_seconds":
+            return
+        for row in source_rows:
+            source_text = row["source_text"]
+            cache[row["path"]] = _SearchSource(
+                lines=tuple(source_text.splitlines()),
+                size=len(source_text.encode("utf-8")),
+            )
+        budget.set_reason(deferred_reason)
+
+    def _finish_symbol_search(
+        self,
+        budget: _SearchBudget,
+        tokens: list[str],
+        limit: int,
+        name_candidates: dict[str, _SearchCandidate],
+        body_candidates: dict[str, _SearchCandidate],
+        source_cache: dict[str, _SearchSource] | None = None,
+    ) -> SearchQueryResult:
+        """Sort accepted candidates and render snippets without new wide reads."""
+
+        candidates = [*name_candidates.values(), *body_candidates.values()]
+        if budget.reason is None:
+            budget.check_time()
         candidates.sort(key=_search_candidate_sort_key)
-
-        selected = candidates[: params.limit]
-        source_by_path: dict[str, str] = {}
-        missing_source_paths = sorted({candidate.symbol.path for candidate in selected if candidate.source_text is None})
-        if missing_source_paths:
-            placeholders = ", ".join("?" for _ in missing_source_paths)
-            source_rows = self._connection.execute(
-                f"SELECT path, source_text FROM snapshot_files WHERE index_id = ? AND path IN ({placeholders})",
-                (index_id, *missing_source_paths),
-            ).fetchall()
-            source_by_path = {row["path"]: row["source_text"] for row in source_rows}
-
+        selected = candidates[:limit]
+        source_cache = source_cache or {}
         results: list[SymbolSearchResult] = []
         for rank, candidate in enumerate(selected, start=1):
-            source_text = candidate.source_text
-            if source_text is None:
-                source_text = _symbol_source_text(source_by_path.get(candidate.symbol.path, ""), candidate.symbol)
-            folded_name = candidate.symbol.qualified_name.casefold()
-            scoped_tokens = set(_search_tokens(source_text))
-            matched_terms = [
-                token for token in tokens if token in folded_name or token in scoped_tokens
-            ]
+            source = source_cache.get(candidate.source_path or "")
+            source_text = ""
+            if source is not None:
+                source_text = _symbol_source_text_from_lines(source.lines, candidate.symbol)
             results.append(
                 SymbolSearchResult(
                     match=SearchMatch(
                         rank=rank,
                         symbol=candidate.symbol,
-                        matched_terms=matched_terms or [tokens[0]],
+                        matched_terms=list(tokens),
                     ),
                     snippet=_snippet(source_text, tokens, candidate.symbol.qualified_name),
                 )
             )
-        return SearchQueryResult(
-            matches=tuple(results),
-            truncated=len(candidates) > params.limit,
-            truncation_reason="max_results reached" if len(candidates) > params.limit else None,
-        )
+        if budget.reason is not None:
+            truncated = True
+            reason = budget.reason
+        else:
+            truncated = len(candidates) > limit
+            reason = "max_results reached" if truncated else None
+        return SearchQueryResult(tuple(results), truncated, reason)
 
     def read_evidence(
         self,
@@ -3649,8 +3891,14 @@ def _search_tokens(query: str) -> list[str]:
     return list(dict.fromkeys(re.findall(r"\w+", query.casefold(), flags=re.UNICODE)))
 
 
+def _escape_search_like(value: str) -> str:
+    """Escape user text used in a SQLite LIKE pattern."""
+
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def _search_candidate_sort_key(candidate: _SearchCandidate) -> tuple[int, float, str, str, str]:
-    """Sort name matches ahead of body matches, then keep every tie deterministic."""
+    """Sort name matches ahead of body matches with deterministic ties."""
 
     return (
         candidate.priority,
@@ -3664,12 +3912,30 @@ def _search_candidate_sort_key(candidate: _SearchCandidate) -> tuple[int, float,
 def _symbol_source_text(source_text: str, symbol: Symbol) -> str:
     """Return only the immutable source span owned by one indexed symbol."""
 
-    lines = source_text.splitlines()
+    return _symbol_source_text_from_lines(tuple(source_text.splitlines()), symbol)
+
+
+def _symbol_source_text_from_lines(lines: tuple[str, ...], symbol: Symbol) -> str:
+    """Return one symbol span from a file that has already been line-split."""
+
     start = max(0, symbol.start_line - 1)
     end = min(len(lines), symbol.end_line)
     if start >= end:
         return ""
     return "\n".join(lines[start:end])
+
+
+def _symbol_source_tokens(lines: tuple[str, ...], symbol: Symbol) -> set[str]:
+    """Tokenize only one symbol span from a cached source file."""
+
+    start = max(0, symbol.start_line - 1)
+    end = min(len(lines), symbol.end_line)
+    if start >= end:
+        return set()
+    tokens: set[str] = set()
+    for line in lines[start:end]:
+        tokens.update(_search_tokens(line))
+    return tokens
 
 
 def _snippet(source_text: str, tokens: list[str], qualified_name: str, max_chars: int = 240) -> str:
