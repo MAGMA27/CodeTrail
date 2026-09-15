@@ -5,7 +5,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 from .contracts import CodeEdge, SourceLocation, Symbol, UnresolvedReference
@@ -54,6 +54,7 @@ class RelationIndex:
     truncation_reason: str | None
     unresolved_truncated: bool | None = None
     unresolved_truncation_reason: str | None = None
+    ast_parse_count: int = field(default=0, compare=False)
 
     @property
     def snapshot(self) -> SourceSnapshot:
@@ -147,10 +148,12 @@ def extract_relations(
     budget = _RelationBudget(max_edges, max_unresolved, max_seconds)
     edges: list[CodeEdge] = []
     unresolved: list[UnresolvedReference] = []
+    ast_parse_count = 0
 
     for source_file in snapshot.files:
         if budget.truncated:
             break
+        ast_parse_count += 1
         try:
             tree = ast.parse(source_file.text, filename=source_file.path, type_comments=True)
         except SyntaxError:
@@ -181,6 +184,7 @@ def extract_relations(
         truncation_reason=budget.reason,
         unresolved_truncated=budget.unresolved_truncated,
         unresolved_truncation_reason=budget.unresolved_reason,
+        ast_parse_count=ast_parse_count,
     )
 
 

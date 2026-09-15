@@ -2,7 +2,7 @@
 
 ## 状态
 
-已实现 Project/Index/Session、来源导入、O1 `python-entry-v4` 概览（入口、HTTP/源码结构组和聚合模块关系）、O2/O3 功能生成与 P2-R1/P2-R2 fixture/real Run 的 HTTP 和本地 MCP 入口；索引支持本地源码新鲜度检查与显式更新。Run 已覆盖冻结输入、受限工具执行、单 Agent 有界模型循环、公开事件、持久化 SSE 回放/续接、Issue/代码理解报告、取消和重启中断；P3-I1 已增加从保存报告候选/发现读取固定快照的有界静态影响查询；Codex external Agent 已能通过本地 MCP 创建并驱动同一持久化 Run。真实供应商语义质量仍未验证；2026-09-14 已完成实际 Codex 主机 MCP 热加载后的 v4 联合对照。
+已实现 Project/Index/Session、来源导入、O1 `python-entry-v4` 概览（入口、HTTP/源码结构组和聚合模块关系）、O2/O3 功能生成与 P2-R1/P2-R2 fixture/real Run 的 HTTP 和本地 MCP 入口；索引支持本地源码新鲜度检查与显式更新，并在新构建中复用项目隔离的文件级定义提取缓存。Run 已覆盖冻结输入、受限工具执行、单 Agent 有界模型循环、公开事件、持久化 SSE 回放/续接、Issue/代码理解报告、取消和重启中断；P3-I1 已增加从保存报告候选/发现读取固定快照的有界静态影响查询；Codex external Agent 已能通过本地 MCP 创建并驱动同一持久化 Run。真实供应商语义质量仍未验证；2026-09-14 已完成实际 Codex 主机 MCP 热加载后的 v4 联合对照。
 
 ## 职责与范围
 
@@ -14,7 +14,7 @@
 
 `search_code`、HTTP 搜索和 external Run 的 `run_search_code` 都委托同一 `IndexStore`。搜索先按有界名称层返回完整限定名（支持限定名后缀）、叶子名精确和名称部分命中，再按有界 FTS 批次复核符号自身源码范围内的正文命中；名称层先完成，因此精确定义不会被正文候选挤出。每次搜索共享服务端候选、源码文件/字节和 0.5 秒预算，SQL 使用 progress handler；同一文件只读取一次。结果保留 `index_id`、稳定 Symbol 身份、rank、matched terms、snippet 和截断说明，预算停止使用 `search budget exceeded: ...`，已确认还有更多结果才使用 `max_results reached`；模块正文范围仍是整文件，函数/类只使用自身行范围。HTTP、普通 MCP 与绑定 Run 不各自实现排序或预算规则。
 
-`POST /api/projects/{project_id}/indexes/{index_id}/freshness` 调用共享的只读 manifest 检查，返回 `consistent`、`changed` 或 `unknown` 的已执行观察，包含基准 index、检查时间、变化计数、受限路径、扫描统计和机器可读原因；同一源码规则下按内容 hash 比较，不执行 AST 或关系提取。`POST /api/projects/{project_id}/indexes/{index_id}/refresh` 沿用 loopback 写约束，在服务端复核后返回 `reused` 或创建的新快照；完整安全扫描下，旧 metadata 可与源码/规则/配置变化一起允许全量重建，仍以 `unknown` 说明 metadata 缺口；不完整检查、来源不可用、读取/边界/TOCTOU/预算原因保留旧 latest。MCP 始终注册 `check_index_freshness`，`CODETRAIL_MCP_INDEX_WRITE_ENABLED=1` 才注册 `refresh_index`，HTTP 与 MCP 复用同一 WorkspaceService。
+`POST /api/projects/{project_id}/indexes/{index_id}/freshness` 调用共享的只读 manifest 检查，返回 `consistent`、`changed` 或 `unknown` 的已执行观察，包含基准 index、检查时间、变化计数、受限路径、扫描统计和机器可读原因；同一源码规则下按内容 hash 比较，不执行 AST 或关系提取。`POST /api/projects/{project_id}/indexes/{index_id}/refresh` 沿用 loopback 写约束，在服务端复核后返回 `reused` 或创建的新快照；完整安全扫描下，旧 metadata 可与源码/规则/配置变化一起允许全量重建，仍以 `unknown` 说明 metadata 缺口；不完整检查、来源不可用、读取/边界/TOCTOU/预算原因保留旧 latest。新快照构建先捕获源码，再按项目隔离的路径/hash/规则/Python/config 键复用定义描述；命中后按新 index 重建 Symbol，关系阶段仍全量解析，缓存读写不改变 HTTP/MCP 返回契约。MCP 始终注册 `check_index_freshness`，`CODETRAIL_MCP_INDEX_WRITE_ENABLED=1` 才注册 `refresh_index`，HTTP 与 MCP 复用同一 WorkspaceService。
 
 Run HTTP 包括 create/list/detail/events/`events/stream`/tool-results/report/impact/cancel；create 接受显式 `mode=fixture|real`，real 还要求 `CODETRAIL_REAL_RUN_ENABLED=1`，执行器有空闲预留名额且 worker 启动成功后显式返回 queued `run_id`，不在请求线程执行分析。`get_overview` 从固定 index 生成有界概览；`python-entry-v4` 的 `fastapi_route` 入口保存方法、声明路径、处理函数 symbol 与同快照 evidence，结构组按声明路径静态前缀/handler 模块和源码目录生成，模块关系只聚合同快照可映射的 `imports`/`calls`，附最多 8 条代表边。结构输出通过 `max_groups`（80/200）和 `max_module_relations`（200/400）独立限制，覆盖字段区分总量/可见量；静态路径仍从处理函数沿既有图展开，入口绑定和聚合关系均不生成 CodeEdge。`mode=external` 只由 MCP external 工具创建，服务端冻结输入但不占内部 worker；后续固定的 `run_search_code`、`run_read_source`、`run_get_neighbors` 和 `submit_external_run` 由同一 WorkspaceService 执行、持久化并校验证据。容量满时在内部 Run 落库前返回可重试的 `budget_exceeded`/429。`events/stream` 复用事件表，以 `{run_id}:{sequence}` 和 `after_sequence`/`Last-Event-ID` 实现严格续接；总连接、单 Run 连接、批次、事件大小、心跳和生命周期均有界，满载在握手前返回 429。`impact` 要求恰好一个报告内 candidate/finding ID，由 WorkspaceService 在 Run 固定 index 上遍历同快照静态 `calls`，深度最多 2、节点默认/最多 40，并返回解释路径与未知边界；它不启动 Run、不调用模型。默认 MCP 增加 `list_session_runs`、`get_session_run`、`list_run_events`、`list_run_tool_results`、`get_run_report`、`get_run_impact`；`CODETRAIL_MCP_RUN_WRITE_ENABLED=1` 才增加独立的 `start_session_run` 和 `cancel_session_run`，`CODETRAIL_MCP_EXTERNAL_RUN_ENABLED=1` 才增加 Codex external 工具，MCP real 另要求 `CODETRAIL_MCP_REAL_RUN_ENABLED=1`，不会隐式开放 Session 写入。
 
@@ -24,7 +24,7 @@ Run 的 `analysis_kind` 默认是 `issue`；只有 external Run 可声明 `under
 
 创建 Run 时校验 Session 的固定 ready index、可选同快照 feature generation 和消息 cutoff；省略 cutoff 时以服务端当前保存消息计数为线性化点，并读取完整连续消息前缀，保存 input hash、字符数和范围。Run、RunInput、事件、工具结果和报告由 [IndexStore](../../apps/api/app/storage.py) 同一数据库事务保存；Session 最多一个 queued/running Run，幂等键绑定请求指纹。
 
-本地 executor 在 `CODETRAIL_RUN_MAX_CONCURRENT_RUNS`（默认 2）上做非阻塞准入，只保留有限的 daemon worker，不引入持久或内部等待队列、多 Agent。索引新鲜度扫描默认最多读取 2,000 个 Python 文件、20 MiB 和 2 秒；变化路径最多返回 100 条，扫描预算与路径展示上限分开。fixture 和 real 的工具计划只调用 `search_code`、`read_source`、`get_neighbors`；real 每轮由模型返回一个 Pydantic 校验的工具请求或最终结论，最多一次有限修复。external Run 在首个外部工具或结论请求时写入 `run.started`，不经过内部 executor；每个外部 `request_id` 绑定原始参数和实际结果，重复调用只返回已持久化结果。`submit_external_run` 的成功回执与持久化的 succeeded Run/Report 共用同一 `report_id` 和终态序号；连接在持久化后中断时，使用完全相同的结论重试会复用原报告和 evidence references，不追加终态事件；不同结论返回 `conflict`，不创建补偿 Run。未知 `internal_error` 不能当作成功，客户端应先读取 Run/report，再决定是否用相同内容重试。服务端按创建时间兑现 external 的 `max_seconds`，超时只中断当前 Run；成功、证据不足和工具失败报告均由这次执行的真实结果组装，证据/图绑定冻结 index_id。公开事件按连续 sequence 写入，queued/running 只能进入一次 succeeded/failed/cancelled/interrupted 终态；模型调用预算在请求前预留，输出只记录字符/token 用量，不保存原始模型文本；容量预留在存储失败、worker 启动失败、取消、超时、异常和完成路径恰好释放，晚到结果因终态事务拒绝。影响读取不持久化派生结果，且从报告映射失败时返回 unmapped 空结果，不按同名符号猜测。
+本地 executor 在 `CODETRAIL_RUN_MAX_CONCURRENT_RUNS`（默认 2）上做非阻塞准入，只保留有限的 daemon worker，不引入持久或内部等待队列、多 Agent。索引新鲜度扫描默认最多读取 2,000 个 Python 文件、20 MiB 和 2 秒；变化路径最多返回 100 条，扫描预算与路径展示上限分开。定义缓存默认每个项目/仓库最多 5,000 条和 16 MiB，损坏或不兼容按未命中处理，缓存不是 evidence 来源，`read_source` 仍读取固定 snapshot。fixture 和 real 的工具计划只调用 `search_code`、`read_source`、`get_neighbors`；real 每轮由模型返回一个 Pydantic 校验的工具请求或最终结论，最多一次有限修复。external Run 在首个外部工具或结论请求时写入 `run.started`，不经过内部 executor；每个外部 `request_id` 绑定原始参数和实际结果，重复调用只返回已持久化结果。`submit_external_run` 的成功回执与持久化的 succeeded Run/Report 共用同一 `report_id` 和终态序号；连接在持久化后中断时，使用完全相同的结论重试会复用原报告和 evidence references，不追加终态事件；不同结论返回 `conflict`，不创建补偿 Run。未知 `internal_error` 不能当作成功，客户端应先读取 Run/report，再决定是否用相同内容重试。服务端按创建时间兑现 external 的 `max_seconds`，超时只中断当前 Run；成功、证据不足和工具失败报告均由这次执行的真实结果组装，证据/图绑定冻结 index_id。公开事件按连续 sequence 写入，queued/running 只能进入一次 succeeded/failed/cancelled/interrupted 终态；模型调用预算在请求前预留，输出只记录字符/token 用量，不保存原始模型文本；容量预留在存储失败、worker 启动失败、取消、超时、异常和完成路径恰好释放，晚到结果因终态事务拒绝。影响读取不持久化派生结果，且从报告映射失败时返回 unmapped 空结果，不按同名符号猜测。
 
 ## 错误与限制
 
@@ -48,6 +48,8 @@ MCP 代码更新后由 Codex 宿主对 `codetrail` 做一次 reload（或按宿�
 
 `apps/api/tests/test_runs.py` 验证 fixture 生命周期和固定报告影响查询；`apps/api/tests/test_storage.py` 验证有界静态路径、环、去重、manifest 和 latest 冲突；`apps/api/tests/test_freshness.py` 验证内容 hash、预算未知、显式复用/重建、旧 metadata 和旧 latest 保留；`apps/api/tests/test_run_sse.py` 验证持久化逐帧回放、双游标续接、终态控制帧、未来/跨 Run 拒绝、断开释放容量和 health 并发；`apps/api/tests/test_issue_runs.py` 验证 real 的模型工具协议、不同问题的工具计划、证据不足、非法引用/工具、有限修复、预算、持久化配置和 OpenAI-compatible 请求、供应商失败、取消与终态容量；`apps/api/tests/test_mcp.py` 验证 HTTP/MCP 新鲜度对照、独立 index 写能力、同一 Run、影响结果和 Codex external 的实际工具结果、代码理解有序步骤、证据拒绝、幂等、时间预算、取消与终态拒写；`apps/api/tests/test_overview.py` 另验证结构组、模块关系、预算和固定快照。另运行全量 pytest、compileall、本地 stdio MCP 与浏览器索引管理流程。真实 DeepSeek 语义质量为 UNVERIFIED。
 
+本轮新增 `apps/api/tests/test_definition_cache.py` 覆盖定义缓存的冷/热复用、重启、失效、损坏、容量、并发和失败降级；后端全量 `uv run pytest -q` 实际为 158 passed，另通过 compileall。本步没有 Pydantic/HTTP/MCP 契约变化，不生成 Schema，不需前端构建。
+
 ## 相关决策
 
 - [Run 执行决策](../decisions/2026-09-12-run-execution.md)
@@ -60,3 +62,4 @@ MCP 代码更新后由 Codex 宿主对 `codetrail` 做一次 reload（或按宿�
 - [项目结构总览](../decisions/2026-09-14-project-structure-overview.md)
 - [共享本地运行环境与 Codex 联合演示](../decisions/2026-09-14-shared-runtime-codex-demo.md)
 - [本地项目索引新鲜度与显式更新](../decisions/2026-09-15-index-freshness.md)
+- [文件级定义提取缓存](../decisions/2026-09-15-definition-extraction-cache.md)

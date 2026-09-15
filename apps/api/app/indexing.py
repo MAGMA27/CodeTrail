@@ -8,7 +8,8 @@ import json
 import re
 import sys
 import time
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
@@ -142,6 +143,27 @@ class SourceManifestScan:
     unstable_paths: tuple[str, ...] = ()
 
 
+DefinitionKind = Literal["module", "class", "function"]
+
+
+@dataclass(frozen=True)
+class DefinitionDescription:
+    """A cache-safe definition description without index-bound identity."""
+
+    qualified_name: str
+    kind: DefinitionKind
+    start_line: int
+    end_line: int
+
+
+@dataclass(frozen=True)
+class DefinitionCacheEntry:
+    """Validated per-file definitions and the diagnostic from parsing it."""
+
+    definitions: tuple[DefinitionDescription, ...]
+    issue: SnapshotIssue | None = None
+
+
 @dataclass(frozen=True)
 class DefinitionIndex:
     """Definitions extracted from one source snapshot."""
@@ -149,6 +171,22 @@ class DefinitionIndex:
     snapshot: SourceSnapshot
     symbols: tuple[Symbol, ...]
     issues: tuple[SnapshotIssue, ...]
+    ast_parse_count: int = field(default=0, compare=False)
+    cache_hits: int = field(default=0, compare=False)
+    cache_misses: int = field(default=0, compare=False)
+    cache_entries: tuple[tuple[str, DefinitionCacheEntry], ...] = field(default=(), compare=False)
+
+
+@dataclass(frozen=True)
+class IndexBuildStats:
+    """Internal build evidence separating definition and relation parsing."""
+
+    source_file_count: int
+    definition_cache_hits: int
+    definition_cache_misses: int
+    definition_ast_parse_count: int
+    relation_ast_parse_count: int
+    definition_cache_entries_written: int
 
 
 def build_source_snapshot(
@@ -257,6 +295,11 @@ def build_source_snapshot(
 
 
 SOURCE_CAPTURE_RULES_VERSION = "python-source-v1"
+DEFINITION_EXTRACTION_RULES_VERSION = "python-definitions-v1"
+PYTHON_AST_VERSION = (
+    f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+)
+_DEFINITION_CACHE_FORMAT_VERSION = "definition-cache-v1"
 
 
 def current_source_rules_version(identity_version: str) -> str:
@@ -461,52 +504,91 @@ def scan_source_manifest(
     )
 
 
-def extract_definitions(snapshot: SourceSnapshot) -> DefinitionIndex:
-    """Extract module, class, and function symbols from snapshot text only."""
+def extract_definitions(
+    snapshot: SourceSnapshot,
+    *,
+    cached: Mapping[str, DefinitionCacheEntry] | None = None,
+) -> DefinitionIndex:
+    """Extract definitions, reusing only validated entries for unchanged files."""
 
     symbols: list[Symbol] = []
     issues = list(snapshot.issues)
+    cache_entries: list[tuple[str, DefinitionCacheEntry]] = []
+    ast_parse_count = 0
+    cache_hits = 0
+    cache_misses = 0
     for source_file in snapshot.files:
-        try:
-            tree = ast.parse(source_file.text, filename=source_file.path, type_comments=True)
-        except SyntaxError as exc:
-            location = f" at line {exc.lineno}" if exc.lineno else ""
-            issues.append(
-                SnapshotIssue(
-                    source_file.path,
-                    "syntax_error",
-                    f"could not parse Python source{location}: {exc.msg}",
+        entry = cached.get(source_file.path) if cached is not None else None
+        if entry is None:
+            ast_parse_count += 1
+            entry = _extract_file_definitions(source_file)
+            cache_entries.append((source_file.path, entry))
+            cache_misses += 1
+        else:
+            cache_hits += 1
+        for definition in entry.definitions:
+            symbols.append(
+                _build_symbol(
+                    index_id=snapshot.index.index_id,
+                    path=source_file.path,
+                    qualified_name=definition.qualified_name,
+                    kind=definition.kind,
+                    start_line=definition.start_line,
+                    end_line=definition.end_line,
                 )
             )
-            continue
-
-        module_name = _module_name(source_file.path)
-        symbols.append(
-            _build_symbol(
-                index_id=snapshot.index.index_id,
-                path=source_file.path,
-                qualified_name=module_name,
-                kind="module",
-                start_line=1,
-                end_line=max(1, len(source_file.text.splitlines())),
-            )
-        )
-        visitor = _DefinitionVisitor(snapshot.index.index_id, source_file.path, module_name)
-        visitor.visit(tree)
-        symbols.extend(visitor.symbols)
+        if entry.issue is not None:
+            issues.append(entry.issue)
 
     symbols.sort(key=lambda symbol: (symbol.path, symbol.start_line, symbol.end_line, symbol.kind, symbol.qualified_name))
     issues.sort(key=lambda issue: (issue.path, issue.kind))
-    return DefinitionIndex(snapshot=snapshot, symbols=tuple(symbols), issues=tuple(issues))
+    return DefinitionIndex(
+        snapshot=snapshot,
+        symbols=tuple(symbols),
+        issues=tuple(issues),
+        ast_parse_count=ast_parse_count,
+        cache_hits=cache_hits,
+        cache_misses=cache_misses,
+        cache_entries=tuple(cache_entries),
+    )
+
+
+def _extract_file_definitions(source_file: SnapshotFile) -> DefinitionCacheEntry:
+    """Parse one file into index-independent definitions and diagnostics."""
+
+    try:
+        tree = ast.parse(source_file.text, filename=source_file.path, type_comments=True)
+    except SyntaxError as exc:
+        location = f" at line {exc.lineno}" if exc.lineno else ""
+        return DefinitionCacheEntry(
+            definitions=(),
+            issue=SnapshotIssue(
+                source_file.path,
+                "syntax_error",
+                f"could not parse Python source{location}: {exc.msg}",
+            ),
+        )
+
+    module_name = _module_name(source_file.path)
+    definitions = [
+        DefinitionDescription(
+            qualified_name=module_name,
+            kind="module",
+            start_line=1,
+            end_line=max(1, len(source_file.text.splitlines())),
+        )
+    ]
+    visitor = _DefinitionVisitor(module_name)
+    visitor.visit(tree)
+    definitions.extend(visitor.definitions)
+    return DefinitionCacheEntry(definitions=tuple(definitions))
 
 
 class _DefinitionVisitor(ast.NodeVisitor):
-    def __init__(self, index_id: str, path: str, module_name: str) -> None:
-        self.index_id = index_id
-        self.path = path
+    def __init__(self, module_name: str) -> None:
         self.module_name = module_name
         self._name_stack: list[str] = []
-        self.symbols: list[Symbol] = []
+        self.definitions: list[DefinitionDescription] = []
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         self._visit_definition(node, "class")
@@ -523,10 +605,8 @@ class _DefinitionVisitor(ast.NodeVisitor):
         kind: Literal["class", "function"],
     ) -> None:
         qualified_name = ".".join((*([self.module_name] if self.module_name else []), *self._name_stack, node.name))
-        self.symbols.append(
-            _build_symbol(
-                index_id=self.index_id,
-                path=self.path,
+        self.definitions.append(
+            DefinitionDescription(
                 qualified_name=qualified_name,
                 kind=kind,
                 start_line=node.lineno,
@@ -538,12 +618,154 @@ class _DefinitionVisitor(ast.NodeVisitor):
         self._name_stack.pop()
 
 
+def serialize_definition_cache_entry(entry: DefinitionCacheEntry) -> str:
+    """Serialize only validated, index-independent definition facts."""
+
+    definitions: list[dict[str, object]] = []
+    for definition in entry.definitions:
+        _validate_definition_description(definition)
+        definitions.append(
+            {
+                "qualified_name": definition.qualified_name,
+                "kind": definition.kind,
+                "start_line": definition.start_line,
+                "end_line": definition.end_line,
+            }
+        )
+    issue: dict[str, object] | None = None
+    if entry.issue is not None:
+        if entry.issue.kind != "syntax_error":
+            raise ValueError("definition cache can only store syntax diagnostics")
+        if not entry.issue.path or not entry.issue.message or len(entry.issue.message) > 2_000:
+            raise ValueError("definition cache issue is invalid")
+        if entry.issue.size is not None and (
+            not isinstance(entry.issue.size, int)
+            or isinstance(entry.issue.size, bool)
+            or entry.issue.size < 0
+        ):
+            raise ValueError("definition cache issue size is invalid")
+        issue = {
+            "path": entry.issue.path,
+            "kind": entry.issue.kind,
+            "message": entry.issue.message,
+            "size": entry.issue.size,
+        }
+    return json.dumps(
+        {
+            "format_version": _DEFINITION_CACHE_FORMAT_VERSION,
+            "definitions": definitions,
+            "issue": issue,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def deserialize_definition_cache_entry(
+    serialized: str,
+    *,
+    expected_path: str,
+) -> DefinitionCacheEntry:
+    """Validate and decode one cache value, rejecting unknown fields or shapes."""
+
+    try:
+        payload = json.loads(serialized)
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise ValueError("definition cache payload is not valid JSON") from exc
+    if not isinstance(payload, dict) or set(payload) != {"format_version", "definitions", "issue"}:
+        raise ValueError("definition cache payload shape is invalid")
+    if payload["format_version"] != _DEFINITION_CACHE_FORMAT_VERSION:
+        raise ValueError("definition cache format is unsupported")
+    raw_definitions = payload["definitions"]
+    if not isinstance(raw_definitions, list) or len(raw_definitions) > 20_000:
+        raise ValueError("definition cache definitions are invalid")
+    definitions: list[DefinitionDescription] = []
+    seen: set[tuple[str, str, int, int]] = set()
+    for raw_definition in raw_definitions:
+        if not isinstance(raw_definition, dict) or set(raw_definition) != {
+            "qualified_name",
+            "kind",
+            "start_line",
+            "end_line",
+        }:
+            raise ValueError("definition cache definition shape is invalid")
+        qualified_name = raw_definition["qualified_name"]
+        kind = raw_definition["kind"]
+        start_line = raw_definition["start_line"]
+        end_line = raw_definition["end_line"]
+        if not isinstance(qualified_name, str) or not 1 <= len(qualified_name) <= 500:
+            raise ValueError("definition cache qualified name is invalid")
+        if kind not in {"module", "class", "function"}:
+            raise ValueError("definition cache kind is invalid")
+        if (
+            not isinstance(start_line, int)
+            or isinstance(start_line, bool)
+            or not isinstance(end_line, int)
+            or isinstance(end_line, bool)
+            or start_line < 1
+            or end_line < start_line
+        ):
+            raise ValueError("definition cache line range is invalid")
+        signature = (qualified_name, kind, start_line, end_line)
+        if signature in seen:
+            raise ValueError("definition cache contains duplicate definitions")
+        seen.add(signature)
+        definitions.append(
+            DefinitionDescription(
+                qualified_name=qualified_name,
+                kind=kind,
+                start_line=start_line,
+                end_line=end_line,
+            )
+        )
+
+    raw_issue = payload["issue"]
+    issue: SnapshotIssue | None = None
+    if raw_issue is not None:
+        if not isinstance(raw_issue, dict) or set(raw_issue) != {"path", "kind", "message", "size"}:
+            raise ValueError("definition cache issue shape is invalid")
+        path = raw_issue["path"]
+        kind = raw_issue["kind"]
+        message = raw_issue["message"]
+        size = raw_issue["size"]
+        if path != expected_path or kind != "syntax_error":
+            raise ValueError("definition cache issue scope is invalid")
+        if not isinstance(message, str) or not 1 <= len(message) <= 2_000:
+            raise ValueError("definition cache issue message is invalid")
+        if size is not None and (
+            not isinstance(size, int) or isinstance(size, bool) or size < 0
+        ):
+            raise ValueError("definition cache issue size is invalid")
+        issue = SnapshotIssue(path, kind, message, size=size)
+    entry = DefinitionCacheEntry(definitions=tuple(definitions), issue=issue)
+    for definition in entry.definitions:
+        _validate_definition_description(definition)
+    return entry
+
+
+def _validate_definition_description(definition: DefinitionDescription) -> None:
+    if not 1 <= len(definition.qualified_name) <= 500:
+        raise ValueError("definition qualified name is invalid")
+    if definition.kind not in {"module", "class", "function"}:
+        raise ValueError("definition kind is invalid")
+    if (
+        not isinstance(definition.start_line, int)
+        or isinstance(definition.start_line, bool)
+        or not isinstance(definition.end_line, int)
+        or isinstance(definition.end_line, bool)
+        or definition.start_line < 1
+        or definition.end_line < definition.start_line
+    ):
+        raise ValueError("definition line range is invalid")
+
+
 def _build_symbol(
     *,
     index_id: str,
     path: str,
     qualified_name: str,
-    kind: Literal["module", "class", "function"],
+    kind: DefinitionKind,
     start_line: int,
     end_line: int,
 ) -> Symbol:

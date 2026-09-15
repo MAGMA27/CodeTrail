@@ -8,11 +8,11 @@
 
 - [main.py](app/main.py)：FastAPI 应用和 HTTP 路由。
 - [service.py](app/service.py)：仓库注册、Project/Index/Session/Run 归属和应用服务。
-- [storage.py](app/storage.py)：快照、来源、Session/消息、Run、事件、工具结果、报告、manifest 和 SQLite/FTS5 查询。
+- [storage.py](app/storage.py)：快照、来源、Session/消息、Run、事件、工具结果、报告、manifest、项目隔离的定义缓存和 SQLite/FTS5 查询。
 - [run_execution.py](app/run_execution.py)：有界 daemon 线程中的 fixture/real Run 执行器，只调用白名单查询工具；external Run 不经过该内部 worker。
 - [run_sse.py](app/run_sse.py)：复用持久化事件表的有界 SSE 回放、断线游标和订阅容量管理。
 - [issue_analysis.py](app/issue_analysis.py)：real Run 的结构化模型输出、有限工具循环、预算和引用校验。
-- [indexing.py](app/indexing.py) 与 [relations.py](app/relations.py)：Python 快照、只读源码 manifest、符号和保守静态关系提取。
+- [indexing.py](app/indexing.py) 与 [relations.py](app/relations.py)：Python 快照、只读源码 manifest、可复用的文件级定义提取、符号和保守静态关系提取。
 - [overview.py](app/overview.py)、[feature_generation.py](app/feature_generation.py) 与 [feature_graph.py](app/feature_graph.py)：概览、功能生成和同快照功能图。
 - [mcp_server.py](app/mcp_server.py)：本地 MCP stdio 适配器，包含可选 Codex external Run 工具。
 - [config.py](app/config.py)：服务数据目录中的持久化模型供应商配置。
@@ -25,7 +25,7 @@
 
 `GET /api/projects/{project_id}/indexes/{index_id}/overview` 从同一不可变快照生成确定性的 `python-entry-v4` 概览。除 `__main__.py`/main guard 外，`fastapi_route` 入口还会保存已确认的 HTTP 方法、声明路径、处理函数 symbol、装饰器到函数结束的 evidence；概览同时生成 `http_path` 和 `source_directory` 结构组，并把固定快照中可映射的跨模块 `imports`/`calls` 聚合为带代表源码位置的模块关系。处理函数仍沿既有静态图展开，入口绑定本身不新增 CodeEdge；结构组和聚合关系也不会写回静态边。HTTP 组按首个 `{parameter}` 前的声明路径静态前缀及 handler 模块分组，源码组按相对目录分组；它们都不是业务功能。只识别已知 `FastAPI()` 实例、字面量路径和静态方法，声明路径不包含未解析的 router/部署前缀；未展开语句中的可能绑定写入会保守使已知绑定失效，不把后续不确定装饰器升级为路由。结构输出由 `max_groups`（默认 80、最大 200）和 `max_module_relations`（默认 200、最大 400）独立限制，代表边最多保留 8 条并以 `edge_count` 说明总量。
 
-`POST /api/projects/{project_id}/indexes/{index_id}/freshness` 以同一源码规则读取有界内容 hash manifest，返回 `consistent`、`changed` 或 `unknown`，不解析 AST、不创建索引；`POST /api/projects/{project_id}/indexes/{index_id}/refresh` 只允许 loopback，在完整安全扫描下可修复旧 metadata 与源码/规则/配置变化的组合，服务端复核后复用当前 latest 或生成新 immutable index，其他不确定情况失败并保留旧 latest。HTTP 与 MCP 复用同一 WorkspaceService。
+`POST /api/projects/{project_id}/indexes/{index_id}/freshness` 以同一源码规则读取有界内容 hash manifest，返回 `consistent`、`changed` 或 `unknown`，不解析 AST、不创建索引；`POST /api/projects/{project_id}/indexes/{index_id}/refresh` 只允许 loopback，在完整安全扫描下可修复旧 metadata 与源码/规则/配置变化的组合，服务端复核后复用当前 latest 或生成新 immutable index，其他不确定情况失败并保留旧 latest。新快照构建先捕获源码，再用项目隔离的路径、内容 hash、定义规则、Python AST 版本和配置 hash 查询严格 JSON 定义缓存；命中后按新 index 重建 Symbol，关系仍对全量新快照解析。缓存默认 5,000 条/16 MiB，坏缓存安全降级，缓存不是源码 evidence 来源，HTTP/MCP 契约不变。HTTP 与 MCP 复用同一 WorkspaceService。
 
 ## 数据与生命周期
 
@@ -59,7 +59,7 @@ Run 拒绝未开启能力的 `mode=real` 或 `CODETRAIL_MCP_EXTERNAL_RUN_ENABLED
 
 ## 验证
 
-从 `apps/api` 执行 `uv run pytest -q` 和 `uv run python -m compileall -q app`。`tests/test_runs.py` 覆盖 fixture 生命周期和固定 Run 报告影响查询；`tests/test_storage.py` 覆盖静态路径、节点去重、环和输出边界；`tests/test_run_sse.py` 覆盖持久化逐帧回放、双游标续接、终态控制帧、未来/跨 Run 拒绝、断开释放容量和 health 并发；`tests/test_issue_runs.py` 覆盖 real 工具决策、证据不足、非法引用/工具、有限修复、预算、取消、持久化 config.json 和 OpenAI-compatible 请求；`tests/test_mcp.py` 覆盖 HTTP/MCP Run 与影响查询对照、默认只读、独立 Run 写开关和 real 能力开关，以及 external 的实际 stdio 工具、证据边界、幂等、时间预算、取消和终态拒写。其它项目/索引/导入/Session/O1/O2/O3 测试继续覆盖各自边界。本轮全量后端 149 passed、前端测试 25 passed、契约测试 23 passed，编译、类型检查、生产构建、文档检查和本地 stdio MCP/浏览器索引更新闭环均通过；真实 DeepSeek 语义质量仍未验证。
+从 `apps/api` 执行 `uv run pytest -q` 和 `uv run python -m compileall -q app`。`tests/test_runs.py` 覆盖 fixture 生命周期和固定 Run 报告影响查询；`tests/test_storage.py` 与 `tests/test_definition_cache.py` 覆盖静态路径、节点去重、环、容量边界、文件定义缓存的冷/热复用、重启、失效、损坏、并发和失败降级；`tests/test_run_sse.py` 覆盖持久化逐帧回放、双游标续接、终态控制帧、未来/跨 Run 拒绝、断开释放容量和 health 并发；`tests/test_issue_runs.py` 覆盖 real 工具决策、证据不足、非法引用/工具、有限修复、预算、取消、持久化 config.json 和 OpenAI-compatible 请求；`tests/test_mcp.py` 覆盖 HTTP/MCP Run 与影响查询对照、默认只读、独立 Run 写开关和 real 能力开关，以及 external 的实际 stdio 工具、证据边界、幂等、时间预算、取消和终态拒写。其它项目/索引/导入/Session/O1/O2/O3 测试继续覆盖各自边界。本轮全量后端 158 passed，compileall 通过；前端和契约未因本步改变，真实 DeepSeek 语义质量仍未验证。
 
 ## 关联文档
 

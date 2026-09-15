@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import json
+import logging
 import os
 import shutil
 import threading
@@ -104,6 +105,9 @@ from .contracts import (
 )
 from .config import ModelProviderConfig, load_model_config
 from .indexing import (
+    DEFINITION_EXTRACTION_RULES_VERSION,
+    PYTHON_AST_VERSION,
+    IndexBuildStats,
     SnapshotBoundaryError,
     build_source_snapshot,
     current_source_rules_version,
@@ -563,10 +567,14 @@ class RepositoryRegistry:
 
 T = TypeVar("T")
 
+logger = logging.getLogger(__name__)
+
 _FRESHNESS_MAX_FILES = 2_000
 _FRESHNESS_MAX_TOTAL_BYTES = 20 * 1024 * 1024
 _FRESHNESS_MAX_SECONDS = 2.0
 _FRESHNESS_MAX_CHANGED_PATHS = 100
+_DEFINITION_CACHE_MAX_ENTRIES = 5_000
+_DEFINITION_CACHE_MAX_BYTES = 16 * 1024 * 1024
 _LEGACY_REBUILDABLE_FRESHNESS_REASONS: frozenset[FreshnessReasonCode] = frozenset(
     {
         "missing_index_metadata",
@@ -589,6 +597,8 @@ class IndexService:
         freshness_max_files: int = _FRESHNESS_MAX_FILES,
         freshness_max_total_bytes: int = _FRESHNESS_MAX_TOTAL_BYTES,
         freshness_max_seconds: float = _FRESHNESS_MAX_SECONDS,
+        definition_cache_max_entries: int = _DEFINITION_CACHE_MAX_ENTRIES,
+        definition_cache_max_bytes: int = _DEFINITION_CACHE_MAX_BYTES,
     ) -> None:
         if (
             max_concurrent_indexes < 1
@@ -596,6 +606,8 @@ class IndexService:
             or freshness_max_files < 1
             or freshness_max_total_bytes < 1
             or freshness_max_seconds <= 0
+            or definition_cache_max_entries < 1
+            or definition_cache_max_bytes < 1
         ):
             raise ValueError("service budgets must be positive")
         self.registry = registry
@@ -603,6 +615,8 @@ class IndexService:
         self.freshness_max_files = freshness_max_files
         self.freshness_max_total_bytes = freshness_max_total_bytes
         self.freshness_max_seconds = freshness_max_seconds
+        self.definition_cache_max_entries = definition_cache_max_entries
+        self.definition_cache_max_bytes = definition_cache_max_bytes
         self.rules_version = current_source_rules_version(RELATION_INDEX_IDENTITY_VERSION)
         self.configuration_hash = index_configuration_hash(
             max_file_bytes=max_file_bytes,
@@ -616,7 +630,9 @@ class IndexService:
         request: CreateIndexRequest,
         *,
         on_snapshot_ready: Callable[[str], None] | None = None,
+        on_build_stats: Callable[[IndexBuildStats], None] | None = None,
         identity_version: str | None = None,
+        cache_scope_id: str | None = None,
     ) -> IndexResponse:
         root = self.registry.root_for(request.repository_id)
         build_identity_version = identity_version or INDEX_BUILD_IDENTITY_VERSION
@@ -643,13 +659,63 @@ class IndexService:
                         400,
                         "source directory contains no supported Python files",
                     )
-                definitions = extract_definitions(snapshot)
+                resolved_cache_scope_id = cache_scope_id or f"repository:{request.repository_id}"
+                cached_definitions = {}
+                try:
+                    with self.registry.store_for_repository(request.repository_id) as store:
+                        cached_definitions = store.load_definition_cache(
+                            scope_id=resolved_cache_scope_id,
+                            repository_id=request.repository_id,
+                            source_files=snapshot.files,
+                            definition_rules_version=DEFINITION_EXTRACTION_RULES_VERSION,
+                            python_version=PYTHON_AST_VERSION,
+                            configuration_hash=build_configuration_hash,
+                            max_bytes=self.definition_cache_max_bytes,
+                        )
+                except StorageError as exc:
+                    logger.warning(
+                        "definition cache read failed; continuing with cold extraction: %s",
+                        exc,
+                    )
+                definitions = extract_definitions(snapshot, cached=cached_definitions)
                 relation = extract_relations(definitions)
                 if on_snapshot_ready is not None:
                     on_snapshot_ready(snapshot.index.index_id)
                 with self.registry.store_for_repository(request.repository_id) as store:
                     store.write_index(relation)
                     persisted = store.load_index(snapshot.index.index_id)
+                    cache_entries_written = 0
+                    try:
+                        cache_entries_written = store.write_definition_cache(
+                            scope_id=resolved_cache_scope_id,
+                            repository_id=request.repository_id,
+                            source_files=snapshot.files,
+                            entries=definitions.cache_entries,
+                            definition_rules_version=DEFINITION_EXTRACTION_RULES_VERSION,
+                            python_version=PYTHON_AST_VERSION,
+                            configuration_hash=build_configuration_hash,
+                            max_entries=self.definition_cache_max_entries,
+                            max_bytes=self.definition_cache_max_bytes,
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "definition cache write failed; index remains valid: %s",
+                            exc,
+                        )
+                if on_build_stats is not None:
+                    try:
+                        on_build_stats(
+                            IndexBuildStats(
+                                source_file_count=len(snapshot.files),
+                                definition_cache_hits=definitions.cache_hits,
+                                definition_cache_misses=definitions.cache_misses,
+                                definition_ast_parse_count=definitions.ast_parse_count,
+                                relation_ast_parse_count=relation.ast_parse_count,
+                                definition_cache_entries_written=cache_entries_written,
+                            )
+                        )
+                    except Exception as exc:
+                        logger.warning("index build stats callback failed: %s", exc)
             except SnapshotBoundaryError as exc:
                 raise ServiceError(
                     "internal_error",
@@ -2150,12 +2216,15 @@ class WorkspaceService:
         self,
         project_id: str,
         request: CreateProjectIndexRequest,
+        *,
+        on_build_stats: Callable[[IndexBuildStats], None] | None = None,
     ) -> IndexResponse:
         with self._index_mutation_lock:
             return self._create_project_index(
                 project_id,
                 request,
                 expected_latest_index_id=None,
+                on_build_stats=on_build_stats,
             )
 
     def _create_project_index(
@@ -2165,6 +2234,7 @@ class WorkspaceService:
         *,
         expected_latest_index_id: str | None,
         identity_version: str | None = None,
+        on_build_stats: Callable[[IndexBuildStats], None] | None = None,
     ) -> IndexResponse:
         project = self._find_project(project_id)
         spec = self.registry.spec_for(project.repository_id)
@@ -2199,7 +2269,9 @@ class WorkspaceService:
                     dirty=request.dirty,
                 ),
                 on_snapshot_ready=mark_snapshot_ready,
+                on_build_stats=on_build_stats,
                 identity_version=identity_version,
+                cache_scope_id=project.project_id,
             )
             with self.registry.store_for_repository(project.repository_id) as store:
                 store.finish_project_index(

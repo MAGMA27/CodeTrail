@@ -47,7 +47,15 @@ from .contracts import (
     UnresolvedReference,
     ToolResult,
 )
-from .indexing import DefinitionIndex, SnapshotFile, SnapshotIssue, SourceSnapshot
+from .indexing import (
+    DefinitionCacheEntry,
+    DefinitionIndex,
+    SnapshotFile,
+    SnapshotIssue,
+    SourceSnapshot,
+    deserialize_definition_cache_entry,
+    serialize_definition_cache_entry,
+)
 from .relations import RelationIndex
 
 
@@ -475,6 +483,31 @@ CREATE TABLE IF NOT EXISTS snapshot_issues (
     PRIMARY KEY (index_id, ordinal),
     FOREIGN KEY (index_id) REFERENCES index_snapshots(index_id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS definition_cache (
+    scope_id TEXT NOT NULL,
+    repository_id TEXT NOT NULL,
+    path TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    definition_rules_version TEXT NOT NULL,
+    python_version TEXT NOT NULL,
+    configuration_hash TEXT NOT NULL,
+    result_json TEXT NOT NULL,
+    result_bytes INTEGER NOT NULL CHECK (result_bytes >= 0),
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (
+        scope_id,
+        repository_id,
+        path,
+        content_hash,
+        definition_rules_version,
+        python_version,
+        configuration_hash
+    )
+);
+
+CREATE INDEX IF NOT EXISTS definition_cache_scope
+    ON definition_cache(scope_id, repository_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS symbols (
     index_id TEXT NOT NULL,
@@ -1579,6 +1612,191 @@ class IndexStore:
             for row in issue_rows
         )
         return files, issues
+
+    def load_definition_cache(
+        self,
+        *,
+        scope_id: str,
+        repository_id: str,
+        source_files: tuple[SnapshotFile, ...],
+        definition_rules_version: str,
+        python_version: str,
+        configuration_hash: str,
+        max_bytes: int,
+    ) -> dict[str, DefinitionCacheEntry]:
+        """Load validated definitions for the exact current source files.
+
+        Cache rows are an optional performance hint.  A malformed, stale, or
+        over-sized row is ignored as a miss; only an unavailable SQLite read is
+        raised so the build service can fall back to cold extraction.
+        """
+
+        if not scope_id or not repository_id or max_bytes < 1:
+            raise StorageInputError("definition cache scope and budget are invalid")
+        source_by_path = _definition_cache_sources(source_files)
+        if not source_by_path:
+            return {}
+        try:
+            rows = self._connection.execute(
+                "SELECT path, content_hash, result_json, result_bytes "
+                "FROM definition_cache WHERE scope_id = ? AND repository_id = ? "
+                "AND definition_rules_version = ? AND python_version = ? "
+                "AND configuration_hash = ? AND result_bytes <= ?",
+                (
+                    scope_id,
+                    repository_id,
+                    definition_rules_version,
+                    python_version,
+                    configuration_hash,
+                    max_bytes,
+                ),
+            ).fetchall()
+        except sqlite3.Error as exc:
+            raise StorageError(f"could not read definition cache: {exc}") from exc
+
+        entries: dict[str, DefinitionCacheEntry] = {}
+        for row in rows:
+            path = row["path"]
+            source_file = source_by_path.get(path)
+            if source_file is None or row["content_hash"] != source_file.content_hash:
+                continue
+            serialized = row["result_json"]
+            result_bytes = row["result_bytes"]
+            if (
+                not isinstance(serialized, str)
+                or not isinstance(result_bytes, int)
+                or isinstance(result_bytes, bool)
+                or result_bytes != len(serialized.encode("utf-8"))
+            ):
+                logger.warning("ignoring invalid definition cache size for %s", path)
+                continue
+            try:
+                entry = deserialize_definition_cache_entry(
+                    serialized,
+                    expected_path=source_file.path,
+                )
+                _validate_definition_cache_entry_lines(entry, source_file)
+            except (UnicodeError, ValueError, TypeError):
+                logger.warning("ignoring invalid definition cache entry for %s", path)
+                continue
+            entries[source_file.path] = entry
+        return entries
+
+    def write_definition_cache(
+        self,
+        *,
+        scope_id: str,
+        repository_id: str,
+        source_files: tuple[SnapshotFile, ...],
+        entries: tuple[tuple[str, DefinitionCacheEntry], ...],
+        definition_rules_version: str,
+        python_version: str,
+        configuration_hash: str,
+        max_entries: int,
+        max_bytes: int,
+    ) -> int:
+        """Persist parsed definitions and prune only this derived cache.
+
+        Serialization happens before the SQLite transaction.  The transaction
+        then inserts complete rows and applies both capacity limits atomically;
+        an index or its historical evidence is never part of cache cleanup.
+        """
+
+        if (
+            not scope_id
+            or not repository_id
+            or max_entries < 1
+            or max_bytes < 1
+        ):
+            raise StorageInputError("definition cache scope and budgets are invalid")
+        source_by_path = _definition_cache_sources(source_files)
+        rows: list[tuple[object, ...]] = []
+        seen_paths: set[str] = set()
+        timestamp = _datetime_text(datetime.now(timezone.utc))
+        for path, entry in entries:
+            if path in seen_paths:
+                raise StorageInputError("definition cache contains duplicate paths")
+            seen_paths.add(path)
+            source_file = source_by_path.get(path)
+            if source_file is None:
+                continue
+            try:
+                _validate_definition_cache_entry_lines(entry, source_file)
+                serialized = serialize_definition_cache_entry(entry)
+            except (TypeError, ValueError):
+                logger.warning("skipping invalid definition cache entry for %s", path)
+                continue
+            result_bytes = len(serialized.encode("utf-8"))
+            if result_bytes > max_bytes:
+                logger.warning("skipping over-sized definition cache entry for %s", path)
+                continue
+            rows.append(
+                (
+                    scope_id,
+                    repository_id,
+                    path,
+                    source_file.content_hash,
+                    definition_rules_version,
+                    python_version,
+                    configuration_hash,
+                    serialized,
+                    result_bytes,
+                    timestamp,
+                )
+            )
+
+        try:
+            self._connection.execute("BEGIN IMMEDIATE")
+            for row in rows:
+                self._connection.execute(
+                    "INSERT OR REPLACE INTO definition_cache ("
+                    "scope_id, repository_id, path, content_hash, "
+                    "definition_rules_version, python_version, configuration_hash, "
+                    "result_json, result_bytes, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    row,
+                )
+            cache_rows = self._connection.execute(
+                "SELECT rowid, result_bytes FROM definition_cache "
+                "WHERE scope_id = ? AND repository_id = ? "
+                "ORDER BY created_at DESC, rowid DESC",
+                (scope_id, repository_id),
+            ).fetchall()
+            kept_count = 0
+            kept_bytes = 0
+            delete_rowids: list[int] = []
+            for cache_row in cache_rows:
+                rowid = cache_row["rowid"]
+                result_bytes = cache_row["result_bytes"]
+                if (
+                    isinstance(rowid, int)
+                    and isinstance(result_bytes, int)
+                    and not isinstance(result_bytes, bool)
+                    and kept_count < max_entries
+                    and result_bytes >= 0
+                    and kept_bytes + result_bytes <= max_bytes
+                ):
+                    kept_count += 1
+                    kept_bytes += result_bytes
+                else:
+                    delete_rowids.append(rowid)
+            for rowid in delete_rowids:
+                self._connection.execute(
+                    "DELETE FROM definition_cache WHERE rowid = ?",
+                    (rowid,),
+                )
+            self._connection.execute("COMMIT")
+        except Exception as exc:
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            if isinstance(exc, StorageError):
+                raise
+            if isinstance(exc, sqlite3.Error):
+                raise StorageError(f"could not write definition cache: {exc}") from exc
+            raise
+        return len(rows)
 
     def get_relation_coverage(self, index_id: str) -> RelationCoverage:
         """Read relation coverage facts without loading the immutable graph payload."""
@@ -3899,6 +4117,29 @@ def _edge_from_row(index_id: str, row: sqlite3.Row) -> CodeEdge:
             end_line=row["end_line"],
         ),
     )
+
+
+def _definition_cache_sources(
+    source_files: tuple[SnapshotFile, ...],
+) -> dict[str, SnapshotFile]:
+    source_by_path: dict[str, SnapshotFile] = {}
+    for source_file in source_files:
+        if source_file.path in source_by_path:
+            raise StorageInputError("source snapshot contains duplicate paths")
+        source_by_path[source_file.path] = source_file
+    return source_by_path
+
+
+def _validate_definition_cache_entry_lines(
+    entry: DefinitionCacheEntry,
+    source_file: SnapshotFile,
+) -> None:
+    line_count = max(1, len(source_file.text.splitlines()))
+    for definition in entry.definitions:
+        if definition.end_line > line_count:
+            raise ValueError("definition cache line range exceeds source")
+    if entry.issue is not None and entry.issue.path != source_file.path:
+        raise ValueError("definition cache issue path does not match source")
 
 
 def _issue_key(issue: SnapshotIssue) -> tuple[object, ...]:
