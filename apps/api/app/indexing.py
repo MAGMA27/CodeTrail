@@ -175,6 +175,9 @@ class DefinitionIndex:
     cache_hits: int = field(default=0, compare=False)
     cache_misses: int = field(default=0, compare=False)
     cache_entries: tuple[tuple[str, DefinitionCacheEntry], ...] = field(default=(), compare=False)
+    parsed_trees: tuple[tuple[str, ast.Module], ...] = field(
+        default=(), compare=False, repr=False
+    )
 
 
 @dataclass(frozen=True)
@@ -186,7 +189,11 @@ class IndexBuildStats:
     definition_cache_misses: int
     definition_ast_parse_count: int
     relation_ast_parse_count: int
+    relation_fact_cache_hits: int
+    relation_fact_cache_misses: int
+    relation_shared_ast_reuse_count: int
     definition_cache_entries_written: int
+    relation_cache_entries_written: int
 
 
 def build_source_snapshot(
@@ -514,6 +521,7 @@ def extract_definitions(
     symbols: list[Symbol] = []
     issues = list(snapshot.issues)
     cache_entries: list[tuple[str, DefinitionCacheEntry]] = []
+    parsed_trees: list[tuple[str, ast.Module]] = []
     ast_parse_count = 0
     cache_hits = 0
     cache_misses = 0
@@ -521,9 +529,11 @@ def extract_definitions(
         entry = cached.get(source_file.path) if cached is not None else None
         if entry is None:
             ast_parse_count += 1
-            entry = _extract_file_definitions(source_file)
+            entry, tree = _extract_file_definitions_with_tree(source_file)
             cache_entries.append((source_file.path, entry))
             cache_misses += 1
+            if tree is not None:
+                parsed_trees.append((source_file.path, tree))
         else:
             cache_hits += 1
         for definition in entry.definitions:
@@ -550,23 +560,36 @@ def extract_definitions(
         cache_hits=cache_hits,
         cache_misses=cache_misses,
         cache_entries=tuple(cache_entries),
+        parsed_trees=tuple(parsed_trees),
     )
 
 
 def _extract_file_definitions(source_file: SnapshotFile) -> DefinitionCacheEntry:
     """Parse one file into index-independent definitions and diagnostics."""
 
+    entry, _tree = _extract_file_definitions_with_tree(source_file)
+    return entry
+
+
+def _extract_file_definitions_with_tree(
+    source_file: SnapshotFile,
+) -> tuple[DefinitionCacheEntry, ast.Module | None]:
+    """Parse one file and retain its in-process AST for the next index stage."""
+
     try:
         tree = ast.parse(source_file.text, filename=source_file.path, type_comments=True)
     except SyntaxError as exc:
         location = f" at line {exc.lineno}" if exc.lineno else ""
-        return DefinitionCacheEntry(
-            definitions=(),
-            issue=SnapshotIssue(
-                source_file.path,
-                "syntax_error",
-                f"could not parse Python source{location}: {exc.msg}",
+        return (
+            DefinitionCacheEntry(
+                definitions=(),
+                issue=SnapshotIssue(
+                    source_file.path,
+                    "syntax_error",
+                    f"could not parse Python source{location}: {exc.msg}",
+                ),
             ),
+            None,
         )
 
     module_name = _module_name(source_file.path)
@@ -581,7 +604,7 @@ def _extract_file_definitions(source_file: SnapshotFile) -> DefinitionCacheEntry
     visitor = _DefinitionVisitor(module_name)
     visitor.visit(tree)
     definitions.extend(visitor.definitions)
-    return DefinitionCacheEntry(definitions=tuple(definitions))
+    return DefinitionCacheEntry(definitions=tuple(definitions)), tree
 
 
 class _DefinitionVisitor(ast.NodeVisitor):

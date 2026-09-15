@@ -4,17 +4,22 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import json
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Literal
 
 from .contracts import CodeEdge, SourceLocation, Symbol, UnresolvedReference
-from .indexing import DefinitionIndex, SnapshotIssue, SourceSnapshot
+from .indexing import DefinitionIndex, SnapshotIssue, SourceSnapshot, SnapshotFile, _module_name
 
 
 RelationKind = Literal["imports", "calls"]
 BindingKind = Literal["module", "symbol"]
+RelationScopeKind = Literal["module", "class", "function"]
 RELATION_INDEX_IDENTITY_VERSION = "relations-v2"
+RELATION_FACT_EXTRACTION_RULES_VERSION = "python-relation-facts-v1"
+_RELATION_FACTS_FORMAT_VERSION = "relation-facts-v1"
 # New service-built snapshots use a separate identity namespace so legacy
 # rows without freshness metadata remain immutable and explicitly rebuildable.
 INDEX_BUILD_IDENTITY_VERSION = "relations-v3"
@@ -44,6 +49,89 @@ def relation_coverage_limitations(
 
 
 @dataclass(frozen=True)
+class RelationImportAlias:
+    """One import alias retained without an AST object."""
+
+    name: str
+    asname: str | None = None
+
+
+@dataclass(frozen=True)
+class RelationImportFact:
+    """One ordered import statement and all aliases it contains."""
+
+    kind: Literal["import", "from"]
+    aliases: tuple[RelationImportAlias, ...]
+    module: str | None
+    level: int
+    start_line: int
+    end_line: int
+
+
+@dataclass(frozen=True)
+class RelationBindings:
+    """Scope-wide binding facts used by conservative target resolution."""
+
+    imports: tuple[RelationImportFact, ...]
+    assigned: tuple[str, ...]
+    definition_names: tuple[str, ...]
+    global_names: tuple[str, ...]
+    dynamic_names: tuple[str, ...]
+    parameter_names: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class RelationCallFact:
+    """A call expression's syntactic target and source range."""
+
+    expression: str
+    target_kind: Literal["name", "attribute", "dynamic"]
+    target_name: str | None
+    target_parts: tuple[str, ...]
+    start_line: int
+    end_line: int
+
+
+@dataclass(frozen=True)
+class RelationImportEvent:
+    fact: RelationImportFact
+
+
+@dataclass(frozen=True)
+class RelationCallEvent:
+    fact: RelationCallFact
+
+
+@dataclass(frozen=True)
+class RelationScopeEvent:
+    scope: RelationScopeFacts
+
+
+RelationEvent = RelationImportEvent | RelationCallEvent | RelationScopeEvent
+
+
+@dataclass(frozen=True)
+class RelationScopeFacts:
+    """One lexical scope and its ordered relation events."""
+
+    qualified_name: str
+    kind: RelationScopeKind
+    start_line: int
+    bindings: RelationBindings
+    events: tuple[RelationEvent, ...]
+
+
+@dataclass(frozen=True)
+class RelationFileFacts:
+    """Versioned, index-independent syntax facts for one source file."""
+
+    path: str
+    module_name: str
+    syntax_error: bool
+    scope: RelationScopeFacts | None
+
+
+@dataclass(frozen=True)
 class RelationIndex:
     """Static relations and unresolved references tied to one definition index."""
 
@@ -55,6 +143,12 @@ class RelationIndex:
     unresolved_truncated: bool | None = None
     unresolved_truncation_reason: str | None = None
     ast_parse_count: int = field(default=0, compare=False)
+    fact_cache_hits: int = field(default=0, compare=False)
+    fact_cache_misses: int = field(default=0, compare=False)
+    shared_ast_reuse_count: int = field(default=0, compare=False)
+    fact_cache_entries: tuple[tuple[str, RelationFileFacts], ...] = field(
+        default=(), compare=False, repr=False
+    )
 
     @property
     def snapshot(self) -> SourceSnapshot:
@@ -78,7 +172,7 @@ class _Binding:
 
 @dataclass
 class _Scope:
-    node: ast.AST
+    kind: RelationScopeKind
     symbol: Symbol
     parent: _Scope | None
     bindings: dict[str, _Binding]
@@ -134,11 +228,12 @@ class _RelationBudget:
 def extract_relations(
     definitions: DefinitionIndex,
     *,
+    cached: Mapping[str, RelationFileFacts] | None = None,
     max_edges: int = 5_000,
     max_unresolved: int = 5_000,
     max_seconds: float = 5.0,
 ) -> RelationIndex:
-    """Extract only relations whose target is supported by snapshot evidence."""
+    """Resolve file syntax facts against the current immutable definition set."""
 
     if max_edges < 1 or max_unresolved < 1 or max_seconds <= 0:
         raise ValueError("relation budgets must be positive")
@@ -149,30 +244,66 @@ def extract_relations(
     edges: list[CodeEdge] = []
     unresolved: list[UnresolvedReference] = []
     ast_parse_count = 0
+    fact_cache_hits = 0
+    fact_cache_misses = 0
+    shared_ast_reuse_count = 0
+    fact_cache_entries: list[tuple[str, RelationFileFacts]] = []
+    parsed_trees = dict(definitions.parsed_trees)
+    syntax_error_paths = {
+        issue.path for issue in definitions.issues if issue.kind == "syntax_error"
+    }
 
     for source_file in snapshot.files:
         if budget.truncated:
             break
-        ast_parse_count += 1
-        try:
-            tree = ast.parse(source_file.text, filename=source_file.path, type_comments=True)
-        except SyntaxError:
+        facts = cached.get(source_file.path) if cached is not None else None
+        if facts is None:
+            fact_cache_misses += 1
+            tree = parsed_trees.get(source_file.path)
+            if tree is not None:
+                shared_ast_reuse_count += 1
+            if tree is None and source_file.path in syntax_error_paths:
+                facts, parsed = (
+                    RelationFileFacts(
+                        path=source_file.path,
+                        module_name=_module_name(source_file.path),
+                        syntax_error=True,
+                        scope=None,
+                    ),
+                    0,
+                )
+            else:
+                try:
+                    facts, parsed = _extract_relation_facts(
+                        source_file,
+                        tree=tree,
+                        deadline=budget.deadline,
+                    )
+                except _RelationFactsIncomplete:
+                    budget._stop("max_seconds exceeded")
+                    break
+            ast_parse_count += parsed
+            fact_cache_entries.append((source_file.path, facts))
+        else:
+            fact_cache_hits += 1
+
+        if facts.syntax_error or facts.scope is None:
             continue
 
         module_symbol = maps.modules_by_path.get(source_file.path)
         if module_symbol is None:
             continue
-        visitor = _RelationVisitor(
+        resolver = _RelationFactResolver(
             path=source_file.path,
-            module_name=module_symbol.qualified_name,
-            tree=tree,
+            module_name=facts.module_name,
+            scope_facts=facts.scope,
             module_symbol=module_symbol,
             maps=maps,
             budget=budget,
             edges=edges,
             unresolved=unresolved,
         )
-        visitor.visit_module()
+        resolver.visit_scope()
 
     edges.sort(key=lambda edge: (edge.source_location.path, edge.source_location.start_line, edge.kind, edge.edge_id))
     unresolved.sort(key=lambda item: (item.path, item.start_line, item.expression, item.unresolved_id))
@@ -185,12 +316,17 @@ def extract_relations(
         unresolved_truncated=budget.unresolved_truncated,
         unresolved_truncation_reason=budget.unresolved_reason,
         ast_parse_count=ast_parse_count,
+        fact_cache_hits=fact_cache_hits,
+        fact_cache_misses=fact_cache_misses,
+        shared_ast_reuse_count=shared_ast_reuse_count,
+        fact_cache_entries=tuple(fact_cache_entries),
     )
 
 
 def build_relation_index(
     definitions: DefinitionIndex,
     *,
+    cached: Mapping[str, RelationFileFacts] | None = None,
     max_edges: int = 5_000,
     max_unresolved: int = 5_000,
     max_seconds: float = 5.0,
@@ -199,6 +335,7 @@ def build_relation_index(
 
     return extract_relations(
         definitions,
+        cached=cached,
         max_edges=max_edges,
         max_unresolved=max_unresolved,
         max_seconds=max_seconds,
@@ -284,13 +421,196 @@ class _BindingCollector(ast.NodeVisitor):
         self.generic_visit(node)
 
 
-class _RelationVisitor(ast.NodeVisitor):
+class _RelationFactsIncomplete(RuntimeError):
+    """Raised when the bounded fact walk cannot finish one source file."""
+
+
+def _extract_relation_facts(
+    source_file: SnapshotFile,
+    *,
+    tree: ast.Module | None,
+    deadline: float,
+) -> tuple[RelationFileFacts, int]:
+    """Extract cache-safe relation facts, reusing a definition-stage AST when present."""
+
+    parsed = 0
+    if tree is None:
+        if time.monotonic() >= deadline:
+            raise _RelationFactsIncomplete
+        parsed = 1
+        try:
+            tree = ast.parse(source_file.text, filename=source_file.path, type_comments=True)
+        except SyntaxError:
+            return (
+                RelationFileFacts(
+                    path=source_file.path,
+                    module_name=_module_name(source_file.path),
+                    syntax_error=True,
+                    scope=None,
+                ),
+                parsed,
+            )
+    if time.monotonic() >= deadline:
+        raise _RelationFactsIncomplete
+    module_name = _module_name(source_file.path)
+    scope = _extract_scope_facts(
+        tree,
+        qualified_name=module_name,
+        kind="module",
+        start_line=1,
+        deadline=deadline,
+    )
+    return (
+        RelationFileFacts(
+            path=source_file.path,
+            module_name=module_name,
+            syntax_error=False,
+            scope=scope,
+        ),
+        parsed,
+    )
+
+
+def _extract_scope_facts(
+    node: ast.AST,
+    *,
+    qualified_name: str,
+    kind: RelationScopeKind,
+    start_line: int,
+    deadline: float,
+) -> RelationScopeFacts:
+    if time.monotonic() >= deadline:
+        raise _RelationFactsIncomplete
+    collector = _BindingCollector()
+    for child in _scope_body(node):
+        if time.monotonic() >= deadline:
+            raise _RelationFactsIncomplete
+        collector.visit(child)
+    bindings = RelationBindings(
+        imports=tuple(_import_fact_from_node(import_node) for import_node in collector.imports),
+        assigned=tuple(sorted(collector.assigned)),
+        definition_names=tuple(sorted(collector.definition_names)),
+        global_names=tuple(sorted(collector.global_names)),
+        dynamic_names=tuple(sorted(collector.dynamic_names)),
+        parameter_names=(
+            tuple(sorted(_parameter_names(node)))
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            else ()
+        ),
+    )
+    events: list[RelationEvent] = []
+    for child in _scope_body(node):
+        events.extend(
+            _extract_relation_events(
+                child,
+                parent_qualified_name=qualified_name,
+                deadline=deadline,
+            )
+        )
+    return RelationScopeFacts(
+        qualified_name=qualified_name,
+        kind=kind,
+        start_line=start_line,
+        bindings=bindings,
+        events=tuple(events),
+    )
+
+
+def _extract_relation_events(
+    node: ast.AST,
+    *,
+    parent_qualified_name: str,
+    deadline: float,
+) -> list[RelationEvent]:
+    if time.monotonic() >= deadline:
+        raise _RelationFactsIncomplete
+    if isinstance(node, (ast.Import, ast.ImportFrom)):
+        return [RelationImportEvent(_import_fact_from_node(node))]
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        events: list[RelationEvent] = []
+        for expression in _definition_expressions(node):
+            events.extend(
+                _extract_relation_events(
+                    expression,
+                    parent_qualified_name=parent_qualified_name,
+                    deadline=deadline,
+                )
+            )
+        child_kind: RelationScopeKind = "class" if isinstance(node, ast.ClassDef) else "function"
+        child_scope = _extract_scope_facts(
+            node,
+            qualified_name=f"{parent_qualified_name}.{node.name}",
+            kind=child_kind,
+            start_line=node.lineno,
+            deadline=deadline,
+        )
+        events.append(RelationScopeEvent(child_scope))
+        return events
+    if isinstance(node, ast.Call):
+        events = [RelationCallEvent(_call_fact_from_node(node))]
+        for child in ast.iter_child_nodes(node):
+            events.extend(
+                _extract_relation_events(
+                    child,
+                    parent_qualified_name=parent_qualified_name,
+                    deadline=deadline,
+                )
+            )
+        return events
+    events = []
+    for child in ast.iter_child_nodes(node):
+        events.extend(
+            _extract_relation_events(
+                child,
+                parent_qualified_name=parent_qualified_name,
+                deadline=deadline,
+            )
+        )
+    return events
+
+
+def _import_fact_from_node(node: ast.Import | ast.ImportFrom) -> RelationImportFact:
+    return RelationImportFact(
+        kind="import" if isinstance(node, ast.Import) else "from",
+        aliases=tuple(RelationImportAlias(alias.name, alias.asname) for alias in node.names),
+        module=None if isinstance(node, ast.Import) else node.module,
+        level=0 if isinstance(node, ast.Import) else node.level,
+        start_line=node.lineno,
+        end_line=getattr(node, "end_lineno", node.lineno) or node.lineno,
+    )
+
+
+def _call_fact_from_node(node: ast.Call) -> RelationCallFact:
+    target_kind: Literal["name", "attribute", "dynamic"]
+    target_name: str | None = None
+    target_parts: tuple[str, ...] = ()
+    if isinstance(node.func, ast.Name):
+        target_kind = "name"
+        target_name = node.func.id
+    else:
+        parts = _attribute_parts(node.func)
+        if parts:
+            target_kind = "attribute"
+            target_parts = tuple(parts)
+        else:
+            target_kind = "dynamic"
+    return RelationCallFact(
+        expression=_expression(node)[:500],
+        target_kind=target_kind,
+        target_name=target_name,
+        target_parts=target_parts,
+        start_line=node.lineno,
+        end_line=getattr(node, "end_lineno", node.lineno) or node.lineno,
+    )
+
+
+class _RelationFactResolver:
     def __init__(
         self,
         *,
         path: str,
         module_name: str,
-        tree: ast.Module,
+        scope_facts: RelationScopeFacts,
         module_symbol: Symbol,
         maps: _DefinitionMaps,
         budget: _RelationBudget,
@@ -299,145 +619,124 @@ class _RelationVisitor(ast.NodeVisitor):
     ) -> None:
         self.path = path
         self.module_name = module_name
-        self.tree = tree
+        self.scope_facts = scope_facts
         self.maps = maps
         self.budget = budget
         self.edges = edges
         self.unresolved = unresolved
-        self.scope = self._make_scope(tree, module_symbol, None)
+        self.scope = self._make_scope(scope_facts, module_symbol, None)
         self._edge_occurrences: dict[tuple[str, str, str, int, int], int] = {}
         self._unresolved_occurrences: dict[tuple[str, str, int, int], int] = {}
 
-    def visit_module(self) -> None:
-        for node in self.tree.body:
-            self.visit(node)
+    def visit_scope(self) -> None:
+        self._visit_events(self.scope_facts.events)
+
+    def _visit_events(self, events: tuple[RelationEvent, ...]) -> None:
+        for event in events:
             if self.budget.truncated:
                 return
-
-    def visit(self, node: ast.AST) -> object:
-        if self.budget.truncated:
-            return None
-        return super().visit(node)
-
-    def visit_Import(self, node: ast.Import) -> None:
-        for alias in node.names:
-            resolution = self._resolve_import(node, alias)
-            if resolution.target is not None:
-                self._add_edge("imports", resolution.target, "explicit_import", node)
+            if isinstance(event, RelationImportEvent):
+                self._visit_import(event.fact)
+            elif isinstance(event, RelationCallEvent):
+                self._visit_call(event.fact)
             else:
+                self._visit_nested_scope(event.scope)
+
+    def _visit_import(self, fact: RelationImportFact) -> None:
+        for alias in fact.aliases:
+            resolution = self._resolve_import(fact, alias)
+            if resolution.target is not None:
+                self._add_edge(
+                    "imports",
+                    resolution.target,
+                    "explicit_import",
+                    fact.start_line,
+                    fact.end_line,
+                )
+            else:
+                candidate_name = alias.name.rsplit(".", 1)[-1] if fact.kind == "import" else alias.name
                 self._add_unresolved(
-                    node,
                     resolution.expression,
                     resolution.reason,
-                    self._candidate_ids(alias.name.rsplit(".", 1)[-1]),
+                    self._candidate_ids(candidate_name),
+                    fact.start_line,
+                    fact.end_line,
                 )
 
-    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
-        for alias in node.names:
-            resolution = self._resolve_import(node, alias)
-            if resolution.target is not None:
-                self._add_edge("imports", resolution.target, "explicit_import", node)
-            else:
-                self._add_unresolved(
-                    node,
-                    resolution.expression,
-                    resolution.reason,
-                    self._candidate_ids(alias.name),
-                )
-
-    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        self._visit_nested_scope(node, "function")
-
-    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
-        self._visit_nested_scope(node, "function")
-
-    def visit_ClassDef(self, node: ast.ClassDef) -> None:
-        self._visit_nested_scope(node, "class")
-
-    def visit_Call(self, node: ast.Call) -> None:
-        target, reason, candidates = self._resolve_call_target(node.func)
+    def _visit_call(self, fact: RelationCallFact) -> None:
+        target, reason, candidates = self._resolve_call_target(fact)
         if target is not None:
-            self._add_edge("calls", target, "ast", node)
+            self._add_edge("calls", target, "ast", fact.start_line, fact.end_line)
         else:
-            self._add_unresolved(node, _expression(node), reason, candidates)
-        self.generic_visit(node)
+            self._add_unresolved(
+                fact.expression,
+                reason,
+                candidates,
+                fact.start_line,
+                fact.end_line,
+            )
 
-    def _visit_nested_scope(
-        self,
-        node: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef,
-        kind: Literal["class", "function"],
-    ) -> None:
+    def _visit_nested_scope(self, scope_facts: RelationScopeFacts) -> None:
         parent_scope = self.scope
-        for expression in _definition_expressions(node):
-            self.visit(expression)
-            if self.budget.truncated:
-                return
-
-        symbol = self._symbol_for_node(node, kind)
+        symbol = self._symbol_for_scope(scope_facts)
         if symbol is None:
-            self.generic_visit(node)
+            self._visit_events(scope_facts.events)
             return
-
         lexical_parent = (
-            parent_scope.parent if kind == "function" and isinstance(parent_scope.node, ast.ClassDef) else parent_scope
+            parent_scope.parent
+            if scope_facts.kind == "function" and parent_scope.kind == "class"
+            else parent_scope
         )
-        self.scope = self._make_scope(node, symbol, lexical_parent)
-        for child in node.body:
-            self.visit(child)
-            if self.budget.truncated:
-                break
+        self.scope = self._make_scope(scope_facts, symbol, lexical_parent)
+        self._visit_events(scope_facts.events)
         self.scope = parent_scope
 
-    def _make_scope(self, node: ast.AST, symbol: Symbol, parent: _Scope | None) -> _Scope:
-        collector = _BindingCollector()
-        for child in _scope_body(node):
-            collector.visit(child)
-
-        shadowed = collector.assigned - collector.global_names
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            shadowed.update(_parameter_names(node))
+    def _make_scope(
+        self,
+        scope_facts: RelationScopeFacts,
+        symbol: Symbol,
+        parent: _Scope | None,
+    ) -> _Scope:
+        binding_facts = scope_facts.bindings
+        shadowed = set(binding_facts.assigned) - set(binding_facts.global_names)
+        if scope_facts.kind == "function":
+            shadowed.update(binding_facts.parameter_names)
         bindings: dict[str, _Binding] = {}
-        for import_node in collector.imports:
-            aliases = import_node.names
-            for alias in aliases:
-                resolution = self._resolve_import(import_node, alias)
+        for import_fact in binding_facts.imports:
+            for alias in import_fact.aliases:
+                resolution = self._resolve_import(import_fact, alias)
                 if (
                     resolution.binding_name
                     and resolution.binding
                     and resolution.binding_name not in shadowed
                 ):
                     bindings[resolution.binding_name] = resolution.binding
-
-        for name in collector.definition_names:
+        for name in binding_facts.definition_names:
             if name in shadowed:
                 continue
             local_symbol = self.maps.one_by_name(f"{symbol.qualified_name}.{name}")
             if local_symbol is not None:
                 bindings[name] = _Binding(kind="symbol", symbol=local_symbol)
-
         return _Scope(
-            node=node,
+            kind=scope_facts.kind,
             symbol=symbol,
             parent=parent,
             bindings=bindings,
             shadowed=shadowed,
-            dynamic_names=collector.dynamic_names,
+            dynamic_names=set(binding_facts.dynamic_names),
         )
 
-    def _symbol_for_node(
-        self,
-        node: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef,
-        kind: Literal["class", "function"],
-    ) -> Symbol | None:
-        qualified_name = f"{self.scope.symbol.qualified_name}.{node.name}"
-        return self.maps.by_key.get((self.path, qualified_name, kind, node.lineno))
+    def _symbol_for_scope(self, scope_facts: RelationScopeFacts) -> Symbol | None:
+        return self.maps.by_key.get(
+            (self.path, scope_facts.qualified_name, scope_facts.kind, scope_facts.start_line)
+        )
 
     def _resolve_import(
         self,
-        node: ast.Import | ast.ImportFrom,
-        alias: ast.alias,
+        fact: RelationImportFact,
+        alias: RelationImportAlias,
     ) -> _ImportResolution:
-        if isinstance(node, ast.Import):
+        if fact.kind == "import":
             expression = alias.name
             target = self.maps.modules_by_name.get(alias.name)
             if target is None:
@@ -454,19 +753,17 @@ class _RelationVisitor(ast.NodeVisitor):
                 "",
             )
 
-        expression = _import_expression(node, alias)
+        expression = _import_expression_fact(fact, alias)
         if alias.name == "*":
             return _ImportResolution(None, None, None, expression, "star_import_not_resolved")
-        base = _from_import_base(self.module_name, self.path, node.level, node.module)
+        base = _from_import_base(self.module_name, self.path, fact.level, fact.module)
         if not base:
             return _ImportResolution(None, None, None, expression, "invalid_relative_import")
-
         target_name = f"{base}.{alias.name}"
         target = self.maps.one_by_name(target_name) or self.maps.modules_by_name.get(target_name)
         if target is None:
-            reason = "external_import" if node.level == 0 else "missing_relative_import"
+            reason = "external_import" if fact.level == 0 else "missing_relative_import"
             return _ImportResolution(None, None, None, expression, reason)
-
         binding_name = alias.asname or alias.name
         if target.kind == "module":
             binding = _Binding(kind="module", symbol=target, module_name=target.qualified_name)
@@ -476,21 +773,20 @@ class _RelationVisitor(ast.NodeVisitor):
 
     def _resolve_call_target(
         self,
-        function: ast.expr,
+        fact: RelationCallFact,
     ) -> tuple[Symbol | None, str, list[str]]:
-        if isinstance(function, ast.Name):
-            binding, lookup_reason = self._lookup(function.id)
+        if fact.target_kind == "name" and fact.target_name is not None:
+            binding, lookup_reason = self._lookup(fact.target_name)
             if binding is not None and binding.symbol is not None and binding.kind == "symbol":
                 return binding.symbol, "", []
             if lookup_reason:
                 return None, lookup_reason, []
-            candidates = self._candidate_ids(function.id)
+            candidates = self._candidate_ids(fact.target_name)
             if len(candidates) > 1:
                 return None, "ambiguous_name", candidates
             return None, "call_target_not_in_snapshot", candidates
-
-        parts = _attribute_parts(function)
-        if parts:
+        if fact.target_kind == "attribute" and fact.target_parts:
+            parts = fact.target_parts
             binding, lookup_reason = self._lookup(parts[0])
             if binding is not None and binding.kind == "module" and binding.module_name:
                 target_name = ".".join((binding.module_name, *parts[1:]))
@@ -499,7 +795,6 @@ class _RelationVisitor(ast.NodeVisitor):
                     return target, "", []
                 return None, "module_attribute_not_in_snapshot", self._candidate_ids(parts[-1])
             return None, lookup_reason or "object_method_not_resolved", []
-
         return None, "dynamic_call_target", []
 
     def _lookup(self, name: str) -> tuple[_Binding | None, str | None]:
@@ -523,11 +818,11 @@ class _RelationVisitor(ast.NodeVisitor):
         kind: RelationKind,
         target: Symbol,
         extraction_method: Literal["ast", "explicit_import", "fixture"],
-        node: ast.AST,
+        start_line: int,
+        end_line: int,
     ) -> None:
         if not self.budget.reserve("edges"):
             return
-        start_line, end_line = _node_range(node)
         key = (kind, self.scope.symbol.symbol_id, target.symbol_id, start_line, end_line)
         occurrence = self._edge_occurrences.get(key, 0)
         self._edge_occurrences[key] = occurrence + 1
@@ -562,15 +857,15 @@ class _RelationVisitor(ast.NodeVisitor):
 
     def _add_unresolved(
         self,
-        node: ast.AST,
         expression: str,
         reason: str,
         candidate_ids: list[str],
+        start_line: int,
+        end_line: int,
     ) -> None:
         if not self.budget.reserve("unresolved"):
             return
-        start_line, end_line = _node_range(node)
-        expression = expression[:500] or type(node).__name__
+        expression = expression[:500] or "unknown"
         key = (expression, reason, start_line, end_line)
         occurrence = self._unresolved_occurrences.get(key, 0)
         self._unresolved_occurrences[key] = occurrence + 1
@@ -600,6 +895,377 @@ class _RelationVisitor(ast.NodeVisitor):
                 end_line=end_line,
             )
         )
+
+
+def serialize_relation_file_facts(facts: RelationFileFacts) -> str:
+    """Serialize only validated, index-independent relation syntax facts."""
+
+    _validate_relation_file_facts(facts)
+    return json.dumps(
+        {
+            "format_version": _RELATION_FACTS_FORMAT_VERSION,
+            "path": facts.path,
+            "module_name": facts.module_name,
+            "syntax_error": facts.syntax_error,
+            "scope": _relation_scope_to_json(facts.scope) if facts.scope is not None else None,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def deserialize_relation_file_facts(
+    serialized: str,
+    *,
+    expected_path: str,
+) -> RelationFileFacts:
+    """Validate and decode one relation facts cache value."""
+
+    try:
+        payload = json.loads(serialized)
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise ValueError("relation facts payload is not valid JSON") from exc
+    _require_dict(
+        payload,
+        {"format_version", "path", "module_name", "syntax_error", "scope"},
+        "relation facts payload",
+    )
+    if payload["format_version"] != _RELATION_FACTS_FORMAT_VERSION:
+        raise ValueError("relation facts format is unsupported")
+    path = _require_text(payload["path"], "relation facts path", 1_000)
+    if path != expected_path:
+        raise ValueError("relation facts path does not match source")
+    module_name = _require_text(payload["module_name"], "relation facts module name", 500)
+    if module_name != _module_name(expected_path):
+        raise ValueError("relation facts module name does not match path")
+    syntax_error = payload["syntax_error"]
+    if not isinstance(syntax_error, bool):
+        raise ValueError("relation facts syntax flag is invalid")
+    raw_scope = payload["scope"]
+    if raw_scope is None:
+        scope = None
+    else:
+        scope = _relation_scope_from_json(raw_scope)
+    facts = RelationFileFacts(path, module_name, syntax_error, scope)
+    _validate_relation_file_facts(facts)
+    return facts
+
+
+def _relation_scope_to_json(scope: RelationScopeFacts) -> dict[str, object]:
+    return {
+        "qualified_name": scope.qualified_name,
+        "kind": scope.kind,
+        "start_line": scope.start_line,
+        "bindings": {
+            "imports": [_relation_import_to_json(item) for item in scope.bindings.imports],
+            "assigned": list(scope.bindings.assigned),
+            "definition_names": list(scope.bindings.definition_names),
+            "global_names": list(scope.bindings.global_names),
+            "dynamic_names": list(scope.bindings.dynamic_names),
+            "parameter_names": list(scope.bindings.parameter_names),
+        },
+        "events": [_relation_event_to_json(event) for event in scope.events],
+    }
+
+
+def _relation_event_to_json(event: RelationEvent) -> dict[str, object]:
+    if isinstance(event, RelationImportEvent):
+        return {"type": "import", "fact": _relation_import_to_json(event.fact)}
+    if isinstance(event, RelationCallEvent):
+        return {"type": "call", "fact": _relation_call_to_json(event.fact)}
+    return {"type": "scope", "scope": _relation_scope_to_json(event.scope)}
+
+
+def _relation_import_to_json(fact: RelationImportFact) -> dict[str, object]:
+    return {
+        "kind": fact.kind,
+        "aliases": [{"name": alias.name, "asname": alias.asname} for alias in fact.aliases],
+        "module": fact.module,
+        "level": fact.level,
+        "start_line": fact.start_line,
+        "end_line": fact.end_line,
+    }
+
+
+def _relation_call_to_json(fact: RelationCallFact) -> dict[str, object]:
+    return {
+        "expression": fact.expression,
+        "target_kind": fact.target_kind,
+        "target_name": fact.target_name,
+        "target_parts": list(fact.target_parts),
+        "start_line": fact.start_line,
+        "end_line": fact.end_line,
+    }
+
+
+def _relation_scope_from_json(raw_scope: object) -> RelationScopeFacts:
+    _require_dict(
+        raw_scope,
+        {"qualified_name", "kind", "start_line", "bindings", "events"},
+        "relation scope",
+    )
+    qualified_name = _require_text(raw_scope["qualified_name"], "relation scope name", 500)
+    kind = raw_scope["kind"]
+    if kind not in {"module", "class", "function"}:
+        raise ValueError("relation scope kind is invalid")
+    start_line = _require_positive_int(raw_scope["start_line"], "relation scope line")
+    raw_bindings = raw_scope["bindings"]
+    _require_dict(
+        raw_bindings,
+        {"imports", "assigned", "definition_names", "global_names", "dynamic_names", "parameter_names"},
+        "relation bindings",
+    )
+    raw_imports = raw_bindings["imports"]
+    if not isinstance(raw_imports, list) or len(raw_imports) > 20_000:
+        raise ValueError("relation binding imports are invalid")
+    bindings = RelationBindings(
+        imports=tuple(_relation_import_from_json(item) for item in raw_imports),
+        assigned=_relation_names_from_json(raw_bindings["assigned"], "assigned names"),
+        definition_names=_relation_names_from_json(
+            raw_bindings["definition_names"], "definition names"
+        ),
+        global_names=_relation_names_from_json(raw_bindings["global_names"], "global names"),
+        dynamic_names=_relation_names_from_json(
+            raw_bindings["dynamic_names"], "dynamic names"
+        ),
+        parameter_names=_relation_names_from_json(
+            raw_bindings["parameter_names"], "parameter names"
+        ),
+    )
+    raw_events = raw_scope["events"]
+    if not isinstance(raw_events, list) or len(raw_events) > 100_000:
+        raise ValueError("relation scope events are invalid")
+    return RelationScopeFacts(
+        qualified_name=qualified_name,
+        kind=kind,
+        start_line=start_line,
+        bindings=bindings,
+        events=tuple(_relation_event_from_json(item) for item in raw_events),
+    )
+
+
+def _relation_event_from_json(raw_event: object) -> RelationEvent:
+    if not isinstance(raw_event, dict) or "type" not in raw_event:
+        raise ValueError("relation event shape is invalid")
+    event_type = raw_event["type"]
+    if event_type == "import":
+        _require_dict(raw_event, {"type", "fact"}, "relation import event")
+        return RelationImportEvent(_relation_import_from_json(raw_event["fact"]))
+    if event_type == "call":
+        _require_dict(raw_event, {"type", "fact"}, "relation call event")
+        return RelationCallEvent(_relation_call_from_json(raw_event["fact"]))
+    if event_type == "scope":
+        _require_dict(raw_event, {"type", "scope"}, "relation scope event")
+        return RelationScopeEvent(_relation_scope_from_json(raw_event["scope"]))
+    raise ValueError("relation event type is invalid")
+
+
+def _relation_import_from_json(raw_fact: object) -> RelationImportFact:
+    _require_dict(
+        raw_fact,
+        {"kind", "aliases", "module", "level", "start_line", "end_line"},
+        "relation import fact",
+    )
+    kind = raw_fact["kind"]
+    if kind not in {"import", "from"}:
+        raise ValueError("relation import kind is invalid")
+    raw_aliases = raw_fact["aliases"]
+    if not isinstance(raw_aliases, list) or not 1 <= len(raw_aliases) <= 1_000:
+        raise ValueError("relation import aliases are invalid")
+    aliases: list[RelationImportAlias] = []
+    for raw_alias in raw_aliases:
+        _require_dict(raw_alias, {"name", "asname"}, "relation import alias")
+        name = _require_text(raw_alias["name"], "relation import name", 500)
+        asname = raw_alias["asname"]
+        if asname is not None:
+            asname = _require_text(asname, "relation import alias name", 500)
+        aliases.append(RelationImportAlias(name, asname))
+    module = raw_fact["module"]
+    if module is not None:
+        module = _require_text(module, "relation import module", 500)
+    level = _require_nonnegative_int(raw_fact["level"], "relation import level")
+    start_line = _require_positive_int(raw_fact["start_line"], "relation import start line")
+    end_line = _require_positive_int(raw_fact["end_line"], "relation import end line")
+    return RelationImportFact(kind, tuple(aliases), module, level, start_line, end_line)
+
+
+def _relation_call_from_json(raw_fact: object) -> RelationCallFact:
+    _require_dict(
+        raw_fact,
+        {"expression", "target_kind", "target_name", "target_parts", "start_line", "end_line"},
+        "relation call fact",
+    )
+    expression = _require_text(raw_fact["expression"], "relation call expression", 500)
+    target_kind = raw_fact["target_kind"]
+    if target_kind not in {"name", "attribute", "dynamic"}:
+        raise ValueError("relation call target kind is invalid")
+    target_name = raw_fact["target_name"]
+    if target_name is not None:
+        target_name = _require_text(target_name, "relation call target name", 500)
+    raw_parts = raw_fact["target_parts"]
+    if not isinstance(raw_parts, list) or len(raw_parts) > 100:
+        raise ValueError("relation call target parts are invalid")
+    target_parts = tuple(
+        _require_text(part, "relation call target part", 500) for part in raw_parts
+    )
+    start_line = _require_positive_int(raw_fact["start_line"], "relation call start line")
+    end_line = _require_positive_int(raw_fact["end_line"], "relation call end line")
+    return RelationCallFact(
+        expression,
+        target_kind,
+        target_name,
+        target_parts,
+        start_line,
+        end_line,
+    )
+
+
+def _relation_names_from_json(raw_names: object, label: str) -> tuple[str, ...]:
+    if not isinstance(raw_names, list) or len(raw_names) > 20_000:
+        raise ValueError(f"relation {label} are invalid")
+    names = tuple(_require_text(name, f"relation {label[:-1]} name", 500) for name in raw_names)
+    if names != tuple(sorted(set(names))):
+        raise ValueError(f"relation {label} are not canonical")
+    return names
+
+
+def _require_dict(value: object, keys: set[str], label: str) -> dict[str, object]:
+    if not isinstance(value, dict) or set(value) != keys:
+        raise ValueError(f"{label} shape is invalid")
+    return value
+
+
+def _require_text(value: object, label: str, max_length: int) -> str:
+    if not isinstance(value, str) or not 1 <= len(value) <= max_length:
+        raise ValueError(f"{label} is invalid")
+    return value
+
+
+def _require_positive_int(value: object, label: str) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+        raise ValueError(f"{label} is invalid")
+    return value
+
+
+def _require_nonnegative_int(value: object, label: str) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise ValueError(f"{label} is invalid")
+    return value
+
+
+def _validate_relation_file_facts(facts: RelationFileFacts) -> None:
+    _require_text(facts.path, "relation facts path", 1_000)
+    _require_text(facts.module_name, "relation facts module name", 500)
+    if not isinstance(facts.syntax_error, bool):
+        raise ValueError("relation facts syntax flag is invalid")
+    if facts.syntax_error:
+        if facts.scope is not None:
+            raise ValueError("syntax-error relation facts cannot contain a scope")
+        return
+    if facts.scope is None:
+        raise ValueError("valid relation facts require a scope")
+    if facts.scope.kind != "module" or facts.scope.qualified_name != facts.module_name:
+        raise ValueError("relation facts module scope is invalid")
+    if facts.scope.start_line != 1:
+        raise ValueError("relation facts module line is invalid")
+    counters = [0]
+    _validate_relation_scope(facts.scope, depth=0, counters=counters)
+
+
+def _validate_relation_scope(
+    scope: RelationScopeFacts,
+    *,
+    depth: int,
+    counters: list[int],
+) -> None:
+    if depth > 1_000:
+        raise ValueError("relation facts scope nesting is too deep")
+    _require_text(scope.qualified_name, "relation scope name", 500)
+    if scope.kind not in {"module", "class", "function"}:
+        raise ValueError("relation scope kind is invalid")
+    _require_positive_int(scope.start_line, "relation scope line")
+    bindings = scope.bindings
+    if not isinstance(bindings.imports, tuple) or len(bindings.imports) > 20_000:
+        raise ValueError("relation binding imports are invalid")
+    for import_fact in bindings.imports:
+        _validate_relation_import(import_fact)
+    for label, names in (
+        ("assigned names", bindings.assigned),
+        ("definition names", bindings.definition_names),
+        ("global names", bindings.global_names),
+        ("dynamic names", bindings.dynamic_names),
+        ("parameter names", bindings.parameter_names),
+    ):
+        if not isinstance(names, tuple) or len(names) > 20_000:
+            raise ValueError(f"relation {label} are invalid")
+        for name in names:
+            _require_text(name, f"relation {label} name", 500)
+        if names != tuple(sorted(set(names))):
+            raise ValueError(f"relation {label} are not canonical")
+    if not isinstance(scope.events, tuple) or len(scope.events) > 100_000:
+        raise ValueError("relation scope events are invalid")
+    for event in scope.events:
+        counters[0] += 1
+        if counters[0] > 200_000:
+            raise ValueError("relation facts contain too many events")
+        if isinstance(event, RelationImportEvent):
+            _validate_relation_import(event.fact)
+        elif isinstance(event, RelationCallEvent):
+            _validate_relation_call(event.fact)
+        elif isinstance(event, RelationScopeEvent):
+            if event.scope.kind == "module":
+                raise ValueError("nested relation module scope is invalid")
+            _validate_relation_scope(event.scope, depth=depth + 1, counters=counters)
+        else:
+            raise ValueError("relation event type is invalid")
+
+
+def _validate_relation_import(fact: RelationImportFact) -> None:
+    if fact.kind not in {"import", "from"}:
+        raise ValueError("relation import kind is invalid")
+    if not isinstance(fact.aliases, tuple) or not 1 <= len(fact.aliases) <= 1_000:
+        raise ValueError("relation import aliases are invalid")
+    for alias in fact.aliases:
+        _require_text(alias.name, "relation import name", 500)
+        if alias.asname is not None:
+            _require_text(alias.asname, "relation import alias name", 500)
+    if fact.module is not None:
+        _require_text(fact.module, "relation import module", 500)
+    _require_nonnegative_int(fact.level, "relation import level")
+    if fact.kind == "import" and (fact.module is not None or fact.level != 0):
+        raise ValueError("plain relation import metadata is invalid")
+    _validate_line_range(fact.start_line, fact.end_line, "relation import")
+
+
+def _validate_relation_call(fact: RelationCallFact) -> None:
+    _require_text(fact.expression, "relation call expression", 500)
+    if fact.target_kind not in {"name", "attribute", "dynamic"}:
+        raise ValueError("relation call target kind is invalid")
+    if fact.target_name is not None:
+        _require_text(fact.target_name, "relation call target name", 500)
+    if not isinstance(fact.target_parts, tuple) or len(fact.target_parts) > 100:
+        raise ValueError("relation call target parts are invalid")
+    for part in fact.target_parts:
+        _require_text(part, "relation call target part", 500)
+    if fact.target_kind == "name" and (
+        fact.target_name is None or fact.target_parts
+    ):
+        raise ValueError("name call target metadata is invalid")
+    if fact.target_kind == "attribute" and (
+        fact.target_name is not None or len(fact.target_parts) < 2
+    ):
+        raise ValueError("attribute call target metadata is invalid")
+    if fact.target_kind == "dynamic" and (fact.target_name is not None or fact.target_parts):
+        raise ValueError("dynamic call target metadata is invalid")
+    _validate_line_range(fact.start_line, fact.end_line, "relation call")
+
+
+def _validate_line_range(start_line: object, end_line: object, label: str) -> None:
+    start = _require_positive_int(start_line, f"{label} start line")
+    end = _require_positive_int(end_line, f"{label} end line")
+    if end < start:
+        raise ValueError(f"{label} line range is invalid")
 
 
 def _scope_body(node: ast.AST) -> list[ast.stmt]:
@@ -695,12 +1361,6 @@ def _expression(node: ast.AST) -> str:
         return type(node).__name__
 
 
-def _import_expression(node: ast.ImportFrom, alias: ast.alias) -> str:
-    prefix = "." * node.level + (node.module or "")
+def _import_expression_fact(fact: RelationImportFact, alias: RelationImportAlias) -> str:
+    prefix = "." * fact.level + (fact.module or "")
     return f"from {prefix} import {alias.name}"
-
-
-def _node_range(node: ast.AST) -> tuple[int, int]:
-    start_line = getattr(node, "lineno", 1) or 1
-    end_line = getattr(node, "end_lineno", start_line) or start_line
-    return start_line, end_line

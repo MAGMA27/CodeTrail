@@ -118,6 +118,7 @@ from .indexing import (
 from .github import GitHubArchive, GitHubClient, GitHubError, GitHubRepository, GitHubResolution, parse_github_repository_url
 from .relations import (
     INDEX_BUILD_IDENTITY_VERSION,
+    RELATION_FACT_EXTRACTION_RULES_VERSION,
     RELATION_INDEX_IDENTITY_VERSION,
     extract_relations,
     relation_coverage_limitations,
@@ -661,6 +662,7 @@ class IndexService:
                     )
                 resolved_cache_scope_id = cache_scope_id or f"repository:{request.repository_id}"
                 cached_definitions = {}
+                cached_relation_facts = {}
                 try:
                     with self.registry.store_for_repository(request.repository_id) as store:
                         cached_definitions = store.load_definition_cache(
@@ -672,19 +674,29 @@ class IndexService:
                             configuration_hash=build_configuration_hash,
                             max_bytes=self.definition_cache_max_bytes,
                         )
+                        cached_relation_facts = store.load_relation_cache(
+                            scope_id=resolved_cache_scope_id,
+                            repository_id=request.repository_id,
+                            source_files=snapshot.files,
+                            relation_rules_version=RELATION_FACT_EXTRACTION_RULES_VERSION,
+                            python_version=PYTHON_AST_VERSION,
+                            configuration_hash=build_configuration_hash,
+                            max_bytes=self.definition_cache_max_bytes,
+                        )
                 except StorageError as exc:
                     logger.warning(
-                        "definition cache read failed; continuing with cold extraction: %s",
+                        "derived cache read failed; continuing with cold extraction: %s",
                         exc,
                     )
                 definitions = extract_definitions(snapshot, cached=cached_definitions)
-                relation = extract_relations(definitions)
+                relation = extract_relations(definitions, cached=cached_relation_facts)
                 if on_snapshot_ready is not None:
                     on_snapshot_ready(snapshot.index.index_id)
                 with self.registry.store_for_repository(request.repository_id) as store:
                     store.write_index(relation)
                     persisted = store.load_index(snapshot.index.index_id)
                     cache_entries_written = 0
+                    relation_cache_entries_written = 0
                     try:
                         cache_entries_written = store.write_definition_cache(
                             scope_id=resolved_cache_scope_id,
@@ -702,6 +714,23 @@ class IndexService:
                             "definition cache write failed; index remains valid: %s",
                             exc,
                         )
+                    try:
+                        relation_cache_entries_written = store.write_relation_cache(
+                            scope_id=resolved_cache_scope_id,
+                            repository_id=request.repository_id,
+                            source_files=snapshot.files,
+                            entries=relation.fact_cache_entries,
+                            relation_rules_version=RELATION_FACT_EXTRACTION_RULES_VERSION,
+                            python_version=PYTHON_AST_VERSION,
+                            configuration_hash=build_configuration_hash,
+                            max_entries=self.definition_cache_max_entries,
+                            max_bytes=self.definition_cache_max_bytes,
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "relation cache write failed; index remains valid: %s",
+                            exc,
+                        )
                 if on_build_stats is not None:
                     try:
                         on_build_stats(
@@ -711,7 +740,11 @@ class IndexService:
                                 definition_cache_misses=definitions.cache_misses,
                                 definition_ast_parse_count=definitions.ast_parse_count,
                                 relation_ast_parse_count=relation.ast_parse_count,
+                                relation_fact_cache_hits=relation.fact_cache_hits,
+                                relation_fact_cache_misses=relation.fact_cache_misses,
+                                relation_shared_ast_reuse_count=relation.shared_ast_reuse_count,
                                 definition_cache_entries_written=cache_entries_written,
+                                relation_cache_entries_written=relation_cache_entries_written,
                             )
                         )
                     except Exception as exc:

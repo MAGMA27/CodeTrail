@@ -56,7 +56,16 @@ from .indexing import (
     deserialize_definition_cache_entry,
     serialize_definition_cache_entry,
 )
-from .relations import RelationIndex
+from .relations import (
+    RelationCallEvent,
+    RelationFileFacts,
+    RelationImportEvent,
+    RelationIndex,
+    RelationScopeFacts,
+    RelationScopeEvent,
+    deserialize_relation_file_facts,
+    serialize_relation_file_facts,
+)
 
 
 _UNSET = object()
@@ -508,6 +517,31 @@ CREATE TABLE IF NOT EXISTS definition_cache (
 
 CREATE INDEX IF NOT EXISTS definition_cache_scope
     ON definition_cache(scope_id, repository_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS relation_cache (
+    scope_id TEXT NOT NULL,
+    repository_id TEXT NOT NULL,
+    path TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    relation_rules_version TEXT NOT NULL,
+    python_version TEXT NOT NULL,
+    configuration_hash TEXT NOT NULL,
+    result_json TEXT NOT NULL,
+    result_bytes INTEGER NOT NULL CHECK (result_bytes >= 0),
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (
+        scope_id,
+        repository_id,
+        path,
+        content_hash,
+        relation_rules_version,
+        python_version,
+        configuration_hash
+    )
+);
+
+CREATE INDEX IF NOT EXISTS relation_cache_scope
+    ON relation_cache(scope_id, repository_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS symbols (
     index_id TEXT NOT NULL,
@@ -1695,7 +1729,7 @@ class IndexStore:
         max_entries: int,
         max_bytes: int,
     ) -> int:
-        """Persist parsed definitions and prune only this derived cache.
+        """Persist parsed definitions and prune the shared derived-cache budget.
 
         Serialization happens before the SQLite transaction.  The transaction
         then inserts complete rows and applies both capacity limits atomically;
@@ -1756,35 +1790,12 @@ class IndexStore:
                     "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     row,
                 )
-            cache_rows = self._connection.execute(
-                "SELECT rowid, result_bytes FROM definition_cache "
-                "WHERE scope_id = ? AND repository_id = ? "
-                "ORDER BY created_at DESC, rowid DESC",
-                (scope_id, repository_id),
-            ).fetchall()
-            kept_count = 0
-            kept_bytes = 0
-            delete_rowids: list[int] = []
-            for cache_row in cache_rows:
-                rowid = cache_row["rowid"]
-                result_bytes = cache_row["result_bytes"]
-                if (
-                    isinstance(rowid, int)
-                    and isinstance(result_bytes, int)
-                    and not isinstance(result_bytes, bool)
-                    and kept_count < max_entries
-                    and result_bytes >= 0
-                    and kept_bytes + result_bytes <= max_bytes
-                ):
-                    kept_count += 1
-                    kept_bytes += result_bytes
-                else:
-                    delete_rowids.append(rowid)
-            for rowid in delete_rowids:
-                self._connection.execute(
-                    "DELETE FROM definition_cache WHERE rowid = ?",
-                    (rowid,),
-                )
+            self._prune_derived_cache(
+                scope_id=scope_id,
+                repository_id=repository_id,
+                max_entries=max_entries,
+                max_bytes=max_bytes,
+            )
             self._connection.execute("COMMIT")
         except Exception as exc:
             try:
@@ -1797,6 +1808,196 @@ class IndexStore:
                 raise StorageError(f"could not write definition cache: {exc}") from exc
             raise
         return len(rows)
+
+    def load_relation_cache(
+        self,
+        *,
+        scope_id: str,
+        repository_id: str,
+        source_files: tuple[SnapshotFile, ...],
+        relation_rules_version: str,
+        python_version: str,
+        configuration_hash: str,
+        max_bytes: int,
+    ) -> dict[str, RelationFileFacts]:
+        """Load validated relation facts for the exact current source files."""
+
+        if not scope_id or not repository_id or max_bytes < 1:
+            raise StorageInputError("relation cache scope and budget are invalid")
+        source_by_path = _definition_cache_sources(source_files)
+        if not source_by_path:
+            return {}
+        try:
+            rows = self._connection.execute(
+                "SELECT path, content_hash, result_json, result_bytes "
+                "FROM relation_cache WHERE scope_id = ? AND repository_id = ? "
+                "AND relation_rules_version = ? AND python_version = ? "
+                "AND configuration_hash = ? AND result_bytes <= ?",
+                (
+                    scope_id,
+                    repository_id,
+                    relation_rules_version,
+                    python_version,
+                    configuration_hash,
+                    max_bytes,
+                ),
+            ).fetchall()
+        except sqlite3.Error as exc:
+            raise StorageError(f"could not read relation cache: {exc}") from exc
+
+        entries: dict[str, RelationFileFacts] = {}
+        for row in rows:
+            path = row["path"]
+            source_file = source_by_path.get(path)
+            if source_file is None or row["content_hash"] != source_file.content_hash:
+                continue
+            serialized = row["result_json"]
+            result_bytes = row["result_bytes"]
+            if (
+                not isinstance(serialized, str)
+                or not isinstance(result_bytes, int)
+                or isinstance(result_bytes, bool)
+                or result_bytes != len(serialized.encode("utf-8"))
+            ):
+                logger.warning("ignoring invalid relation cache size for %s", path)
+                continue
+            try:
+                facts = deserialize_relation_file_facts(
+                    serialized,
+                    expected_path=source_file.path,
+                )
+                _validate_relation_cache_lines(facts, source_file)
+            except (UnicodeError, ValueError, TypeError, RecursionError):
+                logger.warning("ignoring invalid relation cache entry for %s", path)
+                continue
+            entries[source_file.path] = facts
+        return entries
+
+    def write_relation_cache(
+        self,
+        *,
+        scope_id: str,
+        repository_id: str,
+        source_files: tuple[SnapshotFile, ...],
+        entries: tuple[tuple[str, RelationFileFacts], ...],
+        relation_rules_version: str,
+        python_version: str,
+        configuration_hash: str,
+        max_entries: int,
+        max_bytes: int,
+    ) -> int:
+        """Persist relation facts and prune the shared derived-cache budget."""
+
+        if not scope_id or not repository_id or max_entries < 1 or max_bytes < 1:
+            raise StorageInputError("relation cache scope and budgets are invalid")
+        source_by_path = _definition_cache_sources(source_files)
+        rows: list[tuple[object, ...]] = []
+        seen_paths: set[str] = set()
+        timestamp = _datetime_text(datetime.now(timezone.utc))
+        for path, facts in entries:
+            if path in seen_paths:
+                raise StorageInputError("relation cache contains duplicate paths")
+            seen_paths.add(path)
+            source_file = source_by_path.get(path)
+            if source_file is None:
+                continue
+            try:
+                _validate_relation_cache_lines(facts, source_file)
+                serialized = serialize_relation_file_facts(facts)
+            except (TypeError, ValueError):
+                logger.warning("skipping invalid relation cache entry for %s", path)
+                continue
+            result_bytes = len(serialized.encode("utf-8"))
+            if result_bytes > max_bytes:
+                logger.warning("skipping over-sized relation cache entry for %s", path)
+                continue
+            rows.append(
+                (
+                    scope_id,
+                    repository_id,
+                    path,
+                    source_file.content_hash,
+                    relation_rules_version,
+                    python_version,
+                    configuration_hash,
+                    serialized,
+                    result_bytes,
+                    timestamp,
+                )
+            )
+
+        try:
+            self._connection.execute("BEGIN IMMEDIATE")
+            for row in rows:
+                self._connection.execute(
+                    "INSERT OR REPLACE INTO relation_cache ("
+                    "scope_id, repository_id, path, content_hash, "
+                    "relation_rules_version, python_version, configuration_hash, "
+                    "result_json, result_bytes, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    row,
+                )
+            self._prune_derived_cache(
+                scope_id=scope_id,
+                repository_id=repository_id,
+                max_entries=max_entries,
+                max_bytes=max_bytes,
+            )
+            self._connection.execute("COMMIT")
+        except Exception as exc:
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            if isinstance(exc, StorageError):
+                raise
+            if isinstance(exc, sqlite3.Error):
+                raise StorageError(f"could not write relation cache: {exc}") from exc
+            raise
+        return len(rows)
+
+    def _prune_derived_cache(
+        self,
+        *,
+        scope_id: str,
+        repository_id: str,
+        max_entries: int,
+        max_bytes: int,
+    ) -> None:
+        """Keep definition and relation rows within one shared scope budget."""
+
+        cache_rows = self._connection.execute(
+            "SELECT 'definition' AS cache_kind, rowid, result_bytes, created_at "
+            "FROM definition_cache WHERE scope_id = ? AND repository_id = ? "
+            "UNION ALL "
+            "SELECT 'relation' AS cache_kind, rowid, result_bytes, created_at "
+            "FROM relation_cache WHERE scope_id = ? AND repository_id = ? "
+            "ORDER BY created_at DESC, cache_kind DESC, rowid DESC",
+            (scope_id, repository_id, scope_id, repository_id),
+        ).fetchall()
+        kept_count = 0
+        kept_bytes = 0
+        delete_rows: list[tuple[str, int]] = []
+        for cache_row in cache_rows:
+            cache_kind = cache_row["cache_kind"]
+            rowid = cache_row["rowid"]
+            result_bytes = cache_row["result_bytes"]
+            if (
+                cache_kind in {"definition", "relation"}
+                and isinstance(rowid, int)
+                and isinstance(result_bytes, int)
+                and not isinstance(result_bytes, bool)
+                and kept_count < max_entries
+                and result_bytes >= 0
+                and kept_bytes + result_bytes <= max_bytes
+            ):
+                kept_count += 1
+                kept_bytes += result_bytes
+            elif isinstance(cache_kind, str) and isinstance(rowid, int):
+                delete_rows.append((cache_kind, rowid))
+        for cache_kind, rowid in delete_rows:
+            table = "definition_cache" if cache_kind == "definition" else "relation_cache"
+            self._connection.execute(f"DELETE FROM {table} WHERE rowid = ?", (rowid,))
 
     def get_relation_coverage(self, index_id: str) -> RelationCoverage:
         """Read relation coverage facts without loading the immutable graph payload."""
@@ -4140,6 +4341,44 @@ def _validate_definition_cache_entry_lines(
             raise ValueError("definition cache line range exceeds source")
     if entry.issue is not None and entry.issue.path != source_file.path:
         raise ValueError("definition cache issue path does not match source")
+
+
+def _validate_relation_cache_lines(
+    facts: RelationFileFacts,
+    source_file: SnapshotFile,
+) -> None:
+    if facts.path != source_file.path:
+        raise ValueError("relation cache path does not match source")
+    if facts.syntax_error:
+        return
+    line_count = max(1, len(source_file.text.splitlines()))
+
+    def check_scope(scope: RelationScopeFacts) -> None:
+        if not isinstance(scope, RelationScopeFacts):
+            raise ValueError("relation cache scope is invalid")
+        if scope.start_line > line_count:
+            raise ValueError("relation cache scope line exceeds source")
+        for import_fact in scope.bindings.imports:
+            check_range(import_fact.start_line, import_fact.end_line, "import")
+        for event in scope.events:
+            if isinstance(event, RelationImportEvent):
+                fact = event.fact
+                check_range(fact.start_line, fact.end_line, "import")
+            elif isinstance(event, RelationCallEvent):
+                fact = event.fact
+                check_range(fact.start_line, fact.end_line, "call")
+            elif isinstance(event, RelationScopeEvent):
+                check_scope(event.scope)
+            else:
+                raise ValueError("relation cache event is invalid")
+
+    def check_range(start_line: int, end_line: int, label: str) -> None:
+        if start_line > line_count or end_line > line_count:
+            raise ValueError(f"relation cache {label} line exceeds source")
+
+    if facts.scope is None:
+        raise ValueError("valid relation cache facts require a scope")
+    check_scope(facts.scope)
 
 
 def _issue_key(issue: SnapshotIssue) -> tuple[object, ...]:
