@@ -6097,6 +6097,19 @@
         "IndexSnapshot": {
           "additionalProperties": false,
           "properties": {
+            "configuration_hash": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Configuration Hash"
+            },
             "dirty": {
               "title": "Dirty",
               "type": "boolean"
@@ -6118,6 +6131,20 @@
               "minLength": 1,
               "title": "Revision",
               "type": "string"
+            },
+            "rules_version": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Rules Version"
             },
             "schema_version": {
               "const": "0.1.0",
@@ -6758,6 +6785,19 @@
         "IndexSnapshot": {
           "additionalProperties": false,
           "properties": {
+            "configuration_hash": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Configuration Hash"
+            },
             "dirty": {
               "title": "Dirty",
               "type": "boolean"
@@ -6779,6 +6819,20 @@
               "minLength": 1,
               "title": "Revision",
               "type": "string"
+            },
+            "rules_version": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Rules Version"
             },
             "schema_version": {
               "const": "0.1.0",
@@ -7659,6 +7713,19 @@
         "IndexSnapshot": {
           "additionalProperties": false,
           "properties": {
+            "configuration_hash": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Configuration Hash"
+            },
             "dirty": {
               "title": "Dirty",
               "type": "boolean"
@@ -7680,6 +7747,20 @@
               "minLength": 1,
               "title": "Revision",
               "type": "string"
+            },
+            "rules_version": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Rules Version"
             },
             "schema_version": {
               "const": "0.1.0",
@@ -7865,6 +7946,19 @@
         "IndexSnapshot": {
           "additionalProperties": false,
           "properties": {
+            "configuration_hash": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Configuration Hash"
+            },
             "dirty": {
               "title": "Dirty",
               "type": "boolean"
@@ -7886,6 +7980,20 @@
               "minLength": 1,
               "title": "Revision",
               "type": "string"
+            },
+            "rules_version": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Rules Version"
             },
             "schema_version": {
               "const": "0.1.0",
@@ -10427,6 +10535,19 @@
         "IndexSnapshot": {
           "additionalProperties": false,
           "properties": {
+            "configuration_hash": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Configuration Hash"
+            },
             "dirty": {
               "title": "Dirty",
               "type": "boolean"
@@ -10448,6 +10569,20 @@
               "minLength": 1,
               "title": "Revision",
               "type": "string"
+            },
+            "rules_version": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Rules Version"
             },
             "schema_version": {
               "const": "0.1.0",
@@ -13042,6 +13177,19 @@
         "IndexSnapshot": {
           "additionalProperties": false,
           "properties": {
+            "configuration_hash": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Configuration Hash"
+            },
             "dirty": {
               "title": "Dirty",
               "type": "boolean"
@@ -13063,6 +13211,20 @@
               "minLength": 1,
               "title": "Revision",
               "type": "string"
+            },
+            "rules_version": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Rules Version"
             },
             "schema_version": {
               "const": "0.1.0",
@@ -14680,6 +14842,19 @@
         "IndexSnapshot": {
           "additionalProperties": false,
           "properties": {
+            "configuration_hash": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Configuration Hash"
+            },
             "dirty": {
               "title": "Dirty",
               "type": "boolean"
@@ -14701,6 +14876,20 @@
               "minLength": 1,
               "title": "Revision",
               "type": "string"
+            },
+            "rules_version": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Rules Version"
             },
             "schema_version": {
               "const": "0.1.0",
@@ -14858,6 +15047,19 @@
     "IndexSnapshot": {
       "additionalProperties": false,
       "properties": {
+        "configuration_hash": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Configuration Hash"
+        },
         "dirty": {
           "title": "Dirty",
           "type": "boolean"
@@ -14879,6 +15081,20 @@
           "minLength": 1,
           "title": "Revision",
           "type": "string"
+        },
+        "rules_version": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rules Version"
         },
         "schema_version": {
           "const": "0.1.0",
@@ -16073,6 +16289,19 @@
         "IndexSnapshot": {
           "additionalProperties": false,
           "properties": {
+            "configuration_hash": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Configuration Hash"
+            },
             "dirty": {
               "title": "Dirty",
               "type": "boolean"
@@ -16094,6 +16323,20 @@
               "minLength": 1,
               "title": "Revision",
               "type": "string"
+            },
+            "rules_version": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Rules Version"
             },
             "schema_version": {
               "const": "0.1.0",
@@ -16633,6 +16876,19 @@
         "IndexSnapshot": {
           "additionalProperties": false,
           "properties": {
+            "configuration_hash": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Configuration Hash"
+            },
             "dirty": {
               "title": "Dirty",
               "type": "boolean"
@@ -16654,6 +16910,20 @@
               "minLength": 1,
               "title": "Revision",
               "type": "string"
+            },
+            "rules_version": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Rules Version"
             },
             "schema_version": {
               "const": "0.1.0",
@@ -17486,6 +17756,19 @@
         "IndexSnapshot": {
           "additionalProperties": false,
           "properties": {
+            "configuration_hash": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Configuration Hash"
+            },
             "dirty": {
               "title": "Dirty",
               "type": "boolean"
@@ -17507,6 +17790,20 @@
               "minLength": 1,
               "title": "Revision",
               "type": "string"
+            },
+            "rules_version": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Rules Version"
             },
             "schema_version": {
               "const": "0.1.0",
@@ -18573,6 +18870,19 @@
         "IndexSnapshot": {
           "additionalProperties": false,
           "properties": {
+            "configuration_hash": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Configuration Hash"
+            },
             "dirty": {
               "title": "Dirty",
               "type": "boolean"
@@ -18594,6 +18904,20 @@
               "minLength": 1,
               "title": "Revision",
               "type": "string"
+            },
+            "rules_version": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Rules Version"
             },
             "schema_version": {
               "const": "0.1.0",
@@ -19240,6 +19564,19 @@
         "IndexSnapshot": {
           "additionalProperties": false,
           "properties": {
+            "configuration_hash": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Configuration Hash"
+            },
             "dirty": {
               "title": "Dirty",
               "type": "boolean"
@@ -19261,6 +19598,20 @@
               "minLength": 1,
               "title": "Revision",
               "type": "string"
+            },
+            "rules_version": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Rules Version"
             },
             "schema_version": {
               "const": "0.1.0",
@@ -19615,6 +19966,19 @@
         "IndexSnapshot": {
           "additionalProperties": false,
           "properties": {
+            "configuration_hash": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Configuration Hash"
+            },
             "dirty": {
               "title": "Dirty",
               "type": "boolean"
@@ -19636,6 +20000,20 @@
               "minLength": 1,
               "title": "Revision",
               "type": "string"
+            },
+            "rules_version": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Rules Version"
             },
             "schema_version": {
               "const": "0.1.0",
@@ -20384,6 +20762,19 @@
         "IndexSnapshot": {
           "additionalProperties": false,
           "properties": {
+            "configuration_hash": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Configuration Hash"
+            },
             "dirty": {
               "title": "Dirty",
               "type": "boolean"
@@ -20405,6 +20796,20 @@
               "minLength": 1,
               "title": "Revision",
               "type": "string"
+            },
+            "rules_version": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Rules Version"
             },
             "schema_version": {
               "const": "0.1.0",
@@ -21288,6 +21693,19 @@
         "IndexSnapshot": {
           "additionalProperties": false,
           "properties": {
+            "configuration_hash": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Configuration Hash"
+            },
             "dirty": {
               "title": "Dirty",
               "type": "boolean"
@@ -21309,6 +21727,20 @@
               "minLength": 1,
               "title": "Revision",
               "type": "string"
+            },
+            "rules_version": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Rules Version"
             },
             "schema_version": {
               "const": "0.1.0",
@@ -28245,6 +28677,19 @@
         "IndexSnapshot": {
           "additionalProperties": false,
           "properties": {
+            "configuration_hash": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Configuration Hash"
+            },
             "dirty": {
               "title": "Dirty",
               "type": "boolean"
@@ -28266,6 +28711,20 @@
               "minLength": 1,
               "title": "Revision",
               "type": "string"
+            },
+            "rules_version": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Rules Version"
             },
             "schema_version": {
               "const": "0.1.0",
@@ -28995,6 +29454,19 @@
         "IndexSnapshot": {
           "additionalProperties": false,
           "properties": {
+            "configuration_hash": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Configuration Hash"
+            },
             "dirty": {
               "title": "Dirty",
               "type": "boolean"
@@ -29016,6 +29488,20 @@
               "minLength": 1,
               "title": "Revision",
               "type": "string"
+            },
+            "rules_version": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Rules Version"
             },
             "schema_version": {
               "const": "0.1.0",
@@ -30463,6 +30949,19 @@
         "IndexSnapshot": {
           "additionalProperties": false,
           "properties": {
+            "configuration_hash": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Configuration Hash"
+            },
             "dirty": {
               "title": "Dirty",
               "type": "boolean"
@@ -30484,6 +30983,20 @@
               "minLength": 1,
               "title": "Revision",
               "type": "string"
+            },
+            "rules_version": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Rules Version"
             },
             "schema_version": {
               "const": "0.1.0",
@@ -38032,6 +38545,19 @@
         "IndexSnapshot": {
           "additionalProperties": false,
           "properties": {
+            "configuration_hash": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Configuration Hash"
+            },
             "dirty": {
               "title": "Dirty",
               "type": "boolean"
@@ -38053,6 +38579,20 @@
               "minLength": 1,
               "title": "Revision",
               "type": "string"
+            },
+            "rules_version": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Rules Version"
             },
             "schema_version": {
               "const": "0.1.0",
@@ -38164,6 +38704,19 @@
         "IndexSnapshot": {
           "additionalProperties": false,
           "properties": {
+            "configuration_hash": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Configuration Hash"
+            },
             "dirty": {
               "title": "Dirty",
               "type": "boolean"
@@ -38185,6 +38738,20 @@
               "minLength": 1,
               "title": "Revision",
               "type": "string"
+            },
+            "rules_version": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Rules Version"
             },
             "schema_version": {
               "const": "0.1.0",
@@ -38635,6 +39202,19 @@
         "IndexSnapshot": {
           "additionalProperties": false,
           "properties": {
+            "configuration_hash": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Configuration Hash"
+            },
             "dirty": {
               "title": "Dirty",
               "type": "boolean"
@@ -38656,6 +39236,20 @@
               "minLength": 1,
               "title": "Revision",
               "type": "string"
+            },
+            "rules_version": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Rules Version"
             },
             "schema_version": {
               "const": "0.1.0",

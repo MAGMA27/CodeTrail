@@ -15,6 +15,9 @@ from .indexing import DefinitionIndex, SnapshotIssue, SourceSnapshot
 RelationKind = Literal["imports", "calls"]
 BindingKind = Literal["module", "symbol"]
 RELATION_INDEX_IDENTITY_VERSION = "relations-v2"
+# New service-built snapshots use a separate identity namespace so legacy
+# rows without freshness metadata remain immutable and explicitly rebuildable.
+INDEX_BUILD_IDENTITY_VERSION = "relations-v3"
 
 
 def relation_coverage_limitations(

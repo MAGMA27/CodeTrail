@@ -25,6 +25,7 @@ import type {
   ImpactDirection,
   ImportAttempt,
   ImportStatus,
+  IndexFreshness,
   IndexResponse,
   IndexSnapshot,
   NeighborDirection,
@@ -103,8 +104,13 @@ type GitHubImportUi = {
 type IndexUi = {
   response: IndexResponse | null;
   indexes: IndexSnapshot[];
+  isLatest: boolean;
   status: UiIndexStatus;
   error: string | null;
+  freshness: IndexFreshness | null;
+  freshnessStatus: "idle" | "checking" | "refreshing";
+  freshnessError: string | null;
+  refreshMode: "reused" | "created" | null;
   revision: string;
   dirty: boolean;
   indexIdInput: string;
@@ -113,6 +119,8 @@ type IndexUi = {
   onIndexIdChange: (value: string) => void;
   onCreate: FormHandler;
   onOpen: FormHandler;
+  onCheckFreshness: Action;
+  onRefresh: Action;
 };
 
 type SessionUi = {
@@ -313,6 +321,33 @@ function indexStatusLabel(status: UiIndexStatus): string {
     partial: "快照部分完成",
     error: "索引请求失败",
   }[status];
+}
+
+function freshnessStatusLabel(status: IndexFreshness["status"]): string {
+  return {
+    unchecked: "尚未检查",
+    consistent: "源码一致",
+    changed: "发现变化",
+    unknown: "无法确定",
+  }[status];
+}
+
+function freshnessReasonLabel(reason: string): string {
+  return {
+    missing_index_metadata: "旧索引缺少规则/配置元数据",
+    rules_changed: "解析或关系规则版本变化",
+    configuration_changed: "索引配置指纹变化",
+    source_changed: "纳入范围的源码 hash 变化",
+    source_read_error: "读取来源失败",
+    source_unavailable: "来源目录不可用",
+    decode_error: "存在无法按 UTF-8 读取的文件",
+    file_too_large: "存在超过索引上限的文件",
+    symlink: "发现不允许索引的符号链接",
+    outside_root: "发现越过来源根目录的路径",
+    file_changed_during_check: "文件在检查期间发生变化",
+    budget_exceeded: "检查达到扫描预算",
+    remote_not_checked: "GitHub 远端未检查",
+  }[reason] ?? reason;
 }
 
 function importStatusLabel(status: ImportStatus | null): string {
@@ -656,6 +691,57 @@ function OperationPanel({
                   <p className="ct-form-help">打开后知识页、图和证据都绑定该 index_id。</p>
                   <button type="submit" className="ct-button ct-button-secondary" disabled={index.status === "loading"}>{index.status === "loading" ? "载入中…" : "打开固定版本"}</button>
                 </form>
+              </div>
+              <div className="ct-index-freshness">
+                <div className="ct-form-heading">
+                  <strong>源码新鲜度</strong>
+                  <span>{index.freshness ? freshnessStatusLabel(index.freshness.status) : "尚未检查"}{!index.isLatest ? " · 仅 latest 可更新" : ""}</span>
+                </div>
+                <p className="ct-form-help">检查会读取当前纳入索引范围的 Python 文件并计算 hash，不会自动重建；更新时服务端会再次核对。</p>
+                <div className="ct-form-actions">
+                  <button
+                    type="button"
+                    className="ct-button ct-button-secondary"
+                    onClick={() => void index.onCheckFreshness()}
+                    disabled={!index.response || index.freshnessStatus !== "idle"}
+                  >
+                    {index.freshnessStatus === "checking" ? "检查中…" : "检查更新"}
+                  </button>
+                  <button
+                    type="button"
+                    className="ct-button ct-button-primary"
+                    onClick={() => void index.onRefresh()}
+                    disabled={!index.response || !index.isLatest || index.freshnessStatus !== "idle"}
+                  >
+                    {index.freshnessStatus === "refreshing" ? "更新中…" : "更新索引"}
+                  </button>
+                </div>
+                {!index.isLatest ? <p className="ct-form-help">当前打开的是历史快照；可以检查源码，但更新必须先切换到项目 latest。</p> : null}
+                {index.freshnessError ? <p className="ct-inline-error" role="alert">{index.freshnessError}</p> : null}
+                {index.refreshMode ? <p className="ct-card-note">本次显式更新：{index.refreshMode === "reused" ? "复用原快照，未重新解析。" : "已生成新的不可变快照；旧快照仍保留。"}</p> : null}
+                {index.freshness ? (
+                  <div className="ct-freshness-result" data-state={index.freshness.status}>
+                    <div className="ct-freshness-meta">
+                      <strong>{freshnessStatusLabel(index.freshness.status)}</strong>
+                      <span>{index.freshness.checked_at ? formatDate(index.freshness.checked_at) : "未检查"}</span>
+                      <code>{index.freshness.baseline_index_id}</code>
+                    </div>
+                    <div className="ct-freshness-stats">
+                      <span><strong>{index.freshness.added_count}</strong> 新增</span>
+                      <span><strong>{index.freshness.modified_count}</strong> 修改</span>
+                      <span><strong>{index.freshness.deleted_count}</strong> 删除</span>
+                      <span><strong>{index.freshness.scanned_files}</strong> 文件 / {index.freshness.scanned_bytes} bytes</span>
+                    </div>
+                    {!index.freshness.scan_complete ? <p className="ct-warning">扫描未完成{index.freshness.scan_truncation_reason ? "：" + index.freshness.scan_truncation_reason : ""}，不能据此判定一致。</p> : null}
+                    {index.freshness.changed_paths.length > 0 ? (
+                      <div className="ct-freshness-paths">
+                        {index.freshness.changed_paths.map((path) => <code key={path}>{path}</code>)}
+                        {index.freshness.changed_paths_truncated ? <small>还有未展示路径</small> : null}
+                      </div>
+                    ) : null}
+                    {index.freshness.reasons.length > 0 ? <p className="ct-card-note">原因：{index.freshness.reasons.map(freshnessReasonLabel).join(" · ")}</p> : null}
+                  </div>
+                ) : <p className="ct-muted">当前索引尚未执行新鲜度检查。</p>}
               </div>
             </>
           )}

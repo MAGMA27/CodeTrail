@@ -19,6 +19,7 @@ import {
   ApiRequestError,
   createProject,
   createProjectIndex,
+  checkProjectIndexFreshness,
   generateProjectFeatures,
   getHealth,
   getProjectNeighbors,
@@ -50,6 +51,7 @@ import {
   retryLocalImport,
   retryGitHubImport,
   retryImportCleanup,
+  refreshProjectIndex,
   searchProjectIndex,
   type CodeEdge,
   type EdgeKind,
@@ -65,6 +67,7 @@ import {
   type HealthResponse,
   type ImpactDirection,
   type ImportStatus,
+  type IndexFreshness,
   type IndexResponse,
   type ImportAttempt,
   type GitHubImportResponse,
@@ -489,6 +492,10 @@ export default function Workbench() {
   const [indexResponse, setIndexResponse] = useState<IndexResponse | null>(null);
   const [indexStatus, setIndexStatus] = useState<IndexUiStatus>("unindexed");
   const [indexError, setIndexError] = useState<string | null>(null);
+  const [indexFreshness, setIndexFreshness] = useState<IndexFreshness | null>(null);
+  const [indexFreshnessStatus, setIndexFreshnessStatus] = useState<"idle" | "checking" | "refreshing">("idle");
+  const [indexFreshnessError, setIndexFreshnessError] = useState<string | null>(null);
+  const [indexRefreshMode, setIndexRefreshMode] = useState<"reused" | "created" | null>(null);
   const [searchQuery, setSearchQuery] = useState("load_settings");
   const [searchStatus, setSearchStatus] = useState<AsyncStatus>("idle");
   const [searchResults, setSearchResults] = useState<SearchMatch[]>([]);
@@ -2052,6 +2059,9 @@ export default function Workbench() {
       setIndexResponse(response);
       setIndexIdInput(response.index.index_id);
       setIndexError(null);
+      setIndexFreshness(null);
+      setIndexFreshnessError(null);
+      setIndexRefreshMode(null);
       setIndexStatus(
         response.index.status === "failed"
           ? "error"
@@ -2073,6 +2083,9 @@ export default function Workbench() {
       setIndexResponse(null);
       setIndexIdInput("");
       setIndexError(null);
+      setIndexFreshness(null);
+      setIndexFreshnessError(null);
+      setIndexRefreshMode(null);
       setProjectIndexes([]);
       setIndexStatus("loading");
       clearExploration();
@@ -2533,6 +2546,94 @@ export default function Workbench() {
     },
     [applyIndexResponse, indexIdInput, selectedProjectId],
   );
+
+  const checkCurrentIndexFreshness = useCallback(async () => {
+    if (!selectedProjectId || !indexResponse) {
+      setIndexFreshnessError("请先打开一个固定索引。");
+      return;
+    }
+    indexController.current?.abort();
+    const controller = new AbortController();
+    indexController.current = controller;
+    const requestId = ++indexRequestId.current;
+    setIndexFreshnessStatus("checking");
+    setIndexFreshnessError(null);
+    try {
+      const result = await checkProjectIndexFreshness(
+        selectedProjectId,
+        indexResponse.index.index_id,
+        controller.signal,
+      );
+      if (!isLatestRequest(requestId, indexRequestId.current)) {
+        return;
+      }
+      setIndexFreshness(result);
+      setIndexRefreshMode(null);
+    } catch (error) {
+      if (isAbortError(error) || !isLatestRequest(requestId, indexRequestId.current)) {
+        return;
+      }
+      setIndexFreshnessError(errorMessage(error));
+    } finally {
+      if (isLatestRequest(requestId, indexRequestId.current)) {
+        setIndexFreshnessStatus("idle");
+      }
+    }
+  }, [indexResponse, selectedProjectId]);
+
+  const refreshCurrentIndex = useCallback(async () => {
+    if (!selectedProjectId || !indexResponse) {
+      setIndexFreshnessError("请先打开一个固定索引。");
+      return;
+    }
+    indexController.current?.abort();
+    const controller = new AbortController();
+    indexController.current = controller;
+    const requestId = ++indexRequestId.current;
+    setIndexFreshnessStatus("refreshing");
+    setIndexFreshnessError(null);
+    try {
+      const result = await refreshProjectIndex(
+        selectedProjectId,
+        indexResponse.index.index_id,
+        revision.trim() || "working-tree",
+        dirty,
+        controller.signal,
+      );
+      if (!isLatestRequest(requestId, indexRequestId.current)) {
+        return;
+      }
+      applyIndexResponse(result.index);
+      setIndexFreshness(result.freshness);
+      setIndexRefreshMode(result.mode);
+      setProjectIndexes((previous) => [
+        result.index.index,
+        ...previous.filter((index) => index.index_id !== result.index.index.index_id),
+      ]);
+      setProjects((previous) => previous.map((project) => (
+        project.project_id === selectedProjectId
+          ? {
+              ...project,
+              available_index_ids: [
+                result.index.index.index_id,
+                ...project.available_index_ids.filter((indexId) => indexId !== result.index.index.index_id),
+              ],
+              latest_index_id: result.index.index.index_id,
+              building_index_id: null,
+            }
+          : project
+      )));
+    } catch (error) {
+      if (isAbortError(error) || !isLatestRequest(requestId, indexRequestId.current)) {
+        return;
+      }
+      setIndexFreshnessError(errorMessage(error));
+    } finally {
+      if (isLatestRequest(requestId, indexRequestId.current)) {
+        setIndexFreshnessStatus("idle");
+      }
+    }
+  }, [applyIndexResponse, dirty, indexResponse, revision, selectedProjectId]);
 
   const loadSource = useCallback(
     async (symbol: SymbolRecord, startLine = symbol.start_line) => {
@@ -3186,8 +3287,13 @@ export default function Workbench() {
       index={{
         response: indexResponse,
         indexes: projectIndexes,
+        isLatest: Boolean(indexResponse && selectedProject?.latest_index_id === indexResponse.index.index_id),
         status: indexStatus,
         error: indexError,
+        freshness: indexFreshness,
+        freshnessStatus: indexFreshnessStatus,
+        freshnessError: indexFreshnessError,
+        refreshMode: indexRefreshMode,
         revision,
         dirty,
         indexIdInput,
@@ -3196,6 +3302,8 @@ export default function Workbench() {
         onIndexIdChange: setIndexIdInput,
         onCreate: createNewIndex,
         onOpen: openExistingIndex,
+        onCheckFreshness: checkCurrentIndexFreshness,
+        onRefresh: refreshCurrentIndex,
       }}
       session={{
         sessions,

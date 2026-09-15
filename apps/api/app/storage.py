@@ -422,6 +422,8 @@ CREATE TABLE IF NOT EXISTS index_snapshots (
     revision TEXT NOT NULL,
     dirty INTEGER NOT NULL CHECK (dirty IN (0, 1)),
     snapshot_hash TEXT NOT NULL,
+    rules_version TEXT,
+    configuration_hash TEXT,
     status TEXT NOT NULL CHECK (status IN ('ready', 'building', 'failed')),
     truncated INTEGER NOT NULL CHECK (truncated IN (0, 1)),
     truncation_reason TEXT,
@@ -1174,6 +1176,8 @@ class IndexStore:
         additions = {
             "unresolved_truncated": "INTEGER CHECK (unresolved_truncated IN (0, 1))",
             "unresolved_truncation_reason": "TEXT",
+            "rules_version": "TEXT",
+            "configuration_hash": "TEXT",
         }
         for column, definition in additions.items():
             if column not in existing:
@@ -1336,7 +1340,13 @@ class IndexStore:
         if cursor.rowcount != 1:
             raise StorageNotFoundError(f"project {project_id!r} was not found")
 
-    def finish_project_index(self, project_id: str, index_id: str) -> None:
+    def finish_project_index(
+        self,
+        project_id: str,
+        index_id: str,
+        *,
+        expected_latest_index_id: str | None = None,
+    ) -> None:
         project = self.load_project(project_id)
         index_row = self._require_index(index_id)
         if index_row["repository_id"] != project.repository_id:
@@ -1351,6 +1361,19 @@ class IndexStore:
             raise StorageConflictError("index already belongs to another project")
         try:
             self._connection.execute("BEGIN IMMEDIATE")
+            current_latest = self._connection.execute(
+                "SELECT latest_index_id FROM projects WHERE project_id = ?",
+                (project_id,),
+            ).fetchone()
+            if current_latest is None:
+                self._connection.execute("ROLLBACK")
+                raise StorageNotFoundError(f"project {project_id!r} was not found")
+            if (
+                expected_latest_index_id is not None
+                and current_latest["latest_index_id"] != expected_latest_index_id
+            ):
+                self._connection.execute("ROLLBACK")
+                raise StorageConflictError("project latest index changed during the build")
             self._connection.execute(
                 "INSERT OR IGNORE INTO project_indexes (project_id, index_id, associated_at) VALUES (?, ?, ?)",
                 (project_id, index_id, _datetime_text(datetime.now(timezone.utc))),
@@ -1520,6 +1543,42 @@ class IndexStore:
         """Read only index metadata without loading source, symbols, or relations."""
 
         return _index_from_row(self._require_index(index_id))
+
+    def load_snapshot_manifest(
+        self,
+        index_id: str,
+    ) -> tuple[tuple[SnapshotFile, ...], tuple[SnapshotIssue, ...]]:
+        """Read source hashes and snapshot-stage issues without loading graph data."""
+
+        self._require_index(index_id)
+        file_rows = self._connection.execute(
+            "SELECT path, size, content_hash FROM snapshot_files WHERE index_id = ? ORDER BY path",
+            (index_id,),
+        ).fetchall()
+        issue_rows = self._connection.execute(
+            "SELECT path, issue_kind, message, size FROM snapshot_issues "
+            "WHERE index_id = ? AND stage = 'snapshot' ORDER BY path, issue_kind, ordinal",
+            (index_id,),
+        ).fetchall()
+        files = tuple(
+            SnapshotFile(
+                path=row["path"],
+                size=row["size"],
+                content_hash=row["content_hash"],
+                text="",
+            )
+            for row in file_rows
+        )
+        issues = tuple(
+            SnapshotIssue(
+                path=row["path"],
+                kind=row["issue_kind"],  # type: ignore[arg-type]
+                message=row["message"],
+                size=row["size"],
+            )
+            for row in issue_rows
+        )
+        return files, issues
 
     def get_relation_coverage(self, index_id: str) -> RelationCoverage:
         """Read relation coverage facts without loading the immutable graph payload."""
@@ -3620,9 +3679,9 @@ class IndexStore:
         index = relation.snapshot.index
         self._connection.execute(
             "INSERT INTO index_snapshots (index_id, schema_version, repository_id, revision, dirty, "
-            "snapshot_hash, status, truncated, truncation_reason, unresolved_truncated, "
-            "unresolved_truncation_reason, payload_hash) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "snapshot_hash, rules_version, configuration_hash, status, truncated, truncation_reason, "
+            "unresolved_truncated, unresolved_truncation_reason, payload_hash) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 index.index_id,
                 index.schema_version,
@@ -3630,6 +3689,8 @@ class IndexStore:
                 index.revision,
                 int(index.dirty),
                 index.snapshot_hash,
+                index.rules_version,
+                index.configuration_hash,
                 index.status,
                 int(relation.truncated),
                 relation.truncation_reason,
@@ -3807,6 +3868,8 @@ def _index_from_row(row: sqlite3.Row) -> IndexSnapshot:
         dirty=bool(row["dirty"]),
         snapshot_hash=row["snapshot_hash"],
         status=row["status"],
+        rules_version=row["rules_version"],
+        configuration_hash=row["configuration_hash"],
     )
 
 

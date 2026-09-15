@@ -6,6 +6,8 @@ import ast
 import hashlib
 import json
 import re
+import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -127,6 +129,20 @@ class SourceSnapshot:
 
 
 @dataclass(frozen=True)
+class SourceManifestScan:
+    """Bounded source manifest observation used without parsing Python."""
+
+    files: tuple[SnapshotFile, ...]
+    issues: tuple[SnapshotIssue, ...]
+    scanned_files: int
+    scanned_bytes: int
+    scan_complete: bool
+    scan_truncated: bool
+    scan_truncation_reason: str | None
+    unstable_paths: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class DefinitionIndex:
     """Definitions extracted from one source snapshot."""
 
@@ -144,6 +160,8 @@ def build_source_snapshot(
     index_id: str | None = None,
     identity_version: str = "source-v1",
     max_file_bytes: int = 1_000_000,
+    rules_version: str | None = None,
+    configuration_hash: str | None = None,
 ) -> SourceSnapshot:
     """Read a bounded Python source tree and build a reproducible snapshot.
 
@@ -232,8 +250,215 @@ def build_source_snapshot(
         dirty=dirty,
         snapshot_hash=snapshot_hash,
         status=status,
+        rules_version=rules_version,
+        configuration_hash=configuration_hash,
     )
     return SourceSnapshot(index, tuple(snapshot_files), tuple(issues))
+
+
+SOURCE_CAPTURE_RULES_VERSION = "python-source-v1"
+
+
+def current_source_rules_version(identity_version: str) -> str:
+    """Return the parser/source capture version used for new index metadata."""
+
+    if not re.fullmatch(r"[A-Za-z0-9._-]{1,80}", identity_version):
+        raise ValueError("identity_version must be a short stable identifier")
+    return (
+        f"{SOURCE_CAPTURE_RULES_VERSION}+python-{sys.version_info.major}.{sys.version_info.minor}"
+        f"+{identity_version}"
+    )
+
+
+def index_configuration_hash(
+    *,
+    max_file_bytes: int,
+    identity_version: str,
+    rules_version: str,
+) -> str:
+    """Fingerprint the source/index settings that can change index contents."""
+
+    if max_file_bytes < 1:
+        raise ValueError("max_file_bytes must be positive")
+    payload = {
+        "identity_version": identity_version,
+        "max_file_bytes": max_file_bytes,
+        "rules_version": rules_version,
+    }
+    return _sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    )
+
+
+def scan_source_manifest(
+    repository_root: str | Path,
+    *,
+    max_file_bytes: int = 1_000_000,
+    max_files: int = 2_000,
+    max_total_bytes: int = 20 * 1024 * 1024,
+    max_seconds: float = 2.0,
+) -> SourceManifestScan:
+    """Read a bounded, hash-only manifest using the snapshot source rules.
+
+    This function deliberately does not call ``ast.parse`` or any relation
+    extractor. It still reads every accepted file's bytes so mtime/size cannot
+    be mistaken for content identity.
+    """
+
+    if max_file_bytes < 1 or max_files < 1 or max_total_bytes < 1 or max_seconds <= 0:
+        raise ValueError("source manifest budgets must be positive")
+
+    root = _resolve_repository_root(repository_root)
+    deadline = time.monotonic() + max_seconds
+    files: list[SnapshotFile] = []
+    issues: list[SnapshotIssue] = []
+    unstable_paths: list[str] = []
+    scanned_files = 0
+    scanned_bytes = 0
+    scan_complete = True
+    scan_truncated = False
+    scan_truncation_reason: str | None = None
+
+    def truncate(reason: str) -> None:
+        nonlocal scan_complete, scan_truncated, scan_truncation_reason
+        scan_complete = False
+        scan_truncated = True
+        scan_truncation_reason = reason
+
+    def check_time() -> bool:
+        if time.monotonic() > deadline:
+            truncate("max_seconds")
+            return False
+        return True
+
+    def visit(directory: Path) -> None:
+        nonlocal scanned_files, scanned_bytes, scan_complete
+        if scan_truncated or not check_time():
+            return
+        try:
+            entries = sorted(directory.iterdir(), key=lambda entry: entry.name.casefold())
+        except OSError as exc:
+            relative = _relative_path_for_issue(root, directory)
+            issues.append(SnapshotIssue(relative, "read_error", f"could not list directory: {exc}"))
+            scan_complete = False
+            return
+
+        for entry in entries:
+            if scan_truncated or not check_time():
+                return
+            relative = _relative_path_for_issue(root, entry)
+            try:
+                is_dir = entry.is_dir()
+            except OSError as exc:
+                issues.append(SnapshotIssue(relative, "read_error", f"could not inspect source: {exc}"))
+                scan_complete = False
+                continue
+            if is_dir and entry.name.lower() in _EXCLUDED_DIRECTORIES:
+                continue
+            if _is_secret_name(entry.name):
+                continue
+            try:
+                if entry.is_symlink():
+                    issues.append(SnapshotIssue(relative, "symlink", "symbolic links are not indexed"))
+                    continue
+            except OSError as exc:
+                issues.append(SnapshotIssue(relative, "read_error", f"could not inspect source: {exc}"))
+                scan_complete = False
+                continue
+            if is_dir:
+                visit(entry)
+                continue
+            try:
+                is_file = entry.is_file()
+            except OSError as exc:
+                issues.append(SnapshotIssue(relative, "read_error", f"could not inspect source: {exc}"))
+                scan_complete = False
+                continue
+            if entry.suffix.lower() != ".py" or not is_file:
+                continue
+            if scanned_files >= max_files:
+                truncate("max_files")
+                return
+            scanned_files += 1
+            try:
+                resolved = entry.resolve(strict=False)
+                resolved.relative_to(root)
+            except (OSError, ValueError):
+                issues.append(SnapshotIssue(relative, "outside_root", "source resolves outside root"))
+                continue
+            try:
+                before = entry.stat()
+            except OSError as exc:
+                issues.append(SnapshotIssue(relative, "read_error", f"could not stat source: {exc}"))
+                scan_complete = False
+                continue
+            if before.st_size > max_file_bytes:
+                issues.append(
+                    SnapshotIssue(
+                        relative,
+                        "file_too_large",
+                        f"source file is {before.st_size} bytes; limit is {max_file_bytes}",
+                        size=before.st_size,
+                    )
+                )
+                continue
+            if scanned_bytes + before.st_size > max_total_bytes:
+                truncate("max_total_bytes")
+                return
+            try:
+                raw = entry.read_bytes()
+            except OSError as exc:
+                issues.append(SnapshotIssue(relative, "read_error", f"could not read source: {exc}"))
+                scan_complete = False
+                continue
+            scanned_bytes += len(raw)
+            try:
+                after = entry.stat()
+            except OSError as exc:
+                issues.append(SnapshotIssue(relative, "read_error", f"could not stat source after read: {exc}"))
+                scan_complete = False
+                continue
+            if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+                unstable_paths.append(relative)
+                scan_complete = False
+            if len(raw) > max_file_bytes:
+                issues.append(
+                    SnapshotIssue(
+                        relative,
+                        "file_too_large",
+                        f"source file exceeds the {max_file_bytes}-byte limit",
+                        size=len(raw),
+                    )
+                )
+                continue
+            try:
+                text = raw.decode("utf-8-sig")
+            except UnicodeDecodeError as exc:
+                issues.append(SnapshotIssue(relative, "decode_error", f"source is not UTF-8: {exc}"))
+                continue
+            files.append(
+                SnapshotFile(
+                    path=relative,
+                    size=len(raw),
+                    content_hash=_sha256(raw),
+                    text=text,
+                )
+            )
+
+    visit(root)
+    files.sort(key=lambda source_file: source_file.path)
+    issues.sort(key=lambda issue: (issue.path, issue.kind))
+    unstable_paths.sort()
+    return SourceManifestScan(
+        files=tuple(files),
+        issues=tuple(issues),
+        scanned_files=scanned_files,
+        scanned_bytes=scanned_bytes,
+        scan_complete=scan_complete and not scan_truncated,
+        scan_truncated=scan_truncated,
+        scan_truncation_reason=scan_truncation_reason,
+        unstable_paths=tuple(unstable_paths),
+    )
 
 
 def extract_definitions(snapshot: SourceSnapshot) -> DefinitionIndex:

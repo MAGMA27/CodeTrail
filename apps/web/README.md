@@ -2,7 +2,7 @@
 
 ## 职责与边界
 
-`apps/web` 提供项目/索引切换、概览、Session/消息、保存功能历史、同快照功能图、源码证据，以及 Session 内显式 fixture/real Run 的启动、状态、事件、工具结果、Issue/代码理解报告、候选位置与有界静态影响、SSE 订阅和取消；Codex external Run 会被自动发现并接入同一展示链。它只通过公开 HTTP API 访问服务端数据，不直接访问 SQLite、GitHub、宿主路径或模型。
+`apps/web` 提供项目/索引切换、索引新鲜度检查与显式更新、概览、Session/消息、保存功能历史、同快照功能图、源码证据，以及 Session 内显式 fixture/real Run 的启动、状态、事件、工具结果、Issue/代码理解报告、候选位置与有界静态影响、SSE 订阅和取消；Codex external Run 会被自动发现并接入同一展示链。它只通过公开 HTTP API 访问服务端数据，不直接访问 SQLite、GitHub、宿主路径或模型。
 
 ## 入口与目录导航
 
@@ -17,7 +17,9 @@
 
 ## 接口与依赖
 
-项目、索引、概览、Session/消息和 Run 均通过 `/api/projects/*` 调用；概览先展示固定索引中的结构组：HTTP 路径按静态声明前缀与 handler 模块分组，源码按相对目录分组；选择分组后查看真实入口或可见模块。FastAPI 路由入口显示 HTTP 方法、声明路径和处理函数，点击入口先打开装饰器到函数结束的同快照 evidence，关系图按钮则以处理函数作为既有静态图根节点；模块关系区域展示聚合的静态 imports/calls、总边数和最多 8 条源码位置样本。结构组与模块关系是静态组织事实，不是语义功能，前端对组、模块和关系的可见/总量分别显示预算边界。Run 使用同一 Session 的 list/detail/events、`events/stream`、tool-results/report/impact/cancel 端点。启动按钮只发送 Issue/模式/fixture 场景/固定 index_id，服务端独立冻结已保存消息；前端不把已加载的消息页当作 Run 输入。Codex external Run 不由网页创建，工作台在 Session history 成功后有界轮询 `execution_source=codex` 的活动 Run，再复用 detail/events/SSE 读取链。代码关系面板区分邻接查询 `truncated`、固定关系扫描 `index_truncated` 和 unresolved 详情 `index_unresolved_truncated`，并对旧索引的未知状态单独提示；大目录分组默认收起，展开后按选中节点及有限相邻节点聚焦。影响面板从报告候选或唯一 finding symbol 发起，重新查询 Run 固定 index 的静态 `calls`，方向/深度由用户控制且不修改 Run。HTTP 响应在 [lib/api.ts](lib/api.ts) 经过形状和 project/session/index/hash 边界校验，SSE 事件按 schema、Run 和连续 sequence 校验；`run.stream.end` 只接受 `succeeded`、`failed`、`cancelled`、`interrupted` 四类 Run 终态。
+项目、索引、新鲜度、概览、Session/消息和 Run 均通过 `/api/projects/*` 调用；索引管理提供检查更新和显式更新，前端展示 `consistent`、`changed`、`unknown`、变化计数、扫描预算及有界路径，更新返回复用或新快照结果。概览先展示固定索引中的结构组：HTTP 路径按静态声明前缀与 handler 模块分组，源码按相对目录分组；选择分组后查看真实入口或可见模块。FastAPI 路由入口显示 HTTP 方法、声明路径和处理函数，点击入口先打开装饰器到函数结束的同快照 evidence，关系图按钮则以处理函数作为既有静态图根节点；模块关系区域展示聚合的静态 imports/calls、总边数和最多 8 条源码位置样本。结构组与模块关系是静态组织事实，不是语义功能，前端对组、模块和关系的可见/总量分别显示预算边界。Run 使用同一 Session 的 list/detail/events、`events/stream`、tool-results/report/impact/cancel 端点。启动按钮只发送 Issue/模式/fixture 场景/固定 index_id，服务端独立冻结已保存消息；前端不把已加载的消息页当作 Run 输入。Codex external Run 不由网页创建，工作台在 Session history 成功后有界轮询 `execution_source=codex` 的活动 Run，再复用 detail/events/SSE 读取链。代码关系面板区分邻接查询 `truncated`、固定关系扫描 `index_truncated` 和 unresolved 详情 `index_unresolved_truncated`，并对旧索引的未知状态单独提示；大目录分组默认收起，展开后按选中节点及有限相邻节点聚焦。影响面板从报告候选或唯一 finding symbol 发起，重新查询 Run 固定 index 的静态 `calls`，方向/深度由用户控制且不修改 Run。HTTP 响应在 [lib/api.ts](lib/api.ts) 经过形状和 project/session/index/hash 边界校验，SSE 事件按 schema、Run 和连续 sequence 校验；`run.stream.end` 只接受 `succeeded`、`failed`、`cancelled`、`interrupted` 四类 Run 终态。
+
+索引管理在当前项目的知识页提供“检查更新”和“更新索引”。检查结果只由服务端读取本地源码 manifest，按内容 hash 区分 `consistent`、`changed`、`unknown`；前端同时显示变化统计、扫描预算、路径列表和扫描不完整告警。更新成功显示复用或新建快照，失败不替换旧 latest；前端不直接访问来源路径或 SQLite。
 
 ## 数据与生命周期
 
@@ -43,13 +45,13 @@ CodeTrail 作为自身仓库的 Codex external 验收流程见 [MVP 操作说明
 
 ## 错误与限制
 
-API 离线、项目/Session/index 不属于当前范围、消息未保存、空 Session、Run 活动冲突、预算或执行容量拒绝、模型不可用/失败、结构化输出无效、取消和重启中断都会显示明确状态；容量满时服务端在落库前返回可重试错误，工作台不会伪造 queued Run；Run 失败不会伪造成功结论。工作台不显示隐藏思维链，只显示服务端公开事件、工具结果、证据、报告和限制；real Run 的能力开关和配置由服务端控制，fixture/real/external 都不会执行仓库源码或 shell。固定关系扫描未完成、unresolved 详情截断和旧索引未知状态分别显示覆盖告警，查询自身截断时另显示查询告警；空邻接不能证明没有关系。Run 历史、事件和工具结果使用服务端有界分页，影响查询最多返回 40 个节点、40 条解释路径和 40 个 unresolved；前端显式显示 mapped/unmapped、截断、静态 calls、未知边界和范围说明。报告 evidence 与影响节点必须和 Run 的固定 index_id 一致，否则拒绝载入；外部 Run 终态或超时后不会继续显示新工具活动。
+API 离线、项目/Session/index 不属于当前范围、索引不在 latest、源码扫描不完整或来源不可用、消息未保存、空 Session、Run 活动冲突、预算或执行容量拒绝、模型不可用/失败、结构化输出无效、取消和重启中断都会显示明确状态；unknown 不渲染为一致，更新失败保留旧 latest。容量满时服务端在落库前返回可重试错误，工作台不会伪造 queued Run；Run 失败不会伪造成功结论。工作台不显示隐藏思维链，只显示服务端公开事件、工具结果、证据、报告和限制；real Run 的能力开关和配置由服务端控制，fixture/real/external 都不会执行仓库源码或 shell。固定关系扫描未完成、unresolved 详情截断和旧索引未知状态分别显示覆盖告警，查询自身截断时另显示查询告警；空邻接不能证明没有关系。Run 历史、事件和工具结果使用服务端有界分页，影响查询最多返回 40 个节点、40 条解释路径和 40 个 unresolved；前端显式显示 mapped/unmapped、截断、静态 calls、未知边界和范围说明。报告 evidence 与影响节点必须和 Run 的固定 index_id 一致，否则拒绝载入；外部 Run 终态或超时后不会继续显示新工具活动。
 
 草稿继续按 project/session 保存到浏览器 localStorage，切换范围不串入；消息保存中的旧响应不能清除新草稿。证据链接携带 project_id、index_id、路径、行范围、content hash 和 evidence_id，Session 链接携带 project_id/session_id，不回退到 latest index。
 
 ## 验证
 
-从仓库根目录执行 `pnpm --dir apps/web test`、`pnpm web:typecheck` 和 `pnpm web:build`。本轮前端测试覆盖结构组、模块关系、概览路由契约及既有订阅状态机；类型检查和生产构建通过。实际浏览器验证结构组列表→选择/返回→入口 evidence→处理函数源码→同快照关系图，并核对 HTTP 与本地 stdio MCP 的结构组和模块关系字段；真实供应商语义质量仍未验证。
+从仓库根目录执行 `pnpm --dir apps/web test`、`pnpm web:typecheck` 和 `pnpm web:build`。本轮前端测试覆盖新鲜度响应校验、结构组、模块关系、概览路由契约及既有订阅状态机；类型检查和生产构建通过。实际浏览器验证检查更新→变化摘要，并在无法确定时拒绝显式更新、保留旧 latest；变化后的新快照切换由后端业务回归验证。真实供应商语义质量仍未验证。
 
 ## 关联文档
 

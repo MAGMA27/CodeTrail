@@ -32,11 +32,13 @@ from .contracts import (
     FeatureGenerationRequest,
     FeatureGenerationListResponse,
     FeatureGenerationResponse,
+    IndexFreshness,
     GitHubImportRequest,
     GitHubImportResponse,
     ImportAttemptResponse,
     ImpactDirection,
     IndexResponse,
+    IndexRefreshResponse,
     LocalImportRequest,
     LocalImportResponse,
     NeighborsIndexResponse,
@@ -44,6 +46,7 @@ from .contracts import (
     ProjectIndexListResponse,
     ProjectListResponse,
     ProjectOverview,
+    RefreshProjectIndexRequest,
     ReportResponse,
     RunImpactResponse,
     RunEventsResponse,
@@ -112,6 +115,7 @@ def create_app(
     github_import_enabled: bool | None = None,
     mcp_github_import_enabled: bool | None = None,
     mcp_feature_generation_enabled: bool | None = None,
+    mcp_index_write_enabled: bool | None = None,
     mcp_session_write_enabled: bool | None = None,
     mcp_run_write_enabled: bool | None = None,
     mcp_external_run_enabled: bool | None = None,
@@ -131,6 +135,7 @@ def create_app(
             github_import_enabled=github_import_enabled,
             mcp_github_import_enabled=mcp_github_import_enabled,
             mcp_feature_generation_enabled=mcp_feature_generation_enabled,
+            mcp_index_write_enabled=mcp_index_write_enabled,
             mcp_session_write_enabled=mcp_session_write_enabled,
             mcp_run_write_enabled=mcp_run_write_enabled,
             mcp_external_run_enabled=mcp_external_run_enabled,
@@ -146,6 +151,7 @@ def create_app(
             github_import_enabled=github_import_enabled,
             mcp_github_import_enabled=mcp_github_import_enabled,
             mcp_feature_generation_enabled=mcp_feature_generation_enabled,
+            mcp_index_write_enabled=mcp_index_write_enabled,
             mcp_session_write_enabled=mcp_session_write_enabled,
             mcp_run_write_enabled=mcp_run_write_enabled,
             mcp_external_run_enabled=mcp_external_run_enabled,
@@ -597,6 +603,33 @@ def create_app(
         request: CreateProjectIndexRequest,
     ) -> IndexResponse:
         return await run_in_threadpool(workspace_service.create_project_index, project_id, request)
+
+    @application.post(
+        "/api/projects/{project_id}/indexes/{index_id}/freshness",
+        response_model=IndexFreshness,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def check_project_index_freshness(project_id: str, index_id: str) -> IndexFreshness:
+        return await run_in_threadpool(workspace_service.check_index_freshness, project_id, index_id)
+
+    @application.post(
+        "/api/projects/{project_id}/indexes/{index_id}/refresh",
+        response_model=IndexRefreshResponse,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def refresh_project_index(
+        http_request: Request,
+        project_id: str,
+        index_id: str,
+        request: RefreshProjectIndexRequest,
+    ) -> IndexRefreshResponse:
+        _require_local_write(http_request)
+        return await run_in_threadpool(
+            workspace_service.refresh_project_index,
+            project_id,
+            index_id,
+            request,
+        )
 
     @application.get(
         "/api/projects/{project_id}/indexes/{index_id}",

@@ -404,6 +404,18 @@ code { font-family: var(--ct-mono); }
 .ct-form-heading span { color: var(--ct-faint); font-family: var(--ct-mono); font-size: 9px; }
 .ct-check-field { display: inline-flex !important; align-items: center; gap: 6px; color: var(--ct-muted); font-size: 10px; }
 .ct-check-field input { width: 14px; height: 14px; accent-color: var(--ct-blue); }
+.ct-index-freshness { display: grid; gap: 8px; padding-top: 14px; border-top: 1px solid var(--ct-border); }
+.ct-freshness-result { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--ct-border); border-radius: 6px; background: var(--ct-subtle); }
+.ct-freshness-result[data-state="consistent"] { border-color: color-mix(in srgb, var(--ct-success) 45%, var(--ct-border)); }
+.ct-freshness-result[data-state="changed"], .ct-freshness-result[data-state="unknown"] { border-color: color-mix(in srgb, var(--ct-warning) 45%, var(--ct-border)); }
+.ct-freshness-meta, .ct-freshness-stats, .ct-freshness-paths { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ct-freshness-meta strong { color: var(--ct-success); font-size: 11px; }
+.ct-freshness-result[data-state="changed"] .ct-freshness-meta strong, .ct-freshness-result[data-state="unknown"] .ct-freshness-meta strong { color: var(--ct-warning); }
+.ct-freshness-meta span, .ct-freshness-stats, .ct-freshness-paths small { color: var(--ct-muted); font-size: 10px; }
+.ct-freshness-meta code { max-width: 100%; overflow: hidden; color: var(--ct-muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.ct-freshness-stats span { padding: 3px 5px; border: 1px solid var(--ct-border); border-radius: 4px; }
+.ct-freshness-stats strong { color: var(--ct-text); }
+.ct-freshness-paths code { padding: 3px 5px; border-radius: 4px; background: var(--ct-code-bg); color: var(--ct-muted); font-size: 9px; }
 
 .ct-side-panel { display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; border-left: 1px solid var(--ct-border); background: var(--ct-surface); }
 .ct-side-panel-header { display: flex; min-height: 68px; align-items: start; justify-content: space-between; gap: 10px; padding: 17px 16px 12px; border-bottom: 1px solid var(--ct-border); }

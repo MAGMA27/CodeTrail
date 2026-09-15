@@ -60,6 +60,8 @@ export type IndexSnapshot = {
   dirty: boolean;
   snapshot_hash: string;
   status: "ready" | "building" | "failed";
+  rules_version: string | null;
+  configuration_hash: string | null;
 };
 
 export type IndexIssue = {
@@ -77,6 +79,52 @@ export type IndexResponse = {
   truncation_reason: string | null;
   unresolved_truncated: boolean | null;
   unresolved_truncation_reason: string | null;
+};
+
+export type FreshnessStatus = "unchecked" | "consistent" | "changed" | "unknown";
+export type FreshnessReasonCode =
+  | "missing_index_metadata"
+  | "rules_changed"
+  | "configuration_changed"
+  | "source_changed"
+  | "source_read_error"
+  | "source_unavailable"
+  | "decode_error"
+  | "file_too_large"
+  | "symlink"
+  | "outside_root"
+  | "file_changed_during_check"
+  | "budget_exceeded"
+  | "remote_not_checked";
+
+export type IndexFreshness = {
+  schema_version: typeof SCHEMA_VERSION;
+  project_id: string;
+  baseline_index_id: string;
+  status: FreshnessStatus;
+  checked_at: string | null;
+  added_count: number;
+  modified_count: number;
+  deleted_count: number;
+  changed_paths: string[];
+  changed_paths_truncated: boolean;
+  scanned_files: number;
+  scanned_bytes: number;
+  scan_complete: boolean;
+  scan_truncated: boolean;
+  scan_truncation_reason: string | null;
+  current_rules_version: string | null;
+  current_configuration_hash: string | null;
+  reasons: FreshnessReasonCode[];
+};
+
+export type IndexRefreshResponse = {
+  schema_version: typeof SCHEMA_VERSION;
+  project_id: string;
+  baseline_index_id: string;
+  mode: "reused" | "created";
+  index: IndexResponse;
+  freshness: IndexFreshness;
 };
 
 export type ProjectRecord = {
@@ -952,7 +1000,9 @@ function isIndexSnapshot(value: unknown): value is IndexSnapshot {
     isString(value.revision) &&
     typeof value.dirty === "boolean" &&
     isString(value.snapshot_hash) &&
-    ["ready", "building", "failed"].includes(String(value.status))
+    ["ready", "building", "failed"].includes(String(value.status)) &&
+    (value.rules_version === undefined || value.rules_version === null || isString(value.rules_version)) &&
+    (value.configuration_hash === undefined || value.configuration_hash === null || isString(value.configuration_hash))
   );
 }
 
@@ -1639,6 +1689,61 @@ export function isIndexResponse(value: unknown): value is IndexResponse {
       "unresolved_truncated",
       "unresolved_truncation_reason",
     )
+  );
+}
+
+export function isIndexFreshness(value: unknown): value is IndexFreshness {
+  const reasons = [
+    "missing_index_metadata",
+    "rules_changed",
+    "configuration_changed",
+    "source_changed",
+    "source_read_error",
+    "source_unavailable",
+    "decode_error",
+    "file_too_large",
+    "symlink",
+    "outside_root",
+    "file_changed_during_check",
+    "budget_exceeded",
+    "remote_not_checked",
+  ];
+  return (
+    isRecord(value) &&
+    value.schema_version === SCHEMA_VERSION &&
+    isString(value.project_id) &&
+    isString(value.baseline_index_id) &&
+    ["unchecked", "consistent", "changed", "unknown"].includes(String(value.status)) &&
+    (value.checked_at === null || isString(value.checked_at)) &&
+    isNonNegativeInteger(value.added_count) &&
+    isNonNegativeInteger(value.modified_count) &&
+    isNonNegativeInteger(value.deleted_count) &&
+    isStringArray(value.changed_paths) &&
+    typeof value.changed_paths_truncated === "boolean" &&
+    isNonNegativeInteger(value.scanned_files) &&
+    isNonNegativeInteger(value.scanned_bytes) &&
+    typeof value.scan_complete === "boolean" &&
+    typeof value.scan_truncated === "boolean" &&
+    (value.scan_truncation_reason === null || isString(value.scan_truncation_reason)) &&
+    (value.current_rules_version === null || isString(value.current_rules_version)) &&
+    (value.current_configuration_hash === null || isString(value.current_configuration_hash)) &&
+    Array.isArray(value.reasons) &&
+    value.reasons.every((reason) => reasons.includes(String(reason)))
+  );
+}
+
+export function isIndexRefreshResponse(value: unknown): value is IndexRefreshResponse {
+  return (
+    isRecord(value) &&
+    value.schema_version === SCHEMA_VERSION &&
+    isString(value.project_id) &&
+    isString(value.baseline_index_id) &&
+    ["reused", "created"].includes(String(value.mode)) &&
+    isIndexResponse(value.index) &&
+    isIndexFreshness(value.freshness) &&
+    value.freshness.baseline_index_id === value.baseline_index_id &&
+    (value.mode !== "reused" || value.index.index.index_id === value.baseline_index_id) &&
+    (value.mode !== "created" || value.index.index.index_id !== value.baseline_index_id)
   );
 }
 
@@ -2742,6 +2847,40 @@ export function openProjectIndex(
     `/api/projects/${encodeURIComponent(projectId)}/indexes/${encodeURIComponent(indexId)}`,
     isIndexResponse,
     { signal },
+  );
+}
+
+export function checkProjectIndexFreshness(
+  projectId: string,
+  indexId: string,
+  signal?: AbortSignal,
+): Promise<IndexFreshness> {
+  return requestJson(
+    `/api/projects/${encodeURIComponent(projectId)}/indexes/${encodeURIComponent(indexId)}/freshness`,
+    isIndexFreshness,
+    { method: "POST", signal },
+  );
+}
+
+export function refreshProjectIndex(
+  projectId: string,
+  indexId: string,
+  revision: string,
+  dirty: boolean,
+  signal?: AbortSignal,
+): Promise<IndexRefreshResponse> {
+  return requestJson(
+    `/api/projects/${encodeURIComponent(projectId)}/indexes/${encodeURIComponent(indexId)}/refresh`,
+    isIndexRefreshResponse,
+    {
+      method: "POST",
+      signal,
+      body: JSON.stringify({
+        schema_version: SCHEMA_VERSION,
+        revision,
+        dirty,
+      }),
+    },
   );
 }
 

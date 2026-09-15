@@ -85,6 +85,70 @@ class IndexSnapshot(VersionedModel):
     dirty: bool
     snapshot_hash: Sha256
     status: Literal["ready", "building", "failed"]
+    rules_version: str | None = Field(default=None, min_length=1, max_length=200)
+    configuration_hash: Sha256 | None = None
+
+
+FreshnessStatus: TypeAlias = Literal["unchecked", "consistent", "changed", "unknown"]
+FreshnessReasonCode: TypeAlias = Literal[
+    "missing_index_metadata",
+    "rules_changed",
+    "configuration_changed",
+    "source_changed",
+    "source_read_error",
+    "source_unavailable",
+    "decode_error",
+    "file_too_large",
+    "symlink",
+    "outside_root",
+    "file_changed_during_check",
+    "budget_exceeded",
+    "remote_not_checked",
+]
+
+
+class IndexFreshness(VersionedModel):
+    """Bounded observation of one project's current source versus an index."""
+
+    project_id: Identifier
+    baseline_index_id: Identifier
+    status: FreshnessStatus
+    checked_at: datetime | None = None
+    added_count: NonNegativeInt = 0
+    modified_count: NonNegativeInt = 0
+    deleted_count: NonNegativeInt = 0
+    changed_paths: list[RelativePath] = Field(default_factory=list, max_length=100)
+    changed_paths_truncated: bool = False
+    scanned_files: NonNegativeInt = 0
+    scanned_bytes: NonNegativeInt = 0
+    scan_complete: bool = False
+    scan_truncated: bool = False
+    scan_truncation_reason: str | None = Field(default=None, max_length=200)
+    current_rules_version: str | None = Field(default=None, min_length=1, max_length=200)
+    current_configuration_hash: Sha256 | None = None
+    reasons: list[FreshnessReasonCode] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="after")
+    def validate_observation(self) -> IndexFreshness:
+        if self.status == "unchecked":
+            if self.checked_at is not None:
+                raise ValueError("unchecked freshness cannot have a check time")
+        elif self.checked_at is None:
+            raise ValueError("checked freshness must have a check time")
+        if self.scan_truncated and not self.scan_truncation_reason:
+            raise ValueError("truncated freshness scans must explain the truncation")
+        if not self.scan_truncated and self.scan_truncation_reason:
+            raise ValueError("non-truncated freshness scans cannot have a truncation reason")
+        if self.status == "consistent" and (
+            not self.scan_complete
+            or self.added_count
+            or self.modified_count
+            or self.deleted_count
+            or self.changed_paths
+            or self.reasons
+        ):
+            raise ValueError("consistent freshness must describe a complete unchanged scan")
+        return self
 
 
 IndexIssueKind: TypeAlias = Literal[
@@ -139,6 +203,13 @@ class CreateProjectIndexRequest(VersionedModel):
     dirty: bool = True
 
 
+class RefreshProjectIndexRequest(VersionedModel):
+    """Options for an explicit project-local index refresh."""
+
+    revision: str = Field(default="working-tree", min_length=1, max_length=200)
+    dirty: bool = True
+
+
 class IndexResponse(VersionedModel):
     index: IndexSnapshot
     issues: list[IndexIssue] = Field(default_factory=list)
@@ -159,6 +230,26 @@ class IndexResponse(VersionedModel):
             raise ValueError(
                 "non-truncated or unknown unresolved details cannot have a truncation reason"
             )
+        return self
+
+
+class IndexRefreshResponse(VersionedModel):
+    """Result of an explicit project index update or no-op reuse."""
+
+    project_id: Identifier
+    baseline_index_id: Identifier
+    mode: Literal["reused", "created"]
+    index: IndexResponse
+    freshness: IndexFreshness
+
+    @model_validator(mode="after")
+    def validate_refresh_scope(self) -> IndexRefreshResponse:
+        if self.freshness.baseline_index_id != self.baseline_index_id:
+            raise ValueError("refresh freshness must use the same baseline index")
+        if self.mode == "reused" and self.index.index.index_id != self.baseline_index_id:
+            raise ValueError("reused refresh must return the baseline index")
+        if self.mode == "created" and self.index.index.index_id == self.baseline_index_id:
+            raise ValueError("created refresh must return a new index")
         return self
 
 
@@ -2098,6 +2189,30 @@ class McpProjectIndexesResponse(McpResultBase):
 
 class McpIndexResponse(McpResultBase):
     index: IndexResponse | None = None
+
+
+class McpIndexFreshnessResponse(McpResultBase):
+    result: IndexFreshness | None = None
+
+    @model_validator(mode="after")
+    def validate_freshness_result(self) -> McpIndexFreshnessResponse:
+        if self.ok and self.result is None:
+            raise ValueError("successful freshness results require a result")
+        if not self.ok and self.result is not None:
+            raise ValueError("failed freshness results cannot include freshness data")
+        return self
+
+
+class McpIndexRefreshResponse(McpResultBase):
+    result: IndexRefreshResponse | None = None
+
+    @model_validator(mode="after")
+    def validate_refresh_result(self) -> McpIndexRefreshResponse:
+        if self.ok and self.result is None:
+            raise ValueError("successful refresh results require a result")
+        if not self.ok and self.result is not None:
+            raise ValueError("failed refresh results cannot include refresh data")
+        return self
 
 
 class McpSearchResponse(McpResultBase):

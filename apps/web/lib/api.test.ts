@@ -5,7 +5,9 @@ import {
   isFeatureGenerationListResponse,
   isFeatureGenerationResponse,
   isFeatureGraphResponse,
+  isIndexFreshness,
   isIndexResponse,
+  isIndexRefreshResponse,
   isNeighborsResponse,
   isProjectOverviewResponse,
   isRunImpactResponse,
@@ -351,6 +353,55 @@ test("index validator accepts explicit unresolved coverage and legacy omission",
   delete (legacy as Record<string, unknown>).unresolved_truncated;
   delete (legacy as Record<string, unknown>).unresolved_truncation_reason;
   assert.equal(isIndexResponse(legacy), true);
+});
+
+test("index freshness validators keep scan state and refresh mode explicit", () => {
+  const freshness = {
+    schema_version: SCHEMA_VERSION,
+    project_id: "project-freshness",
+    baseline_index_id: indexId,
+    status: "changed",
+    checked_at: "2026-09-15T00:00:00Z",
+    added_count: 1,
+    modified_count: 2,
+    deleted_count: 0,
+    changed_paths: ["pkg/changed.py"],
+    changed_paths_truncated: false,
+    scanned_files: 12,
+    scanned_bytes: 2048,
+    scan_complete: true,
+    scan_truncated: false,
+    scan_truncation_reason: null,
+    current_rules_version: "python-source-v1+python-3.13+relations-v2",
+    current_configuration_hash: "a".repeat(64),
+    reasons: ["source_changed"],
+  };
+  assert.equal(isIndexFreshness(freshness), true);
+
+  const refreshed = {
+    schema_version: SCHEMA_VERSION,
+    project_id: "project-freshness",
+    baseline_index_id: indexId,
+    mode: "created",
+    index: {
+      schema_version: SCHEMA_VERSION,
+      index: {
+        ...structuredClone(overview()).index,
+        index_id: "index-freshness-new",
+        snapshot_hash: "b".repeat(64),
+      },
+      issues: [],
+      truncated: false,
+      truncation_reason: null,
+      unresolved_truncated: false,
+      unresolved_truncation_reason: null,
+    },
+    freshness,
+  };
+  assert.equal(isIndexRefreshResponse(refreshed), true);
+
+  const forgedReuse = { ...refreshed, mode: "reused" };
+  assert.equal(isIndexRefreshResponse(forgedReuse), false);
 });
 
 test("Run impact validator accepts same-snapshot paths and rejects forged direction", () => {

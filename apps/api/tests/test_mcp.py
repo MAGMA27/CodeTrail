@@ -158,6 +158,13 @@ def test_real_stdio_client_matches_http_and_returns_evidence_link(tmp_path: Path
         f"/api/projects/{project_id}/indexes/{index_id}/overview",
     )
     assert status == 200
+    status, http_freshness = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/indexes/{index_id}/freshness",
+    )
+    assert status == 200
+    assert http_freshness["status"] == "consistent"
 
     environment = {
         "CODETRAIL_REPOSITORIES": json.dumps({"timeout-demo": str(repository)}),
@@ -182,6 +189,7 @@ def test_real_stdio_client_matches_http_and_returns_evidence_link(tmp_path: Path
             http_neighbors=http_neighbors,
             http_source=http_source,
             http_overview=http_overview,
+            http_freshness=http_freshness,
         )
     )
 
@@ -356,6 +364,7 @@ def test_mcp_local_import_is_opt_in_and_shares_http_state(tmp_path: Path) -> Non
                 "list_session_messages",
                 "list_indexes",
                 "get_index",
+                "check_index_freshness",
                 "search_code",
                 "read_source",
                 "get_neighbors",
@@ -413,6 +422,7 @@ def test_mcp_local_import_is_opt_in_and_shares_http_state(tmp_path: Path) -> Non
                 "list_session_messages",
                 "list_indexes",
                 "get_index",
+                "check_index_freshness",
                 "search_code",
                 "read_source",
                 "get_neighbors",
@@ -434,6 +444,67 @@ def test_mcp_local_import_is_opt_in_and_shares_http_state(tmp_path: Path) -> Non
         http_import["project"]["project_id"],
         mcp_project_id,
     } <= {project["project_id"] for project in projects["projects"]}
+
+
+def test_mcp_index_refresh_is_separately_opt_in(tmp_path: Path) -> None:
+    repository = copy_fixture(tmp_path, name="mcp-refresh")
+    application = create_app({"timeout-demo": repository})
+    status, project = request(
+        application,
+        "POST",
+        "/api/projects",
+        {"name": "MCP refresh fixture", "repository_id": "timeout-demo"},
+    )
+    assert status == 200
+    project_id = project["project_id"]
+    status, index = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/indexes",
+        {"revision": "mcp-refresh-v1", "dirty": False},
+    )
+    assert status == 200
+    index_id = index["index"]["index_id"]
+
+    base_environment = {
+        "CODETRAIL_REPOSITORIES": json.dumps({"timeout-demo": str(repository)}),
+        "CODETRAIL_WORKBENCH_URL": "http://localhost:3000",
+    }
+
+    def parameters(write_enabled: bool) -> StdioServerParameters:
+        environment = dict(base_environment)
+        if write_enabled:
+            environment["CODETRAIL_MCP_INDEX_WRITE_ENABLED"] = "1"
+        return StdioServerParameters(
+            command=sys.executable,
+            args=["-m", "app.mcp_server"],
+            env=environment,
+            cwd=API_ROOT,
+        )
+
+    async def exercise() -> None:
+        async with Client(parameters(False), read_timeout_seconds=10) as client:
+            names = {tool.name for tool in (await client.list_tools()).tools}
+            assert "check_index_freshness" in names
+            assert "refresh_index" not in names
+
+        async with Client(parameters(True), read_timeout_seconds=10) as client:
+            names = {tool.name for tool in (await client.list_tools()).tools}
+            assert "check_index_freshness" in names
+            assert "refresh_index" in names
+            checked = await client.call_tool(
+                "check_index_freshness",
+                {"project_id": project_id, "index_id": index_id},
+            )
+            assert checked.structured_content["result"]["status"] == "consistent"
+            refreshed = await client.call_tool(
+                "refresh_index",
+                {"project_id": project_id, "index_id": index_id, "revision": "mcp-refresh-v2", "dirty": True},
+            )
+            assert refreshed.structured_content["ok"] is True
+            assert refreshed.structured_content["result"]["mode"] == "reused"
+
+    asyncio.run(exercise())
 
 
 def test_mcp_feature_generation_is_separately_opt_in_and_returns_citations(tmp_path: Path) -> None:
@@ -478,6 +549,7 @@ def test_mcp_feature_generation_is_separately_opt_in_and_returns_citations(tmp_p
                 "list_session_messages",
                 "list_indexes",
                 "get_index",
+                "check_index_freshness",
                 "search_code",
                 "read_source",
                 "get_neighbors",
@@ -703,6 +775,7 @@ async def _exercise_stdio(
     http_neighbors: dict,
     http_source: dict,
     http_overview: dict,
+    http_freshness: dict,
 ) -> None:
     expected_tools = {
         "list_projects",
@@ -712,6 +785,7 @@ async def _exercise_stdio(
         "list_session_messages",
         "list_indexes",
         "get_index",
+        "check_index_freshness",
         "search_code",
         "read_source",
         "get_neighbors",
@@ -763,6 +837,15 @@ async def _exercise_stdio(
             "error": None,
             "index": http_index,
         }
+
+        freshness_result = await client.call_tool(
+            "check_index_freshness",
+            {"project_id": project_id, "index_id": index_id},
+        )
+        assert freshness_result.structured_content["ok"] is True
+        mcp_freshness = dict(freshness_result.structured_content["result"])
+        mcp_freshness["checked_at"] = http_freshness["checked_at"]
+        assert mcp_freshness == http_freshness
 
         search_result = await client.call_tool(
             "search_code",

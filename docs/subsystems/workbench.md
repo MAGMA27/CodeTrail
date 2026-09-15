@@ -2,7 +2,7 @@
 
 ## 状态
 
-已实现多项目真实工作台、Project/Index/Session/消息、O1/O2/O3 浏览和 P2-R1/P2-R2 Session 内显式 fixture/real Run 面板。概览默认先展示 `python-entry-v4` 的 HTTP 路径组、源码目录组、计数和静态模块关系；选择组后可查看真实路由/模块，再从入口 evidence 进入源码或从处理函数/模块进入既有关系图。Run 面板支持模式选择、真实模式警告、启动、状态同步、持久化 SSE 事件流、有限重连/轮询回退、工具结果、Issue/代码理解报告 evidence、候选位置与有界静态影响、取消、历史选择和刷新/切换恢复；Codex external Run 会从 Session history 自动发现、选择并订阅，代码理解结果按顺序步骤和覆盖级别展示。
+已实现多项目真实工作台、Project/Index/Session/消息、索引新鲜度检查/显式更新、O1/O2/O3 浏览和 P2-R1/P2-R2 Session 内显式 fixture/real Run 面板。概览默认先展示 `python-entry-v4` 的 HTTP 路径组、源码目录组、计数和静态模块关系；选择组后可查看真实路由/模块，再从入口 evidence 进入源码或从处理函数/模块进入既有关系图。Run 面板支持模式选择、真实模式警告、启动、状态同步、持久化 SSE 事件流、有限重连/轮询回退、工具结果、Issue/代码理解报告 evidence、候选位置与有界静态影响、取消、历史选择和刷新/切换恢复；Codex external Run 会从 Session history 自动发现、选择并订阅，代码理解结果按顺序步骤和覆盖级别展示。
 
 ## 职责与范围
 
@@ -10,13 +10,15 @@
 
 ## 接口与依赖
 
-[workbench.tsx](../../apps/web/app/workbench.tsx) 编排 Project/Index/Session/Run 请求，[workbench-ui.tsx](../../apps/web/app/workbench-ui.tsx) 渲染 Session、Run 和影响面板，[api.ts](../../apps/web/lib/api.ts) 校验边界，[run-event-stream.ts](../../apps/web/lib/run-event-stream.ts) 承载可测试的 SSE 订阅状态机，[globals.css](../../apps/web/app/globals.css) 提供样式。Run 调用 create/list/detail/events/`events/stream`/tool-results/report/impact/cancel 项目 Session 端点；外部 Run 通过受限 history 轮询发现后复用同一 detail/SSE 订阅链，不创建 HTTP Run；影响查询只传递报告中的精确 candidate/finding ID，并把返回 symbol/index 用于图和源码联动；接口语义和 fixture/external 限制见 [Run 执行子系统](execution.md)。
+[workbench.tsx](../../apps/web/app/workbench.tsx) 编排 Project/Index/Session/Run 请求，[workbench-ui.tsx](../../apps/web/app/workbench-ui.tsx) 渲染 Session、Run、索引新鲜度和影响面板，[api.ts](../../apps/web/lib/api.ts) 校验边界，[run-event-stream.ts](../../apps/web/lib/run-event-stream.ts) 承载可测试的 SSE 订阅状态机，[globals.css](../../apps/web/app/globals.css) 提供样式。索引管理调用 freshness/refresh 项目端点；Run 调用 create/list/detail/events/`events/stream`/tool-results/report/impact/cancel 项目 Session 端点；外部 Run 通过受限 history 轮询发现后复用同一 detail/SSE 订阅链，不创建 HTTP Run；影响查询只传递报告中的精确 candidate/finding ID，并把返回 symbol/index 用于图和源码联动；接口语义和 fixture/external 限制见 [Run 执行子系统](execution.md)。
 
 ## 设计原型与生产边界
 
 生产 `/` 使用真实服务端数据；`/prototype` 仅是演示数据原型，不调用 API、不写入项目状态。UI 布局和证据侧栏沿用 [工作区 UI 规范](../design/workspace-ui-spec.md)，Run 面板是现有 Session 视图中的显式操作，不自动随消息保存触发。
 
 ## 数据与生命周期
+
+打开项目后可在索引管理中显式执行“检查更新”或“更新索引”。检查结果显示 `consistent`、`changed` 或 `unknown`、检查时间、变化统计、扫描预算和有界路径；更新只针对当前 latest，consistent 直接复用，changed 或旧 metadata 生成新 immutable index，失败不替换旧 latest。GitHub 来源明确显示远端未检查。
 
 代码理解报告使用 `outcome=explanation`：结果区域显示 `complete/partial` 覆盖和最多 12 个有序步骤，按 confirmed/inferred/unknown 区分证据强度；步骤 evidence 只能打开报告内同快照源码，唯一 symbol 可进入现有局部关系图，多符号或无符号步骤说明原因，不派生候选影响。
 
@@ -26,13 +28,15 @@
 
 ## 错误与限制
 
+索引检查的 `changed_paths_truncated` 与 `scan_truncated` 分开显示；unknown 不能被渲染为一致，refresh 失败会明确保留旧 latest。索引更新按钮只在当前项目有 ready latest 时可用，避免隐式创建或跨项目操作。
+
 API 离线、归属错误、消息为空、活动 Run 冲突、预算或执行容量拒绝、模型不可用/失败、结构化输出失败、取消和 interrupted 状态显示为明确错误或状态；容量拒绝不创建本地 Run，提示可稍后重试。结构组/模块关系和入口路径受各自预算限制，工作台显示可见/总量与代表边样本边界；源码目录组可能包含因 `max_modules` 未载入的模块，下钻时明确说明。固定关系索引扫描未完成会显示“关系提取未完成”，unresolved 详情截断会显示独立告警，旧索引未记录该状态会显示未知，查询自身达到节点/边/时间/输出边界则另显示“查询已截断”；这些状态同时存在时不把空邻接当成否定证据。real Run 仍需服务端显式能力开关和持久化配置，失败不回退 fixture；fixture、real 和 external 都不执行仓库源码或 shell，external 的公开工具/报告状态只从服务端持久化事实读取。影响请求失败、无唯一映射、超出深度/节点/路径边界和 unresolved 均显示明确状态，不猜测同名符号。前端读取 Run history/events/tool-results 受服务端页大小限制，报告和证据必须绑定同一 index；请求失败不会用旧项目、旧 Session 或 latest index 的数据填补。
 
 Session 草稿按 project/session 保存到 localStorage，消息保存旧响应不能清除新草稿；Run 请求也按项目/Session取消和代数隔离。工作台只显示公开事件、工具结果、同快照证据、报告结论和用量，不显示模型隐藏思维链。
 
 ## 验证
 
-本轮前端结构组/关系契约测试、类型检查和生产构建通过；后端结构概览、全量回归和契约测试通过；浏览器验证了结构组列表、选择/返回、入口 evidence、处理函数源码和同快照关系图联动，并与本地 stdio MCP 对照结构组、模块关系、成员和源码位置。真实供应商语义质量仍为 UNVERIFIED。
+本轮前端新鲜度契约/交互、类型检查和生产构建，以及后端新鲜度、HTTP/MCP 对照、全量回归和契约检查通过。实际浏览器验证了检查→变化摘要，并在旧索引缺元数据且源码变化时将状态显示为 unknown、拒绝不安全更新并保留旧 latest；变化更新切换为新快照由后端业务回归覆盖。真实供应商语义质量仍为 UNVERIFIED。
 
 ## 相关决策
 
@@ -47,3 +51,4 @@ Session 草稿按 project/session 保存到 localStorage，消息保存旧响应
 - [关系扫描与 unresolved 覆盖语义](../decisions/2026-09-13-relation-coverage.md)
 - [FastAPI 路由入口概览](../decisions/2026-09-14-fastapi-route-overview.md)
 - [项目结构总览](../decisions/2026-09-14-project-structure-overview.md)
+- [本地项目索引新鲜度与显式更新](../decisions/2026-09-15-index-freshness.md)

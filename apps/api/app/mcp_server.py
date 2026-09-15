@@ -40,6 +40,8 @@ from .contracts import (
     McpImportResponse,
     McpImportStatusResponse,
     McpIndexResponse,
+    McpIndexFreshnessResponse,
+    McpIndexRefreshResponse,
     McpNeighborsResponse,
     McpOverviewResponse,
     McpProjectIndexesResponse,
@@ -66,6 +68,7 @@ from .contracts import (
     LocalImportResponse,
     ProjectIndexListResponse,
     ProjectOverview,
+    RefreshProjectIndexRequest,
     ReportResponse,
     RunEventsResponse,
     RunImpactResponse,
@@ -145,6 +148,7 @@ def create_mcp_server(
     local_import_enabled = service.registry.mcp_local_import_enabled
     github_import_enabled = service.registry.mcp_github_import_enabled
     feature_generation_enabled = service.registry.mcp_feature_generation_enabled
+    index_write_enabled = service.registry.mcp_index_write_enabled
     session_write_enabled = service.registry.mcp_session_write_enabled
     run_write_enabled = service.registry.mcp_run_write_enabled
     external_run_enabled = service.registry.mcp_external_run_enabled
@@ -152,14 +156,14 @@ def create_mcp_server(
         "Discover CodeTrail projects and query one explicitly selected immutable index. "
         "Default tools are read-only. Explicitly enabled session writes, bounded fixture/real Run start/cancel, "
         "Codex external-Agent Run tools, "
-        "local/GitHub import/status/retry, and feature generation are separately gated."
-        if local_import_enabled or github_import_enabled or feature_generation_enabled or session_write_enabled or run_write_enabled or external_run_enabled
+        "local/GitHub import/status/retry, index refresh, and feature generation are separately gated."
+        if local_import_enabled or github_import_enabled or feature_generation_enabled or index_write_enabled or session_write_enabled or run_write_enabled or external_run_enabled
         else "Discover CodeTrail projects and query one explicitly selected immutable index. "
         "All tools are read-only and never execute repository code."
     )
     server = MCPServer(
         name="codetrail",
-        title="CodeTrail workspace" if local_import_enabled or github_import_enabled or feature_generation_enabled or session_write_enabled or run_write_enabled or external_run_enabled else "CodeTrail read-only workspace",
+        title="CodeTrail workspace" if local_import_enabled or github_import_enabled or feature_generation_enabled or index_write_enabled or session_write_enabled or run_write_enabled or external_run_enabled else "CodeTrail read-only workspace",
         description=server_description,
         version="0.1.0",
         log_level="WARNING",
@@ -321,6 +325,59 @@ def create_mcp_server(
             return _failure(McpIndexResponse, exc)
         except Exception:
             return _unexpected_failure("get_index", McpIndexResponse)
+
+    @server.tool(
+        name="check_index_freshness",
+        title="Check index freshness",
+        description=(
+            "Compare one explicitly selected local project index with its current Python source manifest. "
+            "The check is read-only, content-hash based, bounded, and never creates an index. "
+            "GitHub sources report remote_not_checked."
+        ),
+        structured_output=True,
+    )
+    def check_index_freshness(
+        project_id: _ProjectId,
+        index_id: _IndexId,
+    ) -> McpIndexFreshnessResponse:
+        try:
+            return McpIndexFreshnessResponse(
+                ok=True,
+                result=service.check_index_freshness(project_id, index_id),
+            )
+        except ServiceError as exc:
+            return _failure(McpIndexFreshnessResponse, exc)
+        except Exception:
+            return _unexpected_failure("check_index_freshness", McpIndexFreshnessResponse)
+
+    if index_write_enabled:
+
+        @server.tool(
+            name="refresh_index",
+            title="Refresh project index",
+            description=(
+                "Explicitly recheck the project's current latest index and either reuse it or create a new immutable "
+                "snapshot. This write is separately enabled, source reads are bounded, and the baseline must remain latest."
+            ),
+            structured_output=True,
+        )
+        def refresh_index(
+            project_id: _ProjectId,
+            index_id: _IndexId,
+            revision: Annotated[str, Field(min_length=1, max_length=200)] = "working-tree",
+            dirty: bool = True,
+        ) -> McpIndexRefreshResponse:
+            try:
+                result = service.refresh_project_index(
+                    project_id,
+                    index_id,
+                    RefreshProjectIndexRequest(revision=revision, dirty=dirty),
+                )
+                return McpIndexRefreshResponse(ok=True, result=result)
+            except ServiceError as exc:
+                return _failure(McpIndexRefreshResponse, exc)
+            except Exception:
+                return _unexpected_failure("refresh_index", McpIndexRefreshResponse)
 
     @server.tool(
         name="search_code",
