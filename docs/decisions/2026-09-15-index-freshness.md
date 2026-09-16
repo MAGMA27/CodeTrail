@@ -16,6 +16,7 @@ Status: implemented
 4. 工作台提供“检查更新”和“更新索引”。更新接口以路径中的基准索引为准，在服务端重新核对：内容和当前规则均一致时返回 `reused`；完整且安全扫描确认源码恢复到同项目中规则、配置、schema 和完整 manifest 均兼容的历史快照时返回 `historical_reused`，推进 `latest` 到该 immutable index，并保留其原 revision/dirty 等来源 metadata；其他源码/规则/配置变化，或旧元数据缺失（可与这些可重建原因同时出现）时，从一次新的源码捕获生成新不可变快照；检查不完整或来源无法安全读取时失败并保留旧 `latest`。旧 metadata 场景仍报告 `unknown`，不冒充 `consistent`。
 5. 更新只允许推进调用时仍为项目 `latest_index_id` 的基准，完成写入时再次校验，避免并发请求以较晚完成的旧结果覆盖较新的 latest。旧 Session/Run/source evidence 继续绑定原 index/hash/行号。HTTP 更新沿用 loopback 写约束；MCP 更新工具单独受显式写开关控制，默认不注册。
 6. 本地来源的索引构建使用新的身份版本，使旧索引即使与源码内容相同也不会被错误地当作已经写入了当前规则元数据。不会迁移、复制或删除旧存储；GitHub 来源的检查明确返回“远端未检查”，不访问已清理的临时目录。
+7. 版本职责明确分离：当前关系语义为 `relations-v3`，参与 `rules_version` 和 freshness；当前关系事实缓存规则/格式为 `python-relation-facts-v2` / `relation-facts-v2`，只决定事实缓存是否命中；当前索引构建身份为 `relations-v4`，决定相同源码 hash 下生成的 immutable index ID 命名空间。语义变化必须同时导致 freshness 不兼容和新 index 身份；缓存格式变化只使对应派生缓存安全 miss，不单独改变图身份。
 
 ## 替代方案
 
@@ -42,3 +43,10 @@ Status: implemented
 - 实际工作台浏览器使用共享运行目录中的旧 latest：源码已发生变化且该旧索引缺少规则/配置元数据。索引管理显示 `无法确定`、1 个新增/16 个修改/0 个删除、扫描 121 个文件/1,404,324 bytes 和机器可读原因，并提示完整安全扫描可全量重建；点击“更新索引”创建 `index-import-c929f2f2b7a3e5b435ddaee3859158fe-relations-v3-rebuild-3378e41e1001cbce`，旧 v2 latest 仍保留。对新快照再次“检查更新”显示 `源码一致`，再次“更新索引”显示“复用原快照，未重新解析”；原 `session-aad58cde386e4b48868fca082ae6b94e` 及其历史 Run/evidence 仍可读取。
 - 实际宿主 `check_index_freshness` 与 HTTP freshness 对照一致：旧 v2 均为 `unknown`（`source_changed` + `missing_index_metadata`），新 v3 均为 `consistent`；当前宿主工具目录未注册 `refresh_index`，因此只做宿主读检查，写入路径由工作台闭环验证。
 - GitHub 检查保持 `remote_not_checked` 的未知语义；真实供应商语义质量未在本步验证。未修改用户控制的 `memory-bank/next.md`，`memory-bank/` 也未纳入 Git。
+
+## 实际证据（2026-09-16 关系语义升级）
+
+- 在隔离的同一源码和服务数据目录中，旧提交 `dee662f` 生成 `relations-v2` index；`sample.caller.resolved` 的 `obj.run()` 只有 `unresolved`，没有方法 calls 边。
+- 当前代码读取该旧 index 时 freshness 为 `changed`，原因为 `rules_changed`、`configuration_changed`，当前规则为 `python-source-v1+python-3.13+relations-v3`。显式更新生成不同的 `relations-v4-rebuild` index；旧 index 仍保留，新 index 出现 `sample.models.Widget.run` calls 边；再次 freshness 为 `consistent`，再次更新为 `reused`。
+- 同一过程通过 HTTP 和 stdio MCP 对照验证；MCP 工具数为 21。工作台对旧固定快照显示“解析或关系规则版本变化 · 索引配置指纹变化”，对新快照的关系图和源码 evidence 显示 `Widget.run`。
+- 本轮新增升级回归测试与现有 freshness/indexing 定向测试通过；真实供应商语义质量、共享运行目录的实际迁移未在本步验证。旧 index、历史 evidence 和用户未提交修改均未删除或改写。

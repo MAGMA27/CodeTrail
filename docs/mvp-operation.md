@@ -42,7 +42,7 @@ MCP `get_overview` 使用同一 `project_id`、`index_id`、结构规则和预�
 
 ## 进行调查
 
-打开 `http://localhost:3000`，选择目标项目和一个已有消息的 Session；当前自用验收使用项目 `CodeTrail 自用验收`、Session `已知费用结算问题自用验收`，项目和索引 ID 由 API/MCP 列表发现，不手工编造。结构总览选择该项目的最新 `relations-v2` ready index。
+打开 `http://localhost:3000`，选择目标项目和一个已有消息的 Session；当前自用验收使用项目 `CodeTrail 自用验收`、Session `已知费用结算问题自用验收`，项目和索引 ID 由 API/MCP 列表发现，不手工编造。结构总览选择该项目由列表返回的最新 ready index；历史示例中的 `relations-v2` 不代表当前关系语义或索引身份。
 
 在 Codex 中只描述现象，不预先提供候选文件、函数或行号，例如：“批量评测时供应商返回明确 token 用量，但费用高于请求前预留时最终累计费用可能仍停留在预留值，请检查是否存在导致低估的逻辑，给出源码证据、触发条件与可能影响；证据不足时明确说明。”
 

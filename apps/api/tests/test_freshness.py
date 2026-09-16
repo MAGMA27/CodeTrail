@@ -14,8 +14,14 @@ from app.contracts import (
     CreateProjectRequest,
     RefreshProjectIndexRequest,
 )
-from app.indexing import SnapshotIssue, SourceManifestScan
+from app.indexing import (
+    SnapshotIssue,
+    SourceManifestScan,
+    current_source_rules_version,
+    index_configuration_hash,
+)
 from app.main import create_app
+from app.relations import INDEX_BUILD_IDENTITY_VERSION, RELATION_SEMANTICS_VERSION
 from app.service import IndexService, ServiceError
 
 
@@ -228,6 +234,58 @@ def test_refresh_does_not_reuse_history_when_configuration_changes(tmp_path: Pat
         index_a.index.index_id,
         index_b.index.index.index_id,
     }
+
+
+def test_relation_semantics_upgrade_rebuilds_same_source_with_new_identity(tmp_path: Path) -> None:
+    application, _repository, project, index = _workspace(tmp_path)
+    index_service = application.state.index_service
+    old_rules_version = current_source_rules_version("relations-v2")
+    old_configuration_hash = index_configuration_hash(
+        max_file_bytes=index_service.max_file_bytes,
+        identity_version="relations-v3",
+        rules_version=old_rules_version,
+    )
+    with application.state.registry.store_for_repository("timeout-demo") as store:
+        store.connection.execute(
+            "UPDATE index_snapshots SET rules_version = ?, configuration_hash = ? WHERE index_id = ?",
+            (old_rules_version, old_configuration_hash, index.index.index_id),
+        )
+
+    freshness = application.state.workspace_service.check_index_freshness(
+        project.project_id,
+        index.index.index_id,
+    )
+    assert freshness.status == "changed"
+    assert freshness.reasons == ["rules_changed", "configuration_changed"]
+    assert freshness.current_rules_version.endswith(f"+{RELATION_SEMANTICS_VERSION}")
+    assert INDEX_BUILD_IDENTITY_VERSION == "relations-v4"
+
+    refreshed = application.state.workspace_service.refresh_project_index(
+        project.project_id,
+        index.index.index_id,
+        RefreshProjectIndexRequest(revision="semantic-upgrade", dirty=True),
+    )
+    assert refreshed.mode == "created"
+    assert refreshed.index.index.index_id != index.index.index_id
+    assert "relations-v4-rebuild" in refreshed.index.index.index_id
+    assert refreshed.index.index.rules_version == freshness.current_rules_version
+    assert refreshed.index.index.configuration_hash == index_service.configuration_hash
+
+    upgraded_freshness = application.state.workspace_service.check_index_freshness(
+        project.project_id,
+        refreshed.index.index.index_id,
+    )
+    assert upgraded_freshness.status == "consistent"
+    repeated = application.state.workspace_service.refresh_project_index(
+        project.project_id,
+        refreshed.index.index.index_id,
+        RefreshProjectIndexRequest(revision="semantic-upgrade-repeat", dirty=True),
+    )
+    assert repeated.mode == "reused"
+    assert repeated.index.index.index_id == refreshed.index.index.index_id
+    current = application.state.workspace_service.get_project(project.project_id)
+    assert current.latest_index_id == refreshed.index.index.index_id
+    assert index.index.index_id in current.available_index_ids
 
 
 def test_budget_exhaustion_is_unknown_and_keeps_latest_on_refresh(tmp_path: Path) -> None:

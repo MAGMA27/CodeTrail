@@ -17,12 +17,15 @@ from .indexing import DefinitionIndex, SnapshotIssue, SourceSnapshot, SnapshotFi
 RelationKind = Literal["imports", "calls"]
 BindingKind = Literal["module", "symbol"]
 RelationScopeKind = Literal["module", "class", "function"]
-RELATION_INDEX_IDENTITY_VERSION = "relations-v2"
+# The semantic version changes when the graph/unresolved meaning changes.
+RELATION_SEMANTICS_VERSION = "relations-v3"
+# This version only governs the persisted, index-independent facts payload.
 RELATION_FACT_EXTRACTION_RULES_VERSION = "python-relation-facts-v2"
 _RELATION_FACTS_FORMAT_VERSION = "relation-facts-v2"
-# New service-built snapshots use a separate identity namespace so legacy
-# rows without freshness metadata remain immutable and explicitly rebuildable.
-INDEX_BUILD_IDENTITY_VERSION = "relations-v3"
+# This namespace is part of generated immutable index IDs. Keep it separate
+# from both semantic and facts-serialization versions, and bump it when an
+# index with the same source hash could contain different graph semantics.
+INDEX_BUILD_IDENTITY_VERSION = "relations-v4"
 
 
 def relation_coverage_limitations(

@@ -123,7 +123,7 @@ from .github import GitHubArchive, GitHubClient, GitHubError, GitHubRepository, 
 from .relations import (
     INDEX_BUILD_IDENTITY_VERSION,
     RELATION_FACT_EXTRACTION_RULES_VERSION,
-    RELATION_INDEX_IDENTITY_VERSION,
+    RELATION_SEMANTICS_VERSION,
     extract_relations,
     relation_coverage_limitations,
 )
@@ -630,7 +630,7 @@ class IndexService:
         self.freshness_max_seconds = freshness_max_seconds
         self.definition_cache_max_entries = definition_cache_max_entries
         self.definition_cache_max_bytes = definition_cache_max_bytes
-        self.rules_version = current_source_rules_version(RELATION_INDEX_IDENTITY_VERSION)
+        self.rules_version = current_source_rules_version(RELATION_SEMANTICS_VERSION)
         self.configuration_hash = index_configuration_hash(
             max_file_bytes=max_file_bytes,
             identity_version=INDEX_BUILD_IDENTITY_VERSION,
