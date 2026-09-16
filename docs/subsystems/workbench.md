@@ -36,7 +36,7 @@ Session 草稿按 project/session 保存到 localStorage，消息保存旧响应
 
 ## 验证
 
-本轮前端新鲜度契约/交互、类型检查和生产构建，以及后端新鲜度、HTTP/MCP 对照、全量回归和文档检查通过。实际浏览器验证了旧索引缺元数据且源码变化时的 `unknown` 与安全重建提示、更新后新快照、再次检查 `consistent`、再次更新 `reused`，并确认旧 latest、Session 和 evidence 仍可读取。真实供应商语义质量仍为 UNVERIFIED。
+本轮前端新鲜度契约/交互、类型检查和生产构建，以及后端新鲜度、HTTP/MCP 对照、全量回归和文档检查通过。实际浏览器验证了旧索引缺元数据且源码变化时的 `unknown` 与安全重建提示、更新后新快照、再次检查 `consistent`、再次更新 `reused`，并确认旧 latest、Session 和 evidence 仍可读取；本项目隔离副本上的缓存/更新联合验收（含真实工作台的 changed、显式 update、consistent、reused 和历史 Session 恢复）见 [本项目索引更新与缓存效果联合验收](../decisions/2026-09-16-project-index-cache-acceptance.md)。真实供应商语义质量仍为 UNVERIFIED。
 
 ## 相关决策
 
@@ -52,3 +52,4 @@ Session 草稿按 project/session 保存到 localStorage，消息保存旧响应
 - [FastAPI 路由入口概览](../decisions/2026-09-14-fastapi-route-overview.md)
 - [项目结构总览](../decisions/2026-09-14-project-structure-overview.md)
 - [本地项目索引新鲜度与显式更新](../decisions/2026-09-15-index-freshness.md)
+- [本项目索引更新与缓存效果联合验收](../decisions/2026-09-16-project-index-cache-acceptance.md)

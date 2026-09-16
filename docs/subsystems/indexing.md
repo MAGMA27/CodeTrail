@@ -22,8 +22,8 @@
 
 ## 验证
 
-apps/api/tests/test_indexing.py、test_relations.py、test_storage.py、test_freshness.py 和 test_definition_cache.py 覆盖稳定 ID、规则版本隔离、路径约束、资源预算、定义/关系事实缓存冷热等价、共享 AST、失效/损坏/容量/并发/失败降级、内容 hash 新鲜度、显式复用/重建、旧元数据和 latest 保留；test_mcp.py 覆盖 HTTP/MCP 检查结果一致及独立 index 写开关。本步后端全量结果以本轮交付记录为准，关系目标解析与两阶段实际计数均有独立断言。
+apps/api/tests/test_indexing.py、test_relations.py、test_storage.py、test_freshness.py 和 test_definition_cache.py 覆盖稳定 ID、规则版本隔离、路径约束、资源预算、定义/关系事实缓存冷热等价、共享 AST、失效/损坏/容量/并发/失败降级、内容 hash 新鲜度、显式复用/重建、旧元数据和 latest 保留；test_mcp.py 覆盖 HTTP/MCP 检查结果一致及独立 index 写开关。本项目的冷/热/单文件/目标重绑定/禁用缓存和跨进程实测见 [本项目索引更新与缓存效果联合验收](../decisions/2026-09-16-project-index-cache-acceptance.md)，关系目标解析与两阶段实际计数均有独立证据。
 
 ## 相关决策
 
-当前依据为现有实现和根目录开发约束；取舍记录在 [关系扫描与 unresolved 覆盖语义](../decisions/2026-09-13-relation-coverage.md)、[本地项目索引新鲜度与显式更新](../decisions/2026-09-15-index-freshness.md)、[文件级定义提取缓存](../decisions/2026-09-15-definition-extraction-cache.md) 和 [文件关系事实缓存与全快照目标解析](../decisions/2026-09-15-relation-facts-cache.md)，其他重要取舍记录到 [决策目录](../decisions/README.md)。
+当前依据为现有实现和根目录开发约束；取舍记录在 [关系扫描与 unresolved 覆盖语义](../decisions/2026-09-13-relation-coverage.md)、[本地项目索引新鲜度与显式更新](../decisions/2026-09-15-index-freshness.md)、[文件级定义提取缓存](../decisions/2026-09-15-definition-extraction-cache.md)、[文件关系事实缓存与全快照目标解析](../decisions/2026-09-15-relation-facts-cache.md) 和 [本项目索引更新与缓存效果联合验收](../decisions/2026-09-16-project-index-cache-acceptance.md)，其他重要取舍记录到 [决策目录](../decisions/README.md)。
