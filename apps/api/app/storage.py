@@ -58,6 +58,7 @@ from .indexing import (
 )
 from .relations import (
     RelationCallEvent,
+    RelationAssignmentEvent,
     RelationFileFacts,
     RelationImportEvent,
     RelationIndex,
@@ -4391,6 +4392,9 @@ def _validate_relation_cache_lines(
             elif isinstance(event, RelationCallEvent):
                 fact = event.fact
                 check_range(fact.start_line, fact.end_line, "call")
+            elif isinstance(event, RelationAssignmentEvent):
+                fact = event.fact
+                check_range(fact.start_line, fact.end_line, "assignment")
             elif isinstance(event, RelationScopeEvent):
                 check_scope(event.scope)
             else:

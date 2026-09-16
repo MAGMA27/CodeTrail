@@ -421,6 +421,104 @@ def test_cached_relation_facts_preserve_alias_shadowing_and_unknown_semantics(tm
     assert hot.ast_parse_count == 0
 
 
+def test_cached_object_method_facts_rebind_to_changed_and_restored_targets(tmp_path: Path) -> None:
+    repository = tmp_path / "repository"
+    package = repository / "sample"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    model_source = (
+        "class Widget:\n"
+        "    def run(self) -> None:\n"
+        "        pass\n"
+    )
+    (package / "models.py").write_text(model_source, encoding="utf-8")
+    (package / "caller.py").write_text(
+        "from .models import Widget\n\n"
+        "def call() -> None:\n"
+        "    obj = Widget()\n"
+        "    obj.run()\n",
+        encoding="utf-8",
+    )
+    database = tmp_path / "index.sqlite3"
+
+    snapshot_one = build_source_snapshot(
+        repository, repository_id="sample", index_id="index-one"
+    )
+    definitions_one = extract_definitions(snapshot_one)
+    relations_one = extract_relations(definitions_one)
+    names_one = {symbol.symbol_id: symbol.qualified_name for symbol in relations_one.symbols}
+    assert (
+        "sample.caller.call",
+        "sample.models.Widget.run",
+    ) in {
+        (names_one[edge.source_id], names_one[edge.target_id])
+        for edge in relations_one.edges
+        if edge.kind == "calls"
+    }
+
+    with IndexStore(database) as store:
+        _write_cache(store, snapshot_one, definitions_one)
+        _write_relation_cache(store, snapshot_one, relations_one)
+
+        (package / "models.py").write_text(
+            "class Widget:\n"
+            "    def stop(self) -> None:\n"
+            "        pass\n",
+            encoding="utf-8",
+        )
+        snapshot_two = build_source_snapshot(
+            repository, repository_id="sample", index_id="index-two"
+        )
+        definitions_two = extract_definitions(
+            snapshot_two,
+            cached=store.load_definition_cache(
+                **_cache_kwargs(snapshot_two), max_bytes=100_000
+            ),
+        )
+        relations_two = extract_relations(
+            definitions_two,
+            cached=store.load_relation_cache(**_relation_cache_kwargs(snapshot_two)),
+        )
+        assert any(
+            item.reason == "object_method_not_resolved"
+            for item in relations_two.unresolved
+            if item.expression == "obj.run()"
+        )
+        assert not any(
+            names_one.get(edge.target_id) == "sample.models.Widget.run"
+            for edge in relations_two.edges
+        )
+
+        (package / "models.py").write_text(model_source, encoding="utf-8")
+        snapshot_three = build_source_snapshot(
+            repository, repository_id="sample", index_id="index-three"
+        )
+        definitions_three = extract_definitions(
+            snapshot_three,
+            cached=store.load_definition_cache(
+                **_cache_kwargs(snapshot_three), max_bytes=100_000
+            ),
+        )
+        relations_three = extract_relations(
+            definitions_three,
+            cached=store.load_relation_cache(**_relation_cache_kwargs(snapshot_three)),
+        )
+
+    names_three = {symbol.symbol_id: symbol.qualified_name for symbol in relations_three.symbols}
+    restored_edges = {
+        (names_three[edge.source_id], names_three[edge.target_id])
+        for edge in relations_three.edges
+        if edge.kind == "calls"
+    }
+    assert ("sample.caller.call", "sample.models.Widget.run") in restored_edges
+    assert relations_three.fact_cache_hits == len(snapshot_three.files)
+    assert all(edge.index_id == "index-three" for edge in relations_three.edges)
+    assert not any(
+        edge.target_id in {item.target_id for item in relations_one.edges}
+        for edge in relations_three.edges
+    )
+
+
 def test_relation_fact_cache_preserves_syntax_diagnostics_and_skips_incomplete_walks(
     tmp_path: Path,
 ) -> None:
@@ -502,7 +600,10 @@ def test_relation_cache_corruption_and_shared_capacity_are_bounded(tmp_path: Pat
             ("{not-json", "project-a"),
         )
         assert store.load_relation_cache(**_relation_cache_kwargs(snapshot)) == {}
-        unsupported = original["result_json"].replace("relation-facts-v1", "relation-facts-v0")
+        unsupported = original["result_json"].replace(
+            '"format_version":"relation-facts-v2"',
+            '"format_version":"relation-facts-v0"',
+        )
         store.connection.execute(
             "UPDATE relation_cache SET result_json = ?, result_bytes = ? WHERE scope_id = ?",
             (unsupported, len(unsupported.encode("utf-8")), "project-a"),

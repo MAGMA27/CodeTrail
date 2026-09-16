@@ -217,6 +217,173 @@ def test_aliases_parameter_shadowing_rebinding_and_unknown_imports(tmp_path: Pat
     assert any(item.reason == "object_method_not_resolved" for item in result.unresolved)
 
 
+def test_local_constructed_objects_resolve_only_direct_unique_methods(tmp_path: Path) -> None:
+    repository = tmp_path / "repository"
+    package = repository / "sample"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "left.py").write_text(
+        "class Widget:\n"
+        "    def run(self) -> None:\n"
+        "        pass\n",
+        encoding="utf-8",
+    )
+    (package / "right.py").write_text(
+        "class Widget:\n"
+        "    def run(self) -> None:\n"
+        "        pass\n",
+        encoding="utf-8",
+    )
+    (package / "caller.py").write_text(
+        "from .left import Widget as LeftWidget\n"
+        "from .right import Widget as RightWidget\n\n"
+        "class LocalWidget:\n"
+        "    def run(self) -> None:\n"
+        "        pass\n\n"
+        "def positive() -> None:\n"
+        "    local = LocalWidget()\n"
+        "    local.run()\n"
+        "    left = LeftWidget()\n"
+        "    left.run()\n"
+        "    right = RightWidget()\n"
+        "    right.run()\n",
+        encoding="utf-8",
+    )
+
+    definitions = extract_definitions(
+        build_source_snapshot(repository, repository_id="constructed", revision="fixture-v1", dirty=True)
+    )
+    result = extract_relations(definitions)
+    names = {symbol.symbol_id: symbol.qualified_name for symbol in result.symbols}
+    calls = {
+        (names[edge.source_id], names[edge.target_id])
+        for edge in result.edges
+        if edge.kind == "calls"
+    }
+
+    assert {
+        ("sample.caller.positive", "sample.caller.LocalWidget.run"),
+        ("sample.caller.positive", "sample.left.Widget.run"),
+        ("sample.caller.positive", "sample.right.Widget.run"),
+    } <= calls
+    assert len([item for item in result.unresolved if item.expression.endswith(".run()")]) == 0
+
+
+def test_constructed_object_method_resolution_rejects_unsafe_patterns(tmp_path: Path) -> None:
+    repository = tmp_path / "repository"
+    package = repository / "sample"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "caller.py").write_text(
+        "def replacement(self) -> None:\n"
+        "    pass\n\n"
+        "class Plain:\n"
+        "    def run(self) -> None:\n"
+        "        pass\n\n"
+        "class Inherited(Plain):\n"
+        "    def run(self) -> None:\n"
+        "        pass\n\n"
+        "class Decorated:\n"
+        "    @replacement\n"
+        "    def run(self) -> None:\n"
+        "        pass\n\n"
+        "class ClassOverride:\n"
+        "    def run(self) -> None:\n"
+        "        pass\n"
+        "    run = replacement\n\n"
+        "class InstanceOverride:\n"
+        "    def run(self) -> None:\n"
+        "        pass\n"
+        "    def __init__(self) -> None:\n"
+        "        self.run = replacement\n\n"
+        "class Duplicate:\n"
+        "    def run(self) -> None:\n"
+        "        pass\n"
+        "    def run(self) -> None:\n"
+        "        pass\n\n"
+        "def reassigned() -> None:\n"
+        "    obj = Plain()\n"
+        "    obj = replacement\n"
+        "    obj.run()\n\n"
+        "def parameter_shadow(obj) -> None:\n"
+        "    obj.run()\n\n"
+        "def conditional(flag: bool) -> None:\n"
+        "    if flag:\n"
+        "        obj = Plain()\n"
+        "    obj.run()\n\n"
+        "def constructor_shadow(Plain) -> None:\n"
+        "    obj = Plain()\n"
+        "    obj.run()\n\n"
+        "def inherited() -> None:\n"
+        "    obj = Inherited()\n"
+        "    obj.run()\n\n"
+        "def decorated() -> None:\n"
+        "    obj = Decorated()\n"
+        "    obj.run()\n\n"
+        "def class_override() -> None:\n"
+        "    obj = ClassOverride()\n"
+        "    obj.run()\n\n"
+        "def instance_override() -> None:\n"
+        "    obj = InstanceOverride()\n"
+        "    obj.run()\n\n"
+        "def call_site_override() -> None:\n"
+        "    obj = Plain()\n"
+        "    obj.run = replacement\n"
+        "    obj.run()\n\n"
+        "def duplicate() -> None:\n"
+        "    obj = Duplicate()\n"
+        "    obj.run()\n\n"
+        "def dynamic() -> None:\n"
+        "    obj = Plain()\n"
+        "    getattr(obj, 'run')()\n",
+        encoding="utf-8",
+    )
+
+    definitions = extract_definitions(
+        build_source_snapshot(repository, repository_id="unsafe", revision="fixture-v1", dirty=True)
+    )
+    result = extract_relations(definitions)
+    names = {symbol.symbol_id: symbol.qualified_name for symbol in result.symbols}
+    calls = {
+        (names[edge.source_id], names[edge.target_id])
+        for edge in result.edges
+        if edge.kind == "calls"
+    }
+
+    assert all(
+        (source, target) not in calls
+        for source in {
+            "sample.caller.reassigned",
+            "sample.caller.parameter_shadow",
+            "sample.caller.conditional",
+            "sample.caller.constructor_shadow",
+            "sample.caller.inherited",
+            "sample.caller.decorated",
+            "sample.caller.class_override",
+            "sample.caller.instance_override",
+            "sample.caller.call_site_override",
+            "sample.caller.duplicate",
+        }
+        for target in {
+            "sample.caller.Plain.run",
+            "sample.caller.Inherited.run",
+            "sample.caller.Decorated.run",
+            "sample.caller.ClassOverride.run",
+            "sample.caller.InstanceOverride.run",
+            "sample.caller.Duplicate.run",
+        }
+    )
+    unresolved_by_source = {
+        names[item.source_symbol_id]: item.reason for item in result.unresolved
+    }
+    assert unresolved_by_source["sample.caller.parameter_shadow"] == "name_rebound_in_scope"
+    assert unresolved_by_source["sample.caller.conditional"] == "name_rebound_in_scope"
+    assert unresolved_by_source["sample.caller.inherited"] == "object_method_not_resolved"
+    assert unresolved_by_source["sample.caller.decorated"] == "object_method_not_resolved"
+    assert unresolved_by_source["sample.caller.call_site_override"] == "object_method_not_resolved"
+    assert unresolved_by_source["sample.caller.dynamic"] == "dynamic_call_target"
+
+
 def test_old_snapshot_is_unchanged_when_worktree_changes(tmp_path: Path) -> None:
     source_path = tmp_path / "module.py"
     source_path.write_text("def first() -> None:\n    first()\n", encoding="utf-8")

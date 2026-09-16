@@ -18,8 +18,8 @@ RelationKind = Literal["imports", "calls"]
 BindingKind = Literal["module", "symbol"]
 RelationScopeKind = Literal["module", "class", "function"]
 RELATION_INDEX_IDENTITY_VERSION = "relations-v2"
-RELATION_FACT_EXTRACTION_RULES_VERSION = "python-relation-facts-v1"
-_RELATION_FACTS_FORMAT_VERSION = "relation-facts-v1"
+RELATION_FACT_EXTRACTION_RULES_VERSION = "python-relation-facts-v2"
+_RELATION_FACTS_FORMAT_VERSION = "relation-facts-v2"
 # New service-built snapshots use a separate identity namespace so legacy
 # rows without freshness metadata remain immutable and explicitly rebuildable.
 INDEX_BUILD_IDENTITY_VERSION = "relations-v3"
@@ -78,6 +78,7 @@ class RelationBindings:
     global_names: tuple[str, ...]
     dynamic_names: tuple[str, ...]
     parameter_names: tuple[str, ...]
+    attribute_write_names: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -93,6 +94,17 @@ class RelationCallFact:
 
 
 @dataclass(frozen=True)
+class RelationAssignmentFact:
+    """An ordered assignment that can bind or invalidate a local object name."""
+
+    target_names: tuple[str, ...]
+    constructor_name: str | None
+    certainty: Literal["definite", "uncertain"]
+    start_line: int
+    end_line: int
+
+
+@dataclass(frozen=True)
 class RelationImportEvent:
     fact: RelationImportFact
 
@@ -103,11 +115,21 @@ class RelationCallEvent:
 
 
 @dataclass(frozen=True)
+class RelationAssignmentEvent:
+    fact: RelationAssignmentFact
+
+
+@dataclass(frozen=True)
 class RelationScopeEvent:
     scope: RelationScopeFacts
 
 
-RelationEvent = RelationImportEvent | RelationCallEvent | RelationScopeEvent
+RelationEvent = (
+    RelationImportEvent
+    | RelationCallEvent
+    | RelationAssignmentEvent
+    | RelationScopeEvent
+)
 
 
 @dataclass(frozen=True)
@@ -119,6 +141,8 @@ class RelationScopeFacts:
     start_line: int
     bindings: RelationBindings
     events: tuple[RelationEvent, ...]
+    has_decorators: bool
+    has_bases: bool
 
 
 @dataclass(frozen=True)
@@ -178,6 +202,9 @@ class _Scope:
     bindings: dict[str, _Binding]
     shadowed: set[str]
     dynamic_names: set[str]
+    attribute_write_names: set[str]
+    object_bindings: dict[str, Symbol]
+    object_invalidated: set[str]
 
 
 @dataclass(frozen=True)
@@ -252,6 +279,7 @@ def extract_relations(
     syntax_error_paths = {
         issue.path for issue in definitions.issues if issue.kind == "syntax_error"
     }
+    facts_by_path: dict[str, RelationFileFacts] = {}
 
     for source_file in snapshot.files:
         if budget.truncated:
@@ -286,24 +314,33 @@ def extract_relations(
             fact_cache_entries.append((source_file.path, facts))
         else:
             fact_cache_hits += 1
+        facts_by_path[source_file.path] = facts
 
-        if facts.syntax_error or facts.scope is None:
-            continue
+    scope_facts_by_key: dict[tuple[str, str, RelationScopeKind, int], RelationScopeFacts] = {}
+    for path, facts in facts_by_path.items():
+        if facts.scope is not None:
+            _collect_scope_facts(path, facts.scope, scope_facts_by_key)
 
-        module_symbol = maps.modules_by_path.get(source_file.path)
-        if module_symbol is None:
-            continue
-        resolver = _RelationFactResolver(
-            path=source_file.path,
-            module_name=facts.module_name,
-            scope_facts=facts.scope,
-            module_symbol=module_symbol,
-            maps=maps,
-            budget=budget,
-            edges=edges,
-            unresolved=unresolved,
-        )
-        resolver.visit_scope()
+    if not budget.truncated:
+        for source_file in snapshot.files:
+            facts = facts_by_path.get(source_file.path)
+            if facts is None or facts.syntax_error or facts.scope is None:
+                continue
+            module_symbol = maps.modules_by_path.get(source_file.path)
+            if module_symbol is None:
+                continue
+            resolver = _RelationFactResolver(
+                path=source_file.path,
+                module_name=facts.module_name,
+                scope_facts=facts.scope,
+                module_symbol=module_symbol,
+                maps=maps,
+                scope_facts_by_key=scope_facts_by_key,
+                budget=budget,
+                edges=edges,
+                unresolved=unresolved,
+            )
+            resolver.visit_scope()
 
     edges.sort(key=lambda edge: (edge.source_location.path, edge.source_location.start_line, edge.kind, edge.edge_id))
     unresolved.sort(key=lambda item: (item.path, item.start_line, item.expression, item.unresolved_id))
@@ -374,6 +411,7 @@ class _BindingCollector(ast.NodeVisitor):
         self.definition_names: set[str] = set()
         self.global_names: set[str] = set()
         self.dynamic_names: set[str] = set()
+        self.attribute_write_names: set[str] = set()
 
     def visit_Import(self, node: ast.Import) -> None:
         self.imports.append(node)
@@ -397,11 +435,13 @@ class _BindingCollector(ast.NodeVisitor):
         self.global_names.update(node.names)
 
     def visit_Assign(self, node: ast.Assign) -> None:
+        self._collect_attribute_write_names(node.targets)
         if _is_getattr_call(node.value):
             self.dynamic_names.update(_assigned_names(node.targets))
         self.generic_visit(node)
 
     def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
+        self._collect_attribute_write_names([node.target])
         if node.value is not None and _is_getattr_call(node.value):
             self.dynamic_names.update(_assigned_names([node.target]))
         self.generic_visit(node)
@@ -409,6 +449,14 @@ class _BindingCollector(ast.NodeVisitor):
     def visit_NamedExpr(self, node: ast.NamedExpr) -> None:
         if _is_getattr_call(node.value):
             self.dynamic_names.update(_assigned_names([node.target]))
+        self.generic_visit(node)
+
+    def visit_AugAssign(self, node: ast.AugAssign) -> None:
+        self._collect_attribute_write_names([node.target])
+        self.generic_visit(node)
+
+    def visit_Delete(self, node: ast.Delete) -> None:
+        self._collect_attribute_write_names(node.targets)
         self.generic_visit(node)
 
     def visit_Name(self, node: ast.Name) -> None:
@@ -420,9 +468,28 @@ class _BindingCollector(ast.NodeVisitor):
             self.assigned.add(node.name)
         self.generic_visit(node)
 
+    def _collect_attribute_write_names(self, targets: list[ast.expr]) -> None:
+        for target in targets:
+            if isinstance(target, ast.Attribute):
+                self.attribute_write_names.add(target.attr)
+
 
 class _RelationFactsIncomplete(RuntimeError):
     """Raised when the bounded fact walk cannot finish one source file."""
+
+
+_UNCERTAIN_RELATION_NODES = (
+    ast.If,
+    ast.For,
+    ast.AsyncFor,
+    ast.While,
+    ast.Try,
+    ast.With,
+    ast.AsyncWith,
+    ast.Match,
+    ast.IfExp,
+    ast.BoolOp,
+)
 
 
 def _extract_relation_facts(
@@ -497,6 +564,7 @@ def _extract_scope_facts(
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
             else ()
         ),
+        attribute_write_names=tuple(sorted(collector.attribute_write_names)),
     )
     events: list[RelationEvent] = []
     for child in _scope_body(node):
@@ -513,6 +581,13 @@ def _extract_scope_facts(
         start_line=start_line,
         bindings=bindings,
         events=tuple(events),
+        has_decorators=bool(
+            isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.decorator_list
+        ),
+        has_bases=bool(
+            isinstance(node, ast.ClassDef) and (node.bases or node.keywords)
+        ),
     )
 
 
@@ -521,6 +596,7 @@ def _extract_relation_events(
     *,
     parent_qualified_name: str,
     deadline: float,
+    certainty: Literal["definite", "uncertain"] = "definite",
 ) -> list[RelationEvent]:
     if time.monotonic() >= deadline:
         raise _RelationFactsIncomplete
@@ -534,6 +610,7 @@ def _extract_relation_events(
                     expression,
                     parent_qualified_name=parent_qualified_name,
                     deadline=deadline,
+                    certainty=certainty,
                 )
             )
         child_kind: RelationScopeKind = "class" if isinstance(node, ast.ClassDef) else "function"
@@ -546,6 +623,136 @@ def _extract_relation_events(
         )
         events.append(RelationScopeEvent(child_scope))
         return events
+    if isinstance(node, ast.Assign):
+        events: list[RelationEvent] = []
+        assignment = _assignment_fact_from_node(node, certainty=certainty)
+        if assignment is not None:
+            events.append(RelationAssignmentEvent(assignment))
+        for child in ast.iter_child_nodes(node):
+            events.extend(
+                _extract_relation_events(
+                    child,
+                    parent_qualified_name=parent_qualified_name,
+                    deadline=deadline,
+                    certainty=certainty,
+                )
+            )
+        return events
+    if isinstance(node, ast.AnnAssign):
+        events = []
+        assignment = _assignment_fact_from_node(node, certainty=certainty)
+        if assignment is not None:
+            events.append(RelationAssignmentEvent(assignment))
+        for child in ast.iter_child_nodes(node):
+            events.extend(
+                _extract_relation_events(
+                    child,
+                    parent_qualified_name=parent_qualified_name,
+                    deadline=deadline,
+                    certainty=certainty,
+                )
+            )
+        return events
+    if isinstance(node, (ast.AugAssign, ast.NamedExpr, ast.Delete)):
+        events = []
+        assignment = _assignment_fact_from_node(node, certainty="uncertain")
+        if assignment is not None:
+            events.append(RelationAssignmentEvent(assignment))
+        for child in ast.iter_child_nodes(node):
+            events.extend(
+                _extract_relation_events(
+                    child,
+                    parent_qualified_name=parent_qualified_name,
+                    deadline=deadline,
+                    certainty="uncertain",
+                )
+            )
+        return events
+    if isinstance(node, (ast.For, ast.AsyncFor)):
+        events = []
+        assignment = _assignment_fact_from_targets(
+            [node.target],
+            start_line=node.lineno,
+            end_line=getattr(node, "end_lineno", node.lineno) or node.lineno,
+            certainty="uncertain",
+        )
+        if assignment is not None:
+            events.append(RelationAssignmentEvent(assignment))
+        for child in ast.iter_child_nodes(node):
+            events.extend(
+                _extract_relation_events(
+                    child,
+                    parent_qualified_name=parent_qualified_name,
+                    deadline=deadline,
+                    certainty="uncertain",
+                )
+            )
+        return events
+    if isinstance(node, (ast.With, ast.AsyncWith)):
+        events = []
+        assignment = _assignment_fact_from_targets(
+            [item.optional_vars for item in node.items if item.optional_vars is not None],
+            start_line=node.lineno,
+            end_line=getattr(node, "end_lineno", node.lineno) or node.lineno,
+            certainty="uncertain",
+        )
+        if assignment is not None:
+            events.append(RelationAssignmentEvent(assignment))
+        for child in ast.iter_child_nodes(node):
+            events.extend(
+                _extract_relation_events(
+                    child,
+                    parent_qualified_name=parent_qualified_name,
+                    deadline=deadline,
+                    certainty="uncertain",
+                )
+            )
+        return events
+    if isinstance(node, ast.ExceptHandler):
+        events = []
+        if node.name:
+            events.append(
+                RelationAssignmentEvent(
+                    RelationAssignmentFact(
+                        target_names=(node.name,),
+                        constructor_name=None,
+                        certainty="uncertain",
+                        start_line=node.lineno,
+                        end_line=getattr(node, "end_lineno", node.lineno) or node.lineno,
+                    )
+                )
+            )
+        for child in ast.iter_child_nodes(node):
+            events.extend(
+                _extract_relation_events(
+                    child,
+                    parent_qualified_name=parent_qualified_name,
+                    deadline=deadline,
+                    certainty="uncertain",
+                )
+            )
+        return events
+    if isinstance(node, ast.comprehension):
+        events = []
+        assignment = _assignment_fact_from_targets(
+            [node.target],
+            start_line=node.target.lineno,
+            end_line=getattr(node.target, "end_lineno", node.target.lineno)
+            or node.target.lineno,
+            certainty="uncertain",
+        )
+        if assignment is not None:
+            events.append(RelationAssignmentEvent(assignment))
+        for child in ast.iter_child_nodes(node):
+            events.extend(
+                _extract_relation_events(
+                    child,
+                    parent_qualified_name=parent_qualified_name,
+                    deadline=deadline,
+                    certainty="uncertain",
+                )
+            )
+        return events
     if isinstance(node, ast.Call):
         events = [RelationCallEvent(_call_fact_from_node(node))]
         for child in ast.iter_child_nodes(node):
@@ -554,19 +761,115 @@ def _extract_relation_events(
                     child,
                     parent_qualified_name=parent_qualified_name,
                     deadline=deadline,
+                    certainty=certainty,
                 )
             )
         return events
     events = []
+    child_certainty = (
+        "uncertain" if isinstance(node, _UNCERTAIN_RELATION_NODES) else certainty
+    )
     for child in ast.iter_child_nodes(node):
         events.extend(
             _extract_relation_events(
                 child,
                 parent_qualified_name=parent_qualified_name,
                 deadline=deadline,
+                certainty=child_certainty,
             )
         )
     return events
+
+
+def _assignment_fact_from_node(
+    node: ast.Assign | ast.AnnAssign | ast.AugAssign | ast.NamedExpr | ast.Delete,
+    *,
+    certainty: Literal["definite", "uncertain"],
+) -> RelationAssignmentFact | None:
+    if isinstance(node, ast.Assign):
+        targets = node.targets
+        value = node.value
+    elif isinstance(node, ast.AnnAssign):
+        targets = [node.target]
+        value = node.value
+    elif isinstance(node, ast.NamedExpr):
+        targets = [node.target]
+        value = node.value
+    elif isinstance(node, ast.AugAssign):
+        targets = [node.target]
+        value = None
+    else:
+        targets = node.targets
+        value = None
+
+    return _assignment_fact_from_targets(
+        targets,
+        constructor_name=(
+            value.func.id
+            if (
+                certainty == "definite"
+                and len(targets) == 1
+                and isinstance(targets[0], ast.Name)
+                and isinstance(value, ast.Call)
+                and isinstance(value.func, ast.Name)
+            )
+            else None
+        ),
+        start_line=node.lineno,
+        end_line=getattr(node, "end_lineno", node.lineno) or node.lineno,
+        certainty=certainty,
+    )
+
+
+def _assignment_fact_from_targets(
+    targets: list[ast.expr],
+    *,
+    start_line: int,
+    end_line: int,
+    certainty: Literal["definite", "uncertain"],
+    constructor_name: str | None = None,
+) -> RelationAssignmentFact | None:
+    target_names = tuple(sorted(_target_names(targets)))
+    if not target_names:
+        return None
+    return RelationAssignmentFact(
+        target_names=target_names,
+        constructor_name=constructor_name,
+        certainty=certainty,
+        start_line=start_line,
+        end_line=end_line,
+    )
+
+
+def _target_names(targets: list[ast.expr]) -> set[str]:
+    names: set[str] = set()
+
+    def collect(target: ast.expr) -> None:
+        if isinstance(target, ast.Name):
+            if isinstance(target.ctx, (ast.Store, ast.Del)):
+                names.add(target.id)
+            return
+        if isinstance(target, (ast.Tuple, ast.List)):
+            for element in target.elts:
+                collect(element)
+            return
+        if isinstance(target, ast.Starred):
+            collect(target.value)
+
+    for target in targets:
+        collect(target)
+    return names
+
+
+def _collect_scope_facts(
+    path: str,
+    scope: RelationScopeFacts,
+    result: dict[tuple[str, str, RelationScopeKind, int], RelationScopeFacts],
+) -> None:
+    result[(path, scope.qualified_name, scope.kind, scope.start_line)] = scope
+    for event in scope.events:
+        if isinstance(event, RelationScopeEvent):
+            _collect_scope_facts(path, event.scope, result)
 
 
 def _import_fact_from_node(node: ast.Import | ast.ImportFrom) -> RelationImportFact:
@@ -613,6 +916,9 @@ class _RelationFactResolver:
         scope_facts: RelationScopeFacts,
         module_symbol: Symbol,
         maps: _DefinitionMaps,
+        scope_facts_by_key: Mapping[
+            tuple[str, str, RelationScopeKind, int], RelationScopeFacts
+        ],
         budget: _RelationBudget,
         edges: list[CodeEdge],
         unresolved: list[UnresolvedReference],
@@ -621,6 +927,7 @@ class _RelationFactResolver:
         self.module_name = module_name
         self.scope_facts = scope_facts
         self.maps = maps
+        self.scope_facts_by_key = scope_facts_by_key
         self.budget = budget
         self.edges = edges
         self.unresolved = unresolved
@@ -639,8 +946,25 @@ class _RelationFactResolver:
                 self._visit_import(event.fact)
             elif isinstance(event, RelationCallEvent):
                 self._visit_call(event.fact)
+            elif isinstance(event, RelationAssignmentEvent):
+                self._visit_assignment(event.fact)
             else:
                 self._visit_nested_scope(event.scope)
+
+    def _visit_assignment(self, fact: RelationAssignmentFact) -> None:
+        for name in fact.target_names:
+            self.scope.object_bindings.pop(name, None)
+            self.scope.object_invalidated.add(name)
+        if (
+            fact.certainty == "definite"
+            and fact.constructor_name is not None
+            and len(fact.target_names) == 1
+        ):
+            target = self._resolve_constructor(fact.constructor_name)
+            if target is not None:
+                name = fact.target_names[0]
+                self.scope.object_bindings[name] = target
+                self.scope.object_invalidated.discard(name)
 
     def _visit_import(self, fact: RelationImportFact) -> None:
         for alias in fact.aliases:
@@ -724,6 +1048,14 @@ class _RelationFactResolver:
             bindings=bindings,
             shadowed=shadowed,
             dynamic_names=set(binding_facts.dynamic_names),
+            attribute_write_names=set(binding_facts.attribute_write_names),
+            object_bindings={},
+            object_invalidated={
+                *shadowed,
+                *binding_facts.parameter_names,
+                *binding_facts.definition_names,
+                *bindings,
+            },
         )
 
     def _symbol_for_scope(self, scope_facts: RelationScopeFacts) -> Symbol | None:
@@ -787,6 +1119,15 @@ class _RelationFactResolver:
             return None, "call_target_not_in_snapshot", candidates
         if fact.target_kind == "attribute" and fact.target_parts:
             parts = fact.target_parts
+            if len(parts) == 2:
+                object_target, object_reason = self._lookup_object(parts[0])
+                if object_target is not None:
+                    target = self._direct_method(object_target, parts[1])
+                    if target is not None:
+                        return target, "", []
+                    return None, "object_method_not_resolved", self._candidate_ids(parts[-1])
+                if object_reason:
+                    return None, object_reason, []
             binding, lookup_reason = self._lookup(parts[0])
             if binding is not None and binding.kind == "module" and binding.module_name:
                 target_name = ".".join((binding.module_name, *parts[1:]))
@@ -796,6 +1137,67 @@ class _RelationFactResolver:
                 return None, "module_attribute_not_in_snapshot", self._candidate_ids(parts[-1])
             return None, lookup_reason or "object_method_not_resolved", []
         return None, "dynamic_call_target", []
+
+    def _resolve_constructor(self, name: str) -> Symbol | None:
+        binding, _reason = self._lookup(name)
+        if (
+            binding is not None
+            and binding.kind == "symbol"
+            and binding.symbol is not None
+            and binding.symbol.kind == "class"
+        ):
+            return binding.symbol
+        return None
+
+    def _direct_method(self, class_symbol: Symbol, method_name: str) -> Symbol | None:
+        candidates = [
+            symbol
+            for symbol in self.maps.by_qualified_name.get(
+                f"{class_symbol.qualified_name}.{method_name}", []
+            )
+            if symbol.path == class_symbol.path and symbol.kind == "function"
+        ]
+        if len(candidates) != 1:
+            return None
+        method = candidates[0]
+        class_scope = self.scope_facts_by_key.get(
+            (class_symbol.path, class_symbol.qualified_name, "class", class_symbol.start_line)
+        )
+        method_scope = self.scope_facts_by_key.get(
+            (method.path, method.qualified_name, "function", method.start_line)
+        )
+        if class_scope is None or method_scope is None:
+            return None
+        if class_scope.has_bases or class_scope.has_decorators or method_scope.has_decorators:
+            return None
+        if method_name in class_scope.bindings.assigned:
+            return None
+        if self._scope_chain_has_attribute_write(method_name):
+            return None
+        if _scope_has_attribute_write(class_scope, method_name):
+            return None
+        return method
+
+    def _scope_chain_has_attribute_write(self, attribute_name: str) -> bool:
+        scope: _Scope | None = self.scope
+        while scope is not None:
+            if attribute_name in scope.attribute_write_names:
+                return True
+            scope = scope.parent
+        return False
+
+    def _lookup_object(self, name: str) -> tuple[Symbol | None, str | None]:
+        scope: _Scope | None = self.scope
+        while scope is not None:
+            if name in scope.object_invalidated:
+                if name in scope.dynamic_names:
+                    return None, "dynamic_call_target"
+                return None, "name_rebound_in_scope"
+            target = scope.object_bindings.get(name)
+            if target is not None:
+                return target, None
+            scope = scope.parent
+        return None, None
 
     def _lookup(self, name: str) -> tuple[_Binding | None, str | None]:
         scope: _Scope | None = self.scope
@@ -897,6 +1299,16 @@ class _RelationFactResolver:
         )
 
 
+def _scope_has_attribute_write(scope: RelationScopeFacts, attribute_name: str) -> bool:
+    if attribute_name in scope.bindings.attribute_write_names:
+        return True
+    return any(
+        isinstance(event, RelationScopeEvent)
+        and _scope_has_attribute_write(event.scope, attribute_name)
+        for event in scope.events
+    )
+
+
 def serialize_relation_file_facts(facts: RelationFileFacts) -> str:
     """Serialize only validated, index-independent relation syntax facts."""
 
@@ -964,8 +1376,11 @@ def _relation_scope_to_json(scope: RelationScopeFacts) -> dict[str, object]:
             "global_names": list(scope.bindings.global_names),
             "dynamic_names": list(scope.bindings.dynamic_names),
             "parameter_names": list(scope.bindings.parameter_names),
+            "attribute_write_names": list(scope.bindings.attribute_write_names),
         },
         "events": [_relation_event_to_json(event) for event in scope.events],
+        "has_decorators": scope.has_decorators,
+        "has_bases": scope.has_bases,
     }
 
 
@@ -974,6 +1389,8 @@ def _relation_event_to_json(event: RelationEvent) -> dict[str, object]:
         return {"type": "import", "fact": _relation_import_to_json(event.fact)}
     if isinstance(event, RelationCallEvent):
         return {"type": "call", "fact": _relation_call_to_json(event.fact)}
+    if isinstance(event, RelationAssignmentEvent):
+        return {"type": "assignment", "fact": _relation_assignment_to_json(event.fact)}
     return {"type": "scope", "scope": _relation_scope_to_json(event.scope)}
 
 
@@ -999,10 +1416,28 @@ def _relation_call_to_json(fact: RelationCallFact) -> dict[str, object]:
     }
 
 
+def _relation_assignment_to_json(fact: RelationAssignmentFact) -> dict[str, object]:
+    return {
+        "target_names": list(fact.target_names),
+        "constructor_name": fact.constructor_name,
+        "certainty": fact.certainty,
+        "start_line": fact.start_line,
+        "end_line": fact.end_line,
+    }
+
+
 def _relation_scope_from_json(raw_scope: object) -> RelationScopeFacts:
     _require_dict(
         raw_scope,
-        {"qualified_name", "kind", "start_line", "bindings", "events"},
+        {
+            "qualified_name",
+            "kind",
+            "start_line",
+            "bindings",
+            "events",
+            "has_decorators",
+            "has_bases",
+        },
         "relation scope",
     )
     qualified_name = _require_text(raw_scope["qualified_name"], "relation scope name", 500)
@@ -1013,7 +1448,15 @@ def _relation_scope_from_json(raw_scope: object) -> RelationScopeFacts:
     raw_bindings = raw_scope["bindings"]
     _require_dict(
         raw_bindings,
-        {"imports", "assigned", "definition_names", "global_names", "dynamic_names", "parameter_names"},
+        {
+            "imports",
+            "assigned",
+            "definition_names",
+            "global_names",
+            "dynamic_names",
+            "parameter_names",
+            "attribute_write_names",
+        },
         "relation bindings",
     )
     raw_imports = raw_bindings["imports"]
@@ -1032,6 +1475,9 @@ def _relation_scope_from_json(raw_scope: object) -> RelationScopeFacts:
         parameter_names=_relation_names_from_json(
             raw_bindings["parameter_names"], "parameter names"
         ),
+        attribute_write_names=_relation_names_from_json(
+            raw_bindings["attribute_write_names"], "attribute write names"
+        ),
     )
     raw_events = raw_scope["events"]
     if not isinstance(raw_events, list) or len(raw_events) > 100_000:
@@ -1042,6 +1488,8 @@ def _relation_scope_from_json(raw_scope: object) -> RelationScopeFacts:
         start_line=start_line,
         bindings=bindings,
         events=tuple(_relation_event_from_json(item) for item in raw_events),
+        has_decorators=_require_bool(raw_scope["has_decorators"], "relation scope decorators"),
+        has_bases=_require_bool(raw_scope["has_bases"], "relation scope bases"),
     )
 
 
@@ -1055,6 +1503,9 @@ def _relation_event_from_json(raw_event: object) -> RelationEvent:
     if event_type == "call":
         _require_dict(raw_event, {"type", "fact"}, "relation call event")
         return RelationCallEvent(_relation_call_from_json(raw_event["fact"]))
+    if event_type == "assignment":
+        _require_dict(raw_event, {"type", "fact"}, "relation assignment event")
+        return RelationAssignmentEvent(_relation_assignment_from_json(raw_event["fact"]))
     if event_type == "scope":
         _require_dict(raw_event, {"type", "scope"}, "relation scope event")
         return RelationScopeEvent(_relation_scope_from_json(raw_event["scope"]))
@@ -1121,6 +1572,37 @@ def _relation_call_from_json(raw_fact: object) -> RelationCallFact:
     )
 
 
+def _relation_assignment_from_json(raw_fact: object) -> RelationAssignmentFact:
+    _require_dict(
+        raw_fact,
+        {"target_names", "constructor_name", "certainty", "start_line", "end_line"},
+        "relation assignment fact",
+    )
+    raw_names = raw_fact["target_names"]
+    if not isinstance(raw_names, list) or len(raw_names) > 20_000:
+        raise ValueError("relation assignment target names are invalid")
+    target_names = tuple(
+        _require_text(name, "relation assignment target name", 500) for name in raw_names
+    )
+    constructor_name = raw_fact["constructor_name"]
+    if constructor_name is not None:
+        constructor_name = _require_text(
+            constructor_name, "relation assignment constructor name", 500
+        )
+    certainty = raw_fact["certainty"]
+    if certainty not in {"definite", "uncertain"}:
+        raise ValueError("relation assignment certainty is invalid")
+    start_line = _require_positive_int(raw_fact["start_line"], "relation assignment start line")
+    end_line = _require_positive_int(raw_fact["end_line"], "relation assignment end line")
+    return RelationAssignmentFact(
+        target_names,
+        constructor_name,
+        certainty,
+        start_line,
+        end_line,
+    )
+
+
 def _relation_names_from_json(raw_names: object, label: str) -> tuple[str, ...]:
     if not isinstance(raw_names, list) or len(raw_names) > 20_000:
         raise ValueError(f"relation {label} are invalid")
@@ -1138,6 +1620,12 @@ def _require_dict(value: object, keys: set[str], label: str) -> dict[str, object
 
 def _require_text(value: object, label: str, max_length: int) -> str:
     if not isinstance(value, str) or not 1 <= len(value) <= max_length:
+        raise ValueError(f"{label} is invalid")
+    return value
+
+
+def _require_bool(value: object, label: str) -> bool:
+    if not isinstance(value, bool):
         raise ValueError(f"{label} is invalid")
     return value
 
@@ -1184,6 +1672,8 @@ def _validate_relation_scope(
     _require_text(scope.qualified_name, "relation scope name", 500)
     if scope.kind not in {"module", "class", "function"}:
         raise ValueError("relation scope kind is invalid")
+    if not isinstance(scope.has_decorators, bool) or not isinstance(scope.has_bases, bool):
+        raise ValueError("relation scope safety flags are invalid")
     _require_positive_int(scope.start_line, "relation scope line")
     bindings = scope.bindings
     if not isinstance(bindings.imports, tuple) or len(bindings.imports) > 20_000:
@@ -1196,6 +1686,7 @@ def _validate_relation_scope(
         ("global names", bindings.global_names),
         ("dynamic names", bindings.dynamic_names),
         ("parameter names", bindings.parameter_names),
+        ("attribute write names", bindings.attribute_write_names),
     ):
         if not isinstance(names, tuple) or len(names) > 20_000:
             raise ValueError(f"relation {label} are invalid")
@@ -1213,6 +1704,8 @@ def _validate_relation_scope(
             _validate_relation_import(event.fact)
         elif isinstance(event, RelationCallEvent):
             _validate_relation_call(event.fact)
+        elif isinstance(event, RelationAssignmentEvent):
+            _validate_relation_assignment(event.fact)
         elif isinstance(event, RelationScopeEvent):
             if event.scope.kind == "module":
                 raise ValueError("nested relation module scope is invalid")
@@ -1259,6 +1752,22 @@ def _validate_relation_call(fact: RelationCallFact) -> None:
     if fact.target_kind == "dynamic" and (fact.target_name is not None or fact.target_parts):
         raise ValueError("dynamic call target metadata is invalid")
     _validate_line_range(fact.start_line, fact.end_line, "relation call")
+
+
+def _validate_relation_assignment(fact: RelationAssignmentFact) -> None:
+    if not isinstance(fact.target_names, tuple) or not fact.target_names:
+        raise ValueError("relation assignment target names are invalid")
+    for name in fact.target_names:
+        _require_text(name, "relation assignment target name", 500)
+    if fact.target_names != tuple(sorted(set(fact.target_names))):
+        raise ValueError("relation assignment target names are not canonical")
+    if fact.constructor_name is not None:
+        _require_text(fact.constructor_name, "relation assignment constructor name", 500)
+        if len(fact.target_names) != 1:
+            raise ValueError("relation assignment constructor target is invalid")
+    if fact.certainty not in {"definite", "uncertain"}:
+        raise ValueError("relation assignment certainty is invalid")
+    _validate_line_range(fact.start_line, fact.end_line, "relation assignment")
 
 
 def _validate_line_range(start_line: object, end_line: object, label: str) -> None:
