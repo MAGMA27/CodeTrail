@@ -1391,6 +1391,28 @@ class IndexStore:
         ).fetchall()
         return tuple(_index_from_row(row) for row in rows)
 
+    def find_compatible_project_indexes(
+        self,
+        project_id: str,
+        *,
+        repository_id: str,
+        snapshot_hash: str,
+        rules_version: str,
+        configuration_hash: str,
+    ) -> tuple[IndexSnapshot, ...]:
+        """Find ready snapshots with the same project, source and build identity."""
+
+        self.load_project(project_id)
+        rows = self._connection.execute(
+            "SELECT i.* FROM index_snapshots AS i "
+            "JOIN project_indexes AS pi ON pi.index_id = i.index_id "
+            "WHERE pi.project_id = ? AND i.repository_id = ? AND i.snapshot_hash = ? "
+            "AND i.rules_version = ? AND i.configuration_hash = ? AND i.status = 'ready' "
+            "ORDER BY pi.associated_at DESC, i.index_id DESC",
+            (project_id, repository_id, snapshot_hash, rules_version, configuration_hash),
+        ).fetchall()
+        return tuple(_index_from_row(row) for row in rows)
+
     def project_has_index(self, project_id: str, index_id: str) -> bool:
         self.load_project(project_id)
         return self._connection.execute(
@@ -1441,9 +1463,11 @@ class IndexStore:
             ):
                 self._connection.execute("ROLLBACK")
                 raise StorageConflictError("project latest index changed during the build")
+            association_time = _datetime_text(datetime.now(timezone.utc))
             self._connection.execute(
-                "INSERT OR IGNORE INTO project_indexes (project_id, index_id, associated_at) VALUES (?, ?, ?)",
-                (project_id, index_id, _datetime_text(datetime.now(timezone.utc))),
+                "INSERT INTO project_indexes (project_id, index_id, associated_at) VALUES (?, ?, ?) "
+                "ON CONFLICT(project_id, index_id) DO UPDATE SET associated_at = excluded.associated_at",
+                (project_id, index_id, association_time),
             )
             self._connection.execute(
                 "UPDATE projects SET latest_index_id = ?, building_index_id = NULL WHERE project_id = ?",

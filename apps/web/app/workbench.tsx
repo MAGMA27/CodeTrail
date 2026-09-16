@@ -68,6 +68,7 @@ import {
   type ImpactDirection,
   type ImportStatus,
   type IndexFreshness,
+  type IndexRefreshMode,
   type IndexResponse,
   type ImportAttempt,
   type GitHubImportResponse,
@@ -495,7 +496,7 @@ export default function Workbench() {
   const [indexFreshness, setIndexFreshness] = useState<IndexFreshness | null>(null);
   const [indexFreshnessStatus, setIndexFreshnessStatus] = useState<"idle" | "checking" | "refreshing">("idle");
   const [indexFreshnessError, setIndexFreshnessError] = useState<string | null>(null);
-  const [indexRefreshMode, setIndexRefreshMode] = useState<"reused" | "created" | null>(null);
+  const [indexRefreshMode, setIndexRefreshMode] = useState<IndexRefreshMode | null>(null);
   const [searchQuery, setSearchQuery] = useState("load_settings");
   const [searchStatus, setSearchStatus] = useState<AsyncStatus>("idle");
   const [searchResults, setSearchResults] = useState<SearchMatch[]>([]);

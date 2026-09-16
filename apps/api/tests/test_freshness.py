@@ -16,7 +16,7 @@ from app.contracts import (
 )
 from app.indexing import SnapshotIssue, SourceManifestScan
 from app.main import create_app
-from app.service import ServiceError
+from app.service import IndexService, ServiceError
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -136,6 +136,98 @@ def test_changed_refresh_creates_new_snapshot_and_keeps_old_index(tmp_path: Path
     current = application.state.workspace_service.get_project(project.project_id)
     assert current.latest_index_id == refreshed.index.index.index_id
     assert index.index.index_id in current.available_index_ids
+
+
+def test_refresh_reuses_compatible_historical_index_after_source_restore(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    application, repository, project, index_a = _workspace(tmp_path)
+    source = repository / "timeout_demo" / "config.py"
+    original = source.read_bytes()
+    source.write_bytes(original.replace(b"DEFAULT_TIMEOUT = 30", b"DEFAULT_TIMEOUT = 99"))
+
+    index_b = application.state.workspace_service.refresh_project_index(
+        project.project_id,
+        index_a.index.index_id,
+        RefreshProjectIndexRequest(revision="freshness-b", dirty=True),
+    )
+    assert index_b.mode == "created"
+    assert index_b.index.index.index_id != index_a.index.index_id
+
+    source.write_bytes(original)
+
+    def fail(*_args, **_kwargs):
+        raise AssertionError("historical refresh must not parse or extract relations")
+
+    monkeypatch.setattr(service_module, "extract_definitions", fail)
+    monkeypatch.setattr(service_module, "extract_relations", fail)
+    restored = application.state.workspace_service.refresh_project_index(
+        project.project_id,
+        index_b.index.index.index_id,
+        RefreshProjectIndexRequest(revision="freshness-a-restored", dirty=True),
+    )
+
+    assert restored.mode == "historical_reused"
+    assert restored.freshness.status == "changed"
+    assert restored.index.index.index_id == index_a.index.index_id
+    assert restored.index.index.revision == "freshness-v1"
+    assert restored.index.index.dirty is False
+    current = application.state.workspace_service.get_project(project.project_id)
+    assert current.latest_index_id == index_a.index.index_id
+    assert set(current.available_index_ids) == {
+        index_a.index.index_id,
+        index_b.index.index.index_id,
+    }
+
+    repeated = application.state.workspace_service.refresh_project_index(
+        project.project_id,
+        index_a.index.index_id,
+        RefreshProjectIndexRequest(revision="freshness-repeat", dirty=True),
+    )
+    assert repeated.mode == "reused"
+    assert repeated.index.index.index_id == index_a.index.index_id
+
+    reopened = create_app({"timeout-demo": repository})
+    reopened_project = reopened.state.workspace_service.get_project(project.project_id)
+    assert reopened_project.latest_index_id == index_a.index.index_id
+    after_restart = reopened.state.workspace_service.refresh_project_index(
+        project.project_id,
+        index_a.index.index_id,
+        RefreshProjectIndexRequest(revision="freshness-after-restart", dirty=True),
+    )
+    assert after_restart.mode == "reused"
+    assert after_restart.index.index.index_id == index_a.index.index_id
+
+
+def test_refresh_does_not_reuse_history_when_configuration_changes(tmp_path: Path) -> None:
+    application, repository, project, index_a = _workspace(tmp_path)
+    source = repository / "timeout_demo" / "config.py"
+    original = source.read_bytes()
+    source.write_bytes(original.replace(b"DEFAULT_TIMEOUT = 30", b"DEFAULT_TIMEOUT = 99"))
+    index_b = application.state.workspace_service.refresh_project_index(
+        project.project_id,
+        index_a.index.index_id,
+        RefreshProjectIndexRequest(revision="freshness-b", dirty=True),
+    )
+    assert index_b.mode == "created"
+    source.write_bytes(original)
+
+    changed_index_service = IndexService(application.state.registry, max_file_bytes=500_000)
+    application.state.workspace_service.index_service = changed_index_service
+    restored = application.state.workspace_service.refresh_project_index(
+        project.project_id,
+        index_b.index.index.index_id,
+        RefreshProjectIndexRequest(revision="freshness-new-config", dirty=True),
+    )
+
+    assert restored.mode == "created"
+    assert restored.freshness.status == "changed"
+    assert "configuration_changed" in restored.freshness.reasons
+    assert restored.index.index.index_id not in {
+        index_a.index.index_id,
+        index_b.index.index.index_id,
+    }
 
 
 def test_budget_exhaustion_is_unknown_and_keeps_latest_on_refresh(tmp_path: Path) -> None:

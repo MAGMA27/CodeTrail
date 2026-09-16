@@ -21,6 +21,8 @@
 
 索引管理在当前项目的知识页提供“检查更新”和“更新索引”。检查结果只由服务端读取本地源码 manifest，按内容 hash 区分 `consistent`、`changed`、`unknown`；前端同时显示变化统计、扫描预算、路径列表和扫描不完整告警，完整安全扫描且仅为旧 metadata/源码/规则/配置变化时提示可全量重建。更新成功显示复用或新建快照，失败不替换旧 latest；前端不直接访问来源路径或 SQLite。
 
+索引更新的响应模式为 `reused`、`historical_reused` 或 `created`。当源码恢复到同项目中规则、配置、schema 和完整 manifest 均兼容的历史内容时，工作台提示 latest 已切换到历史 immutable index，并保留历史 revision/dirty 等来源 metadata；前端不把该场景伪装成当前快照复用。
+
 ## 数据与生命周期
 
 当 Run 报告的 `outcome=explanation` 时，工作台在结果区域显示覆盖级别和最多 12 个有序步骤；每步显示 confirmed/inferred/unknown 状态、说明、同一报告的源码 evidence 按钮。partial/unknown 会明确显示未确认范围；只有一个有效 symbol 时可进入现有局部关系图，多符号或无符号步骤保留源码证据，不显示候选影响按钮。旧 Issue 报告继续使用候选/影响展示。
@@ -42,6 +44,8 @@ pwsh -File .\scripts\start-local.ps1 -Service web
 CodeTrail 作为自身仓库的 Codex external 验收流程见 [MVP 操作说明](../../docs/mvp-operation.md)；external Run 使用本地 MCP 和固定项目/Session，不需要真实供应商配置。
 
 代码流程理解由 MCP external Run 的 `start_external_run(analysis_kind="understanding")` 发起，网页不创建该 Run，只在发现后展示其 explanation 报告；真实供应商语义质量和完整运行时覆盖仍需单独验证。
+
+历史兼容恢复属于安全扫描确认后的显式更新；若扫描不完整、来源不可用或基准已过期，工作台继续显示失败并保留旧 latest。
 
 ## 错误与限制
 

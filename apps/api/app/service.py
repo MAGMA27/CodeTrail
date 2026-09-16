@@ -80,6 +80,7 @@ from .contracts import (
     RunToolResultsResponse,
     RunStartedEvent,
     RunStartedPayload,
+    SCHEMA_VERSION,
     RunCompletedEvent,
     RunCompletedPayload,
     ToolCompletedEvent,
@@ -109,6 +110,9 @@ from .indexing import (
     PYTHON_AST_VERSION,
     IndexBuildStats,
     SnapshotBoundaryError,
+    SnapshotFile,
+    SnapshotIssue,
+    SourceManifestScan,
     build_source_snapshot,
     current_source_rules_version,
     extract_definitions,
@@ -586,6 +590,14 @@ _LEGACY_REBUILDABLE_FRESHNESS_REASONS: frozenset[FreshnessReasonCode] = frozense
 )
 
 
+@dataclass(frozen=True)
+class _FreshnessEvaluation:
+    """Freshness result plus the safe manifest captured for one update attempt."""
+
+    freshness: IndexFreshness
+    scan: SourceManifestScan | None
+
+
 class IndexService:
     """Build immutable indexes and serve bounded queries from persisted snapshots."""
 
@@ -771,6 +783,13 @@ class IndexService:
         project_id: str,
         baseline: IndexSnapshot,
     ) -> IndexFreshness:
+        return self.check_source_freshness_with_manifest(project_id, baseline).freshness
+
+    def check_source_freshness_with_manifest(
+        self,
+        project_id: str,
+        baseline: IndexSnapshot,
+    ) -> _FreshnessEvaluation:
         """Compare one local source manifest with a persisted index without parsing it."""
 
         checked_at = datetime.now(timezone.utc)
@@ -778,15 +797,18 @@ class IndexService:
         current_configuration_hash = self.configuration_hash
         spec = self.registry.spec_for(baseline.repository_id)
         if spec.source_kind == "github":
-            return IndexFreshness(
-                project_id=project_id,
-                baseline_index_id=baseline.index_id,
-                status="unknown",
-                checked_at=checked_at,
-                scan_complete=False,
-                current_rules_version=current_rules_version,
-                current_configuration_hash=current_configuration_hash,
-                reasons=["remote_not_checked"],
+            return _FreshnessEvaluation(
+                freshness=IndexFreshness(
+                    project_id=project_id,
+                    baseline_index_id=baseline.index_id,
+                    status="unknown",
+                    checked_at=checked_at,
+                    scan_complete=False,
+                    current_rules_version=current_rules_version,
+                    current_configuration_hash=current_configuration_hash,
+                    reasons=["remote_not_checked"],
+                ),
+                scan=None,
             )
 
         try:
@@ -800,15 +822,18 @@ class IndexService:
             with self.registry.store_for_repository(baseline.repository_id) as store:
                 stored_files, stored_issues = store.load_snapshot_manifest(baseline.index_id)
         except SnapshotBoundaryError:
-            return IndexFreshness(
-                project_id=project_id,
-                baseline_index_id=baseline.index_id,
-                status="unknown",
-                checked_at=checked_at,
-                scan_complete=False,
-                current_rules_version=current_rules_version,
-                current_configuration_hash=current_configuration_hash,
-                reasons=["source_unavailable"],
+            return _FreshnessEvaluation(
+                freshness=IndexFreshness(
+                    project_id=project_id,
+                    baseline_index_id=baseline.index_id,
+                    status="unknown",
+                    checked_at=checked_at,
+                    scan_complete=False,
+                    current_rules_version=current_rules_version,
+                    current_configuration_hash=current_configuration_hash,
+                    reasons=["source_unavailable"],
+                ),
+                scan=None,
             )
         except StorageNotFoundError as exc:
             raise ServiceError("not_found", 404, "requested project index was not found") from exc
@@ -886,25 +911,60 @@ class IndexService:
             status = "changed"
         else:
             status = "consistent"
-        return IndexFreshness(
-            project_id=project_id,
-            baseline_index_id=baseline.index_id,
-            status=status,
-            checked_at=checked_at,
-            added_count=len(added_paths),
-            modified_count=len(modified_paths),
-            deleted_count=len(deleted_paths),
-            changed_paths=changed_paths[:_FRESHNESS_MAX_CHANGED_PATHS],
-            changed_paths_truncated=changed_paths_truncated,
-            scanned_files=scan.scanned_files,
-            scanned_bytes=scan.scanned_bytes,
-            scan_complete=scan.scan_complete,
-            scan_truncated=scan.scan_truncated,
-            scan_truncation_reason=scan.scan_truncation_reason,
-            current_rules_version=current_rules_version,
-            current_configuration_hash=current_configuration_hash,
-            reasons=reasons,
+        return _FreshnessEvaluation(
+            freshness=IndexFreshness(
+                project_id=project_id,
+                baseline_index_id=baseline.index_id,
+                status=status,
+                checked_at=checked_at,
+                added_count=len(added_paths),
+                modified_count=len(modified_paths),
+                deleted_count=len(deleted_paths),
+                changed_paths=changed_paths[:_FRESHNESS_MAX_CHANGED_PATHS],
+                changed_paths_truncated=changed_paths_truncated,
+                scanned_files=scan.scanned_files,
+                scanned_bytes=scan.scanned_bytes,
+                scan_complete=scan.scan_complete,
+                scan_truncated=scan.scan_truncated,
+                scan_truncation_reason=scan.scan_truncation_reason,
+                current_rules_version=current_rules_version,
+                current_configuration_hash=current_configuration_hash,
+                reasons=reasons,
+            ),
+            scan=scan,
         )
+
+    def find_compatible_index(
+        self,
+        project_id: str,
+        baseline: IndexSnapshot,
+        scan: SourceManifestScan,
+    ) -> IndexSnapshot | None:
+        """Find one persisted project snapshot that exactly matches a safe source scan."""
+
+        if (
+            not scan.scan_complete
+            or scan.scan_truncated
+            or scan.issues
+            or scan.unstable_paths
+        ):
+            return None
+        current_manifest = _source_manifest_signature(scan.files, scan.issues)
+        with self.registry.store_for_repository(baseline.repository_id) as store:
+            candidates = store.find_compatible_project_indexes(
+                project_id,
+                repository_id=baseline.repository_id,
+                snapshot_hash=scan.snapshot_hash,
+                rules_version=self.rules_version,
+                configuration_hash=self.configuration_hash,
+            )
+            for candidate in candidates:
+                if candidate.schema_version != SCHEMA_VERSION:
+                    continue
+                candidate_files, candidate_issues = store.load_snapshot_manifest(candidate.index_id)
+                if _source_manifest_signature(candidate_files, candidate_issues) == current_manifest:
+                    return candidate
+        return None
 
     def search(self, index_id: str, query: str, limit: int) -> SearchIndexResponse:
         def operation(store: IndexStore) -> SearchIndexResponse:
@@ -2365,7 +2425,8 @@ class WorkspaceService:
             if baseline.status != "ready":
                 raise ServiceError("conflict", 409, "update requires a ready project index")
 
-            freshness = self.index_service.check_source_freshness(project_id, baseline)
+            evaluation = self.index_service.check_source_freshness_with_manifest(project_id, baseline)
+            freshness = evaluation.freshness
             metadata_requires_new_identity = bool(
                 set(freshness.reasons)
                 & {"missing_index_metadata", "rules_changed", "configuration_changed"}
@@ -2385,6 +2446,40 @@ class WorkspaceService:
                     index=self.index_service.get_index(index_id),
                     freshness=freshness,
                 )
+            if evaluation.scan is not None:
+                try:
+                    historical = self.index_service.find_compatible_index(
+                        project_id,
+                        baseline,
+                        evaluation.scan,
+                    )
+                except StorageNotFoundError as exc:
+                    raise ServiceError("not_found", 404, "project or index was not found") from exc
+                except StorageError as exc:
+                    raise ServiceError("internal_error", 500, "local index storage failed") from exc
+                if historical is not None and historical.index_id != index_id:
+                    try:
+                        with self.registry.store_for_repository(project.repository_id) as store:
+                            store.finish_project_index(
+                                project_id,
+                                historical.index_id,
+                                expected_latest_index_id=index_id,
+                            )
+                    except StorageNotFoundError as exc:
+                        raise ServiceError("not_found", 404, "project or index was not found") from exc
+                    except StorageInputError as exc:
+                        raise ServiceError("invalid_input", 400, "project index association is invalid") from exc
+                    except StorageConflictError as exc:
+                        raise ServiceError("conflict", 409, str(exc)) from exc
+                    except StorageError as exc:
+                        raise ServiceError("internal_error", 500, "local index storage failed") from exc
+                    return IndexRefreshResponse(
+                        project_id=project_id,
+                        baseline_index_id=index_id,
+                        mode="historical_reused",
+                        index=self.index_service.get_index(historical.index_id),
+                        freshness=freshness,
+                    )
             if freshness.status == "unknown" and not legacy_metadata_rebuildable:
                 if "budget_exceeded" in freshness.reasons:
                     raise ServiceError(
@@ -3321,6 +3416,27 @@ def is_loopback_host(host: str | None) -> bool:
 def _managed_repository_id(normalized_source_path: str) -> str:
     digest = hashlib.sha256(normalized_source_path.encode("utf-8")).hexdigest()[:32]
     return f"import-{digest}"
+
+
+def _source_manifest_signature(
+    files: tuple[SnapshotFile, ...],
+    issues: tuple[SnapshotIssue, ...],
+) -> tuple[tuple[tuple[str, int, str], ...], tuple[tuple[str, str, int | None], ...]]:
+    """Compare manifest facts without using source text or mutable filesystem state."""
+
+    file_entries = tuple(
+        sorted(
+            [(source_file.path, source_file.size, source_file.content_hash) for source_file in files],
+            key=lambda entry: entry[0],
+        )
+    )
+    issue_entries = tuple(
+        sorted(
+            [(issue.path, issue.kind, issue.size) for issue in issues],
+            key=lambda entry: (entry[0], entry[1], -1 if entry[2] is None else entry[2]),
+        )
+    )
+    return file_entries, issue_entries
 
 
 def _same_import_request(

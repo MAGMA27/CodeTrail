@@ -583,6 +583,115 @@ def test_mcp_index_refresh_is_separately_opt_in(tmp_path: Path) -> None:
     assert current_project["latest_index_id"] == mcp_index_id
 
 
+def test_mcp_historical_refresh_reuses_snapshot_and_matches_http(tmp_path: Path) -> None:
+    repository = copy_fixture(tmp_path, name="mcp-historical-refresh")
+    application = create_app({"timeout-demo": repository}, data_root=tmp_path / "data")
+    status, project = request(
+        application,
+        "POST",
+        "/api/projects",
+        {"name": "MCP historical refresh", "repository_id": "timeout-demo"},
+    )
+    assert status == 200
+    project_id = project["project_id"]
+    status, created = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/indexes",
+        {"revision": "mcp-historical-a", "dirty": False},
+    )
+    assert status == 200
+    index_a_id = created["index"]["index_id"]
+
+    source = repository / "timeout_demo" / "config.py"
+    original = source.read_bytes()
+    source.write_bytes(original.replace(b"DEFAULT_TIMEOUT = 30", b"DEFAULT_TIMEOUT = 99"))
+    status, changed_index = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/indexes/{index_a_id}/refresh",
+        {"revision": "mcp-historical-b", "dirty": True},
+    )
+    assert status == 200
+    assert changed_index["mode"] == "created"
+    index_b_id = changed_index["index"]["index"]["index_id"]
+
+    source.write_bytes(original)
+    status, restored = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/indexes/{index_b_id}/refresh",
+        {"revision": "mcp-historical-restored", "dirty": True},
+    )
+    assert status == 200
+    assert restored["mode"] == "historical_reused"
+    assert restored["index"]["index"]["index_id"] == index_a_id
+
+    source.write_bytes(original.replace(b"DEFAULT_TIMEOUT = 30", b"DEFAULT_TIMEOUT = 99"))
+    status, http_freshness = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/indexes/{index_a_id}/freshness",
+    )
+    assert status == 200
+    assert http_freshness["status"] == "changed"
+
+    environment = {
+        "CODETRAIL_DATA_DIR": str(tmp_path / "data"),
+        "CODETRAIL_REPOSITORIES": json.dumps({"timeout-demo": str(repository)}),
+        "CODETRAIL_WORKBENCH_URL": "http://localhost:3000",
+        "CODETRAIL_MCP_INDEX_WRITE_ENABLED": "1",
+    }
+    parameters = StdioServerParameters(
+        command=sys.executable,
+        args=["-m", "app.mcp_server"],
+        env=environment,
+        cwd=API_ROOT,
+    )
+
+    async def exercise() -> tuple[str, str]:
+        async with Client(parameters, read_timeout_seconds=10) as client:
+            checked = await client.call_tool(
+                "check_index_freshness",
+                {"project_id": project_id, "index_id": index_a_id},
+            )
+            checked_payload = checked.structured_content["result"]
+            assert checked_payload["status"] == http_freshness["status"]
+            assert checked_payload["changed_paths"] == http_freshness["changed_paths"]
+            assert checked_payload["reasons"] == http_freshness["reasons"]
+
+            refreshed = await client.call_tool(
+                "refresh_index",
+                {
+                    "project_id": project_id,
+                    "index_id": index_a_id,
+                    "revision": "mcp-historical-restored-again",
+                    "dirty": True,
+                },
+            )
+            result = refreshed.structured_content["result"]
+            assert refreshed.structured_content["ok"] is True
+            assert result["mode"] == "historical_reused"
+            assert result["index"]["index"]["index_id"] == index_b_id
+
+            repeated = await client.call_tool(
+                "refresh_index",
+                {"project_id": project_id, "index_id": index_b_id},
+            )
+            repeated_result = repeated.structured_content["result"]
+            assert repeated.structured_content["ok"] is True
+            assert repeated_result["mode"] == "reused"
+            assert repeated_result["index"]["index"]["index_id"] == index_b_id
+            return result["index"]["index"]["index_id"], repeated_result["index"]["index"]["index_id"]
+
+    historical_id, repeated_id = asyncio.run(exercise())
+    assert historical_id == index_b_id
+    assert repeated_id == index_b_id
+    status, current_project = request(application, "GET", f"/api/projects/{project_id}")
+    assert status == 200
+    assert current_project["latest_index_id"] == index_b_id
+
+
 def test_mcp_feature_generation_is_separately_opt_in_and_returns_citations(tmp_path: Path) -> None:
     repository = copy_fixture(tmp_path)
     application = create_app({"timeout-demo": repository})

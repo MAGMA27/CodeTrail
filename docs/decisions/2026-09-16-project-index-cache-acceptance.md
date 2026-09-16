@@ -79,11 +79,17 @@ local stdio MCP 使用 `uv run python -` 启动 `mcp.client.Client`，子进程�
 - 点击“更新索引”显示“本次显式更新：已生成新的不可变快照；旧快照仍保留”；把当前 latest 与源码保持一致后再次检查为“源码一致”，再次更新显示“复用原快照，未重新解析”；
 - 打开原历史快照时显示“仅 latest 可更新”，Session 仍回到其固定原 index，未被 latest 替换。
 
-一次恢复尝试使用工作台默认 `fixture-v1` revision，而历史原快照使用另一 revision；服务端按 immutable payload 规则返回 `index content conflicts with an existing index`。这不是缓存错误，随后通过工作台“打开固定版本”恢复原快照；该边界已保留为证据，不通过修改数据或实现掩盖。
+此前一次恢复尝试使用工作台默认 `fixture-v1` revision，而历史原快照使用另一 revision；服务端按 immutable payload 规则返回 `index content conflicts with an existing index`。这不是缓存错误，但暴露了显式更新无法复用历史内容的生命周期缺口；该现象触发本次 next 的 `NEEDS_FIX`。本次修复增加 `historical_reused`：完整安全扫描确认同项目的 schema、规则、配置和完整 manifest 兼容时，直接复用历史 immutable index、推进 latest，保留原 revision/dirty metadata，不执行 AST/关系提取，也不原地改写旧索引。工作台“打开固定版本”不再作为该场景的验收替代。
+
+### 版本恢复修复复核（2026-09-16）
+
+- 隔离项目按 A → B → A 变更源码；A 使用 `freshness-v1`/`dirty=false`，B 使用不同 revision/dirty。恢复 A 后以 B 为基准执行显式更新，返回 `mode=historical_reused`，latest 切回原 A index，A 的原 revision/dirty 保持不变，索引总数不增加；重复刷新 A 返回 `mode=reused`。
+- 历史复用只在完整且安全 manifest 与 repository、rules version、configuration hash、schema version 均兼容时发生；配置变化、跨项目归属或不完整扫描不复用历史，仍按既有创建/拒绝语义处理。候选历史 index 通过项目关联查询和完整 manifest 签名再次核对，不能只凭 snapshot hash。
+- `test_freshness.py` 的历史恢复测试通过 monkeypatch 证明复用路径不进入 definition/relation 提取；`test_mcp.py` 通过真实 stdio MCP 子进程对照 HTTP 的历史恢复结果；前端契约测试覆盖 `historical_reused` 及伪造模式拒绝。补充实际 loopback HTTP（8017）结果：隔离项目 `project-0653c5836fc94b78a74a69781beda246` 从 A（`index-history-fix-relations-v3-53c3c2488d7a20a1`）到 B（`index-history-fix-relations-v3-251bd0f8c9bfea74`）再恢复 A，返回 `created` → `historical_reused` → `reused`，latest 为 A、可用快照数保持 2，A 的 `history-a-20260916`/`dirty=false` 保持不变。实际 stdio MCP 使用同一隔离数据目录，`check_index_freshness` 与 HTTP 的 status/changed_paths/reasons 一致，写工具注册且历史复用/当前复用均成功。实际 3017 工作台在隔离项目中完成源码 B=97 的“检查变化 → 更新生成新快照”、恢复 A 的“检查变化 → 更新并显示 `复用兼容历史快照，未重新解析；项目 latest 已切换到该快照，历史元数据保持不变。”，再次更新显示“复用当前快照，未重新解析。”；页面可见结果与服务端模式一致。
 
 ### 检查命令与 Git 边界
 
-本轮实际使用了 `uv run python -` 的缓存统计/语义对照/目标变更驱动、独立 `uv run` 进程热构建、`uv run uvicorn` + `Invoke-WebRequest` loopback HTTP、`python -m app.mcp_server` stdio 客户端和 3016 工作台浏览器操作。临时服务已停止，用户工作树未被实验副本修改。验收记录本身写入 Git；`memory-bank/` 仍由仓库规则忽略，`next.md` 未修改。
+本轮实际使用了 `uv run python -` 的缓存统计/语义对照/目标变更驱动、独立 `uv run` 进程热构建、`uv run uvicorn` + `Invoke-WebRequest` loopback HTTP（8017）、`python -m app.mcp_server` stdio 客户端和 3016/3017 工作台浏览器操作。临时服务已停止，用户工作树未被实验副本修改。验收记录本身写入 Git；`memory-bank/` 仍由仓库规则忽略，`next.md` 未修改。
 
 ## 后果
 

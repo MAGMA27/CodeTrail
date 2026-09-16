@@ -142,6 +142,12 @@ class SourceManifestScan:
     scan_truncation_reason: str | None
     unstable_paths: tuple[str, ...] = ()
 
+    @property
+    def snapshot_hash(self) -> str:
+        """Return the same content identity used by a source snapshot."""
+
+        return _snapshot_hash(list(self.files), list(self.issues))
+
 
 DefinitionKind = Literal["module", "class", "function"]
 

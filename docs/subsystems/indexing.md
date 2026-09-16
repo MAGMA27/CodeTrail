@@ -2,7 +2,7 @@
 
 ## 状态
 
-已实现 Python 源码快照、定义、保守关系提取，以及本地源码新鲜度检查与显式索引更新；新索引对项目隔离的未变化文件复用文件级定义描述和关系事实缓存，但目标解析仍基于新快照全量执行，不是完整增量索引。
+已实现 Python 源码快照、定义、保守关系提取，以及本地源码新鲜度检查与显式索引更新；新索引对项目隔离的未变化文件复用文件级定义描述和关系事实缓存，源码恢复到兼容历史内容时还可直接复用既有 immutable index，不重新解析；新快照的目标解析仍基于当前 DefinitionMaps 全量执行，不是完整增量索引。
 
 ## 职责与范围
 
@@ -14,7 +14,7 @@
 
 ## 数据与生命周期
 
-快照保存文本及 hash、规则版本和配置指纹；关系与符号属于同一 index_id，后续读取不依赖变动工作树。新建快照先读取完整源码，再按精确键复用未变化文件的定义描述和关系事实；定义缓存命中后按当前 index_id 重新生成 Symbol，关系事实命中后仍用当前 DefinitionMaps 解析目标，任何旧跨文件边都不会复用。定义缓存未命中时产生的有效 AST 只在当前构建内供关系事实提取共享，缓存写入在完整 index 成功后以独立事务提交；两类缓存共用每个 scope/repository 的容量。定义/关系事实命中、未命中、实际新 `ast.parse` 和进程内 AST 复用分别记录。新鲜度检查使用与快照相同的源码范围和内容 hash，只读取 manifest，不执行 AST/关系提取，返回 `consistent`、`changed` 或 `unknown` 及有界变化路径。显式更新在服务端重新核对：无变化时复用基准快照；完整且安全扫描确认源码、规则或配置变化，或发现旧元数据缺失时生成新的不可变 index，旧 metadata 与这些可重建原因同时出现时仍允许全量修复但保持 `unknown`；读取/边界/预算/TOCTOU 等安全原因继续拒绝。开始和完成写入时都校验基准仍是项目 latest。关系索引将静态扫描覆盖（`truncated`/`truncation_reason`）与 unresolved 详情容量（`unresolved_truncated`/`unresolved_truncation_reason`）分开记录；unresolved 达到上限后仍继续有界扫描确定静态边。旧索引的新字段为未知，不被回填或改写。
+快照保存文本及 hash、规则版本和配置指纹；关系与符号属于同一 index_id，后续读取不依赖变动工作树。新建快照先读取完整源码，再按精确键复用未变化文件的定义描述和关系事实；定义缓存命中后按当前 index_id 重新生成 Symbol，关系事实命中后仍用当前 DefinitionMaps 解析目标，任何旧跨文件边都不会复用。定义缓存未命中时产生的有效 AST 只在当前构建内供关系事实提取共享，缓存写入在完整 index 成功后以独立事务提交；两类缓存共用每个 scope/repository 的容量。定义/关系事实命中、未命中、实际新 `ast.parse` 和进程内 AST 复用分别记录。新鲜度检查使用与快照相同的源码范围和内容 hash，只读取 manifest，不执行 AST/关系提取，返回 `consistent`、`changed` 或 `unknown` 及有界变化路径。显式更新在服务端重新核对：无变化时返回 `reused` 并复用当前基准；完整且安全扫描确认源码恢复到同项目中规则、配置、schema 和完整 manifest 均兼容的历史快照时返回 `historical_reused`、推进 latest 到该快照且保留其原 revision/dirty metadata；其他源码、规则、配置变化或旧元数据缺失时生成新的不可变 index，旧 metadata 与这些可重建原因同时出现时仍允许全量修复但保持 `unknown`；读取/边界/预算/TOCTOU 等安全原因继续拒绝。开始和完成写入时都校验基准仍是项目 latest。关系索引将静态扫描覆盖（`truncated`/`truncation_reason`）与 unresolved 详情容量（`unresolved_truncated`/`unresolved_truncation_reason`）分开记录；unresolved 达到上限后仍继续有界扫描确定静态边。旧索引的新字段为未知，不被回填或改写。
 
 ## 错误与限制
 

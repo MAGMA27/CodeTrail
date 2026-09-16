@@ -234,11 +234,11 @@ class IndexResponse(VersionedModel):
 
 
 class IndexRefreshResponse(VersionedModel):
-    """Result of an explicit project index update or no-op reuse."""
+    """Result of an explicit project index update or compatible snapshot reuse."""
 
     project_id: Identifier
     baseline_index_id: Identifier
-    mode: Literal["reused", "created"]
+    mode: Literal["reused", "historical_reused", "created"]
     index: IndexResponse
     freshness: IndexFreshness
 
@@ -248,8 +248,8 @@ class IndexRefreshResponse(VersionedModel):
             raise ValueError("refresh freshness must use the same baseline index")
         if self.mode == "reused" and self.index.index.index_id != self.baseline_index_id:
             raise ValueError("reused refresh must return the baseline index")
-        if self.mode == "created" and self.index.index.index_id == self.baseline_index_id:
-            raise ValueError("created refresh must return a new index")
+        if self.mode in {"historical_reused", "created"} and self.index.index.index_id == self.baseline_index_id:
+            raise ValueError(f"{self.mode} refresh must return a different index")
         return self
 
 

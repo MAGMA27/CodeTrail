@@ -400,8 +400,15 @@ test("index freshness validators keep scan state and refresh mode explicit", () 
   };
   assert.equal(isIndexRefreshResponse(refreshed), true);
 
+  const historicalReuse = { ...refreshed, mode: "historical_reused" };
+  assert.equal(isIndexRefreshResponse(historicalReuse), true);
+
   const forgedReuse = { ...refreshed, mode: "reused" };
   assert.equal(isIndexRefreshResponse(forgedReuse), false);
+
+  const forgedHistoricalReuse = structuredClone(historicalReuse);
+  forgedHistoricalReuse.index.index.index_id = indexId;
+  assert.equal(isIndexRefreshResponse(forgedHistoricalReuse), false);
 });
 
 test("Run impact validator accepts same-snapshot paths and rejects forged direction", () => {

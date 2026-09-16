@@ -26,6 +26,7 @@ import type {
   ImportAttempt,
   ImportStatus,
   IndexFreshness,
+  IndexRefreshMode,
   IndexResponse,
   IndexSnapshot,
   NeighborDirection,
@@ -110,7 +111,7 @@ type IndexUi = {
   freshness: IndexFreshness | null;
   freshnessStatus: "idle" | "checking" | "refreshing";
   freshnessError: string | null;
-  refreshMode: "reused" | "created" | null;
+  refreshMode: IndexRefreshMode | null;
   revision: string;
   dirty: boolean;
   indexIdInput: string;
@@ -735,7 +736,7 @@ function OperationPanel({
                 </div>
                 {!index.isLatest ? <p className="ct-form-help">当前打开的是历史快照；可以检查源码，但更新必须先切换到项目 latest。</p> : null}
                 {index.freshnessError ? <p className="ct-inline-error" role="alert">{index.freshnessError}</p> : null}
-                {index.refreshMode ? <p className="ct-card-note">本次显式更新：{index.refreshMode === "reused" ? "复用原快照，未重新解析。" : "已生成新的不可变快照；旧快照仍保留。"}</p> : null}
+                {index.refreshMode ? <p className="ct-card-note">本次显式更新：{index.refreshMode === "reused" ? "复用当前快照，未重新解析。" : index.refreshMode === "historical_reused" ? "复用兼容历史快照，未重新解析；项目 latest 已切换到该快照，历史元数据保持不变。" : "已生成新的不可变快照；旧快照仍保留。"}</p> : null}
                 {index.freshness ? (
                   <div className="ct-freshness-result" data-state={index.freshness.status}>
                     <div className="ct-freshness-meta">

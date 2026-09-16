@@ -118,11 +118,13 @@ export type IndexFreshness = {
   reasons: FreshnessReasonCode[];
 };
 
+export type IndexRefreshMode = "reused" | "historical_reused" | "created";
+
 export type IndexRefreshResponse = {
   schema_version: typeof SCHEMA_VERSION;
   project_id: string;
   baseline_index_id: string;
-  mode: "reused" | "created";
+  mode: IndexRefreshMode;
   index: IndexResponse;
   freshness: IndexFreshness;
 };
@@ -1738,12 +1740,12 @@ export function isIndexRefreshResponse(value: unknown): value is IndexRefreshRes
     value.schema_version === SCHEMA_VERSION &&
     isString(value.project_id) &&
     isString(value.baseline_index_id) &&
-    ["reused", "created"].includes(String(value.mode)) &&
+    ["reused", "historical_reused", "created"].includes(String(value.mode)) &&
     isIndexResponse(value.index) &&
     isIndexFreshness(value.freshness) &&
     value.freshness.baseline_index_id === value.baseline_index_id &&
     (value.mode !== "reused" || value.index.index.index_id === value.baseline_index_id) &&
-    (value.mode !== "created" || value.index.index.index_id !== value.baseline_index_id)
+    (value.mode === "reused" || value.index.index.index_id !== value.baseline_index_id)
   );
 }
 
