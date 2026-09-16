@@ -18,6 +18,8 @@
 
 Run HTTP 包括 create/list/detail/events/`events/stream`/tool-results/report/impact/cancel；create 接受显式 `mode=fixture|real`，real 还要求 `CODETRAIL_REAL_RUN_ENABLED=1`，执行器有空闲预留名额且 worker 启动成功后显式返回 queued `run_id`，不在请求线程执行分析。`get_overview` 从固定 index 生成有界概览；`python-entry-v4` 的 `fastapi_route` 入口保存方法、声明路径、处理函数 symbol 与同快照 evidence，结构组按声明路径静态前缀/handler 模块和源码目录生成，模块关系只聚合同快照可映射的 `imports`/`calls`，附最多 8 条代表边。结构输出通过 `max_groups`（80/200）和 `max_module_relations`（200/400）独立限制，覆盖字段区分总量/可见量；静态路径仍从处理函数沿既有图展开，入口绑定和聚合关系均不生成 CodeEdge。`mode=external` 只由 MCP external 工具创建，服务端冻结输入但不占内部 worker；后续固定的 `run_search_code`、`run_read_source`、`run_get_neighbors` 和 `submit_external_run` 由同一 WorkspaceService 执行、持久化并校验证据。容量满时在内部 Run 落库前返回可重试的 `budget_exceeded`/429。`events/stream` 复用事件表，以 `{run_id}:{sequence}` 和 `after_sequence`/`Last-Event-ID` 实现严格续接；总连接、单 Run 连接、批次、事件大小、心跳和生命周期均有界，满载在握手前返回 429。`impact` 要求恰好一个报告内 candidate/finding ID，由 WorkspaceService 在 Run 固定 index 上遍历同快照静态 `calls`，深度最多 2、节点默认/最多 40，并返回解释路径与未知边界；它不启动 Run、不调用模型。默认 MCP 增加 `list_session_runs`、`get_session_run`、`list_run_events`、`list_run_tool_results`、`get_run_report`、`get_run_impact`；`CODETRAIL_MCP_RUN_WRITE_ENABLED=1` 才增加独立的 `start_session_run` 和 `cancel_session_run`，`CODETRAIL_MCP_EXTERNAL_RUN_ENABLED=1` 才增加 Codex external 工具，MCP real 另要求 `CODETRAIL_MCP_REAL_RUN_ENABLED=1`，不会隐式开放 Session 写入。
 
+GitHub 和本地索引更新先登记项目级持久化 update intent；expected latest 贯穿检查、历史复用/下载、构建和 `finish_project_index` 的 CAS。latest 成功后，来源 identity 与 attempt ready 在管理库单事务中收尾；跨库故障留下可恢复 intent，服务重启按候选 ready latest 补提交或终止，不覆盖其他 writer。待恢复 intent 存在时同项目更新返回 conflict。HTTP 与 MCP 都复用这套 WorkspaceService 行为，错误不把旧 latest/source 误报为新 commit 成功。
+
 ## 数据与生命周期
 
 Run 的 `analysis_kind` 默认是 `issue`；只有 external Run 可声明 `understanding`。该类型提交 `CodeUnderstandingFinal`，包含最多 12 个有序 `ExplanationStep`、`complete/partial` 覆盖和同一 Run 返回的源码 evidence；confirmed 必须有 evidence，complete 不能含 unknown，服务端不生成 findings/candidate links。旧 Run JSON 缺少该字段时按 Issue 读取，不做存储迁移。
@@ -64,3 +66,4 @@ MCP 代码更新后由 Codex 宿主对 `codetrail` 做一次 reload（或按宿�
 - [本地项目索引新鲜度与显式更新](../decisions/2026-09-15-index-freshness.md)
 - [文件级定义提取缓存](../decisions/2026-09-15-definition-extraction-cache.md)
 - [文件关系事实缓存与全快照目标解析](../decisions/2026-09-15-relation-facts-cache.md)
+- [GitHub 更新的跨进程提交一致性](../decisions/2026-09-16-github-update-commit-consistency.md)

@@ -144,6 +144,7 @@ from .storage import (
     ManagedSourceRecord,
     ManagementStore,
     ProjectRecord,
+    ProjectUpdateRecord,
     StorageConflictError,
     StorageError,
     StorageInputError,
@@ -167,6 +168,10 @@ class ServiceError(RuntimeError):
         self.code = code
         self.status_code = status_code
         self.message = message
+
+
+_ACTIVE_PROJECT_UPDATE_OPERATIONS: set[str] = set()
+_ACTIVE_PROJECT_UPDATE_OPERATIONS_LOCK = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -2486,6 +2491,204 @@ class WorkspaceService:
         except StorageError as exc:
             raise ServiceError("internal_error", 500, "local Run storage failed") from exc
 
+    def _begin_project_update(
+        self,
+        project: ProjectRecord,
+        expected_latest_index_id: str | None,
+        *,
+        source_url: str | None = None,
+        requested_ref: str | None = None,
+        resolved_ref: str | None = None,
+        resolved_commit: str | None = None,
+    ) -> ProjectUpdateRecord:
+        operation_id = f"project-update-{uuid4().hex}"
+        try:
+            operation = self.registry.management_store.begin_project_update(
+                operation_id=operation_id,
+                project_id=project.project_id,
+                repository_id=project.repository_id,
+                expected_latest_index_id=expected_latest_index_id,
+                owner_pid=os.getpid(),
+                source_url=source_url,
+                requested_ref=requested_ref,
+                resolved_ref=resolved_ref,
+                resolved_commit=resolved_commit,
+            )
+        except StorageConflictError as exc:
+            raise ServiceError("conflict", 409, "project index update is already in progress") from exc
+        except StorageError as exc:
+            raise ServiceError("internal_error", 500, "project update coordination storage failed") from exc
+        with _ACTIVE_PROJECT_UPDATE_OPERATIONS_LOCK:
+            _ACTIVE_PROJECT_UPDATE_OPERATIONS.add(operation.operation_id)
+        return operation
+
+    def _forget_project_update(self, operation_id: str) -> None:
+        with _ACTIVE_PROJECT_UPDATE_OPERATIONS_LOCK:
+            _ACTIVE_PROJECT_UPDATE_OPERATIONS.discard(operation_id)
+
+    def _current_project_latest_for_update(self, operation: ProjectUpdateRecord) -> str | None:
+        with self.registry.store_for_repository(operation.repository_id) as store:
+            project = store.load_project(operation.project_id)
+            if project.repository_id != operation.repository_id:
+                raise StorageInputError("project update repository association is invalid")
+            return project.latest_index_id
+
+    def _reconcile_project_update_failure(
+        self,
+        operation_id: str,
+        *,
+        error_code: str,
+        error_message: str,
+    ) -> str | None:
+        """Complete a committed candidate or abort without reverting another writer."""
+
+        try:
+            operation = self.registry.management_store.load_project_update(operation_id)
+        except StorageNotFoundError:
+            return None
+        try:
+            current_latest = self._current_project_latest_for_update(operation)
+        except StorageError:
+            try:
+                self.registry.management_store.release_project_update_owner(operation_id)
+            except StorageError:
+                logger.warning("could not release project update after storage failure", exc_info=True)
+            return None
+
+        candidate = operation.candidate_index_id
+        if candidate is not None and current_latest == candidate:
+            content_hash = operation.content_hash
+            if content_hash is None:
+                try:
+                    with self.registry.store_for_repository(operation.repository_id) as store:
+                        content_hash = store.load_index_snapshot(candidate).snapshot_hash
+                except StorageError:
+                    content_hash = None
+            try:
+                self.registry.management_store.commit_project_update(
+                    operation_id,
+                    candidate_index_id=candidate,
+                    content_hash=content_hash,
+                )
+                return candidate
+            except StorageError:
+                try:
+                    self.registry.management_store.release_project_update_owner(operation_id)
+                except StorageError:
+                    logger.warning("could not release pending project update", exc_info=True)
+                return None
+
+        try:
+            self.registry.management_store.abort_project_update(
+                operation_id,
+                error_code=error_code,
+                error_message=error_message,
+            )
+        except StorageError:
+            try:
+                self.registry.management_store.release_project_update_owner(operation_id)
+            except StorageError:
+                logger.warning("could not release project update after abort failure", exc_info=True)
+        return None
+
+    def _recover_project_update(self, operation: ProjectUpdateRecord) -> None:
+        """Recover one operation whose owner process is no longer alive."""
+
+        try:
+            current_latest = self._current_project_latest_for_update(operation)
+        except StorageError:
+            logger.warning("could not inspect interrupted project update %s", operation.operation_id, exc_info=True)
+            return
+
+        candidate = operation.candidate_index_id
+        candidate_ready = False
+        candidate_hash: str | None = None
+        if candidate is not None:
+            try:
+                with self.registry.store_for_repository(operation.repository_id) as store:
+                    snapshot = store.load_index_snapshot(candidate)
+                candidate_ready = snapshot.status == "ready"
+                candidate_hash = snapshot.snapshot_hash
+            except StorageError:
+                candidate_ready = False
+
+        if candidate is not None and current_latest == candidate and candidate_ready:
+            try:
+                self.registry.management_store.commit_project_update(
+                    operation.operation_id,
+                    candidate_index_id=candidate,
+                    content_hash=operation.content_hash or candidate_hash,
+                )
+            except StorageError:
+                logger.warning("could not complete interrupted project update %s", operation.operation_id, exc_info=True)
+                return
+            self._recover_github_cleanup(operation.attempt_id)
+            return
+
+        try:
+            self.registry.management_store.abort_project_update(
+                operation.operation_id,
+                error_code="interrupted",
+                error_message="project update was interrupted before its commit",
+            )
+        except StorageError:
+            logger.warning("could not abort interrupted project update %s", operation.operation_id, exc_info=True)
+            return
+        self._recover_github_cleanup(operation.attempt_id)
+
+    def _recover_github_cleanup(self, attempt_id: str | None) -> None:
+        if attempt_id is None:
+            return
+        try:
+            attempt = self.registry.management_store.load_attempt(attempt_id)
+        except StorageError:
+            return
+        if attempt.source_kind != "github" or attempt.temporary_path is None:
+            return
+        cleanup_error = self._cleanup_github_temp(attempt.temporary_path, attempt.attempt_id)
+        try:
+            if cleanup_error is None:
+                self.registry.management_store.update_attempt_metadata(
+                    attempt_id,
+                    cleanup_status="succeeded",
+                    cleanup_error=None,
+                    temporary_path=None,
+                )
+                self.registry.management_store.update_source(
+                    attempt.repository_id,
+                    cleanup_status="succeeded",
+                    cleanup_error=None,
+                    temporary_path=None,
+                )
+            else:
+                self.registry.management_store.update_attempt_metadata(
+                    attempt_id,
+                    cleanup_status="failed",
+                    cleanup_error=cleanup_error,
+                )
+                self.registry.management_store.update_source(
+                    attempt.repository_id,
+                    cleanup_status="failed",
+                    cleanup_error=cleanup_error,
+                )
+        except StorageError:
+            logger.warning("could not persist recovered GitHub cleanup for %s", attempt_id, exc_info=True)
+
+    @staticmethod
+    def _project_update_owner_is_alive(operation: ProjectUpdateRecord) -> bool:
+        if operation.owner_pid is None:
+            return False
+        if operation.owner_pid == os.getpid():
+            with _ACTIVE_PROJECT_UPDATE_OPERATIONS_LOCK:
+                return operation.operation_id in _ACTIVE_PROJECT_UPDATE_OPERATIONS
+        try:
+            os.kill(operation.owner_pid, 0)
+        except PermissionError:
+            return True
+        except (OSError, ProcessLookupError):
+            return False
+        return True
+
     def create_project_index(
         self,
         project_id: str,
@@ -2494,12 +2697,42 @@ class WorkspaceService:
         on_build_stats: Callable[[IndexBuildStats], None] | None = None,
     ) -> IndexResponse:
         with self._index_mutation_lock:
-            return self._create_project_index(
-                project_id,
-                request,
-                expected_latest_index_id=None,
-                on_build_stats=on_build_stats,
-            )
+            project = self._find_project(project_id)
+            operation = self._begin_project_update(project, project.latest_index_id)
+            try:
+                response = self._create_project_index(
+                    project_id,
+                    request,
+                    expected_latest_index_id=project.latest_index_id,
+                    project_update_id=operation.operation_id,
+                    on_build_stats=on_build_stats,
+                )
+                self.registry.management_store.commit_project_update(
+                    operation.operation_id,
+                    candidate_index_id=response.index.index_id,
+                    content_hash=response.index.snapshot_hash,
+                )
+                return response
+            except ServiceError as exc:
+                recovered_candidate = self._reconcile_project_update_failure(
+                    operation.operation_id,
+                    error_code=exc.code,
+                    error_message=exc.message,
+                )
+                if recovered_candidate is not None:
+                    return self.index_service.get_index(recovered_candidate)
+                raise
+            except StorageError as exc:
+                recovered_candidate = self._reconcile_project_update_failure(
+                    operation.operation_id,
+                    error_code="internal_error",
+                    error_message="project index update failed",
+                )
+                if recovered_candidate is not None:
+                    return self.index_service.get_index(recovered_candidate)
+                raise ServiceError("internal_error", 500, "project index update failed") from exc
+            finally:
+                self._forget_project_update(operation.operation_id)
 
     def _create_project_index(
         self,
@@ -2508,6 +2741,7 @@ class WorkspaceService:
         *,
         expected_latest_index_id: str | None,
         identity_version: str | None = None,
+        project_update_id: str | None = None,
         on_build_stats: Callable[[IndexBuildStats], None] | None = None,
     ) -> IndexResponse:
         project = self._find_project(project_id)
@@ -2522,18 +2756,23 @@ class WorkspaceService:
                 "GitHub sources are immutable; import the repository again to create a new fixed-commit index",
             )
         pending_id = f"pending-{uuid4().hex}"
+        building_marker = pending_id
         with self.registry.store_for_repository(project.repository_id) as store:
             current_project = store.load_project(project.project_id)
-            if (
-                expected_latest_index_id is not None
-                and current_project.latest_index_id != expected_latest_index_id
-            ):
+            if current_project.latest_index_id != expected_latest_index_id:
                 raise ServiceError("conflict", 409, "project latest index changed before the update")
             store.set_project_building(project.project_id, pending_id)
 
         def mark_snapshot_ready(index_id: str) -> None:
+            nonlocal building_marker
             with self.registry.store_for_repository(project.repository_id) as store:
                 store.set_project_building(project.project_id, index_id)
+            building_marker = index_id
+            if project_update_id is not None:
+                self.registry.management_store.update_project_update(
+                    project_update_id,
+                    candidate_index_id=index_id,
+                )
 
         try:
             response = self.index_service.create_index(
@@ -2562,7 +2801,10 @@ class WorkspaceService:
             raise ServiceError("internal_error", 500, "local index storage failed") from exc
         finally:
             with self.registry.store_for_repository(project.repository_id) as store:
-                store.clear_project_building(project.project_id)
+                store.clear_project_building(
+                    project.project_id,
+                    expected_building_index_id=building_marker,
+                )
 
     def check_index_freshness(self, project_id: str, index_id: str) -> IndexFreshness:
         """Check one project index against its current local source manifest."""
@@ -2644,6 +2886,7 @@ class WorkspaceService:
                     ref=freshness.remote_requested_ref,
                 ),
                 via_mcp=via_mcp,
+                expected_latest_index_id=index_id,
             )
             if imported.attempt.status != "ready" or imported.index is None:
                 error_code = imported.attempt.error_code or "conflict"
@@ -2663,18 +2906,6 @@ class WorkspaceService:
                 )
 
             new_index_id = imported.index.index.index_id
-            try:
-                with self.registry.store_for_repository(project.repository_id) as store:
-                    current_project = store.load_project(project_id)
-                    if current_project.latest_index_id != index_id and new_index_id != current_project.latest_index_id:
-                        raise StorageConflictError("project latest index changed during the GitHub update")
-            except StorageConflictError as exc:
-                raise ServiceError("conflict", 409, str(exc)) from exc
-            except StorageNotFoundError as exc:
-                raise ServiceError("not_found", 404, "project or index was not found") from exc
-            except StorageError as exc:
-                raise ServiceError("internal_error", 500, "local index storage failed") from exc
-
             actual_commit = imported.attempt.resolved_commit
             if actual_commit is None:
                 raise ServiceError("internal_error", 503, "GitHub update completed without a resolved commit")
@@ -2759,40 +2990,6 @@ class WorkspaceService:
                     index=self.index_service.get_index(index_id),
                     freshness=freshness,
                 )
-            if evaluation.scan is not None:
-                try:
-                    historical = self.index_service.find_compatible_index(
-                        project_id,
-                        baseline,
-                        evaluation.scan,
-                    )
-                except StorageNotFoundError as exc:
-                    raise ServiceError("not_found", 404, "project or index was not found") from exc
-                except StorageError as exc:
-                    raise ServiceError("internal_error", 500, "local index storage failed") from exc
-                if historical is not None and historical.index_id != index_id:
-                    try:
-                        with self.registry.store_for_repository(project.repository_id) as store:
-                            store.finish_project_index(
-                                project_id,
-                                historical.index_id,
-                                expected_latest_index_id=index_id,
-                            )
-                    except StorageNotFoundError as exc:
-                        raise ServiceError("not_found", 404, "project or index was not found") from exc
-                    except StorageInputError as exc:
-                        raise ServiceError("invalid_input", 400, "project index association is invalid") from exc
-                    except StorageConflictError as exc:
-                        raise ServiceError("conflict", 409, str(exc)) from exc
-                    except StorageError as exc:
-                        raise ServiceError("internal_error", 500, "local index storage failed") from exc
-                    return IndexRefreshResponse(
-                        project_id=project_id,
-                        baseline_index_id=index_id,
-                        mode="historical_reused",
-                        index=self.index_service.get_index(historical.index_id),
-                        freshness=freshness,
-                    )
             if freshness.status == "unknown" and not legacy_metadata_rebuildable:
                 if "budget_exceeded" in freshness.reasons:
                     raise ServiceError(
@@ -2805,23 +3002,119 @@ class WorkspaceService:
                     409,
                     "source freshness could not be established; the existing index was kept",
                 )
-            created = self._create_project_index(
-                project_id,
-                CreateProjectIndexRequest(revision=request.revision, dirty=request.dirty),
-                expected_latest_index_id=index_id,
-                identity_version=(
-                    f"{INDEX_BUILD_IDENTITY_VERSION}-rebuild"
-                    if metadata_requires_new_identity
-                    else None
-                ),
-            )
-            return IndexRefreshResponse(
-                project_id=project_id,
-                baseline_index_id=index_id,
-                mode="created",
-                index=created,
-                freshness=freshness,
-            )
+            operation = self._begin_project_update(project, index_id)
+            candidate_mode = "created"
+            try:
+                if evaluation.scan is not None:
+                    historical = self.index_service.find_compatible_index(
+                        project_id,
+                        baseline,
+                        evaluation.scan,
+                    )
+                    if historical is not None and historical.index_id != index_id:
+                        candidate_mode = "historical_reused"
+                        with self.registry.store_for_repository(project.repository_id) as store:
+                            store.finish_project_index(
+                                project_id,
+                                historical.index_id,
+                                expected_latest_index_id=index_id,
+                            )
+                        self.registry.management_store.commit_project_update(
+                            operation.operation_id,
+                            candidate_index_id=historical.index_id,
+                            content_hash=historical.snapshot_hash,
+                        )
+                        return IndexRefreshResponse(
+                            project_id=project_id,
+                            baseline_index_id=index_id,
+                            mode=candidate_mode,
+                            index=self.index_service.get_index(historical.index_id),
+                            freshness=freshness,
+                        )
+                created = self._create_project_index(
+                    project_id,
+                    CreateProjectIndexRequest(revision=request.revision, dirty=request.dirty),
+                    expected_latest_index_id=index_id,
+                    identity_version=(
+                        f"{INDEX_BUILD_IDENTITY_VERSION}-rebuild"
+                        if metadata_requires_new_identity
+                        else None
+                    ),
+                    project_update_id=operation.operation_id,
+                )
+                self.registry.management_store.commit_project_update(
+                    operation.operation_id,
+                    candidate_index_id=created.index.index_id,
+                    content_hash=created.index.snapshot_hash,
+                )
+                return IndexRefreshResponse(
+                    project_id=project_id,
+                    baseline_index_id=index_id,
+                    mode=candidate_mode,
+                    index=created,
+                    freshness=freshness,
+                )
+            except ServiceError as exc:
+                recovered_candidate = self._reconcile_project_update_failure(
+                    operation.operation_id,
+                    error_code=exc.code,
+                    error_message=exc.message,
+                )
+                if recovered_candidate is not None:
+                    return IndexRefreshResponse(
+                        project_id=project_id,
+                        baseline_index_id=index_id,
+                        mode=candidate_mode,
+                        index=self.index_service.get_index(recovered_candidate),
+                        freshness=freshness,
+                    )
+                raise
+            except StorageNotFoundError as exc:
+                self._reconcile_project_update_failure(
+                    operation.operation_id,
+                    error_code="not_found",
+                    error_message="project or index was not found",
+                )
+                raise ServiceError("not_found", 404, "project or index was not found") from exc
+            except StorageInputError as exc:
+                self._reconcile_project_update_failure(
+                    operation.operation_id,
+                    error_code="invalid_input",
+                    error_message="project index association is invalid",
+                )
+                raise ServiceError("invalid_input", 400, "project index association is invalid") from exc
+            except StorageConflictError as exc:
+                recovered_candidate = self._reconcile_project_update_failure(
+                    operation.operation_id,
+                    error_code="conflict",
+                    error_message=str(exc),
+                )
+                if recovered_candidate is not None:
+                    return IndexRefreshResponse(
+                        project_id=project_id,
+                        baseline_index_id=index_id,
+                        mode=candidate_mode,
+                        index=self.index_service.get_index(recovered_candidate),
+                        freshness=freshness,
+                    )
+                raise ServiceError("conflict", 409, str(exc)) from exc
+            except StorageError as exc:
+                recovered_candidate = self._reconcile_project_update_failure(
+                    operation.operation_id,
+                    error_code="internal_error",
+                    error_message="local index storage failed",
+                )
+                if recovered_candidate is not None:
+                    return IndexRefreshResponse(
+                        project_id=project_id,
+                        baseline_index_id=index_id,
+                        mode=candidate_mode,
+                        index=self.index_service.get_index(recovered_candidate),
+                        freshness=freshness,
+                    )
+                raise ServiceError("internal_error", 500, "local index storage failed") from exc
+            finally:
+                self._forget_project_update(operation.operation_id)
 
     def get_project_index(self, project_id: str, index_id: str) -> IndexResponse:
         self._require_project_index(project_id, index_id)
@@ -3141,6 +3434,7 @@ class WorkspaceService:
         request: GitHubImportRequest,
         *,
         via_mcp: bool = False,
+        expected_latest_index_id: str | None = None,
     ) -> GitHubImportResponse:
 
         self._require_github_import(via_mcp=via_mcp)
@@ -3176,8 +3470,9 @@ class WorkspaceService:
                 source_kind="github",
                 source_url=resolution.repository.canonical_url,
                 requested_ref=resolution.requested_ref,
-                resolved_ref=resolution.resolved_ref or resolution.requested_ref,
-                resolved_commit=resolution.resolved_commit,
+                # The resolved commit becomes visible only with the latest CAS.
+                resolved_ref=None,
+                resolved_commit=None,
             )
             self.registry.refresh_managed_sources()
             self._ensure_managed_project(record)
@@ -3189,73 +3484,134 @@ class WorkspaceService:
             self._ensure_managed_project(record)
 
         project = self._load_project_from_spec(spec)
-        same_commit = self.registry.management_store.find_attempt_by_commit(
-            normalized_path,
-            resolution.resolved_commit,
+        expected_latest = project.latest_index_id if expected_latest_index_id is None else expected_latest_index_id
+        operation = self._begin_project_update(
+            project,
+            expected_latest,
+            source_url=resolution.repository.canonical_url,
+            requested_ref=resolution.requested_ref,
+            resolved_ref=resolution.resolved_ref or resolution.requested_ref,
+            resolved_commit=resolution.resolved_commit,
         )
-        if same_commit is not None:
-            reusable_index = self._compatible_github_index(project, same_commit)
-            if reusable_index is not None:
-                try:
-                    self.registry.management_store.update_source(
-                        spec.repository_id,
-                        source_url=resolution.repository.canonical_url,
-                        requested_ref=resolution.requested_ref,
-                        resolved_ref=resolution.resolved_ref or resolution.requested_ref,
-                        resolved_commit=resolution.resolved_commit,
-                        content_hash=same_commit.content_hash,
-                        cleanup_status="succeeded",
-                        cleanup_error=None,
-                        temporary_path=None,
-                    )
+        try:
+            same_commit = self.registry.management_store.find_attempt_by_commit(
+                normalized_path,
+                resolution.resolved_commit,
+            )
+            if same_commit is not None:
+                reusable_index = self._compatible_github_index(project, same_commit)
+                if reusable_index is not None:
                     with self.registry.store_for_repository(project.repository_id) as store:
                         store.finish_project_index(
                             project.project_id,
                             reusable_index.index_id,
-                            expected_latest_index_id=project.latest_index_id,
+                            expected_latest_index_id=expected_latest,
                         )
-                except StorageNotFoundError as exc:
-                    raise ServiceError("not_found", 404, "project or historical GitHub index was not found") from exc
-                except StorageInputError as exc:
-                    raise ServiceError("invalid_input", 400, "historical GitHub index metadata is invalid") from exc
-                except StorageConflictError as exc:
-                    raise ServiceError("conflict", 409, str(exc)) from exc
-                except StorageError as exc:
-                    raise ServiceError("internal_error", 500, "local index storage failed") from exc
-                return self._github_import_response(same_commit)
-        active = self.registry.management_store.find_active_attempt(normalized_path)
-        if active is not None:
-            return self._github_import_response(active)
-
-        try:
-            attempt = self.registry.management_store.create_attempt(
-                attempt_id=f"import-{uuid4().hex}",
-                project_id=project.project_id,
-                repository_id=spec.repository_id,
-                source_path=resolution.repository.canonical_url,
-                normalized_source_path=normalized_path,
-                name=project.name,
-                revision=resolution.resolved_commit,
-                dirty=False,
-                idempotency_key=request.idempotency_key,
-                created_at=datetime.now(timezone.utc),
-                source_kind="github",
-                source_url=resolution.repository.canonical_url,
-                requested_ref=resolution.requested_ref,
-                resolved_ref=resolution.resolved_ref or resolution.requested_ref,
-                resolved_commit=resolution.resolved_commit,
-            )
-        except StorageConflictError:
-            if request.idempotency_key is not None:
-                existing = self.registry.management_store.find_attempt_by_idempotency(request.idempotency_key)
-                if existing is not None and _same_github_request(existing, repository, request):
-                    return self._github_import_response(existing)
+                    self.registry.management_store.update_project_update(
+                        operation.operation_id,
+                        candidate_index_id=reusable_index.index_id,
+                        content_hash=same_commit.content_hash,
+                        phase="latest_committed",
+                    )
+                    self.registry.management_store.commit_project_update(
+                        operation.operation_id,
+                        candidate_index_id=reusable_index.index_id,
+                        content_hash=same_commit.content_hash,
+                    )
+                    return self._github_import_response(same_commit)
             active = self.registry.management_store.find_active_attempt(normalized_path)
             if active is not None:
+                self.registry.management_store.abort_project_update(
+                    operation.operation_id,
+                    error_code="conflict",
+                    error_message="an equivalent GitHub import is already running",
+                )
                 return self._github_import_response(active)
-            raise ServiceError("conflict", 409, "an equivalent GitHub import is already running")
 
-        return self._run_github_import_attempt(attempt.attempt_id)
+            try:
+                attempt = self.registry.management_store.create_attempt(
+                    attempt_id=f"import-{uuid4().hex}",
+                    project_id=project.project_id,
+                    repository_id=spec.repository_id,
+                    source_path=resolution.repository.canonical_url,
+                    normalized_source_path=normalized_path,
+                    name=project.name,
+                    revision=resolution.resolved_commit,
+                    dirty=False,
+                    idempotency_key=request.idempotency_key,
+                    created_at=datetime.now(timezone.utc),
+                    source_kind="github",
+                    source_url=resolution.repository.canonical_url,
+                    requested_ref=resolution.requested_ref,
+                    resolved_ref=resolution.resolved_ref or resolution.requested_ref,
+                    resolved_commit=resolution.resolved_commit,
+                )
+            except StorageConflictError:
+                if request.idempotency_key is not None:
+                    existing = self.registry.management_store.find_attempt_by_idempotency(request.idempotency_key)
+                    if existing is not None and _same_github_request(existing, repository, request):
+                        self.registry.management_store.abort_project_update(
+                            operation.operation_id,
+                            error_code="conflict",
+                            error_message="the idempotent GitHub import already exists",
+                        )
+                        return self._github_import_response(existing)
+                active = self.registry.management_store.find_active_attempt(normalized_path)
+                if active is not None:
+                    self.registry.management_store.abort_project_update(
+                        operation.operation_id,
+                        error_code="conflict",
+                        error_message="an equivalent GitHub import is already running",
+                    )
+                    return self._github_import_response(active)
+                raise ServiceError("conflict", 409, "an equivalent GitHub import is already running")
+
+            self.registry.management_store.update_project_update(
+                operation.operation_id,
+                attempt_id=attempt.attempt_id,
+            )
+            return self._run_github_import_attempt(
+                attempt.attempt_id,
+                expected_latest_index_id=expected_latest,
+                project_update_id=operation.operation_id,
+            )
+        except ServiceError as exc:
+            self._reconcile_project_update_failure(
+                operation.operation_id,
+                error_code=exc.code,
+                error_message=exc.message,
+            )
+            raise
+        except StorageNotFoundError as exc:
+            self._reconcile_project_update_failure(
+                operation.operation_id,
+                error_code="not_found",
+                error_message="project or index was not found",
+            )
+            raise ServiceError("not_found", 404, "project or index was not found") from exc
+        except StorageInputError as exc:
+            self._reconcile_project_update_failure(
+                operation.operation_id,
+                error_code="invalid_input",
+                error_message="project index association is invalid",
+            )
+            raise ServiceError("invalid_input", 400, "project index association is invalid") from exc
+        except StorageConflictError as exc:
+            self._reconcile_project_update_failure(
+                operation.operation_id,
+                error_code="conflict",
+                error_message=str(exc),
+            )
+            raise ServiceError("conflict", 409, str(exc)) from exc
+        except StorageError as exc:
+            self._reconcile_project_update_failure(
+                operation.operation_id,
+                error_code="internal_error",
+                error_message="local index storage failed",
+            )
+            raise ServiceError("internal_error", 500, "local index storage failed") from exc
+        finally:
+            self._forget_project_update(operation.operation_id)
 
     def retry_github_import(
         self,
@@ -3264,27 +3620,62 @@ class WorkspaceService:
         via_mcp: bool = False,
     ) -> GitHubImportResponse:
         self._require_github_import(via_mcp=via_mcp)
-        attempt = self.registry.management_store.load_attempt(attempt_id)
-        if attempt.source_kind != "github":
-            raise ServiceError("conflict", 409, "the import attempt is not a GitHub import")
-        if attempt.status not in {"failed", "interrupted", "cancelled"}:
-            raise ServiceError("conflict", 409, "only failed or interrupted imports can be retried")
-        self.registry.management_store.update_attempt(
-            attempt_id,
-            status="queued",
-            phase="queued",
-            index_id=None,
-            error_code=None,
-            error_message=None,
-        )
-        self.registry.management_store.update_attempt_metadata(
-            attempt_id,
-            content_hash=None,
-            cleanup_status="not_required",
-            cleanup_error=None,
-            temporary_path=None,
-        )
-        return self._run_github_import_attempt(attempt_id)
+        with self._index_mutation_lock:
+            attempt = self.registry.management_store.load_attempt(attempt_id)
+            if attempt.source_kind != "github":
+                raise ServiceError("conflict", 409, "the import attempt is not a GitHub import")
+            if attempt.status not in {"failed", "interrupted", "cancelled"}:
+                raise ServiceError("conflict", 409, "only failed or interrupted imports can be retried")
+            project = self._find_project(attempt.project_id)
+            operation = self._begin_project_update(
+                project,
+                project.latest_index_id,
+                source_url=attempt.source_url,
+                requested_ref=attempt.requested_ref,
+                resolved_ref=attempt.resolved_ref,
+                resolved_commit=attempt.resolved_commit,
+            )
+            try:
+                self.registry.management_store.update_attempt(
+                    attempt_id,
+                    status="queued",
+                    phase="queued",
+                    index_id=None,
+                    error_code=None,
+                    error_message=None,
+                )
+                self.registry.management_store.update_attempt_metadata(
+                    attempt_id,
+                    content_hash=None,
+                    cleanup_status="not_required",
+                    cleanup_error=None,
+                    temporary_path=None,
+                )
+                self.registry.management_store.update_project_update(
+                    operation.operation_id,
+                    attempt_id=attempt_id,
+                )
+                return self._run_github_import_attempt(
+                    attempt_id,
+                    expected_latest_index_id=project.latest_index_id,
+                    project_update_id=operation.operation_id,
+                )
+            except ServiceError as exc:
+                self._reconcile_project_update_failure(
+                    operation.operation_id,
+                    error_code=exc.code,
+                    error_message=exc.message,
+                )
+                raise
+            except StorageError as exc:
+                self._reconcile_project_update_failure(
+                    operation.operation_id,
+                    error_code="internal_error",
+                    error_message="local index storage failed",
+                )
+                raise ServiceError("internal_error", 500, "local index storage failed") from exc
+            finally:
+                self._forget_project_update(operation.operation_id)
 
     def get_import_status(self, attempt_id: str) -> ImportAttemptResponse:
         attempt = self.registry.management_store.load_attempt(attempt_id)
@@ -3494,13 +3885,20 @@ class WorkspaceService:
             return None
         return index
 
-    def _run_github_import_attempt(self, attempt_id: str) -> GitHubImportResponse:
+    def _run_github_import_attempt(
+        self,
+        attempt_id: str,
+        *,
+        expected_latest_index_id: str | None,
+        project_update_id: str,
+    ) -> GitHubImportResponse:
         attempt = self.registry.management_store.load_attempt(attempt_id)
         if attempt.source_kind != "github" or not attempt.source_url or not attempt.resolved_commit:
             raise ServiceError("internal_error", 500, "GitHub import metadata is incomplete")
         temp_root = self.registry.github_temp_path(attempt.attempt_id)
         source_root = temp_root / "source"
         temp_created = False
+        completed = attempt
         try:
             self.registry.management_store.update_attempt(
                 attempt_id,
@@ -3535,94 +3933,86 @@ class WorkspaceService:
                 status="indexing",
                 phase="indexing",
             )
-            index_response = self.create_project_index(
+            index_response = self._create_project_index(
                 attempt.project_id,
                 CreateProjectIndexRequest(revision=attempt.resolved_commit, dirty=False),
+                expected_latest_index_id=expected_latest_index_id,
+                project_update_id=project_update_id,
             )
             content_hash = index_response.index.snapshot_hash
-            self.registry.management_store.update_attempt_metadata(
-                attempt_id,
+            self.registry.management_store.update_project_update(
+                project_update_id,
+                candidate_index_id=index_response.index.index_id,
+                content_hash=content_hash,
+                phase="latest_committed",
+            )
+            self.registry.management_store.commit_project_update(
+                project_update_id,
+                candidate_index_id=index_response.index.index_id,
                 content_hash=content_hash,
             )
-            self.registry.management_store.update_source(
-                attempt.repository_id,
-                source_url=attempt.source_url,
-                requested_ref=attempt.requested_ref,
-                resolved_ref=attempt.resolved_ref or attempt.requested_ref,
-                resolved_commit=attempt.resolved_commit,
-                content_hash=content_hash,
-                cleanup_status="succeeded",
-                cleanup_error=None,
-                temporary_path=None,
-            )
-            completed = self.registry.management_store.update_attempt(
-                attempt_id,
-                status="ready",
-                phase="ready",
-                index_id=index_response.index.index_id,
-                error_code=None,
-                error_message=None,
-            )
+            completed = self.registry.management_store.load_attempt(attempt_id)
         except GitHubError as exc:
-            failed = self.registry.management_store.update_attempt(
-                attempt_id,
-                status="failed",
-                phase="failed",
-                index_id=None,
-                error_code=exc.code,
-                error_message=exc.message,
-            )
-            completed = failed
+            error_code = exc.code
+            error_message = exc.message
         except ServiceError as exc:
-            failed = self.registry.management_store.update_attempt(
-                attempt_id,
-                status="failed",
-                phase="failed",
-                index_id=None,
-                error_code=exc.code,
-                error_message=exc.message,
-            )
-            completed = failed
+            error_code = exc.code
+            error_message = exc.message
+        except StorageError:
+            error_code = "internal_error"
+            error_message = "local index storage failed"
         except Exception:
-            failed = self.registry.management_store.update_attempt(
-                attempt_id,
-                status="failed",
-                phase="failed",
-                index_id=None,
-                error_code="internal_error",
-                error_message="GitHub import failed",
-            )
-            completed = failed
+            error_code = "internal_error"
+            error_message = "GitHub import failed"
+        else:
+            error_code = None
+            error_message = None
+
         finally:
             self.registry.unbind_runtime_source(attempt.repository_id)
             if temp_created:
                 cleanup_error = self._cleanup_github_temp(str(temp_root), attempt.attempt_id)
-                if cleanup_error is None:
-                    completed = self.registry.management_store.update_attempt_metadata(
-                        attempt_id,
-                        cleanup_status="succeeded",
-                        cleanup_error=None,
-                        temporary_path=None,
-                    )
-                    self.registry.management_store.update_source(
-                        attempt.repository_id,
-                        cleanup_status="succeeded",
-                        cleanup_error=None,
-                        temporary_path=None,
-                    )
-                else:
-                    completed = self.registry.management_store.update_attempt_metadata(
-                        attempt_id,
-                        cleanup_status="failed",
-                        cleanup_error=cleanup_error,
-                        temporary_path=str(temp_root),
-                    )
-                    self.registry.management_store.update_source(
-                        attempt.repository_id,
-                        cleanup_status="failed",
-                        cleanup_error=cleanup_error,
-                        temporary_path=str(temp_root),
-                    )
+                try:
+                    if cleanup_error is None:
+                        completed = self.registry.management_store.update_attempt_metadata(
+                            attempt_id,
+                            cleanup_status="succeeded",
+                            cleanup_error=None,
+                            temporary_path=None,
+                        )
+                        self.registry.management_store.update_source(
+                            attempt.repository_id,
+                            cleanup_status="succeeded",
+                            cleanup_error=None,
+                            temporary_path=None,
+                        )
+                    else:
+                        completed = self.registry.management_store.update_attempt_metadata(
+                            attempt_id,
+                            cleanup_status="failed",
+                            cleanup_error=cleanup_error,
+                            temporary_path=str(temp_root),
+                        )
+                        self.registry.management_store.update_source(
+                            attempt.repository_id,
+                            cleanup_status="failed",
+                            cleanup_error=cleanup_error,
+                            temporary_path=str(temp_root),
+                        )
+                except StorageError:
+                    logger.warning("could not persist GitHub cleanup status for %s", attempt_id, exc_info=True)
+        if error_code is not None:
+            recovered_candidate = self._reconcile_project_update_failure(
+                project_update_id,
+                error_code=error_code,
+                error_message=error_message or "GitHub import failed",
+            )
+            try:
+                completed = self.registry.management_store.load_attempt(attempt_id)
+            except StorageError:
+                completed = attempt
+            if recovered_candidate is not None:
+                completed = self.registry.management_store.load_attempt(attempt_id)
         return self._github_import_response(completed)
 
     def _prepare_github_temp(self, temp_root: Path, attempt_id: str) -> None:
@@ -3757,14 +4147,27 @@ class WorkspaceService:
             self._ensure_managed_project(record)
 
     def _recover_interrupted_builds(self) -> None:
-        self.registry.management_store.mark_active_attempts_interrupted()
         self._ensure_managed_projects()
+        updates = self.registry.management_store.list_project_updates()
+        for operation in updates:
+            if not self._project_update_owner_is_alive(operation):
+                self._recover_project_update(operation)
+
+        remaining_updates = self.registry.management_store.list_project_updates()
+        alive_project_ids = tuple(
+            operation.project_id
+            for operation in remaining_updates
+            if self._project_update_owner_is_alive(operation)
+        )
+        self.registry.management_store.mark_active_attempts_interrupted(
+            exclude_project_ids=alive_project_ids,
+        )
         for repository_id in self.registry.repository_ids:
             database_path = self.registry.storage_root_for(repository_id) / ".codetrail" / "index.sqlite3"
             if not database_path.is_file():
                 continue
             with self.registry.store_for_repository(repository_id) as store:
-                store.recover_building_projects()
+                store.recover_building_projects(exclude_project_ids=alive_project_ids)
 
     def _recover_interrupted_runs(self) -> None:
         """Close persisted queued/running Runs before accepting new work."""

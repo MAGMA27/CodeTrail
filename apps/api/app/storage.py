@@ -434,6 +434,27 @@ class ImportAttemptRecord:
     temporary_path: str | None = None
 
 
+@dataclass(frozen=True)
+class ProjectUpdateRecord:
+    """Durable cross-store intent for one project index update."""
+
+    operation_id: str
+    project_id: str
+    repository_id: str
+    expected_latest_index_id: str | None
+    owner_pid: int | None
+    attempt_id: str | None
+    candidate_index_id: str | None
+    source_url: str | None
+    requested_ref: str | None
+    resolved_ref: str | None
+    resolved_commit: str | None
+    content_hash: str | None
+    phase: str
+    created_at: datetime
+    updated_at: datetime
+
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS index_snapshots (
     index_id TEXT PRIMARY KEY,
@@ -765,6 +786,27 @@ CREATE TABLE IF NOT EXISTS managed_sources (
     temporary_path TEXT
 );
 
+CREATE TABLE IF NOT EXISTS project_updates (
+    operation_id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL UNIQUE,
+    repository_id TEXT NOT NULL,
+    expected_latest_index_id TEXT,
+    owner_pid INTEGER,
+    attempt_id TEXT,
+    candidate_index_id TEXT,
+    source_url TEXT,
+    requested_ref TEXT,
+    resolved_ref TEXT,
+    resolved_commit TEXT,
+    content_hash TEXT,
+    phase TEXT NOT NULL CHECK (phase IN ('building', 'latest_committed')),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS project_updates_owner
+    ON project_updates(owner_pid, updated_at);
+
 CREATE TABLE IF NOT EXISTS import_attempts (
     attempt_id TEXT PRIMARY KEY,
     project_id TEXT NOT NULL,
@@ -1063,6 +1105,267 @@ class ManagementStore:
             ).fetchone()
         return None if row is None else _import_attempt_from_row(row)
 
+    def begin_project_update(
+        self,
+        *,
+        operation_id: str,
+        project_id: str,
+        repository_id: str,
+        expected_latest_index_id: str | None,
+        owner_pid: int | None,
+        source_url: str | None = None,
+        requested_ref: str | None = None,
+        resolved_ref: str | None = None,
+        resolved_commit: str | None = None,
+    ) -> ProjectUpdateRecord:
+        """Persist one project update intent before touching its index database.
+
+        The unique project key is the cross-process admission guard. The row is
+        deliberately committed before a snapshot is built so a process restart
+        can decide whether the latest CAS happened and complete or abort the
+        source-side commit without guessing.
+        """
+
+        timestamp = _datetime_text(datetime.now(timezone.utc))
+        try:
+            with self._connect() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                existing = connection.execute(
+                    "SELECT operation_id FROM project_updates WHERE project_id = ?",
+                    (project_id,),
+                ).fetchone()
+                if existing is not None:
+                    connection.execute("ROLLBACK")
+                    raise StorageConflictError("project index update is already in progress")
+                connection.execute(
+                    "INSERT INTO project_updates "
+                    "(operation_id, project_id, repository_id, expected_latest_index_id, owner_pid, "
+                    "source_url, requested_ref, resolved_ref, resolved_commit, phase, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'building', ?, ?)",
+                    (
+                        operation_id,
+                        project_id,
+                        repository_id,
+                        expected_latest_index_id,
+                        owner_pid,
+                        source_url,
+                        requested_ref,
+                        resolved_ref,
+                        resolved_commit,
+                        timestamp,
+                        timestamp,
+                    ),
+                )
+                connection.execute("COMMIT")
+        except StorageConflictError:
+            raise
+        except sqlite3.IntegrityError as exc:
+            raise StorageConflictError("project index update conflicts with existing data") from exc
+        except sqlite3.Error as exc:
+            raise StorageError(f"could not begin project index update: {exc}") from exc
+        return self.load_project_update(operation_id)
+
+    def load_project_update(self, operation_id: str) -> ProjectUpdateRecord:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM project_updates WHERE operation_id = ?",
+                (operation_id,),
+            ).fetchone()
+        if row is None:
+            raise StorageNotFoundError(f"project update {operation_id!r} was not found")
+        return _project_update_from_row(row)
+
+    def list_project_updates(self) -> tuple[ProjectUpdateRecord, ...]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM project_updates ORDER BY created_at COLLATE BINARY, operation_id COLLATE BINARY"
+            ).fetchall()
+        return tuple(_project_update_from_row(row) for row in rows)
+
+    def update_project_update(
+        self,
+        operation_id: str,
+        *,
+        owner_pid: int | None | object = _UNSET,
+        attempt_id: str | None | object = _UNSET,
+        candidate_index_id: str | None | object = _UNSET,
+        content_hash: str | None | object = _UNSET,
+        phase: str | object = _UNSET,
+    ) -> ProjectUpdateRecord:
+        updates: list[str] = []
+        values: list[object] = []
+        for column, value in (
+            ("owner_pid", owner_pid),
+            ("attempt_id", attempt_id),
+            ("candidate_index_id", candidate_index_id),
+            ("content_hash", content_hash),
+            ("phase", phase),
+        ):
+            if value is not _UNSET:
+                updates.append(f"{column} = ?")
+                values.append(value)
+        if updates:
+            updates.append("updated_at = ?")
+            values.append(_datetime_text(datetime.now(timezone.utc)))
+            values.append(operation_id)
+            try:
+                with self._connect() as connection:
+                    cursor = connection.execute(
+                        f"UPDATE project_updates SET {', '.join(updates)} WHERE operation_id = ?",
+                        values,
+                    )
+                    if cursor.rowcount != 1:
+                        raise StorageNotFoundError(f"project update {operation_id!r} was not found")
+            except StorageNotFoundError:
+                raise
+            except sqlite3.Error as exc:
+                raise StorageError(f"could not update project index update: {exc}") from exc
+        return self.load_project_update(operation_id)
+
+    def commit_project_update(
+        self,
+        operation_id: str,
+        *,
+        candidate_index_id: str,
+        content_hash: str | None,
+    ) -> None:
+        """Commit source metadata and attempt completion in one registry transaction."""
+
+        try:
+            with self._connect() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                row = connection.execute(
+                    "SELECT * FROM project_updates WHERE operation_id = ?",
+                    (operation_id,),
+                ).fetchone()
+                if row is None:
+                    connection.execute("ROLLBACK")
+                    raise StorageNotFoundError(f"project update {operation_id!r} was not found")
+                if row["candidate_index_id"] not in {None, candidate_index_id}:
+                    connection.execute("ROLLBACK")
+                    raise StorageConflictError("project update candidate does not match its persisted intent")
+                resolved_content_hash = content_hash or row["content_hash"]
+                source_url = row["source_url"]
+                if source_url is not None:
+                    source = connection.execute(
+                        "SELECT project_id FROM managed_sources WHERE repository_id = ?",
+                        (row["repository_id"],),
+                    ).fetchone()
+                    if source is None:
+                        connection.execute("ROLLBACK")
+                        raise StorageNotFoundError("managed source for project update was not found")
+                    connection.execute(
+                        "UPDATE managed_sources SET source_url = ?, requested_ref = ?, resolved_ref = ?, "
+                        "resolved_commit = ?, content_hash = ? WHERE repository_id = ?",
+                        (
+                            source_url,
+                            row["requested_ref"],
+                            row["resolved_ref"],
+                            row["resolved_commit"],
+                            resolved_content_hash,
+                            row["repository_id"],
+                        ),
+                    )
+                attempt_id = row["attempt_id"]
+                if attempt_id is not None:
+                    attempt = connection.execute(
+                        "SELECT project_id, repository_id FROM import_attempts WHERE attempt_id = ?",
+                        (attempt_id,),
+                    ).fetchone()
+                    if attempt is None:
+                        connection.execute("ROLLBACK")
+                        raise StorageNotFoundError("project update import attempt was not found")
+                    if (
+                        attempt["project_id"] != row["project_id"]
+                        or attempt["repository_id"] != row["repository_id"]
+                    ):
+                        connection.execute("ROLLBACK")
+                        raise StorageInputError("project update import attempt has the wrong project scope")
+                    connection.execute(
+                        "UPDATE import_attempts SET status = 'ready', phase = 'ready', index_id = ?, "
+                        "error_code = NULL, error_message = NULL, content_hash = ?, source_url = ?, "
+                        "requested_ref = ?, resolved_ref = ?, resolved_commit = ?, updated_at = ? "
+                        "WHERE attempt_id = ?",
+                        (
+                            candidate_index_id,
+                            resolved_content_hash,
+                            row["source_url"],
+                            row["requested_ref"],
+                            row["resolved_ref"],
+                            row["resolved_commit"],
+                            _datetime_text(datetime.now(timezone.utc)),
+                            attempt_id,
+                        ),
+                    )
+                connection.execute(
+                    "DELETE FROM project_updates WHERE operation_id = ?",
+                    (operation_id,),
+                )
+                connection.execute("COMMIT")
+        except (StorageConflictError, StorageInputError, StorageNotFoundError):
+            raise
+        except sqlite3.Error as exc:
+            raise StorageError(f"could not commit project index update: {exc}") from exc
+
+    def abort_project_update(
+        self,
+        operation_id: str,
+        *,
+        error_code: str,
+        error_message: str,
+    ) -> None:
+        """Abort an update without changing source identity or project latest."""
+
+        try:
+            with self._connect() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                row = connection.execute(
+                    "SELECT attempt_id FROM project_updates WHERE operation_id = ?",
+                    (operation_id,),
+                ).fetchone()
+                if row is None:
+                    connection.execute("ROLLBACK")
+                    raise StorageNotFoundError(f"project update {operation_id!r} was not found")
+                attempt_id = row["attempt_id"]
+                if attempt_id is not None:
+                    connection.execute(
+                        "UPDATE import_attempts SET status = 'failed', phase = 'failed', index_id = NULL, "
+                        "error_code = ?, error_message = ?, updated_at = ? "
+                        "WHERE attempt_id = ? AND status IN ('queued', 'acquiring', 'indexing')",
+                        (
+                            error_code,
+                            error_message,
+                            _datetime_text(datetime.now(timezone.utc)),
+                            attempt_id,
+                        ),
+                    )
+                connection.execute(
+                    "DELETE FROM project_updates WHERE operation_id = ?",
+                    (operation_id,),
+                )
+                connection.execute("COMMIT")
+        except StorageNotFoundError:
+            raise
+        except sqlite3.Error as exc:
+            raise StorageError(f"could not abort project index update: {exc}") from exc
+
+    def release_project_update_owner(self, operation_id: str) -> ProjectUpdateRecord:
+        """Leave a durable update for a later restart/recovery pass."""
+
+        try:
+            with self._connect() as connection:
+                cursor = connection.execute(
+                    "UPDATE project_updates SET owner_pid = NULL, updated_at = ? WHERE operation_id = ?",
+                    (_datetime_text(datetime.now(timezone.utc)), operation_id),
+                )
+                if cursor.rowcount != 1:
+                    raise StorageNotFoundError(f"project update {operation_id!r} was not found")
+        except StorageNotFoundError:
+            raise
+        except sqlite3.Error as exc:
+            raise StorageError(f"could not release project index update owner: {exc}") from exc
+        return self.load_project_update(operation_id)
+
     def update_source(
         self,
         repository_id: str,
@@ -1184,15 +1487,21 @@ class ManagementStore:
             raise StorageError(f"could not update import attempt: {exc}") from exc
         return self.load_attempt(attempt_id)
 
-    def mark_active_attempts_interrupted(self) -> int:
+    def mark_active_attempts_interrupted(self, *, exclude_project_ids: tuple[str, ...] = ()) -> int:
         timestamp = _datetime_text(datetime.now(timezone.utc))
         try:
             with self._connect() as connection:
+                exclusion = ""
+                values: list[object] = [timestamp]
+                if exclude_project_ids:
+                    placeholders = ", ".join("?" for _ in exclude_project_ids)
+                    exclusion = f" AND project_id NOT IN ({placeholders})"
+                    values.extend(exclude_project_ids)
                 cursor = connection.execute(
                     "UPDATE import_attempts SET status = 'interrupted', phase = 'interrupted', "
                     "error_code = 'interrupted', error_message = 'import was interrupted by a service restart', updated_at = ? "
-                    "WHERE status IN ('queued', 'acquiring', 'indexing')",
-                    (timestamp,),
+                    f"WHERE status IN ('queued', 'acquiring', 'indexing'){exclusion}",
+                    values,
                 )
                 return cursor.rowcount
         except sqlite3.Error as exc:
@@ -1502,16 +1811,35 @@ class IndexStore:
                 pass
             raise StorageError(f"could not finish project index: {exc}") from exc
 
-    def clear_project_building(self, project_id: str) -> None:
+    def clear_project_building(
+        self,
+        project_id: str,
+        *,
+        expected_building_index_id: str | None = None,
+    ) -> None:
+        if expected_building_index_id is None:
+            self._connection.execute(
+                "UPDATE projects SET building_index_id = NULL WHERE project_id = ?",
+                (project_id,),
+            )
+            return
         self._connection.execute(
-            "UPDATE projects SET building_index_id = NULL WHERE project_id = ?",
-            (project_id,),
+            "UPDATE projects SET building_index_id = NULL "
+            "WHERE project_id = ? AND building_index_id = ?",
+            (project_id, expected_building_index_id),
         )
 
-    def recover_building_projects(self) -> None:
+    def recover_building_projects(self, *, exclude_project_ids: tuple[str, ...] = ()) -> None:
         """Clear markers left by a synchronous build interrupted by a restart."""
 
-        self._connection.execute("UPDATE projects SET building_index_id = NULL")
+        if not exclude_project_ids:
+            self._connection.execute("UPDATE projects SET building_index_id = NULL")
+            return
+        placeholders = ", ".join("?" for _ in exclude_project_ids)
+        self._connection.execute(
+            f"UPDATE projects SET building_index_id = NULL WHERE project_id NOT IN ({placeholders})",
+            exclude_project_ids,
+        )
 
     def write_index(self, relation: RelationIndex) -> None:
         """Write one complete relation index atomically and idempotently."""
@@ -4837,6 +5165,26 @@ def _import_attempt_from_row(row: sqlite3.Row) -> ImportAttemptRecord:
         cleanup_status=row["cleanup_status"],
         cleanup_error=row["cleanup_error"],
         temporary_path=row["temporary_path"],
+    )
+
+
+def _project_update_from_row(row: sqlite3.Row) -> ProjectUpdateRecord:
+    return ProjectUpdateRecord(
+        operation_id=row["operation_id"],
+        project_id=row["project_id"],
+        repository_id=row["repository_id"],
+        expected_latest_index_id=row["expected_latest_index_id"],
+        owner_pid=None if row["owner_pid"] is None else int(row["owner_pid"]),
+        attempt_id=row["attempt_id"],
+        candidate_index_id=row["candidate_index_id"],
+        source_url=row["source_url"],
+        requested_ref=row["requested_ref"],
+        resolved_ref=row["resolved_ref"],
+        resolved_commit=row["resolved_commit"],
+        content_hash=row["content_hash"],
+        phase=row["phase"],
+        created_at=_datetime_value(row["created_at"]),
+        updated_at=_datetime_value(row["updated_at"]),
     )
 
 

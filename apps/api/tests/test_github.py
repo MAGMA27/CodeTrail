@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import tarfile
+import threading
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -18,7 +20,10 @@ from app.github import (
     extract_github_archive,
     parse_github_repository_url,
 )
+from app.contracts import GitHubImportRequest
 from app.main import create_app
+from app.service import ServiceError
+from app.storage import StorageError
 
 
 def _archive_bytes(*members: tuple[str, bytes | None, str]) -> bytes:
@@ -189,6 +194,30 @@ class _FakeGitHubClient:
             encoding="utf-8",
         )
         return GitHubArchive(resolution, "b" * 64, 1, (destination / "module.py").stat().st_size)
+
+
+class _BlockingGitHubClient(_FakeGitHubClient):
+    def __init__(
+        self,
+        commits: list[str],
+        *,
+        block_call: int,
+        started: threading.Event,
+        release: threading.Event,
+    ) -> None:
+        super().__init__(commits)
+        self._resolve_calls = 0
+        self._block_call = block_call
+        self._started = started
+        self._release = release
+
+    def resolve(self, url: str, requested_ref: str | None) -> GitHubResolution:
+        self._resolve_calls += 1
+        if self._resolve_calls == self._block_call:
+            self._started.set()
+            if not self._release.wait(timeout=10):
+                raise AssertionError("controlled GitHub resolve did not receive its release")
+        return super().resolve(url, requested_ref)
 
 
 async def _request(application, method: str, target: str, payload: dict | None = None) -> tuple[int, dict]:
@@ -502,3 +531,200 @@ def test_github_cleanup_failure_is_recorded_and_retryable(tmp_path: Path) -> Non
     )
     assert status == 200
     assert cleaned["cleanup_status"] == "succeeded"
+
+
+def test_github_refresh_stale_new_commit_cannot_overwrite_independent_service_update(tmp_path: Path) -> None:
+    first = "a" * 40
+    second = "b" * 40
+    started = threading.Event()
+    release = threading.Event()
+    client_a = _BlockingGitHubClient(
+        [first, second, second],
+        block_call=2,
+        started=started,
+        release=release,
+    )
+    client_b = _FakeGitHubClient([second, second])
+    data_root = tmp_path / "service-data"
+    app_a = create_app({}, data_root=data_root, github_import_enabled=True, github_client=client_a)  # type: ignore[arg-type]
+    initial = app_a.state.workspace_service.import_github(
+        GitHubImportRequest(
+            name="Remote Python",
+            url="https://github.com/owner/repo",
+            ref="main",
+        )
+    )
+    project_id = initial.project.project_id
+    baseline_index_id = initial.index.index.index_id  # type: ignore[union-attr]
+    app_b = create_app({}, data_root=data_root, github_import_enabled=True, github_client=client_b)  # type: ignore[arg-type]
+
+    stale_error: list[ServiceError] = []
+
+    def stale_refresh() -> None:
+        try:
+            app_a.state.workspace_service.refresh_github_source(project_id, baseline_index_id)
+        except ServiceError as exc:
+            stale_error.append(exc)
+
+    worker = threading.Thread(target=stale_refresh)
+    worker.start()
+    assert started.wait(timeout=10)
+    updated = app_b.state.workspace_service.refresh_github_source(project_id, baseline_index_id)
+    assert updated.mode == "created"
+    latest_after_b = updated.index.index.index_id  # type: ignore[union-attr]
+    release.set()
+    worker.join(timeout=10)
+    assert not worker.is_alive()
+    assert len(stale_error) == 1
+    assert stale_error[0].code == "conflict"
+
+    current = app_a.state.workspace_service.get_project(project_id)
+    assert current.latest_index_id == latest_after_b
+    source = app_a.state.registry.management_store.load_source(initial.attempt.repository_id)
+    assert source.resolved_commit == second
+
+
+def test_github_refresh_stale_historical_reuse_cannot_rewrite_source_identity(tmp_path: Path) -> None:
+    first = "a" * 40
+    second = "b" * 40
+    third = "c" * 40
+    started = threading.Event()
+    release = threading.Event()
+    client_a = _BlockingGitHubClient(
+        [first, second, second, first, first],
+        block_call=4,
+        started=started,
+        release=release,
+    )
+    client_b = _FakeGitHubClient([third, third])
+    data_root = tmp_path / "service-data"
+    app_a = create_app({}, data_root=data_root, github_import_enabled=True, github_client=client_a)  # type: ignore[arg-type]
+    initial = app_a.state.workspace_service.import_github(
+        GitHubImportRequest(
+            name="Remote Python",
+            url="https://github.com/owner/repo",
+            ref="main",
+        )
+    )
+    project_id = initial.project.project_id
+    first_index_id = initial.index.index.index_id  # type: ignore[union-attr]
+    second_result = app_a.state.workspace_service.refresh_github_source(project_id, first_index_id)
+    second_index_id = second_result.index.index.index_id  # type: ignore[union-attr]
+    app_b = create_app({}, data_root=data_root, github_import_enabled=True, github_client=client_b)  # type: ignore[arg-type]
+
+    stale_error: list[ServiceError] = []
+
+    def stale_restore() -> None:
+        try:
+            app_a.state.workspace_service.refresh_github_source(project_id, second_index_id)
+        except ServiceError as exc:
+            stale_error.append(exc)
+
+    worker = threading.Thread(target=stale_restore)
+    worker.start()
+    assert started.wait(timeout=10)
+    updated = app_b.state.workspace_service.refresh_github_source(project_id, second_index_id)
+    assert updated.mode == "created"
+    latest_after_b = updated.index.index.index_id  # type: ignore[union-attr]
+    release.set()
+    worker.join(timeout=10)
+    assert not worker.is_alive()
+    assert len(stale_error) == 1
+    assert stale_error[0].code == "conflict"
+
+    current = app_a.state.workspace_service.get_project(project_id)
+    assert current.latest_index_id == latest_after_b
+    source = app_a.state.registry.management_store.load_source(initial.attempt.repository_id)
+    assert source.resolved_commit == third
+    assert source.source_url == "https://github.com/owner/repo"
+    assert source.requested_ref == "main"
+    assert source.resolved_ref == "main"
+    assert source.content_hash == updated.index.index.snapshot_hash  # type: ignore[union-attr]
+
+
+def test_github_project_update_recovers_source_commit_after_registry_failure(tmp_path: Path) -> None:
+    first = "a" * 40
+    second = "b" * 40
+    client = _FakeGitHubClient([first, second, second])
+    data_root = tmp_path / "service-data"
+    app = create_app({}, data_root=data_root, github_import_enabled=True, github_client=client)  # type: ignore[arg-type]
+    initial = app.state.workspace_service.import_github(
+        GitHubImportRequest(
+            name="Remote Python",
+            url="https://github.com/owner/repo",
+            ref="main",
+        )
+    )
+    project_id = initial.project.project_id
+    baseline_index_id = initial.index.index.index_id  # type: ignore[union-attr]
+    repository_id = initial.attempt.repository_id
+    management_store = app.state.registry.management_store
+    original_commit = management_store.commit_project_update
+
+    def fail_registry_commit(*_args, **_kwargs) -> None:
+        raise StorageError("injected registry commit failure")
+
+    management_store.commit_project_update = fail_registry_commit  # type: ignore[method-assign]
+    try:
+        with pytest.raises(ServiceError, match="existing index was kept"):
+            app.state.workspace_service.refresh_github_source(project_id, baseline_index_id)
+    finally:
+        management_store.commit_project_update = original_commit  # type: ignore[method-assign]
+
+    pending = management_store.list_project_updates()
+    assert len(pending) == 1
+    operation = pending[0]
+    assert operation.owner_pid is None
+    assert operation.candidate_index_id is not None
+    assert app.state.workspace_service.get_project(project_id).latest_index_id == operation.candidate_index_id
+    assert management_store.load_source(repository_id).resolved_commit == first
+    management_store.update_project_update(operation.operation_id, owner_pid=os.getpid())
+
+    reopened = create_app({}, data_root=data_root, github_import_enabled=True, github_client=client)  # type: ignore[arg-type]
+    assert reopened.state.registry.management_store.list_project_updates() == ()
+    recovered_project = reopened.state.workspace_service.get_project(project_id)
+    assert recovered_project.latest_index_id == operation.candidate_index_id
+    recovered_source = reopened.state.registry.management_store.load_source(repository_id)
+    assert recovered_source.resolved_commit == second
+    recovered_attempt = reopened.state.registry.management_store.load_attempt(operation.attempt_id)  # type: ignore[arg-type]
+    assert recovered_attempt.status == "ready"
+    assert recovered_attempt.index_id == operation.candidate_index_id
+
+
+def test_github_build_failure_aborts_update_without_changing_latest_or_source(tmp_path: Path) -> None:
+    import asyncio
+
+    first = "a" * 40
+    second = "b" * 40
+    client = _FakeGitHubClient([first, second, second])
+    data_root = tmp_path / "service-data"
+    app = create_app({}, data_root=data_root, github_import_enabled=True, github_client=client)  # type: ignore[arg-type]
+    initial = app.state.workspace_service.import_github(
+        GitHubImportRequest(
+            name="Remote Python",
+            url="https://github.com/owner/repo",
+            ref="main",
+        )
+    )
+    project_id = initial.project.project_id
+    baseline_index_id = initial.index.index.index_id  # type: ignore[union-attr]
+    repository_id = initial.attempt.repository_id
+    service = app.state.workspace_service
+    original_create = service._create_project_index
+
+    def fail_build(*_args, **_kwargs):
+        raise ServiceError("internal_error", 503, "injected GitHub index build failure")
+
+    service._create_project_index = fail_build  # type: ignore[method-assign]
+    try:
+        status, failed = asyncio.run(
+            _request(app, "POST", f"/api/projects/{project_id}/indexes/{baseline_index_id}/github-refresh")
+        )
+    finally:
+        service._create_project_index = original_create  # type: ignore[method-assign]
+
+    assert status == 503
+    assert failed["code"] == "internal_error"
+    assert app.state.workspace_service.get_project(project_id).latest_index_id == baseline_index_id
+    assert app.state.registry.management_store.load_source(repository_id).resolved_commit == first
+    assert app.state.registry.management_store.list_project_updates() == ()
