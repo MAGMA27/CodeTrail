@@ -54,6 +54,7 @@ class GitHubResolution:
     repository: GitHubRepository
     requested_ref: str | None
     resolved_commit: str
+    resolved_ref: str | None = None
 
 
 @dataclass(frozen=True)
@@ -134,6 +135,7 @@ class GitHubClient:
             repository=repository,
             requested_ref=requested_ref,
             resolved_commit=sha.lower(),
+            resolved_ref=ref,
         )
 
     def download_and_extract(

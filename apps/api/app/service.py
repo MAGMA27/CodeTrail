@@ -70,6 +70,7 @@ from .contracts import (
     ReadSourceFailure,
     ReadSourceSuccess,
     RefreshProjectIndexRequest,
+    RemoteFreshnessStatus,
     Run,
     ExternalRunFinal,
     RunBudget,
@@ -605,6 +606,7 @@ class IndexService:
         self,
         registry: RepositoryRegistry,
         *,
+        github_client: GitHubClient | None = None,
         max_concurrent_indexes: int = 1,
         max_file_bytes: int = 1_000_000,
         freshness_max_files: int = _FRESHNESS_MAX_FILES,
@@ -624,6 +626,7 @@ class IndexService:
         ):
             raise ValueError("service budgets must be positive")
         self.registry = registry
+        self.github_client = github_client or GitHubClient()
         self.max_file_bytes = max_file_bytes
         self.freshness_max_files = freshness_max_files
         self.freshness_max_total_bytes = freshness_max_total_bytes
@@ -797,18 +800,13 @@ class IndexService:
         current_configuration_hash = self.configuration_hash
         spec = self.registry.spec_for(baseline.repository_id)
         if spec.source_kind == "github":
-            return _FreshnessEvaluation(
-                freshness=IndexFreshness(
-                    project_id=project_id,
-                    baseline_index_id=baseline.index_id,
-                    status="unknown",
-                    checked_at=checked_at,
-                    scan_complete=False,
-                    current_rules_version=current_rules_version,
-                    current_configuration_hash=current_configuration_hash,
-                    reasons=["remote_not_checked"],
-                ),
-                scan=None,
+            return self._check_github_freshness(
+                project_id,
+                baseline,
+                spec,
+                checked_at=checked_at,
+                current_rules_version=current_rules_version,
+                current_configuration_hash=current_configuration_hash,
             )
 
         try:
@@ -932,6 +930,188 @@ class IndexService:
                 reasons=reasons,
             ),
             scan=scan,
+        )
+
+    def _check_github_freshness(
+        self,
+        project_id: str,
+        baseline: IndexSnapshot,
+        spec: RepositorySpec,
+        *,
+        checked_at: datetime,
+        current_rules_version: str,
+        current_configuration_hash: str,
+    ) -> _FreshnessEvaluation:
+        """Resolve the tracked GitHub ref without downloading or changing an index."""
+
+        source = None
+        try:
+            source = self.registry.management_store.load_source(baseline.repository_id)
+        except StorageNotFoundError:
+            pass
+        except StorageError:
+            return self._github_freshness_without_remote(
+                project_id,
+                baseline,
+                checked_at=checked_at,
+                current_rules_version=current_rules_version,
+                current_configuration_hash=current_configuration_hash,
+                remote_source_url=spec.source_url,
+                remote_requested_ref=None,
+                reasons=["source_unavailable"],
+            )
+
+        source_url = source.source_url if source is not None else None
+        requested_ref = source.requested_ref if source is not None else None
+        stored_resolved_ref = source.resolved_ref if source is not None else None
+        if not source_url or (requested_ref is None and stored_resolved_ref is None):
+            return self._github_freshness_without_remote(
+                project_id,
+                baseline,
+                checked_at=checked_at,
+                current_rules_version=current_rules_version,
+                current_configuration_hash=current_configuration_hash,
+                remote_source_url=source_url or spec.source_url,
+                remote_requested_ref=requested_ref,
+                reasons=["remote_metadata_missing"],
+            )
+
+        try:
+            resolution = self.github_client.resolve(source_url, requested_ref)
+        except GitHubError as exc:
+            reason: FreshnessReasonCode = (
+                "budget_exceeded" if exc.code == "budget_exceeded" else "source_unavailable"
+            )
+            return self._github_freshness_without_remote(
+                project_id,
+                baseline,
+                checked_at=checked_at,
+                current_rules_version=current_rules_version,
+                current_configuration_hash=current_configuration_hash,
+                remote_source_url=source_url,
+                remote_requested_ref=requested_ref,
+                reasons=[reason],
+            )
+        except Exception:
+            return self._github_freshness_without_remote(
+                project_id,
+                baseline,
+                checked_at=checked_at,
+                current_rules_version=current_rules_version,
+                current_configuration_hash=current_configuration_hash,
+                remote_source_url=source_url,
+                remote_requested_ref=requested_ref,
+                reasons=["source_unavailable"],
+            )
+
+        return self._github_freshness_for_identity(
+            project_id,
+            baseline,
+            checked_at=checked_at,
+            source_url=source_url,
+            requested_ref=requested_ref,
+            resolved_ref=resolution.resolved_ref or requested_ref,
+            resolved_commit=resolution.resolved_commit,
+            current_rules_version=current_rules_version,
+            current_configuration_hash=current_configuration_hash,
+        )
+
+    def _github_freshness_without_remote(
+        self,
+        project_id: str,
+        baseline: IndexSnapshot,
+        *,
+        checked_at: datetime,
+        current_rules_version: str,
+        current_configuration_hash: str,
+        remote_source_url: str | None,
+        remote_requested_ref: str | None,
+        reasons: list[FreshnessReasonCode],
+    ) -> _FreshnessEvaluation:
+        return _FreshnessEvaluation(
+            freshness=IndexFreshness(
+                project_id=project_id,
+                baseline_index_id=baseline.index_id,
+                status="unknown",
+                checked_at=checked_at,
+                scan_complete=False,
+                current_rules_version=current_rules_version,
+                current_configuration_hash=current_configuration_hash,
+                reasons=reasons,
+                remote_status="unknown",
+                remote_source_url=remote_source_url,
+                remote_requested_ref=remote_requested_ref,
+            ),
+            scan=None,
+        )
+
+    def _github_freshness_for_identity(
+        self,
+        project_id: str,
+        baseline: IndexSnapshot,
+        *,
+        checked_at: datetime,
+        source_url: str,
+        requested_ref: str | None,
+        resolved_ref: str | None,
+        resolved_commit: str,
+        current_rules_version: str,
+        current_configuration_hash: str,
+    ) -> _FreshnessEvaluation:
+        reasons: list[FreshnessReasonCode] = []
+
+        def add_reason(reason: FreshnessReasonCode) -> None:
+            if reason not in reasons:
+                reasons.append(reason)
+
+        remote_status: RemoteFreshnessStatus
+        if (
+            len(baseline.revision) != 40
+            or not all(char in "0123456789abcdefABCDEF" for char in baseline.revision)
+        ):
+            remote_status = "unknown"
+            add_reason("remote_metadata_missing")
+        elif baseline.revision.casefold() != resolved_commit.casefold():
+            remote_status = "changed"
+            add_reason("source_changed")
+        else:
+            remote_status = "consistent"
+
+        if baseline.rules_version is None:
+            add_reason("missing_index_metadata")
+        elif baseline.rules_version != current_rules_version:
+            add_reason("rules_changed")
+        if baseline.configuration_hash is None:
+            if "missing_index_metadata" not in reasons:
+                add_reason("missing_index_metadata")
+        elif baseline.configuration_hash != current_configuration_hash:
+            add_reason("configuration_changed")
+
+        uncertain = remote_status == "unknown" or "missing_index_metadata" in reasons
+        status: Literal["consistent", "changed", "unknown"]
+        if uncertain:
+            status = "unknown"
+        elif reasons:
+            status = "changed"
+        else:
+            status = "consistent"
+        return _FreshnessEvaluation(
+            freshness=IndexFreshness(
+                project_id=project_id,
+                baseline_index_id=baseline.index_id,
+                status=status,
+                checked_at=checked_at,
+                scan_complete=remote_status in {"consistent", "changed"},
+                current_rules_version=current_rules_version,
+                current_configuration_hash=current_configuration_hash,
+                reasons=reasons,
+                remote_status=remote_status,
+                remote_source_url=source_url,
+                remote_requested_ref=requested_ref,
+                remote_resolved_ref=resolved_ref,
+                remote_resolved_commit=resolved_commit.lower(),
+            ),
+            scan=None,
         )
 
     def find_compatible_index(
@@ -1120,6 +1300,7 @@ class WorkspaceService:
         self.registry = registry
         self.index_service = index_service
         self.github_client = github_client or GitHubClient()
+        self.index_service.github_client = self.github_client
         self.feature_adapter_factory = feature_adapter_factory
         self.run_model_adapter_factory = run_model_adapter_factory
         self._index_mutation_lock = threading.RLock()
@@ -2398,6 +2579,131 @@ class WorkspaceService:
             raise ServiceError("conflict", 409, "freshness requires a ready project index")
         return self.index_service.check_source_freshness(project_id, baseline)
 
+    def refresh_github_source(
+        self,
+        project_id: str,
+        index_id: str,
+        *,
+        via_mcp: bool = False,
+    ) -> IndexRefreshResponse:
+        """Explicitly check and update a tracked GitHub ref through the safe importer."""
+
+        self._require_github_import(via_mcp=via_mcp)
+        with self._index_mutation_lock:
+            project = self._require_project_index(project_id, index_id)
+            try:
+                with self.registry.store_for_repository(project.repository_id) as store:
+                    current_project = store.load_project(project_id)
+                    if current_project.latest_index_id != index_id:
+                        raise ServiceError(
+                            "conflict",
+                            409,
+                            "only the project's current latest index can be updated",
+                        )
+                    baseline = store.load_index_snapshot(index_id)
+            except StorageNotFoundError as exc:
+                raise ServiceError("not_found", 404, "index does not belong to the project") from exc
+            except StorageError as exc:
+                raise ServiceError("internal_error", 500, "local index storage failed") from exc
+            if baseline.status != "ready":
+                raise ServiceError("conflict", 409, "GitHub source update requires a ready project index")
+
+            spec = self.registry.spec_for(project.repository_id)
+            if spec.source_kind != "github":
+                raise ServiceError("conflict", 409, "the selected project is not a GitHub source")
+            evaluation = self.index_service.check_source_freshness_with_manifest(project_id, baseline)
+            freshness = evaluation.freshness
+            if freshness.remote_status == "unknown":
+                if "budget_exceeded" in freshness.reasons:
+                    raise ServiceError(
+                        "budget_exceeded",
+                        429,
+                        "GitHub remote check exceeded its bounded request budget",
+                    )
+                raise ServiceError(
+                    "conflict",
+                    409,
+                    "GitHub remote commit could not be established; the existing index was kept",
+                )
+            if freshness.remote_status == "consistent" and freshness.status == "consistent":
+                return IndexRefreshResponse(
+                    project_id=project_id,
+                    baseline_index_id=index_id,
+                    mode="reused",
+                    index=self.index_service.get_index(index_id),
+                    freshness=freshness,
+                )
+            if freshness.remote_source_url is None:
+                raise ServiceError("conflict", 409, "GitHub source metadata is incomplete; the existing index was kept")
+
+            existing_index_ids = set(project.available_index_ids)
+            imported = self._import_github_locked(
+                GitHubImportRequest(
+                    name=project.name,
+                    url=freshness.remote_source_url,
+                    ref=freshness.remote_requested_ref,
+                ),
+                via_mcp=via_mcp,
+            )
+            if imported.attempt.status != "ready" or imported.index is None:
+                error_code = imported.attempt.error_code or "conflict"
+                if error_code not in {"budget_exceeded", "forbidden", "not_found", "conflict", "internal_error"}:
+                    error_code = "conflict"
+                status_code = {
+                    "budget_exceeded": 429,
+                    "forbidden": 403,
+                    "not_found": 404,
+                    "internal_error": 503,
+                    "conflict": 409,
+                }[error_code]
+                raise ServiceError(
+                    error_code,
+                    status_code,
+                    imported.attempt.error_message or "GitHub source update failed; the existing index was kept",
+                )
+
+            new_index_id = imported.index.index.index_id
+            try:
+                with self.registry.store_for_repository(project.repository_id) as store:
+                    current_project = store.load_project(project_id)
+                    if current_project.latest_index_id != index_id and new_index_id != current_project.latest_index_id:
+                        raise StorageConflictError("project latest index changed during the GitHub update")
+            except StorageConflictError as exc:
+                raise ServiceError("conflict", 409, str(exc)) from exc
+            except StorageNotFoundError as exc:
+                raise ServiceError("not_found", 404, "project or index was not found") from exc
+            except StorageError as exc:
+                raise ServiceError("internal_error", 500, "local index storage failed") from exc
+
+            actual_commit = imported.attempt.resolved_commit
+            if actual_commit is None:
+                raise ServiceError("internal_error", 503, "GitHub update completed without a resolved commit")
+            actual_freshness = self.index_service._github_freshness_for_identity(
+                project_id,
+                baseline,
+                checked_at=datetime.now(timezone.utc),
+                source_url=imported.source_url,
+                requested_ref=imported.attempt.requested_ref,
+                resolved_ref=imported.attempt.resolved_ref or imported.attempt.requested_ref,
+                resolved_commit=actual_commit,
+                current_rules_version=self.index_service.rules_version,
+                current_configuration_hash=self.index_service.configuration_hash,
+            ).freshness
+            mode = (
+                "reused"
+                if new_index_id == index_id
+                else "historical_reused"
+                if new_index_id in existing_index_ids
+                else "created"
+            )
+            return IndexRefreshResponse(
+                project_id=project_id,
+                baseline_index_id=index_id,
+                mode=mode,
+                index=imported.index,
+                freshness=actual_freshness,
+            )
+
     def refresh_project_index(
         self,
         project_id: str,
@@ -2427,6 +2733,13 @@ class WorkspaceService:
 
             evaluation = self.index_service.check_source_freshness_with_manifest(project_id, baseline)
             freshness = evaluation.freshness
+            spec = self.registry.spec_for(project.repository_id)
+            if spec.source_kind == "github" and freshness.status != "consistent":
+                raise ServiceError(
+                    "conflict",
+                    409,
+                    "GitHub sources require the explicit GitHub source update action",
+                )
             metadata_requires_new_identity = bool(
                 set(freshness.reasons)
                 & {"missing_index_metadata", "rules_changed", "configuration_changed"}
@@ -2820,6 +3133,16 @@ class WorkspaceService:
     ) -> GitHubImportResponse:
         """Resolve, fetch, safely unpack, index, and clean one GitHub commit."""
 
+        with self._index_mutation_lock:
+            return self._import_github_locked(request, via_mcp=via_mcp)
+
+    def _import_github_locked(
+        self,
+        request: GitHubImportRequest,
+        *,
+        via_mcp: bool = False,
+    ) -> GitHubImportResponse:
+
         self._require_github_import(via_mcp=via_mcp)
         try:
             repository = parse_github_repository_url(request.url)
@@ -2853,6 +3176,7 @@ class WorkspaceService:
                 source_kind="github",
                 source_url=resolution.repository.canonical_url,
                 requested_ref=resolution.requested_ref,
+                resolved_ref=resolution.resolved_ref or resolution.requested_ref,
                 resolved_commit=resolution.resolved_commit,
             )
             self.registry.refresh_managed_sources()
@@ -2870,7 +3194,35 @@ class WorkspaceService:
             resolution.resolved_commit,
         )
         if same_commit is not None:
-            return self._github_import_response(same_commit)
+            reusable_index = self._compatible_github_index(project, same_commit)
+            if reusable_index is not None:
+                try:
+                    self.registry.management_store.update_source(
+                        spec.repository_id,
+                        source_url=resolution.repository.canonical_url,
+                        requested_ref=resolution.requested_ref,
+                        resolved_ref=resolution.resolved_ref or resolution.requested_ref,
+                        resolved_commit=resolution.resolved_commit,
+                        content_hash=same_commit.content_hash,
+                        cleanup_status="succeeded",
+                        cleanup_error=None,
+                        temporary_path=None,
+                    )
+                    with self.registry.store_for_repository(project.repository_id) as store:
+                        store.finish_project_index(
+                            project.project_id,
+                            reusable_index.index_id,
+                            expected_latest_index_id=project.latest_index_id,
+                        )
+                except StorageNotFoundError as exc:
+                    raise ServiceError("not_found", 404, "project or historical GitHub index was not found") from exc
+                except StorageInputError as exc:
+                    raise ServiceError("invalid_input", 400, "historical GitHub index metadata is invalid") from exc
+                except StorageConflictError as exc:
+                    raise ServiceError("conflict", 409, str(exc)) from exc
+                except StorageError as exc:
+                    raise ServiceError("internal_error", 500, "local index storage failed") from exc
+                return self._github_import_response(same_commit)
         active = self.registry.management_store.find_active_attempt(normalized_path)
         if active is not None:
             return self._github_import_response(active)
@@ -2890,6 +3242,7 @@ class WorkspaceService:
                 source_kind="github",
                 source_url=resolution.repository.canonical_url,
                 requested_ref=resolution.requested_ref,
+                resolved_ref=resolution.resolved_ref or resolution.requested_ref,
                 resolved_commit=resolution.resolved_commit,
             )
         except StorageConflictError:
@@ -2902,16 +3255,6 @@ class WorkspaceService:
                 return self._github_import_response(active)
             raise ServiceError("conflict", 409, "an equivalent GitHub import is already running")
 
-        self.registry.management_store.update_source(
-            spec.repository_id,
-            source_url=resolution.repository.canonical_url,
-            requested_ref=resolution.requested_ref,
-            resolved_commit=resolution.resolved_commit,
-            content_hash=None,
-            cleanup_status="not_required",
-            cleanup_error=None,
-            temporary_path=None,
-        )
         return self._run_github_import_attempt(attempt.attempt_id)
 
     def retry_github_import(
@@ -3128,6 +3471,29 @@ class WorkspaceService:
         except Exception as exc:
             raise ServiceError("internal_error", 503, "GitHub could not resolve the requested repository ref") from exc
 
+    def _compatible_github_index(
+        self,
+        project: ProjectRecord,
+        attempt: ImportAttemptRecord,
+    ) -> IndexSnapshot | None:
+        """Return a ready same-commit snapshot only when current build identity still matches."""
+
+        if attempt.status != "ready" or attempt.index_id is None or attempt.content_hash is None:
+            return None
+        try:
+            with self.registry.store_for_repository(project.repository_id) as store:
+                index = store.load_index_snapshot(attempt.index_id)
+        except StorageNotFoundError:
+            return None
+        if (
+            index.status != "ready"
+            or index.schema_version != SCHEMA_VERSION
+            or index.rules_version != self.index_service.rules_version
+            or index.configuration_hash != self.index_service.configuration_hash
+        ):
+            return None
+        return index
+
     def _run_github_import_attempt(self, attempt_id: str) -> GitHubImportResponse:
         attempt = self.registry.management_store.load_attempt(attempt_id)
         if attempt.source_kind != "github" or not attempt.source_url or not attempt.resolved_commit:
@@ -3160,6 +3526,7 @@ class WorkspaceService:
                 repository=repository,
                 requested_ref=attempt.requested_ref,
                 resolved_commit=attempt.resolved_commit,
+                resolved_ref=attempt.resolved_ref or attempt.requested_ref,
             )
             self.github_client.download_and_extract(resolution, source_root)
             self.registry.bind_runtime_source(attempt.repository_id, source_root)
@@ -3179,8 +3546,14 @@ class WorkspaceService:
             )
             self.registry.management_store.update_source(
                 attempt.repository_id,
+                source_url=attempt.source_url,
+                requested_ref=attempt.requested_ref,
+                resolved_ref=attempt.resolved_ref or attempt.requested_ref,
                 resolved_commit=attempt.resolved_commit,
                 content_hash=content_hash,
+                cleanup_status="succeeded",
+                cleanup_error=None,
+                temporary_path=None,
             )
             completed = self.registry.management_store.update_attempt(
                 attempt_id,
@@ -3303,6 +3676,7 @@ class WorkspaceService:
         return GitHubImportResponse(
             source_url=source_url,
             requested_ref=attempt.requested_ref,
+            resolved_ref=attempt.resolved_ref,
             resolved_commit=attempt.resolved_commit,
             content_hash=attempt.content_hash,
             cleanup_status=attempt.cleanup_status,  # type: ignore[arg-type]
@@ -3482,6 +3856,7 @@ def _import_attempt_response(record: ImportAttemptRecord) -> ImportAttempt:
         source_kind=record.source_kind,  # type: ignore[arg-type]
         source_url=record.source_url,
         requested_ref=record.requested_ref,
+        resolved_ref=record.resolved_ref,
         resolved_commit=record.resolved_commit,
         content_hash=record.content_hash,
         cleanup_status=record.cleanup_status,  # type: ignore[arg-type]

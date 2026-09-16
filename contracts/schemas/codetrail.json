@@ -12990,6 +12990,19 @@
               "default": null,
               "title": "Resolved Commit"
             },
+            "resolved_ref": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Resolved Ref"
+            },
             "schema_version": {
               "const": "0.1.0",
               "default": "0.1.0",
@@ -13420,6 +13433,19 @@
           ],
           "default": null,
           "title": "Resolved Commit"
+        },
+        "resolved_ref": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resolved Ref"
         },
         "schema_version": {
           "const": "0.1.0",
@@ -14444,6 +14470,19 @@
           "default": null,
           "title": "Resolved Commit"
         },
+        "resolved_ref": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resolved Ref"
+        },
         "schema_version": {
           "const": "0.1.0",
           "default": "0.1.0",
@@ -14654,6 +14693,19 @@
               ],
               "default": null,
               "title": "Resolved Commit"
+            },
+            "resolved_ref": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Resolved Ref"
             },
             "schema_version": {
               "const": "0.1.0",
@@ -15042,6 +15094,732 @@
         "attempt"
       ],
       "title": "ImportAttemptResponse",
+      "type": "object"
+    },
+    "IndexFreshness": {
+      "additionalProperties": false,
+      "description": "Bounded observation of one project's current source versus an index.",
+      "properties": {
+        "added_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Added Count",
+          "type": "integer"
+        },
+        "baseline_index_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Baseline Index Id",
+          "type": "string"
+        },
+        "changed_paths": {
+          "items": {
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 100,
+          "title": "Changed Paths",
+          "type": "array"
+        },
+        "changed_paths_truncated": {
+          "default": false,
+          "title": "Changed Paths Truncated",
+          "type": "boolean"
+        },
+        "checked_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Checked At"
+        },
+        "current_configuration_hash": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Current Configuration Hash"
+        },
+        "current_rules_version": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Current Rules Version"
+        },
+        "deleted_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Deleted Count",
+          "type": "integer"
+        },
+        "modified_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Modified Count",
+          "type": "integer"
+        },
+        "project_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Project Id",
+          "type": "string"
+        },
+        "reasons": {
+          "items": {
+            "enum": [
+              "missing_index_metadata",
+              "rules_changed",
+              "configuration_changed",
+              "source_changed",
+              "source_read_error",
+              "source_unavailable",
+              "decode_error",
+              "file_too_large",
+              "symlink",
+              "outside_root",
+              "file_changed_during_check",
+              "budget_exceeded",
+              "remote_not_checked",
+              "remote_metadata_missing"
+            ],
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Reasons",
+          "type": "array"
+        },
+        "remote_requested_ref": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Remote Requested Ref"
+        },
+        "remote_resolved_commit": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Remote Resolved Commit"
+        },
+        "remote_resolved_ref": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Remote Resolved Ref"
+        },
+        "remote_source_url": {
+          "anyOf": [
+            {
+              "maxLength": 4000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Remote Source Url"
+        },
+        "remote_status": {
+          "default": "not_applicable",
+          "enum": [
+            "not_applicable",
+            "not_checked",
+            "consistent",
+            "changed",
+            "unknown"
+          ],
+          "title": "Remote Status",
+          "type": "string"
+        },
+        "scan_complete": {
+          "default": false,
+          "title": "Scan Complete",
+          "type": "boolean"
+        },
+        "scan_truncated": {
+          "default": false,
+          "title": "Scan Truncated",
+          "type": "boolean"
+        },
+        "scan_truncation_reason": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Scan Truncation Reason"
+        },
+        "scanned_bytes": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Scanned Bytes",
+          "type": "integer"
+        },
+        "scanned_files": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Scanned Files",
+          "type": "integer"
+        },
+        "schema_version": {
+          "const": "0.1.0",
+          "default": "0.1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "unchecked",
+            "consistent",
+            "changed",
+            "unknown"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "project_id",
+        "baseline_index_id",
+        "status"
+      ],
+      "title": "IndexFreshness",
+      "type": "object"
+    },
+    "IndexRefreshResponse": {
+      "$defs": {
+        "IndexFreshness": {
+          "additionalProperties": false,
+          "description": "Bounded observation of one project's current source versus an index.",
+          "properties": {
+            "added_count": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Added Count",
+              "type": "integer"
+            },
+            "baseline_index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Baseline Index Id",
+              "type": "string"
+            },
+            "changed_paths": {
+              "items": {
+                "maxLength": 500,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 100,
+              "title": "Changed Paths",
+              "type": "array"
+            },
+            "changed_paths_truncated": {
+              "default": false,
+              "title": "Changed Paths Truncated",
+              "type": "boolean"
+            },
+            "checked_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Checked At"
+            },
+            "current_configuration_hash": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Current Configuration Hash"
+            },
+            "current_rules_version": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Current Rules Version"
+            },
+            "deleted_count": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Deleted Count",
+              "type": "integer"
+            },
+            "modified_count": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Modified Count",
+              "type": "integer"
+            },
+            "project_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Project Id",
+              "type": "string"
+            },
+            "reasons": {
+              "items": {
+                "enum": [
+                  "missing_index_metadata",
+                  "rules_changed",
+                  "configuration_changed",
+                  "source_changed",
+                  "source_read_error",
+                  "source_unavailable",
+                  "decode_error",
+                  "file_too_large",
+                  "symlink",
+                  "outside_root",
+                  "file_changed_during_check",
+                  "budget_exceeded",
+                  "remote_not_checked",
+                  "remote_metadata_missing"
+                ],
+                "type": "string"
+              },
+              "maxItems": 20,
+              "title": "Reasons",
+              "type": "array"
+            },
+            "remote_requested_ref": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Remote Requested Ref"
+            },
+            "remote_resolved_commit": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Remote Resolved Commit"
+            },
+            "remote_resolved_ref": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Remote Resolved Ref"
+            },
+            "remote_source_url": {
+              "anyOf": [
+                {
+                  "maxLength": 4000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Remote Source Url"
+            },
+            "remote_status": {
+              "default": "not_applicable",
+              "enum": [
+                "not_applicable",
+                "not_checked",
+                "consistent",
+                "changed",
+                "unknown"
+              ],
+              "title": "Remote Status",
+              "type": "string"
+            },
+            "scan_complete": {
+              "default": false,
+              "title": "Scan Complete",
+              "type": "boolean"
+            },
+            "scan_truncated": {
+              "default": false,
+              "title": "Scan Truncated",
+              "type": "boolean"
+            },
+            "scan_truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Scan Truncation Reason"
+            },
+            "scanned_bytes": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Scanned Bytes",
+              "type": "integer"
+            },
+            "scanned_files": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Scanned Files",
+              "type": "integer"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "unchecked",
+                "consistent",
+                "changed",
+                "unknown"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "project_id",
+            "baseline_index_id",
+            "status"
+          ],
+          "title": "IndexFreshness",
+          "type": "object"
+        },
+        "IndexIssue": {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "decode_error",
+                "file_too_large",
+                "read_error",
+                "symlink",
+                "syntax_error",
+                "outside_root"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "message": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "title": "Message",
+              "type": "string"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "size": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Size"
+            }
+          },
+          "required": [
+            "path",
+            "kind",
+            "message"
+          ],
+          "title": "IndexIssue",
+          "type": "object"
+        },
+        "IndexResponse": {
+          "additionalProperties": false,
+          "properties": {
+            "index": {
+              "$ref": "#/$defs/IndexSnapshot"
+            },
+            "issues": {
+              "items": {
+                "$ref": "#/$defs/IndexIssue"
+              },
+              "title": "Issues",
+              "type": "array"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            },
+            "truncated": {
+              "default": false,
+              "title": "Truncated",
+              "type": "boolean"
+            },
+            "truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Truncation Reason"
+            },
+            "unresolved_truncated": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Unresolved Truncated"
+            },
+            "unresolved_truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Unresolved Truncation Reason"
+            }
+          },
+          "required": [
+            "index"
+          ],
+          "title": "IndexResponse",
+          "type": "object"
+        },
+        "IndexSnapshot": {
+          "additionalProperties": false,
+          "properties": {
+            "configuration_hash": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Configuration Hash"
+            },
+            "dirty": {
+              "title": "Dirty",
+              "type": "boolean"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "repository_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Repository Id",
+              "type": "string"
+            },
+            "revision": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Revision",
+              "type": "string"
+            },
+            "rules_version": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Rules Version"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            },
+            "snapshot_hash": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Snapshot Hash",
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "ready",
+                "building",
+                "failed"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "index_id",
+            "repository_id",
+            "revision",
+            "dirty",
+            "snapshot_hash",
+            "status"
+          ],
+          "title": "IndexSnapshot",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Result of an explicit project index update or compatible snapshot reuse.",
+      "properties": {
+        "baseline_index_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Baseline Index Id",
+          "type": "string"
+        },
+        "freshness": {
+          "$ref": "#/$defs/IndexFreshness"
+        },
+        "index": {
+          "$ref": "#/$defs/IndexResponse"
+        },
+        "mode": {
+          "enum": [
+            "reused",
+            "historical_reused",
+            "created"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "project_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Project Id",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "0.1.0",
+          "default": "0.1.0",
+          "title": "Schema Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "project_id",
+        "baseline_index_id",
+        "mode",
+        "index",
+        "freshness"
+      ],
+      "title": "IndexRefreshResponse",
       "type": "object"
     },
     "IndexSnapshot": {
@@ -16101,6 +16879,19 @@
               ],
               "default": null,
               "title": "Resolved Commit"
+            },
+            "resolved_ref": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Resolved Ref"
             },
             "schema_version": {
               "const": "0.1.0",
@@ -18683,6 +19474,19 @@
               "default": null,
               "title": "Resolved Commit"
             },
+            "resolved_ref": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Resolved Ref"
+            },
             "schema_version": {
               "const": "0.1.0",
               "default": "0.1.0",
@@ -19193,6 +19997,19 @@
           "default": null,
           "title": "Resolved Commit"
         },
+        "resolved_ref": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resolved Ref"
+        },
         "schema_version": {
           "const": "0.1.0",
           "default": "0.1.0",
@@ -19376,6 +20193,19 @@
               ],
               "default": null,
               "title": "Resolved Commit"
+            },
+            "resolved_ref": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Resolved Ref"
             },
             "schema_version": {
               "const": "0.1.0",
@@ -19841,6 +20671,900 @@
         "ok"
       ],
       "title": "McpImportStatusResponse",
+      "type": "object"
+    },
+    "McpIndexFreshnessResponse": {
+      "$defs": {
+        "IndexFreshness": {
+          "additionalProperties": false,
+          "description": "Bounded observation of one project's current source versus an index.",
+          "properties": {
+            "added_count": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Added Count",
+              "type": "integer"
+            },
+            "baseline_index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Baseline Index Id",
+              "type": "string"
+            },
+            "changed_paths": {
+              "items": {
+                "maxLength": 500,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 100,
+              "title": "Changed Paths",
+              "type": "array"
+            },
+            "changed_paths_truncated": {
+              "default": false,
+              "title": "Changed Paths Truncated",
+              "type": "boolean"
+            },
+            "checked_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Checked At"
+            },
+            "current_configuration_hash": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Current Configuration Hash"
+            },
+            "current_rules_version": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Current Rules Version"
+            },
+            "deleted_count": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Deleted Count",
+              "type": "integer"
+            },
+            "modified_count": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Modified Count",
+              "type": "integer"
+            },
+            "project_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Project Id",
+              "type": "string"
+            },
+            "reasons": {
+              "items": {
+                "enum": [
+                  "missing_index_metadata",
+                  "rules_changed",
+                  "configuration_changed",
+                  "source_changed",
+                  "source_read_error",
+                  "source_unavailable",
+                  "decode_error",
+                  "file_too_large",
+                  "symlink",
+                  "outside_root",
+                  "file_changed_during_check",
+                  "budget_exceeded",
+                  "remote_not_checked",
+                  "remote_metadata_missing"
+                ],
+                "type": "string"
+              },
+              "maxItems": 20,
+              "title": "Reasons",
+              "type": "array"
+            },
+            "remote_requested_ref": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Remote Requested Ref"
+            },
+            "remote_resolved_commit": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Remote Resolved Commit"
+            },
+            "remote_resolved_ref": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Remote Resolved Ref"
+            },
+            "remote_source_url": {
+              "anyOf": [
+                {
+                  "maxLength": 4000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Remote Source Url"
+            },
+            "remote_status": {
+              "default": "not_applicable",
+              "enum": [
+                "not_applicable",
+                "not_checked",
+                "consistent",
+                "changed",
+                "unknown"
+              ],
+              "title": "Remote Status",
+              "type": "string"
+            },
+            "scan_complete": {
+              "default": false,
+              "title": "Scan Complete",
+              "type": "boolean"
+            },
+            "scan_truncated": {
+              "default": false,
+              "title": "Scan Truncated",
+              "type": "boolean"
+            },
+            "scan_truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Scan Truncation Reason"
+            },
+            "scanned_bytes": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Scanned Bytes",
+              "type": "integer"
+            },
+            "scanned_files": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Scanned Files",
+              "type": "integer"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "unchecked",
+                "consistent",
+                "changed",
+                "unknown"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "project_id",
+            "baseline_index_id",
+            "status"
+          ],
+          "title": "IndexFreshness",
+          "type": "object"
+        },
+        "McpError": {
+          "additionalProperties": false,
+          "description": "Domain failure returned inside a read-only MCP tool result.",
+          "properties": {
+            "code": {
+              "enum": [
+                "not_found",
+                "invalid_input",
+                "conflict",
+                "budget_exceeded",
+                "internal_error",
+                "forbidden"
+              ],
+              "title": "Code",
+              "type": "string"
+            },
+            "message": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "title": "Message",
+              "type": "string"
+            },
+            "retryable": {
+              "default": false,
+              "title": "Retryable",
+              "type": "boolean"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "title": "McpError",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/McpError"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "result": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IndexFreshness"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "schema_version": {
+          "const": "0.1.0",
+          "default": "0.1.0",
+          "title": "Schema Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ok"
+      ],
+      "title": "McpIndexFreshnessResponse",
+      "type": "object"
+    },
+    "McpIndexRefreshResponse": {
+      "$defs": {
+        "IndexFreshness": {
+          "additionalProperties": false,
+          "description": "Bounded observation of one project's current source versus an index.",
+          "properties": {
+            "added_count": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Added Count",
+              "type": "integer"
+            },
+            "baseline_index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Baseline Index Id",
+              "type": "string"
+            },
+            "changed_paths": {
+              "items": {
+                "maxLength": 500,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 100,
+              "title": "Changed Paths",
+              "type": "array"
+            },
+            "changed_paths_truncated": {
+              "default": false,
+              "title": "Changed Paths Truncated",
+              "type": "boolean"
+            },
+            "checked_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Checked At"
+            },
+            "current_configuration_hash": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Current Configuration Hash"
+            },
+            "current_rules_version": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Current Rules Version"
+            },
+            "deleted_count": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Deleted Count",
+              "type": "integer"
+            },
+            "modified_count": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Modified Count",
+              "type": "integer"
+            },
+            "project_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Project Id",
+              "type": "string"
+            },
+            "reasons": {
+              "items": {
+                "enum": [
+                  "missing_index_metadata",
+                  "rules_changed",
+                  "configuration_changed",
+                  "source_changed",
+                  "source_read_error",
+                  "source_unavailable",
+                  "decode_error",
+                  "file_too_large",
+                  "symlink",
+                  "outside_root",
+                  "file_changed_during_check",
+                  "budget_exceeded",
+                  "remote_not_checked",
+                  "remote_metadata_missing"
+                ],
+                "type": "string"
+              },
+              "maxItems": 20,
+              "title": "Reasons",
+              "type": "array"
+            },
+            "remote_requested_ref": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Remote Requested Ref"
+            },
+            "remote_resolved_commit": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Remote Resolved Commit"
+            },
+            "remote_resolved_ref": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Remote Resolved Ref"
+            },
+            "remote_source_url": {
+              "anyOf": [
+                {
+                  "maxLength": 4000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Remote Source Url"
+            },
+            "remote_status": {
+              "default": "not_applicable",
+              "enum": [
+                "not_applicable",
+                "not_checked",
+                "consistent",
+                "changed",
+                "unknown"
+              ],
+              "title": "Remote Status",
+              "type": "string"
+            },
+            "scan_complete": {
+              "default": false,
+              "title": "Scan Complete",
+              "type": "boolean"
+            },
+            "scan_truncated": {
+              "default": false,
+              "title": "Scan Truncated",
+              "type": "boolean"
+            },
+            "scan_truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Scan Truncation Reason"
+            },
+            "scanned_bytes": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Scanned Bytes",
+              "type": "integer"
+            },
+            "scanned_files": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Scanned Files",
+              "type": "integer"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "unchecked",
+                "consistent",
+                "changed",
+                "unknown"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "project_id",
+            "baseline_index_id",
+            "status"
+          ],
+          "title": "IndexFreshness",
+          "type": "object"
+        },
+        "IndexIssue": {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "decode_error",
+                "file_too_large",
+                "read_error",
+                "symlink",
+                "syntax_error",
+                "outside_root"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "message": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "title": "Message",
+              "type": "string"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "size": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Size"
+            }
+          },
+          "required": [
+            "path",
+            "kind",
+            "message"
+          ],
+          "title": "IndexIssue",
+          "type": "object"
+        },
+        "IndexRefreshResponse": {
+          "additionalProperties": false,
+          "description": "Result of an explicit project index update or compatible snapshot reuse.",
+          "properties": {
+            "baseline_index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Baseline Index Id",
+              "type": "string"
+            },
+            "freshness": {
+              "$ref": "#/$defs/IndexFreshness"
+            },
+            "index": {
+              "$ref": "#/$defs/IndexResponse"
+            },
+            "mode": {
+              "enum": [
+                "reused",
+                "historical_reused",
+                "created"
+              ],
+              "title": "Mode",
+              "type": "string"
+            },
+            "project_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Project Id",
+              "type": "string"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            }
+          },
+          "required": [
+            "project_id",
+            "baseline_index_id",
+            "mode",
+            "index",
+            "freshness"
+          ],
+          "title": "IndexRefreshResponse",
+          "type": "object"
+        },
+        "IndexResponse": {
+          "additionalProperties": false,
+          "properties": {
+            "index": {
+              "$ref": "#/$defs/IndexSnapshot"
+            },
+            "issues": {
+              "items": {
+                "$ref": "#/$defs/IndexIssue"
+              },
+              "title": "Issues",
+              "type": "array"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            },
+            "truncated": {
+              "default": false,
+              "title": "Truncated",
+              "type": "boolean"
+            },
+            "truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Truncation Reason"
+            },
+            "unresolved_truncated": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Unresolved Truncated"
+            },
+            "unresolved_truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Unresolved Truncation Reason"
+            }
+          },
+          "required": [
+            "index"
+          ],
+          "title": "IndexResponse",
+          "type": "object"
+        },
+        "IndexSnapshot": {
+          "additionalProperties": false,
+          "properties": {
+            "configuration_hash": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Configuration Hash"
+            },
+            "dirty": {
+              "title": "Dirty",
+              "type": "boolean"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "repository_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Repository Id",
+              "type": "string"
+            },
+            "revision": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Revision",
+              "type": "string"
+            },
+            "rules_version": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Rules Version"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            },
+            "snapshot_hash": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Snapshot Hash",
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "ready",
+                "building",
+                "failed"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "index_id",
+            "repository_id",
+            "revision",
+            "dirty",
+            "snapshot_hash",
+            "status"
+          ],
+          "title": "IndexSnapshot",
+          "type": "object"
+        },
+        "McpError": {
+          "additionalProperties": false,
+          "description": "Domain failure returned inside a read-only MCP tool result.",
+          "properties": {
+            "code": {
+              "enum": [
+                "not_found",
+                "invalid_input",
+                "conflict",
+                "budget_exceeded",
+                "internal_error",
+                "forbidden"
+              ],
+              "title": "Code",
+              "type": "string"
+            },
+            "message": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "title": "Message",
+              "type": "string"
+            },
+            "retryable": {
+              "default": false,
+              "title": "Retryable",
+              "type": "boolean"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "title": "McpError",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/McpError"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "result": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IndexRefreshResponse"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "schema_version": {
+          "const": "0.1.0",
+          "default": "0.1.0",
+          "title": "Schema Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ok"
+      ],
+      "title": "McpIndexRefreshResponse",
       "type": "object"
     },
     "McpIndexResponse": {

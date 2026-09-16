@@ -16,6 +16,7 @@ from app.contracts import (
     EvidenceReference,
     ExplanationStep,
     FixtureResponseSet,
+    IndexFreshness,
     McpSourceResponse,
     ReadSourceParams,
     ReadSourceSuccess,
@@ -139,6 +140,17 @@ def test_schema_artifact_includes_code_understanding_contracts() -> None:
     models = build_schema_document()["models"]
 
     assert {"CodeExplanation", "CodeUnderstandingFinal", "ExplanationStep"} <= models.keys()
+
+
+def test_schema_artifact_includes_freshness_contracts() -> None:
+    models = build_schema_document()["models"]
+
+    assert {
+        "IndexFreshness",
+        "IndexRefreshResponse",
+        "McpIndexFreshnessResponse",
+        "McpIndexRefreshResponse",
+    } <= models.keys()
 
 
 def test_failed_tool_bundle_preserves_prior_evidence_without_fake_source() -> None:
@@ -291,6 +303,36 @@ def test_project_contract_keeps_latest_and_building_indexes_separate() -> None:
             repository_id="repo-one",
             created_at=created_at,
             available_index_ids=["index-one", "index-one"],
+        )
+
+
+def test_github_freshness_keeps_remote_identity_separate_from_index_rules() -> None:
+    checked_at = datetime.now(timezone.utc)
+    freshness = IndexFreshness(
+        project_id="project-one",
+        baseline_index_id="index-one",
+        status="changed",
+        checked_at=checked_at,
+        scan_complete=True,
+        current_rules_version="rules-v2",
+        reasons=["rules_changed"],
+        remote_status="consistent",
+        remote_source_url="https://github.com/owner/repo",
+        remote_requested_ref="main",
+        remote_resolved_ref="main",
+        remote_resolved_commit="a" * 40,
+    )
+
+    assert freshness.remote_status == "consistent"
+    assert freshness.status == "changed"
+    with pytest.raises(ValidationError):
+        IndexFreshness(
+            project_id="project-one",
+            baseline_index_id="index-one",
+            status="consistent",
+            checked_at=checked_at,
+            scan_complete=True,
+            remote_status="unknown",
         )
 
 

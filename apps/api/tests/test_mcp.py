@@ -433,6 +433,7 @@ def test_mcp_local_import_is_opt_in_and_shares_http_state(tmp_path: Path) -> Non
                 "get_feature_graph",
                 "import_github_repository",
                 "retry_github_import",
+                "refresh_github_source",
             } | RUN_READ_TOOLS == github_tools
         return mcp_project_id
 

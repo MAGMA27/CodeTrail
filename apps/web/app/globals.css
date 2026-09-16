@@ -406,6 +406,7 @@ code { font-family: var(--ct-mono); }
 .ct-check-field input { width: 14px; height: 14px; accent-color: var(--ct-blue); }
 .ct-index-freshness { display: grid; gap: 8px; padding-top: 14px; border-top: 1px solid var(--ct-border); }
 .ct-freshness-result { display: grid; gap: 8px; padding: 10px; border: 1px solid var(--ct-border); border-radius: 6px; background: var(--ct-subtle); }
+.ct-freshness-remote { display: grid; gap: 8px; padding: 8px; border: 1px solid var(--ct-border); border-radius: 5px; background: var(--ct-surface); }
 .ct-freshness-result[data-state="consistent"] { border-color: color-mix(in srgb, var(--ct-success) 45%, var(--ct-border)); }
 .ct-freshness-result[data-state="changed"], .ct-freshness-result[data-state="unknown"] { border-color: color-mix(in srgb, var(--ct-warning) 45%, var(--ct-border)); }
 .ct-freshness-meta, .ct-freshness-stats, .ct-freshness-paths { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }

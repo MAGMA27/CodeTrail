@@ -395,6 +395,7 @@ class ManagedSourceRecord:
     source_kind: str = "local"
     source_url: str | None = None
     requested_ref: str | None = None
+    resolved_ref: str | None = None
     resolved_commit: str | None = None
     content_hash: str | None = None
     cleanup_status: str = "not_required"
@@ -425,6 +426,7 @@ class ImportAttemptRecord:
     source_kind: str = "local"
     source_url: str | None = None
     requested_ref: str | None = None
+    resolved_ref: str | None = None
     resolved_commit: str | None = None
     content_hash: str | None = None
     cleanup_status: str = "not_required"
@@ -755,6 +757,7 @@ CREATE TABLE IF NOT EXISTS managed_sources (
     source_kind TEXT NOT NULL DEFAULT 'local',
     source_url TEXT,
     requested_ref TEXT,
+    resolved_ref TEXT,
     resolved_commit TEXT,
     content_hash TEXT,
     cleanup_status TEXT NOT NULL DEFAULT 'not_required',
@@ -782,6 +785,7 @@ CREATE TABLE IF NOT EXISTS import_attempts (
     source_kind TEXT NOT NULL DEFAULT 'local',
     source_url TEXT,
     requested_ref TEXT,
+    resolved_ref TEXT,
     resolved_commit TEXT,
     content_hash TEXT,
     cleanup_status TEXT NOT NULL DEFAULT 'not_required',
@@ -837,6 +841,7 @@ class ManagementStore:
                 "source_kind": "TEXT NOT NULL DEFAULT 'local'",
                 "source_url": "TEXT",
                 "requested_ref": "TEXT",
+                "resolved_ref": "TEXT",
                 "resolved_commit": "TEXT",
                 "content_hash": "TEXT",
                 "cleanup_status": "TEXT NOT NULL DEFAULT 'not_required'",
@@ -847,6 +852,7 @@ class ManagementStore:
                 "source_kind": "TEXT NOT NULL DEFAULT 'local'",
                 "source_url": "TEXT",
                 "requested_ref": "TEXT",
+                "resolved_ref": "TEXT",
                 "resolved_commit": "TEXT",
                 "content_hash": "TEXT",
                 "cleanup_status": "TEXT NOT NULL DEFAULT 'not_required'",
@@ -898,6 +904,7 @@ class ManagementStore:
         source_kind: str = "local",
         source_url: str | None = None,
         requested_ref: str | None = None,
+        resolved_ref: str | None = None,
         resolved_commit: str | None = None,
         content_hash: str | None = None,
         cleanup_status: str = "not_required",
@@ -910,8 +917,8 @@ class ManagementStore:
             connection.execute(
                 "INSERT INTO managed_sources "
                 "(repository_id, project_id, name, source_path, normalized_source_path, storage_path, created_at, "
-                "source_kind, source_url, requested_ref, resolved_commit, content_hash, cleanup_status, cleanup_error, temporary_path) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "source_kind, source_url, requested_ref, resolved_ref, resolved_commit, content_hash, cleanup_status, cleanup_error, temporary_path) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     repository_id,
                     project_id,
@@ -923,6 +930,7 @@ class ManagementStore:
                     source_kind,
                     source_url,
                     requested_ref,
+                    resolved_ref,
                     resolved_commit,
                     content_hash,
                     cleanup_status,
@@ -966,6 +974,7 @@ class ManagementStore:
         source_kind: str = "local",
         source_url: str | None = None,
         requested_ref: str | None = None,
+        resolved_ref: str | None = None,
         resolved_commit: str | None = None,
         content_hash: str | None = None,
         cleanup_status: str = "not_required",
@@ -979,8 +988,8 @@ class ManagementStore:
                     "INSERT INTO import_attempts "
                     "(attempt_id, project_id, repository_id, source_path, normalized_source_path, name, revision, dirty, "
                     "idempotency_key, status, phase, created_at, updated_at, source_kind, source_url, requested_ref, "
-                    "resolved_commit, content_hash, cleanup_status, cleanup_error, temporary_path) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "resolved_ref, resolved_commit, content_hash, cleanup_status, cleanup_error, temporary_path) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         attempt_id,
                         project_id,
@@ -996,6 +1005,7 @@ class ManagementStore:
                         source_kind,
                         source_url,
                         requested_ref,
+                        resolved_ref,
                         resolved_commit,
                         content_hash,
                         cleanup_status,
@@ -1060,6 +1070,7 @@ class ManagementStore:
         source_path: str | None = None,
         source_url: str | None | object = _UNSET,
         requested_ref: str | None | object = _UNSET,
+        resolved_ref: str | None | object = _UNSET,
         resolved_commit: str | None | object = _UNSET,
         content_hash: str | None | object = _UNSET,
         cleanup_status: str | object = _UNSET,
@@ -1074,6 +1085,7 @@ class ManagementStore:
         for column, value in (
             ("source_url", source_url),
             ("requested_ref", requested_ref),
+            ("resolved_ref", resolved_ref),
             ("resolved_commit", resolved_commit),
             ("content_hash", content_hash),
             ("cleanup_status", cleanup_status),
@@ -1105,6 +1117,7 @@ class ManagementStore:
         *,
         source_url: str | None | object = _UNSET,
         requested_ref: str | None | object = _UNSET,
+        resolved_ref: str | None | object = _UNSET,
         resolved_commit: str | None | object = _UNSET,
         content_hash: str | None | object = _UNSET,
         cleanup_status: str | object = _UNSET,
@@ -1116,6 +1129,7 @@ class ManagementStore:
         for column, value in (
             ("source_url", source_url),
             ("requested_ref", requested_ref),
+            ("resolved_ref", resolved_ref),
             ("resolved_commit", resolved_commit),
             ("content_hash", content_hash),
             ("cleanup_status", cleanup_status),
@@ -4787,6 +4801,7 @@ def _managed_source_from_row(row: sqlite3.Row) -> ManagedSourceRecord:
         source_kind=row["source_kind"],
         source_url=row["source_url"],
         requested_ref=row["requested_ref"],
+        resolved_ref=row["resolved_ref"],
         resolved_commit=row["resolved_commit"],
         content_hash=row["content_hash"],
         cleanup_status=row["cleanup_status"],
@@ -4816,6 +4831,7 @@ def _import_attempt_from_row(row: sqlite3.Row) -> ImportAttemptRecord:
         source_kind=row["source_kind"],
         source_url=row["source_url"],
         requested_ref=row["requested_ref"],
+        resolved_ref=row["resolved_ref"],
         resolved_commit=row["resolved_commit"],
         content_hash=row["content_hash"],
         cleanup_status=row["cleanup_status"],

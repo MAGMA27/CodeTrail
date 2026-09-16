@@ -51,6 +51,7 @@ import {
   retryLocalImport,
   retryGitHubImport,
   retryImportCleanup,
+  refreshGitHubSource,
   refreshProjectIndex,
   searchProjectIndex,
   type CodeEdge,
@@ -2636,6 +2637,62 @@ export default function Workbench() {
     }
   }, [applyIndexResponse, dirty, indexResponse, revision, selectedProjectId]);
 
+  const refreshCurrentGitHubSource = useCallback(async () => {
+    if (!selectedProjectId || !indexResponse || !indexFreshness?.remote_source_url) {
+      setIndexFreshnessError("请先检查一个可追踪的 GitHub 来源。");
+      return;
+    }
+    if (!["consistent", "changed"].includes(indexFreshness.remote_status)) {
+      setIndexFreshnessError("GitHub 远端状态无法确定，请先重试检查。");
+      return;
+    }
+    indexController.current?.abort();
+    const controller = new AbortController();
+    indexController.current = controller;
+    const requestId = ++indexRequestId.current;
+    setIndexFreshnessStatus("refreshing");
+    setIndexFreshnessError(null);
+    try {
+      const result = await refreshGitHubSource(
+        selectedProjectId,
+        indexResponse.index.index_id,
+        controller.signal,
+      );
+      if (!isLatestRequest(requestId, indexRequestId.current)) {
+        return;
+      }
+      applyIndexResponse(result.index);
+      setIndexFreshness(result.freshness);
+      setIndexRefreshMode(result.mode);
+      setProjectIndexes((previous) => [
+        result.index.index,
+        ...previous.filter((index) => index.index_id !== result.index.index.index_id),
+      ]);
+      setProjects((previous) => previous.map((project) => (
+        project.project_id === selectedProjectId
+          ? {
+              ...project,
+              available_index_ids: [
+                result.index.index.index_id,
+                ...project.available_index_ids.filter((indexId) => indexId !== result.index.index.index_id),
+              ],
+              latest_index_id: result.index.index.index_id,
+              building_index_id: null,
+            }
+          : project
+      )));
+    } catch (error) {
+      if (isAbortError(error) || !isLatestRequest(requestId, indexRequestId.current)) {
+        return;
+      }
+      setIndexFreshnessError(errorMessage(error));
+    } finally {
+      if (isLatestRequest(requestId, indexRequestId.current)) {
+        setIndexFreshnessStatus("idle");
+      }
+    }
+  }, [applyIndexResponse, indexFreshness, indexResponse, selectedProjectId]);
+
   const loadSource = useCallback(
     async (symbol: SymbolRecord, startLine = symbol.start_line) => {
       if (!selectedProjectId) {
@@ -3305,6 +3362,7 @@ export default function Workbench() {
         onOpen: openExistingIndex,
         onCheckFreshness: checkCurrentIndexFreshness,
         onRefresh: refreshCurrentIndex,
+        onUpdateGitHub: refreshCurrentGitHubSource,
       }}
       session={{
         sessions,

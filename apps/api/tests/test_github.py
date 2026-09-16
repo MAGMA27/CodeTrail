@@ -143,6 +143,7 @@ def test_github_client_resolves_default_branch_follows_only_allowed_redirect_and
     try:
         result = client.download_and_extract(resolution, destination)
         assert result.resolution.resolved_commit == "a" * 40
+        assert result.resolution.resolved_ref == "main"
         assert result.extracted_file_count == 1
         assert (destination / "main.py").read_text(encoding="utf-8").startswith("def main")
         assert result.archive_hash
@@ -178,7 +179,7 @@ class _FakeGitHubClient:
 
     def resolve(self, url: str, requested_ref: str | None) -> GitHubResolution:
         repository = parse_github_repository_url(url)
-        return GitHubResolution(repository, requested_ref, next(self.commits))
+        return GitHubResolution(repository, requested_ref, next(self.commits), requested_ref or "main")
 
     def download_and_extract(self, resolution: GitHubResolution, destination: Path) -> GitHubArchive:
         destination.mkdir(parents=True, exist_ok=False)
@@ -272,6 +273,200 @@ def test_github_http_import_is_fixed_commit_idempotent_and_cleans_temp(tmp_path:
     status, indexes = asyncio.run(_request(app, "GET", f"/api/projects/{project_id}/indexes"))
     assert status == 200
     assert len(indexes["indexes"]) == 2
+
+
+def test_github_freshness_is_metadata_only_and_explicit_refresh_updates_latest(tmp_path: Path) -> None:
+    import asyncio
+
+    first = "a" * 40
+    second = "b" * 40
+    client = _FakeGitHubClient([first, second, second, second])
+    app = create_app(
+        {},
+        data_root=tmp_path / "service-data",
+        github_import_enabled=True,
+        github_client=client,  # type: ignore[arg-type]
+    )
+    payload = {"name": "Remote Python", "url": "https://github.com/owner/repo", "ref": "main"}
+    status, imported = asyncio.run(_request(app, "POST", "/api/imports/github", payload))
+    assert status == 200
+    project_id = imported["project"]["project_id"]
+    baseline_index_id = imported["index"]["index"]["index_id"]
+    assert client.downloads == 1
+
+    status, freshness = asyncio.run(
+        _request(app, "POST", f"/api/projects/{project_id}/indexes/{baseline_index_id}/freshness")
+    )
+    assert status == 200
+    assert freshness["status"] == "changed"
+    assert freshness["remote_status"] == "changed"
+    assert freshness["remote_source_url"] == "https://github.com/owner/repo"
+    assert freshness["remote_requested_ref"] == "main"
+    assert freshness["remote_resolved_ref"] == "main"
+    assert freshness["remote_resolved_commit"] == second
+    assert "source_changed" in freshness["reasons"]
+    assert client.downloads == 1
+
+    status, refreshed = asyncio.run(
+        _request(app, "POST", f"/api/projects/{project_id}/indexes/{baseline_index_id}/github-refresh")
+    )
+    assert status == 200
+    assert refreshed["mode"] == "created"
+    assert refreshed["freshness"]["baseline_index_id"] == baseline_index_id
+    assert refreshed["index"]["index"]["revision"] == second
+    assert client.downloads == 2
+
+
+def test_github_refresh_reuses_compatible_historical_commit_without_download(tmp_path: Path) -> None:
+    import asyncio
+
+    first = "a" * 40
+    second = "b" * 40
+    client = _FakeGitHubClient([first, second, second, first, first])
+    app = create_app(
+        {},
+        data_root=tmp_path / "service-data",
+        github_import_enabled=True,
+        github_client=client,  # type: ignore[arg-type]
+    )
+    payload = {"name": "Remote Python", "url": "https://github.com/owner/repo", "ref": "main"}
+    status, imported = asyncio.run(_request(app, "POST", "/api/imports/github", payload))
+    assert status == 200
+    project_id = imported["project"]["project_id"]
+    first_index_id = imported["index"]["index"]["index_id"]
+
+    status, moved = asyncio.run(
+        _request(app, "POST", f"/api/projects/{project_id}/indexes/{first_index_id}/github-refresh")
+    )
+    assert status == 200
+    second_index_id = moved["index"]["index"]["index_id"]
+    assert moved["mode"] == "created"
+    assert second_index_id != first_index_id
+    assert client.downloads == 2
+
+    status, restored = asyncio.run(
+        _request(app, "POST", f"/api/projects/{project_id}/indexes/{second_index_id}/github-refresh")
+    )
+    assert status == 200
+    assert restored["mode"] == "historical_reused"
+    assert restored["index"]["index"]["index_id"] == first_index_id
+    assert client.downloads == 2
+
+
+def test_github_refresh_failure_keeps_latest_and_source_identity(tmp_path: Path) -> None:
+    import asyncio
+
+    first = "a" * 40
+    second = "b" * 40
+    client = _FakeGitHubClient([first, second, second])
+    app = create_app(
+        {},
+        data_root=tmp_path / "service-data",
+        github_import_enabled=True,
+        github_client=client,  # type: ignore[arg-type]
+    )
+    payload = {"name": "Remote Python", "url": "https://github.com/owner/repo", "ref": "main"}
+    status, imported = asyncio.run(_request(app, "POST", "/api/imports/github", payload))
+    assert status == 200
+    project_id = imported["project"]["project_id"]
+    baseline_index_id = imported["index"]["index"]["index_id"]
+    repository_id = imported["attempt"]["repository_id"]
+
+    def fail_download(resolution: GitHubResolution, destination: Path) -> GitHubArchive:
+        client.downloads += 1
+        raise GitHubError("internal_error", 503, "archive unavailable")
+
+    client.download_and_extract = fail_download  # type: ignore[method-assign]
+
+    status, failed = asyncio.run(
+        _request(app, "POST", f"/api/projects/{project_id}/indexes/{baseline_index_id}/github-refresh")
+    )
+    assert status == 503
+    assert failed["code"] == "internal_error"
+    assert app.state.registry.management_store.load_source(repository_id).resolved_commit == first
+    status, indexes = asyncio.run(_request(app, "GET", f"/api/projects/{project_id}/indexes"))
+    assert status == 200
+    assert indexes["latest_index_id"] == baseline_index_id
+
+
+def test_github_freshness_unknown_remote_does_not_update(tmp_path: Path) -> None:
+    import asyncio
+
+    first = "a" * 40
+    client = _FakeGitHubClient([first])
+    app = create_app(
+        {},
+        data_root=tmp_path / "service-data",
+        github_import_enabled=True,
+        github_client=client,  # type: ignore[arg-type]
+    )
+    status, imported = asyncio.run(
+        _request(
+            app,
+            "POST",
+            "/api/imports/github",
+            {"name": "Remote Python", "url": "https://github.com/owner/repo"},
+        )
+    )
+    assert status == 200
+    project_id = imported["project"]["project_id"]
+    baseline_index_id = imported["index"]["index"]["index_id"]
+
+    status, freshness = asyncio.run(
+        _request(app, "POST", f"/api/projects/{project_id}/indexes/{baseline_index_id}/freshness")
+    )
+    assert status == 200
+    assert freshness["status"] == "unknown"
+    assert freshness["remote_status"] == "unknown"
+    assert freshness["reasons"] == ["source_unavailable"]
+    assert client.downloads == 1
+
+    status, failed = asyncio.run(
+        _request(app, "POST", f"/api/projects/{project_id}/indexes/{baseline_index_id}/github-refresh")
+    )
+    assert status == 409
+    assert failed["code"] == "conflict"
+    assert client.downloads == 1
+    status, indexes = asyncio.run(_request(app, "GET", f"/api/projects/{project_id}/indexes"))
+    assert status == 200
+    assert indexes["latest_index_id"] == baseline_index_id
+
+
+def test_github_default_ref_without_persisted_resolution_stays_unknown(tmp_path: Path) -> None:
+    import asyncio
+
+    first = "a" * 40
+    client = _FakeGitHubClient([first])
+    app = create_app(
+        {},
+        data_root=tmp_path / "service-data",
+        github_import_enabled=True,
+        github_client=client,  # type: ignore[arg-type]
+    )
+    status, imported = asyncio.run(
+        _request(
+            app,
+            "POST",
+            "/api/imports/github",
+            {"name": "Remote Python", "url": "https://github.com/owner/repo"},
+        )
+    )
+    assert status == 200
+    project_id = imported["project"]["project_id"]
+    baseline_index_id = imported["index"]["index"]["index_id"]
+    app.state.registry.management_store.update_source(
+        imported["attempt"]["repository_id"],
+        resolved_ref=None,
+    )
+
+    status, freshness = asyncio.run(
+        _request(app, "POST", f"/api/projects/{project_id}/indexes/{baseline_index_id}/freshness")
+    )
+    assert status == 200
+    assert freshness["status"] == "unknown"
+    assert freshness["remote_status"] == "unknown"
+    assert freshness["reasons"] == ["remote_metadata_missing"]
+    assert client.downloads == 1
 
 
 def test_github_cleanup_failure_is_recorded_and_retryable(tmp_path: Path) -> None:

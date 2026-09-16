@@ -126,6 +126,7 @@ type IndexUi = {
   onOpen: FormHandler;
   onCheckFreshness: Action;
   onRefresh: Action;
+  onUpdateGitHub: Action;
 };
 
 type SessionUi = {
@@ -337,6 +338,16 @@ function freshnessStatusLabel(status: IndexFreshness["status"]): string {
   }[status];
 }
 
+function remoteFreshnessStatusLabel(status: IndexFreshness["remote_status"]): string {
+  return {
+    not_applicable: "不适用",
+    not_checked: "尚未检查",
+    consistent: "远端 commit 一致",
+    changed: "远端 commit 已变化",
+    unknown: "远端无法确定",
+  }[status];
+}
+
 function freshnessReasonLabel(reason: string): string {
   return {
     missing_index_metadata: "旧索引缺少规则/配置元数据",
@@ -352,6 +363,7 @@ function freshnessReasonLabel(reason: string): string {
     file_changed_during_check: "文件在检查期间发生变化",
     budget_exceeded: "检查达到扫描预算",
     remote_not_checked: "GitHub 远端未检查",
+    remote_metadata_missing: "GitHub 历史来源缺少原始 ref 元数据",
   }[reason] ?? reason;
 }
 
@@ -606,6 +618,15 @@ function OperationPanel({
   const [activeTab, setActiveTab] = useState<OperationTab>(initialTab);
   const selectedProject = project.selectedProject;
   const importBusy = (status: ImportStatus | null) => status === "queued" || status === "acquiring" || status === "indexing";
+  const baselineIndex = index.freshness
+    ? index.indexes.find((item) => item.index_id === index.freshness?.baseline_index_id)
+    : null;
+  const githubUpdateRequired = Boolean(
+    index.freshness &&
+    ["consistent", "changed"].includes(index.freshness.remote_status) &&
+    index.freshness.status !== "consistent",
+  );
+  const githubCheckUncertain = index.freshness?.remote_status === "unknown";
   useEffect(() => {
     setActiveTab(initialTab);
   }, [initialTab]);
@@ -728,7 +749,7 @@ function OperationPanel({
                   <strong>源码新鲜度</strong>
                   <span>{index.freshness ? freshnessStatusLabel(index.freshness.status) : "尚未检查"}{!index.isLatest ? " · 仅 latest 可更新" : ""}</span>
                 </div>
-                <p className="ct-form-help">检查会读取当前纳入索引范围的 Python 文件并计算 hash，不会自动重建；更新时服务端会再次核对。</p>
+                <p className="ct-form-help">{index.freshness?.remote_status && index.freshness.remote_status !== "not_applicable" ? "GitHub 检查只解析跟踪 ref 的远端 commit，不下载 archive；发现变化后需显式更新。" : "检查会读取当前纳入索引范围的 Python 文件并计算 hash，不会自动重建；更新时服务端会再次核对。"}</p>
                 <div className="ct-form-actions">
                   <button
                     type="button"
@@ -741,13 +762,14 @@ function OperationPanel({
                   <button
                     type="button"
                     className="ct-button ct-button-primary"
-                    onClick={() => void index.onRefresh()}
-                    disabled={!index.response || !index.isLatest || index.freshnessStatus !== "idle"}
+                    onClick={() => void (githubUpdateRequired ? index.onUpdateGitHub() : index.onRefresh())}
+                    disabled={!index.response || !index.isLatest || index.freshnessStatus !== "idle" || githubCheckUncertain}
                   >
-                    {index.freshnessStatus === "refreshing" ? "更新中…" : "更新索引"}
+                    {index.freshnessStatus === "refreshing" ? "更新中…" : githubUpdateRequired ? "更新 GitHub 索引" : "更新索引"}
                   </button>
                 </div>
                 {!index.isLatest ? <p className="ct-form-help">当前打开的是历史快照；可以检查源码，但更新必须先切换到项目 latest。</p> : null}
+                {githubCheckUncertain ? <p className="ct-warning">GitHub 远端状态无法确定，已停用更新；请先重试检查。</p> : null}
                 {index.freshnessError ? <p className="ct-inline-error" role="alert">{index.freshnessError}</p> : null}
                 {index.refreshMode ? <p className="ct-card-note">本次显式更新：{index.refreshMode === "reused" ? "复用当前快照，未重新解析。" : index.refreshMode === "historical_reused" ? "复用兼容历史快照，未重新解析；项目 latest 已切换到该快照，历史元数据保持不变。" : "已生成新的不可变快照；旧快照仍保留。"}</p> : null}
                 {index.freshness ? (
@@ -757,13 +779,27 @@ function OperationPanel({
                       <span>{index.freshness.checked_at ? formatDate(index.freshness.checked_at) : "未检查"}</span>
                       <code>{index.freshness.baseline_index_id}</code>
                     </div>
+                    {index.freshness.remote_status !== "not_applicable" ? (
+                      <div className="ct-freshness-remote">
+                        <div className="ct-freshness-meta">
+                          <strong>{remoteFreshnessStatusLabel(index.freshness.remote_status)}</strong>
+                          {index.freshness.remote_source_url ? <code>{index.freshness.remote_source_url}</code> : null}
+                        </div>
+                        <div className="ct-freshness-stats">
+                          <span>跟踪 ref：<strong>{index.freshness.remote_requested_ref ?? "默认分支"}</strong></span>
+                          <span>解析 ref：<strong>{index.freshness.remote_resolved_ref ?? "未知"}</strong></span>
+                          <span>远端 commit：<strong>{index.freshness.remote_resolved_commit ? shortHash(index.freshness.remote_resolved_commit) : "未知"}</strong></span>
+                          <span>基线索引 commit：<strong>{baselineIndex?.revision ? shortHash(baselineIndex.revision) : "未知"}</strong></span>
+                        </div>
+                      </div>
+                    ) : null}
                     <div className="ct-freshness-stats">
                       <span><strong>{index.freshness.added_count}</strong> 新增</span>
                       <span><strong>{index.freshness.modified_count}</strong> 修改</span>
                       <span><strong>{index.freshness.deleted_count}</strong> 删除</span>
                       <span><strong>{index.freshness.scanned_files}</strong> 文件 / {index.freshness.scanned_bytes} bytes</span>
                     </div>
-                    {!index.freshness.scan_complete ? <p className="ct-warning">扫描未完成{index.freshness.scan_truncation_reason ? "：" + index.freshness.scan_truncation_reason : ""}，不能据此判定一致。</p> : null}
+                    {index.freshness.remote_status === "not_applicable" && !index.freshness.scan_complete ? <p className="ct-warning">扫描未完成{index.freshness.scan_truncation_reason ? "：" + index.freshness.scan_truncation_reason : ""}，不能据此判定一致。</p> : null}
                     {canSafelyRebuildLegacyIndex(index.freshness) ? <p className="ct-card-note">旧索引缺少规则/配置元数据；当前来源已完整安全扫描，可通过“更新索引”完成一次全量重建。</p> : null}
                     {index.freshness.changed_paths.length > 0 ? (
                       <div className="ct-freshness-paths">

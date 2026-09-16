@@ -330,9 +330,9 @@ def create_mcp_server(
         name="check_index_freshness",
         title="Check index freshness",
         description=(
-            "Compare one explicitly selected local project index with its current Python source manifest. "
-            "The check is read-only, content-hash based, bounded, and never creates an index. "
-            "GitHub sources report remote_not_checked."
+            "Compare one explicitly selected project index with its current source. Local sources use a bounded content-hash "
+            "manifest scan; GitHub sources resolve only the tracked ref metadata without downloading an archive. "
+            "The check is read-only and never creates an index."
         ),
         structured_output=True,
     )
@@ -1379,6 +1379,27 @@ def create_mcp_server(
                 return _unexpected_failure("import_github_repository", McpImportResponse)
 
         @server.tool(
+            name="refresh_github_source",
+            title="Refresh a tracked GitHub source",
+            description=(
+                "Explicitly check the tracked public GitHub ref and, only when requested, resolve one commit, download the "
+                "bounded official archive, and update the project's latest immutable index. A failed update keeps the old latest."
+            ),
+            structured_output=True,
+        )
+        def refresh_github_source(
+            project_id: _ProjectId,
+            index_id: _IndexId,
+        ) -> McpIndexRefreshResponse:
+            try:
+                result = service.refresh_github_source(project_id, index_id, via_mcp=True)
+                return McpIndexRefreshResponse(ok=True, result=result)
+            except ServiceError as exc:
+                return _failure(McpIndexRefreshResponse, exc)
+            except Exception:
+                return _unexpected_failure("refresh_github_source", McpIndexRefreshResponse)
+
+        @server.tool(
             name="retry_github_import",
             title="Retry a GitHub import",
             description="Retry one failed or interrupted fixed-commit GitHub import using its persisted request.",
@@ -1475,6 +1496,7 @@ def _mcp_github_import_response(result: GitHubImportResponse) -> McpImportRespon
         source_path=result.source_url,
         source_url=result.source_url,
         requested_ref=result.requested_ref,
+        resolved_ref=result.resolved_ref,
         resolved_commit=result.resolved_commit,
         content_hash=result.content_hash,
         cleanup_status=result.cleanup_status,

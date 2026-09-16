@@ -160,11 +160,12 @@ def create_app(
             model_config=model_config,
         )
     )
-    index_service = IndexService(registry)
+    resolved_github_client = github_client or GitHubClient()
+    index_service = IndexService(registry, github_client=resolved_github_client)
     workspace_service = WorkspaceService(
         registry,
         index_service,
-        github_client=github_client,
+        github_client=resolved_github_client,
         feature_adapter_factory=feature_adapter_factory,
         run_model_adapter_factory=run_model_adapter_factory,
         run_max_concurrent_runs=run_max_concurrent_runs,
@@ -629,6 +630,23 @@ def create_app(
             project_id,
             index_id,
             request,
+        )
+
+    @application.post(
+        "/api/projects/{project_id}/indexes/{index_id}/github-refresh",
+        response_model=IndexRefreshResponse,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def refresh_github_source(
+        http_request: Request,
+        project_id: str,
+        index_id: str,
+    ) -> IndexRefreshResponse:
+        _require_local_write(http_request)
+        return await run_in_threadpool(
+            workspace_service.refresh_github_source,
+            project_id,
+            index_id,
         )
 
     @application.get(

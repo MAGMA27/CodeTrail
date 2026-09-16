@@ -375,6 +375,11 @@ test("index freshness validators keep scan state and refresh mode explicit", () 
     current_rules_version: "python-source-v1+python-3.13+relations-v2",
     current_configuration_hash: "a".repeat(64),
     reasons: ["source_changed"],
+    remote_status: "not_applicable",
+    remote_source_url: null,
+    remote_requested_ref: null,
+    remote_resolved_ref: null,
+    remote_resolved_commit: null,
   };
   assert.equal(isIndexFreshness(freshness), true);
 

@@ -90,6 +90,7 @@ class IndexSnapshot(VersionedModel):
 
 
 FreshnessStatus: TypeAlias = Literal["unchecked", "consistent", "changed", "unknown"]
+RemoteFreshnessStatus: TypeAlias = Literal["not_applicable", "not_checked", "consistent", "changed", "unknown"]
 FreshnessReasonCode: TypeAlias = Literal[
     "missing_index_metadata",
     "rules_changed",
@@ -104,6 +105,7 @@ FreshnessReasonCode: TypeAlias = Literal[
     "file_changed_during_check",
     "budget_exceeded",
     "remote_not_checked",
+    "remote_metadata_missing",
 ]
 
 
@@ -127,6 +129,11 @@ class IndexFreshness(VersionedModel):
     current_rules_version: str | None = Field(default=None, min_length=1, max_length=200)
     current_configuration_hash: Sha256 | None = None
     reasons: list[FreshnessReasonCode] = Field(default_factory=list, max_length=20)
+    remote_status: RemoteFreshnessStatus = "not_applicable"
+    remote_source_url: str | None = Field(default=None, max_length=4_000)
+    remote_requested_ref: str | None = Field(default=None, max_length=200)
+    remote_resolved_ref: str | None = Field(default=None, max_length=200)
+    remote_resolved_commit: str | None = Field(default=None, max_length=64)
 
     @model_validator(mode="after")
     def validate_observation(self) -> IndexFreshness:
@@ -139,6 +146,22 @@ class IndexFreshness(VersionedModel):
             raise ValueError("truncated freshness scans must explain the truncation")
         if not self.scan_truncated and self.scan_truncation_reason:
             raise ValueError("non-truncated freshness scans cannot have a truncation reason")
+        remote_values = (
+            self.remote_source_url,
+            self.remote_requested_ref,
+            self.remote_resolved_ref,
+            self.remote_resolved_commit,
+        )
+        if self.remote_status == "not_applicable" and any(value is not None for value in remote_values):
+            raise ValueError("non-remote freshness cannot include remote metadata")
+        if self.remote_status in {"consistent", "changed"} and (
+            self.remote_source_url is None or self.remote_resolved_commit is None
+        ):
+            raise ValueError("checked remote freshness must include source URL and commit")
+        if self.remote_status == "unknown" and self.status != "unknown":
+            raise ValueError("unknown remote freshness cannot be reported as a known status")
+        if self.remote_status == "changed" and self.status == "consistent":
+            raise ValueError("changed remote freshness cannot be reported as consistent")
         if self.status == "consistent" and (
             not self.scan_complete
             or self.added_count
@@ -436,6 +459,7 @@ class ImportAttempt(VersionedModel):
     source_kind: SourceKind = "local"
     source_url: str | None = Field(default=None, max_length=4_000)
     requested_ref: str | None = Field(default=None, max_length=200)
+    resolved_ref: str | None = Field(default=None, max_length=200)
     resolved_commit: str | None = Field(default=None, max_length=64)
     content_hash: Sha256 | None = None
     cleanup_status: CleanupStatus = "not_required"
@@ -479,6 +503,7 @@ class GitHubImportResponse(VersionedModel):
 
     source_url: str = Field(min_length=1, max_length=4_000)
     requested_ref: str | None = Field(default=None, max_length=200)
+    resolved_ref: str | None = Field(default=None, max_length=200)
     resolved_commit: str | None = Field(default=None, max_length=64)
     content_hash: Sha256 | None = None
     cleanup_status: CleanupStatus = "not_required"
@@ -2602,6 +2627,7 @@ class McpImportResponse(McpResultBase):
     index: IndexResponse | None = None
     source_url: str | None = Field(default=None, max_length=4_000)
     requested_ref: str | None = Field(default=None, max_length=200)
+    resolved_ref: str | None = Field(default=None, max_length=200)
     resolved_commit: str | None = Field(default=None, max_length=64)
     content_hash: Sha256 | None = None
     cleanup_status: CleanupStatus | None = None

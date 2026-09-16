@@ -82,6 +82,7 @@ export type IndexResponse = {
 };
 
 export type FreshnessStatus = "unchecked" | "consistent" | "changed" | "unknown";
+export type RemoteFreshnessStatus = "not_applicable" | "not_checked" | "consistent" | "changed" | "unknown";
 export type FreshnessReasonCode =
   | "missing_index_metadata"
   | "rules_changed"
@@ -95,7 +96,8 @@ export type FreshnessReasonCode =
   | "outside_root"
   | "file_changed_during_check"
   | "budget_exceeded"
-  | "remote_not_checked";
+  | "remote_not_checked"
+  | "remote_metadata_missing";
 
 export type IndexFreshness = {
   schema_version: typeof SCHEMA_VERSION;
@@ -116,6 +118,11 @@ export type IndexFreshness = {
   current_rules_version: string | null;
   current_configuration_hash: string | null;
   reasons: FreshnessReasonCode[];
+  remote_status: RemoteFreshnessStatus;
+  remote_source_url: string | null;
+  remote_requested_ref: string | null;
+  remote_resolved_ref: string | null;
+  remote_resolved_commit: string | null;
 };
 
 export type IndexRefreshMode = "reused" | "historical_reused" | "created";
@@ -168,6 +175,7 @@ export type ImportAttempt = {
   source_kind: "local" | "github";
   source_url: string | null;
   requested_ref: string | null;
+  resolved_ref: string | null;
   resolved_commit: string | null;
   content_hash: string | null;
   cleanup_status: "not_required" | "pending" | "succeeded" | "failed";
@@ -188,6 +196,7 @@ export type GitHubImportResponse = {
   schema_version: typeof SCHEMA_VERSION;
   source_url: string;
   requested_ref: string | null;
+  resolved_ref: string | null;
   resolved_commit: string | null;
   content_hash: string | null;
   cleanup_status: "not_required" | "pending" | "succeeded" | "failed";
@@ -1057,6 +1066,7 @@ export function isImportAttempt(value: unknown): value is ImportAttempt {
     ["local", "github"].includes(String(value.source_kind)) &&
     isNullableString(value.source_url) &&
     isNullableString(value.requested_ref) &&
+    isNullableString(value.resolved_ref) &&
     isNullableString(value.resolved_commit) &&
     isNullableString(value.content_hash) &&
     ["not_required", "pending", "succeeded", "failed"].includes(String(value.cleanup_status)) &&
@@ -1072,6 +1082,7 @@ export function isGitHubImportResponse(value: unknown): value is GitHubImportRes
     value.schema_version === SCHEMA_VERSION &&
     isString(value.source_url) &&
     isNullableString(value.requested_ref) &&
+    isNullableString(value.resolved_ref) &&
     isNullableString(value.resolved_commit) &&
     isNullableString(value.content_hash) &&
     ["not_required", "pending", "succeeded", "failed"].includes(String(value.cleanup_status)) &&
@@ -1709,6 +1720,7 @@ export function isIndexFreshness(value: unknown): value is IndexFreshness {
     "file_changed_during_check",
     "budget_exceeded",
     "remote_not_checked",
+    "remote_metadata_missing",
   ];
   return (
     isRecord(value) &&
@@ -1730,7 +1742,14 @@ export function isIndexFreshness(value: unknown): value is IndexFreshness {
     (value.current_rules_version === null || isString(value.current_rules_version)) &&
     (value.current_configuration_hash === null || isString(value.current_configuration_hash)) &&
     Array.isArray(value.reasons) &&
-    value.reasons.every((reason) => reasons.includes(String(reason)))
+    value.reasons.every((reason) => reasons.includes(String(reason))) &&
+    ["not_applicable", "not_checked", "consistent", "changed", "unknown"].includes(String(value.remote_status)) &&
+    (value.remote_status !== "unknown" || value.status === "unknown") &&
+    (value.remote_status !== "changed" || value.status !== "consistent") &&
+    isNullableString(value.remote_source_url) &&
+    isNullableString(value.remote_requested_ref) &&
+    isNullableString(value.remote_resolved_ref) &&
+    isNullableString(value.remote_resolved_commit)
   );
 }
 
@@ -2883,6 +2902,18 @@ export function refreshProjectIndex(
         dirty,
       }),
     },
+  );
+}
+
+export function refreshGitHubSource(
+  projectId: string,
+  indexId: string,
+  signal?: AbortSignal,
+): Promise<IndexRefreshResponse> {
+  return requestJson(
+    `/api/projects/${encodeURIComponent(projectId)}/indexes/${encodeURIComponent(indexId)}/github-refresh`,
+    isIndexRefreshResponse,
+    { method: "POST", signal },
   );
 }
 

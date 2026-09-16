@@ -18,7 +18,7 @@
 
 ## 数据与生命周期
 
-打开项目后从唯一的“源代码与索引”入口进入项目操作页；其中“固定索引”页签可显式执行“检查更新”或“更新索引”。检查结果显示 `consistent`、`changed` 或 `unknown`、检查时间、变化统计、扫描预算和有界路径；更新只针对当前 latest，consistent 返回 `reused` 直接复用，源码恢复到同项目中规则/配置/schema/manifest 兼容的历史内容时返回 `historical_reused` 并切换 latest 到历史 index，其他可安全重建的变化生成新的 immutable index，历史 revision/dirty metadata 不被改写，失败不替换旧 latest。“源代码来源”页签仍负责本地/GitHub 导入和 ImportAttempt 状态，GitHub 来源明确显示远端未检查。
+打开项目后从唯一的“源代码与索引”入口进入项目操作页；其中“固定索引”页签可显式执行“检查更新”或“更新索引”。本地检查结果显示 `consistent`、`changed` 或 `unknown`、检查时间、变化统计、扫描预算和有界路径；GitHub 检查在同一页签显示 `remote_status`、来源 URL、跟踪/解析 ref、远端 commit 与基线索引 commit，且只做 ref→commit metadata 检查，不下载归档。更新只针对当前 latest：本地 consistent 返回 `reused` 直接复用，GitHub 同一 commit 且构建身份兼容时也可复用当前或历史 index；源码恢复到同项目中规则/配置/schema/manifest 兼容的历史内容时返回 `historical_reused` 并切换 latest 到历史 index，其他可安全重建的变化生成新的 immutable index，历史 revision/dirty metadata 不被改写，失败不替换旧 latest。GitHub 的显式更新使用专用更新动作，但仍在这个合并面板内完成。“源代码来源”页签负责本地/GitHub 导入和 ImportAttempt 状态。
 
 代码理解报告使用 `outcome=explanation`：结果区域显示 `complete/partial` 覆盖和最多 12 个有序步骤，按 confirmed/inferred/unknown 区分证据强度；步骤 evidence 只能打开报告内同快照源码，唯一 symbol 可进入现有局部关系图，多符号或无符号步骤说明原因，不派生候选影响。
 
@@ -52,4 +52,5 @@ Session 草稿按 project/session 保存到 localStorage，消息保存旧响应
 - [FastAPI 路由入口概览](../decisions/2026-09-14-fastapi-route-overview.md)
 - [项目结构总览](../decisions/2026-09-14-project-structure-overview.md)
 - [本地项目索引新鲜度与显式更新](../decisions/2026-09-15-index-freshness.md)
+- [GitHub 远端 ref 新鲜度与显式更新](../decisions/2026-09-16-github-remote-freshness.md)
 - [本项目索引更新与缓存效果联合验收](../decisions/2026-09-16-project-index-cache-acceptance.md)
