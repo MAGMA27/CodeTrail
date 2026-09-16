@@ -3879,7 +3879,7 @@ def _external_report_matches_final(
         and (
             report.limitations == final.limitations
             or report.limitations
-            == list(dict.fromkeys([*final.limitations, *derived_limitations])[:30])
+            == list(dict.fromkeys([*final.limitations, *derived_limitations]))[:30]
         )
         and [evidence.evidence_id for evidence in report.evidence] == final.evidence_ids
     )
