@@ -56,7 +56,11 @@ import type { GraphState } from "../lib/graph";
 export type UiAsyncStatus = "idle" | "loading" | "success" | "empty" | "error";
 export type UiIndexStatus = "unindexed" | "creating" | "loading" | "ready" | "partial" | "error";
 export type UiPanelMode = "none" | "source" | "graph" | "feature_graph" | "impact";
-export type OperationPanel = "create-project" | "import" | "index";
+export type OperationPanel = "create-project" | "project-management";
+export type OperationTab = "source" | "index";
+
+type OpenOperation = (panel: OperationPanel, tab?: OperationTab) => void;
+type OperationPanelState = { mode: OperationPanel; tab: OperationTab };
 
 type FormHandler = (event: FormEvent<HTMLFormElement>) => void | Promise<void>;
 type Action = () => void | Promise<void>;
@@ -440,7 +444,7 @@ function ProjectRail({
 }: {
   project: ProjectUi;
   session: SessionUi;
-  onOpenOperation: (panel: OperationPanel) => void;
+  onOpenOperation: OpenOperation;
   onViewKnowledge: () => void;
 }) {
   const [sessionFormOpen, setSessionFormOpen] = useState(false);
@@ -572,11 +576,8 @@ function ProjectRail({
         ) : null}
       </div>
       <div className="ct-sidebar-footer">
-        <button type="button" className="ct-sidebar-action" onClick={() => onOpenOperation("import")}>
-          <span>导入源代码</span><span aria-hidden="true">↗</span>
-        </button>
-        <button type="button" className="ct-sidebar-action" onClick={() => onOpenOperation("index")} disabled={!selectedProject}>
-          <span>索引管理</span><span aria-hidden="true">↗</span>
+        <button type="button" className="ct-sidebar-action" onClick={() => onOpenOperation("project-management", "source")}>
+          <span>源代码与索引</span><span aria-hidden="true">↗</span>
         </button>
         <p>来源目录只读 · 不执行仓库代码</p>
       </div>
@@ -586,6 +587,7 @@ function ProjectRail({
 
 function OperationPanel({
   mode,
+  initialTab,
   onClose,
   project,
   localImport,
@@ -593,6 +595,7 @@ function OperationPanel({
   index,
 }: {
   mode: OperationPanel;
+  initialTab: OperationTab;
   onClose: () => void;
   project: ProjectUi;
   localImport: LocalImportUi;
@@ -600,15 +603,19 @@ function OperationPanel({
   index: IndexUi;
 }) {
   const [importMode, setImportMode] = useState<"local" | "github">("local");
+  const [activeTab, setActiveTab] = useState<OperationTab>(initialTab);
   const selectedProject = project.selectedProject;
   const importBusy = (status: ImportStatus | null) => status === "queued" || status === "acquiring" || status === "indexing";
+  useEffect(() => {
+    setActiveTab(initialTab);
+  }, [initialTab]);
   return (
     <section className="ct-operation-panel" aria-label="项目操作">
       <div className="ct-operation-header">
         <div>
           <p className="ct-overline">PROJECT OPERATIONS</p>
-          <h2>{mode === "create-project" ? "创建项目" : mode === "import" ? "导入源代码" : "索引管理"}</h2>
-          <p>{mode === "create-project" ? "注册一个服务端 allow-list 中的仓库。" : mode === "import" ? "导入目录由 API 服务端读取，浏览器不会访问本机路径。" : "创建或打开固定版本；旧版本不会被自动替换。"}</p>
+          <h2>{mode === "create-project" ? "创建项目" : "源代码与索引"}</h2>
+          <p>{mode === "create-project" ? "注册一个服务端 allow-list 中的仓库。" : "在同一处管理项目来源和固定快照；两者保持独立的生命周期。"}</p>
         </div>
         <button type="button" className="ct-close-button" onClick={onClose} aria-label="关闭项目操作">关闭</button>
       </div>
@@ -623,14 +630,20 @@ function OperationPanel({
           {project.error ? <p className="ct-inline-error" role="alert">{project.error}</p> : null}
           <button type="submit" className="ct-button ct-button-primary" disabled={project.status === "loading"}>{project.status === "loading" ? "保存中…" : "创建项目"}</button>
         </form>
-      ) : mode === "import" ? (
+      ) : (
         <div className="ct-operation-body">
-          <div className="ct-segmented" role="tablist" aria-label="导入来源">
-            <button type="button" role="tab" aria-selected={importMode === "local"} className={importMode === "local" ? "is-active" : ""} onClick={() => setImportMode("local")}>本地目录</button>
-            <button type="button" role="tab" aria-selected={importMode === "github"} className={importMode === "github" ? "is-active" : ""} onClick={() => setImportMode("github")}>GitHub HTTPS</button>
+          <div className="ct-segmented" role="tablist" aria-label="项目管理">
+            <button type="button" role="tab" aria-selected={activeTab === "source"} className={activeTab === "source" ? "is-active" : ""} onClick={() => setActiveTab("source")}>源代码来源</button>
+            <button type="button" role="tab" aria-selected={activeTab === "index"} className={activeTab === "index" ? "is-active" : ""} onClick={() => setActiveTab("index")} disabled={!selectedProject}>固定索引</button>
           </div>
-          {importMode === "local" ? (
-            <form className="ct-operation-form" onSubmit={(event) => void localImport.onSubmit(event)}>
+          {activeTab === "source" ? (
+            <>
+              <div className="ct-segmented" role="tablist" aria-label="导入来源">
+                <button type="button" role="tab" aria-selected={importMode === "local"} className={importMode === "local" ? "is-active" : ""} onClick={() => setImportMode("local")}>本地目录</button>
+                <button type="button" role="tab" aria-selected={importMode === "github"} className={importMode === "github" ? "is-active" : ""} onClick={() => setImportMode("github")}>GitHub HTTPS</button>
+              </div>
+              {importMode === "local" ? (
+                <form className="ct-operation-form" onSubmit={(event) => void localImport.onSubmit(event)}>
               <div className="ct-form-grid">
                 <div>
                   <label htmlFor="operation-local-name">项目名称</label>
@@ -647,9 +660,9 @@ function OperationPanel({
                 <button type="submit" className="ct-button ct-button-primary" disabled={importBusy(localImport.status)}>{localImport.status === "indexing" ? "建立中…" : "导入并建立索引"}</button>
                 {localImport.attempt ? <ImportAttemptStatus attempt={localImport.attempt} onRetry={localImport.onRetry} /> : null}
               </div>
-            </form>
-          ) : (
-            <form className="ct-operation-form" onSubmit={(event) => void githubImport.onSubmit(event)}>
+                </form>
+              ) : (
+                <form className="ct-operation-form" onSubmit={(event) => void githubImport.onSubmit(event)}>
               <div className="ct-form-grid">
                 <div>
                   <label htmlFor="operation-github-name">项目名称</label>
@@ -670,11 +683,11 @@ function OperationPanel({
                 <button type="submit" className="ct-button ct-button-primary" disabled={importBusy(githubImport.status)}>{githubImport.status === "acquiring" ? "获取中…" : githubImport.status === "indexing" ? "建立中…" : "导入 GitHub 仓库"}</button>
                 {githubImport.attempt ? <ImportAttemptStatus attempt={githubImport.attempt} onRetry={githubImport.onRetry} onRetryCleanup={githubImport.onRetryCleanup} /> : null}
               </div>
-            </form>
-          )}
-        </div>
-      ) : (
-        <div className="ct-operation-body">
+                </form>
+              )}
+            </>
+          ) : (
+            <>
           {!selectedProject ? (
             <EmptyState title="先选择项目" detail="索引属于项目；选择项目后才能创建或打开固定版本。" />
           ) : (
@@ -764,6 +777,8 @@ function OperationPanel({
               </div>
             </>
           )}
+            </>
+          )}
         </div>
       )}
     </section>
@@ -786,12 +801,10 @@ function ContextHeader({
   project,
   index,
   viewMode,
-  onOpenOperation,
 }: {
   project: ProjectUi;
   index: IndexUi;
   viewMode: "overview" | "session";
-  onOpenOperation: (panel: OperationPanel) => void;
 }) {
   return (
     <div className="ct-context-header">
@@ -807,8 +820,6 @@ function ContextHeader({
             <span>{indexStatusLabel(index.status)}</span>
             {index.response ? <code>{shortHash(index.response.index.snapshot_hash)}</code> : null}
           </div>
-          <button type="button" className="ct-button ct-button-secondary" onClick={() => onOpenOperation("import")}>导入源代码</button>
-          <button type="button" className="ct-button ct-button-secondary" onClick={() => onOpenOperation("index")}>索引管理</button>
         </div>
       ) : null}
     </div>
@@ -852,7 +863,7 @@ function KnowledgeView({
   project: ProjectUi;
   index: IndexUi;
   knowledge: KnowledgeUi;
-  onOpenOperation: (panel: OperationPanel) => void;
+  onOpenOperation: OpenOperation;
 }) {
   const overview = knowledge.overview;
   return (
@@ -863,12 +874,6 @@ function KnowledgeView({
           <h2>从入口到功能</h2>
           <p>先建立当前项目的静态事实，再从证据和受限关系中继续排查。图上的可达关系不等于已确认影响。</p>
         </div>
-        {project.selectedProject ? (
-          <div className="ct-page-actions">
-            <button type="button" className="ct-button ct-button-secondary" onClick={() => onOpenOperation("import")}>导入源代码</button>
-            <button type="button" className="ct-button ct-button-secondary" onClick={() => onOpenOperation("index")}>索引管理</button>
-          </div>
-        ) : null}
       </div>
 
       {index.response ? (
@@ -890,8 +895,8 @@ function KnowledgeView({
       ) : !index.response ? (
         <EmptyState
           title="当前项目还没有可用快照"
-          detail="可以在索引管理中创建或打开一个固定版本；没有索引时不会伪造概览或关系图。"
-          action={<button type="button" className="ct-button ct-button-primary" onClick={() => onOpenOperation("index")}>打开索引管理</button>}
+          detail="可以在“源代码与索引”的“固定索引”中创建或打开一个固定版本；没有索引时不会伪造概览或关系图。"
+          action={<button type="button" className="ct-button ct-button-primary" onClick={() => onOpenOperation("project-management", "index")}>打开源代码与索引</button>}
         />
       ) : (
         <>
@@ -1511,9 +1516,13 @@ function GraphFitController({
 
 export default function WorkbenchUi(props: WorkbenchUiProps) {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const [operationPanel, setOperationPanel] = useState<OperationPanel | null>(null);
+  const [operationPanel, setOperationPanel] = useState<OperationPanelState | null>(null);
   const [panelWidth, setPanelWidth] = useState(360);
   const closeOperation = () => setOperationPanel(null);
+  const openOperation = (mode: OperationPanel, tab: OperationTab = "source") => {
+    setOperationPanel({ mode, tab });
+    setMobileSidebarOpen(false);
+  };
   const selectProject = (projectId: string) => {
     props.project.onSelectProject(projectId);
     setMobileSidebarOpen(false);
@@ -1546,11 +1555,11 @@ export default function WorkbenchUi(props: WorkbenchUiProps) {
       </header>
       <div className="ct-workspace-frame">
         {mobileSidebarOpen ? <button type="button" className="ct-mobile-scrim" aria-label="关闭项目导航" onClick={() => setMobileSidebarOpen(false)} /> : null}
-        <div className={`ct-sidebar-slot${mobileSidebarOpen ? " is-open" : ""}`}><ProjectRail project={{ ...props.project, onSelectProject: selectProject }} session={{ ...props.session, onSelectSession: selectSession }} onOpenOperation={(mode) => { setOperationPanel(mode); setMobileSidebarOpen(false); }} onViewKnowledge={openKnowledge} /></div>
+        <div className={`ct-sidebar-slot${mobileSidebarOpen ? " is-open" : ""}`}><ProjectRail project={{ ...props.project, onSelectProject: selectProject }} session={{ ...props.session, onSelectSession: selectSession }} onOpenOperation={openOperation} onViewKnowledge={openKnowledge} /></div>
         <section className="ct-center-column" aria-label={props.viewMode === "session" ? "Issue 会话" : "项目知识页"}>
-          <ContextHeader project={props.project} index={props.index} viewMode={props.viewMode} onOpenOperation={setOperationPanel} />
+          <ContextHeader project={props.project} index={props.index} viewMode={props.viewMode} />
           {alert ? <div className="ct-global-alert" role="alert"><span>{alert}</span>{props.connection.state === "error" ? <button type="button" className="ct-link-button" onClick={() => void props.connection.onCheck()}>重新检查</button> : null}</div> : null}
-          {operationPanel ? <OperationPanel mode={operationPanel} onClose={closeOperation} project={props.project} localImport={props.localImport} githubImport={props.githubImport} index={props.index} /> : props.viewMode === "session" ? <SessionView session={props.session} onBack={openKnowledge} /> : <KnowledgeView project={props.project} index={props.index} knowledge={props.knowledge} onOpenOperation={setOperationPanel} />}
+          {operationPanel ? <OperationPanel mode={operationPanel.mode} initialTab={operationPanel.tab} onClose={closeOperation} project={props.project} localImport={props.localImport} githubImport={props.githubImport} index={props.index} /> : props.viewMode === "session" ? <SessionView session={props.session} onBack={openKnowledge} /> : <KnowledgeView project={props.project} index={props.index} knowledge={props.knowledge} onOpenOperation={openOperation} />}
         </section>
         {props.panelMode === "source" ? <EvidencePanel evidence={props.evidence} /> : props.panelMode === "graph" || props.panelMode === "feature_graph" || props.panelMode === "impact" ? <GraphPanel graph={props.graph} /> : null}
       </div>

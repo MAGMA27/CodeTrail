@@ -18,7 +18,7 @@
 
 ## 数据与生命周期
 
-打开项目后可在索引管理中显式执行“检查更新”或“更新索引”。检查结果显示 `consistent`、`changed` 或 `unknown`、检查时间、变化统计、扫描预算和有界路径；更新只针对当前 latest，consistent 返回 `reused` 直接复用，源码恢复到同项目中规则/配置/schema/manifest 兼容的历史内容时返回 `historical_reused` 并切换 latest 到历史 index，其他可安全重建的变化生成新的 immutable index，历史 revision/dirty metadata 不被改写，失败不替换旧 latest。GitHub 来源明确显示远端未检查。
+打开项目后从唯一的“源代码与索引”入口进入项目操作页；其中“固定索引”页签可显式执行“检查更新”或“更新索引”。检查结果显示 `consistent`、`changed` 或 `unknown`、检查时间、变化统计、扫描预算和有界路径；更新只针对当前 latest，consistent 返回 `reused` 直接复用，源码恢复到同项目中规则/配置/schema/manifest 兼容的历史内容时返回 `historical_reused` 并切换 latest 到历史 index，其他可安全重建的变化生成新的 immutable index，历史 revision/dirty metadata 不被改写，失败不替换旧 latest。“源代码来源”页签仍负责本地/GitHub 导入和 ImportAttempt 状态，GitHub 来源明确显示远端未检查。
 
 代码理解报告使用 `outcome=explanation`：结果区域显示 `complete/partial` 覆盖和最多 12 个有序步骤，按 confirmed/inferred/unknown 区分证据强度；步骤 evidence 只能打开报告内同快照源码，唯一 symbol 可进入现有局部关系图，多符号或无符号步骤说明原因，不派生候选影响。
 
