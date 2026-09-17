@@ -34,7 +34,7 @@ Run 持久化限制工具调用、模型调用/修复、单次/总源码行、�
 
 ## 验证
 
-`apps/api/tests/test_storage.py` 和 `apps/api/tests/test_definition_cache.py` 验证 SQLite 重开、事务、项目隔离、定义/关系事实缓存严格校验、冷/热复用、共享容量/并发和失败降级、旧快照、manifest、latest 冲突、邻接和影响路径边界；`apps/api/tests/test_process_liveness.py` 验证 Windows 只读进程句柄的 alive/exited/unknown 语义、句柄释放和 unknown 恢复保护；`apps/api/tests/test_freshness.py` 验证内容 hash、预算未知、显式复用/重建和旧 metadata，并验证关系语义升级时明确返回 rules/config 变化、生成 `relations-v4-rebuild` 且重复更新复用新快照；其它测试继续覆盖 Run、SSE、API 双入口和 MCP。双进程验收脚本为 `scripts/verify-github-process-lifecycle.py`，默认按单场景运行并将 HTTP worker 日志写入受控临时目录，公网需显式选择；本轮不运行它。真实供应商语义质量和真实双进程流程仍未验证。
+`apps/api/tests/test_storage.py` 和 `apps/api/tests/test_definition_cache.py` 验证 SQLite 重开、事务、项目隔离、定义/关系事实缓存严格校验、冷/热复用、共享容量/并发和失败降级、旧快照、manifest、latest 冲突、邻接和影响路径边界；`apps/api/tests/test_process_liveness.py` 验证 Windows 只读进程句柄的 alive/exited/unknown 语义、句柄释放和 unknown 恢复保护；`apps/api/tests/test_github_process_lifecycle_script.py` 验证受控验收脚本的 release 超时、阶段报告、默认单场景和 worker 回收/日志保留；`apps/api/tests/test_freshness.py` 验证内容 hash、预算未知、显式复用/重建和旧 metadata，并验证关系语义升级时明确返回 rules/config 变化、生成 `relations-v4-rebuild` 且重复更新复用新快照；其它测试继续覆盖 Run、SSE、API 双入口和 MCP。双进程验收脚本为 `scripts/verify-github-process-lifecycle.py`，默认只运行 `http-a-mcp-b`，`--scenario all` 才显式运行全部离线场景；每个场景具有父进程总超时、worker release 超时、受控失败日志和只针对脚本创建 worker 的安全清理。本轮四个真实 HTTP/MCP 进程场景均通过；真实供应商语义质量、浏览器和公开 GitHub 仍未验证。
 
 ## 相关决策
 

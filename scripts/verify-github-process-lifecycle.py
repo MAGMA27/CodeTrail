@@ -20,6 +20,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -32,6 +33,12 @@ SCRIPT_PATH = Path(__file__).resolve()
 GITHUB_URL = "https://github.com/owner/repo"
 FIRST_COMMIT = "a" * 40
 SECOND_COMMIT = "b" * 40
+DEFAULT_SCENARIO_TIMEOUT_SECONDS = 90.0
+DEFAULT_RELEASE_TIMEOUT_SECONDS = 30.0
+DEFAULT_CLEANUP_TIMEOUT_SECONDS = 3.0
+HTTP_REQUEST_TIMEOUT_SECONDS = 5.0
+HTTP_STARTUP_TIMEOUT_SECONDS = 15.0
+MCP_READ_TIMEOUT_SECONDS = 10.0
 
 
 def _log(message: str) -> None:
@@ -43,12 +50,70 @@ def _touch(path: Path) -> None:
     path.write_text("ready\n", encoding="utf-8")
 
 
-def _wait_for_release(release: Path, crash: Path | None, gate: Path) -> None:
+class _ScenarioTimeout(RuntimeError):
+    """A bounded scenario stopped before it could complete its current stage."""
+
+
+@dataclass
+class _ScenarioBudget:
+    name: str
+    timeout: float
+    release_timeout: float
+    started_at: float = field(default_factory=time.monotonic)
+    stage: str = "starting"
+
+    @property
+    def deadline(self) -> float:
+        return self.started_at + self.timeout
+
+    def set_stage(self, stage: str) -> None:
+        self.stage = stage
+        _log(f"[offline] {self.name}: {stage}")
+
+    def remaining(self, stage: str | None = None) -> float:
+        if stage is not None:
+            self.set_stage(stage)
+        remaining = self.deadline - time.monotonic()
+        if remaining <= 0:
+            raise _ScenarioTimeout(
+                f"scenario={self.name} stage={self.stage} exceeded "
+                f"the {self.timeout:.1f}s total timeout"
+            )
+        return remaining
+
+    def request_timeout(self, stage: str) -> float:
+        return min(HTTP_REQUEST_TIMEOUT_SECONDS, self.remaining(stage))
+
+    @property
+    def cleanup_timeout(self) -> float:
+        return DEFAULT_CLEANUP_TIMEOUT_SECONDS
+
+
+def _wait_for_release(
+    release: Path,
+    crash: Path | None,
+    gate: Path,
+    *,
+    timeout: float = DEFAULT_RELEASE_TIMEOUT_SECONDS,
+    stage: str = "release",
+) -> None:
+    if timeout <= 0:
+        raise ValueError("release timeout must be positive")
     _touch(gate)
+    _log(f"[worker] stage={stage} waiting for release timeout={timeout:.1f}s")
+    deadline = time.monotonic() + timeout
     while not release.exists():
         if crash is not None and crash.exists():
+            _log(f"[worker] stage={stage} crash marker received")
             os._exit(91)
-        time.sleep(0.02)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            _log(f"[worker] stage={stage} release wait timed out")
+            raise TimeoutError(
+                f"stage={stage} release gate {release} was not created "
+                f"within {timeout:.1f}s"
+            )
+        time.sleep(min(0.02, remaining))
 
 
 class ProcessGitHubClient:
@@ -62,12 +127,14 @@ class ProcessGitHubClient:
         gate: Path | None = None,
         release: Path | None = None,
         crash: Path | None = None,
+        release_timeout: float = DEFAULT_RELEASE_TIMEOUT_SECONDS,
     ) -> None:
         self._commits = iter(commits)
         self._pause_download_call = pause_download_call
         self._gate = gate
         self._release = release
         self._crash = crash
+        self._release_timeout = release_timeout
         self._download_calls = 0
 
     def resolve(self, url: str, requested_ref: str | None):
@@ -94,7 +161,13 @@ class ProcessGitHubClient:
         if self._pause_download_call == self._download_calls:
             if self._gate is None or self._release is None:
                 raise RuntimeError("download pause requires gate and release paths")
-            _wait_for_release(self._release, self._crash, self._gate)
+            _wait_for_release(
+                self._release,
+                self._crash,
+                self._gate,
+                timeout=self._release_timeout,
+                stage="github.download.release",
+            )
         return GitHubArchive(
             resolution,
             hashlib.sha256(payload).hexdigest(),
@@ -118,10 +191,18 @@ def _install_commit_pause(application, args: argparse.Namespace) -> None:
     ) -> None:
         nonlocal calls
         calls += 1
+        _log(f"[worker] stage=registry.commit call={calls}")
         if calls == args.block_commit_call:
             if args.gate is None or args.release is None:
+                _log("[worker] commit pause is missing gate or release path")
                 raise RuntimeError("commit pause requires gate and release paths")
-            _wait_for_release(args.release, args.crash, args.gate)
+            _wait_for_release(
+                Path(args.release),
+                Path(args.crash) if args.crash else None,
+                Path(args.gate),
+                timeout=args.release_timeout,
+                stage="registry.commit.release",
+            )
         original(
             operation_id,
             candidate_index_id=candidate_index_id,
@@ -147,6 +228,7 @@ def _run_worker(args: argparse.Namespace) -> None:
             gate=Path(args.gate) if args.gate else None,
             release=Path(args.release) if args.release else None,
             crash=Path(args.crash) if args.crash else None,
+            release_timeout=args.release_timeout,
         )
     )
     application = create_app(
@@ -192,15 +274,25 @@ def _free_port() -> int:
         return int(server_socket.getsockname()[1])
 
 
-def _stop_http_process(process: subprocess.Popen[bytes] | None) -> None:
+def _stop_http_process(
+    process: subprocess.Popen[bytes] | None,
+    *,
+    timeout: float = DEFAULT_CLEANUP_TIMEOUT_SECONDS,
+) -> None:
     if process is None or process.poll() is not None:
         return
+    if timeout <= 0:
+        raise ValueError("process cleanup timeout must be positive")
+    deadline = time.monotonic() + timeout
     process.terminate()
     try:
-        process.wait(timeout=5)
+        process.wait(timeout=max(0.01, deadline - time.monotonic()))
     except subprocess.TimeoutExpired:
         process.kill()
-        process.wait(timeout=5)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise RuntimeError("HTTP worker did not exit within the cleanup timeout")
+        process.wait(timeout=remaining)
 
 
 def _wait_for_process_exit(process: subprocess.Popen[bytes], timeout: float = 10) -> None:
@@ -215,7 +307,11 @@ def _http_json(
     url: str,
     method: str = "GET",
     payload: dict[str, Any] | None = None,
+    *,
+    timeout: float = HTTP_REQUEST_TIMEOUT_SECONDS,
 ) -> tuple[int, dict[str, Any]]:
+    if timeout <= 0:
+        raise ValueError("HTTP request timeout must be positive")
     body = None if payload is None else json.dumps(payload).encode("utf-8")
     request = Request(
         url,
@@ -224,7 +320,7 @@ def _http_json(
         headers={"Content-Type": "application/json"} if body is not None else {},
     )
     try:
-        with urlopen(request, timeout=5) as response:
+        with urlopen(request, timeout=timeout) as response:
             return int(response.status), json.loads(response.read() or b"{}")
     except HTTPError as exc:
         return int(exc.code), json.loads(exc.read() or b"{}")
@@ -240,7 +336,7 @@ def _wait_for_http(
     process: subprocess.Popen[bytes],
     base_url: str,
     log_path: Path,
-    timeout: float = 15,
+    timeout: float = HTTP_STARTUP_TIMEOUT_SECONDS,
 ) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -250,7 +346,13 @@ def _wait_for_http(
                 f"log={log_path}\n{_read_log_tail(log_path)}"
             )
         try:
-            status, body = _http_json(f"{base_url}/api/health")
+            request_timeout = min(HTTP_REQUEST_TIMEOUT_SECONDS, deadline - time.monotonic())
+            if request_timeout <= 0:
+                break
+            status, body = _http_json(
+                f"{base_url}/api/health",
+                timeout=request_timeout,
+            )
             if status == 200 and body.get("status") == "ok":
                 return
         except (OSError, URLError):
@@ -273,6 +375,8 @@ def _start_http_worker(
     gate: Path | None = None,
     release: Path | None = None,
     crash: Path | None = None,
+    release_timeout: float = DEFAULT_RELEASE_TIMEOUT_SECONDS,
+    startup_timeout: float = HTTP_STARTUP_TIMEOUT_SECONDS,
     real_github: bool = False,
 ) -> tuple[subprocess.Popen[bytes], str, Path]:
     port = _free_port()
@@ -298,6 +402,7 @@ def _start_http_worker(
         command.extend(["--release", str(release)])
     if crash is not None:
         command.extend(["--crash", str(crash)])
+    command.extend(["--release-timeout", str(release_timeout)])
     if real_github:
         command.append("--real-github")
 
@@ -321,7 +426,7 @@ def _start_http_worker(
         log_handle.close()
     base_url = f"http://127.0.0.1:{port}"
     try:
-        _wait_for_http(process, base_url, log_path)
+        _wait_for_http(process, base_url, log_path, timeout=startup_timeout)
     except Exception:
         _stop_http_process(process)
         raise
@@ -337,6 +442,7 @@ def _mcp_parameters(
     gate: Path | None = None,
     release: Path | None = None,
     crash: Path | None = None,
+    release_timeout: float = DEFAULT_RELEASE_TIMEOUT_SECONDS,
 ):
     from mcp.client.stdio import StdioServerParameters
 
@@ -359,6 +465,7 @@ def _mcp_parameters(
         command.extend(["--release", str(release)])
     if crash is not None:
         command.extend(["--crash", str(crash)])
+    command.extend(["--release-timeout", str(release_timeout)])
     return StdioServerParameters(
         command=sys.executable,
         args=command,
@@ -367,23 +474,27 @@ def _mcp_parameters(
     )
 
 
-def _wait_for_path(
+async def _wait_for_gate(
     path: Path,
     process: subprocess.Popen[bytes] | None = None,
-    timeout: float = 15,
+    *,
+    timeout: float = HTTP_STARTUP_TIMEOUT_SECONDS,
+    stage: str = "gate",
 ) -> None:
+    if timeout <= 0:
+        raise ValueError("gate timeout must be positive")
     deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if path.exists():
-            return
+    while not path.exists():
         if process is not None and process.poll() is not None:
-            raise RuntimeError(f"worker exited before creating gate: {process.returncode}")
-        time.sleep(0.05)
-    raise RuntimeError(f"gate {path} was not created within the bounded timeout")
-
-
-async def _wait_for_gate(path: Path, process: subprocess.Popen[bytes] | None = None) -> None:
-    await asyncio.to_thread(_wait_for_path, path, process)
+            raise RuntimeError(
+                f"stage={stage} worker exited before creating gate: {process.returncode}"
+            )
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError(
+                f"stage={stage} gate {path} was not created within {timeout:.1f}s"
+            )
+        await asyncio.sleep(min(0.05, remaining))
 
 
 def _registry_state(data_root: Path, project_id: str) -> dict[str, Any]:
@@ -434,7 +545,74 @@ def _mcp_data(result: Any) -> dict[str, Any]:
     return structured
 
 
-async def _scenario_http_active_mcp_conflict() -> dict[str, Any]:
+async def _http_request(
+    budget: _ScenarioBudget,
+    url: str,
+    *,
+    stage: str,
+    method: str = "GET",
+    payload: dict[str, Any] | None = None,
+) -> tuple[int, dict[str, Any]]:
+    return await asyncio.to_thread(
+        _http_json,
+        url,
+        method,
+        payload,
+        timeout=budget.request_timeout(stage),
+    )
+
+
+async def _await_bounded(
+    budget: _ScenarioBudget,
+    awaitable: Any,
+    *,
+    stage: str,
+    timeout: float | None = None,
+) -> Any:
+    budget.set_stage(stage)
+    wait_timeout = budget.remaining()
+    if timeout is not None:
+        wait_timeout = min(wait_timeout, timeout)
+    try:
+        return await asyncio.wait_for(awaitable, timeout=wait_timeout)
+    except asyncio.TimeoutError as exc:
+        raise _ScenarioTimeout(
+            f"scenario={budget.name} stage={stage} exceeded its "
+            f"{wait_timeout:.1f}s operation timeout"
+        ) from exc
+
+
+async def _cancel_task(task: asyncio.Task[Any] | None, timeout: float) -> None:
+    if task is None:
+        return
+    if not task.done():
+        task.cancel()
+    try:
+        await asyncio.wait_for(asyncio.shield(task), timeout=timeout)
+    except BaseException:
+        # A cancelled asyncio.to_thread task cannot stop its running thread;
+        # _http_json has its own short socket timeout and the worker is closed
+        # separately below.
+        pass
+
+
+def _cleanup_http_process(
+    process: subprocess.Popen[bytes] | None,
+    *,
+    timeout: float,
+    label: str,
+) -> bool:
+    if process is None or process.poll() is not None:
+        return True
+    try:
+        _stop_http_process(process, timeout=timeout)
+        return True
+    except Exception as exc:
+        _log(f"[offline] cleanup failed for {label}: {type(exc).__name__}: {exc}")
+        return False
+
+
+async def _scenario_http_active_mcp_conflict(budget: _ScenarioBudget) -> dict[str, Any]:
     data_root = Path(tempfile.mkdtemp(prefix="codetrail-github-http-active-"))
     log_dir = data_root / "logs"
     gate = data_root / "a-download-started"
@@ -444,6 +622,7 @@ async def _scenario_http_active_mcp_conflict() -> dict[str, Any]:
     success = False
     try:
         _log("[offline] HTTP A seeds and pauses during its update")
+        budget.set_stage("start HTTP A")
         process_a, base_a, _ = _start_http_worker(
             data_root,
             [FIRST_COMMIT, SECOND_COMMIT, SECOND_COMMIT],
@@ -452,25 +631,35 @@ async def _scenario_http_active_mcp_conflict() -> dict[str, Any]:
             pause_download_call=2,
             gate=gate,
             release=release,
+            release_timeout=budget.release_timeout,
+            startup_timeout=min(HTTP_STARTUP_TIMEOUT_SECONDS, budget.remaining()),
         )
-        status, imported = await asyncio.to_thread(
-            _http_json,
+        status, imported = await _http_request(
+            budget,
             f"{base_a}/api/imports/github",
-            "POST",
-            {"name": "Process HTTP A", "url": GITHUB_URL, "ref": "main"},
+            stage="seed HTTP A",
+            method="POST",
+            payload={"name": "Process HTTP A", "url": GITHUB_URL, "ref": "main"},
         )
         if status != 200:
             raise RuntimeError(f"HTTP seed failed: {status} {imported}")
         project_id = imported["project"]["project_id"]
         baseline_index_id = imported["index"]["index"]["index_id"]
         refresh_task = asyncio.create_task(
-            asyncio.to_thread(
-                _http_json,
+            _http_request(
+                budget,
                 f"{base_a}/api/projects/{project_id}/indexes/{baseline_index_id}/github-refresh",
-                "POST",
+                stage="HTTP A refresh",
+                method="POST",
             )
         )
-        await _wait_for_gate(gate, process_a)
+        budget.set_stage("wait HTTP A download gate")
+        await _wait_for_gate(
+            gate,
+            process_a,
+            timeout=budget.remaining(),
+            stage=budget.stage,
+        )
         active = _registry_state(data_root, project_id)
         if len(active["updates"]) != 1 or active["attempt"]["status"] != "acquiring":
             raise RuntimeError(f"HTTP A active update was not preserved: {active}")
@@ -478,15 +667,23 @@ async def _scenario_http_active_mcp_conflict() -> dict[str, Any]:
         from mcp import Client
 
         _log("[offline] MCP B starts while HTTP A owns the project")
-        parameters = _mcp_parameters(data_root, [SECOND_COMMIT, SECOND_COMMIT])
-        async with Client(parameters, read_timeout_seconds=10) as client_b:
-            tools = await client_b.list_tools()
+        parameters = _mcp_parameters(
+            data_root,
+            [SECOND_COMMIT, SECOND_COMMIT],
+            release_timeout=budget.release_timeout,
+        )
+        async with Client(parameters, read_timeout_seconds=MCP_READ_TIMEOUT_SECONDS) as client_b:
+            tools = await _await_bounded(budget, client_b.list_tools(), stage="list MCP B tools")
             if not any(tool.name == "refresh_github_source" for tool in tools.tools):
                 raise RuntimeError("MCP B did not expose refresh_github_source")
             conflict = _mcp_data(
-                await client_b.call_tool(
-                    "refresh_github_source",
-                    {"project_id": project_id, "index_id": baseline_index_id},
+                await _await_bounded(
+                    budget,
+                    client_b.call_tool(
+                        "refresh_github_source",
+                        {"project_id": project_id, "index_id": baseline_index_id},
+                    ),
+                    stage="MCP B conflict request",
                 )
             )
             if conflict.get("ok") is not False or conflict.get("error", {}).get("code") != "conflict":
@@ -495,11 +692,22 @@ async def _scenario_http_active_mcp_conflict() -> dict[str, Any]:
             if len(after_b_start["updates"]) != 1 or after_b_start["attempt"]["status"] != "acquiring":
                 raise RuntimeError(f"MCP B startup interrupted HTTP A: {after_b_start}")
             _touch(release)
-            status, updated = await asyncio.wait_for(refresh_task, timeout=20)
+            status, updated = await _await_bounded(
+                budget,
+                refresh_task,
+                stage="finish HTTP A refresh",
+                timeout=20,
+            )
             refresh_task = None
             if status != 200 or updated.get("mode") != "created":
                 raise RuntimeError(f"HTTP A update failed after MCP conflict: {status} {updated}")
-            project = _mcp_data(await client_b.call_tool("get_project", {"project_id": project_id}))
+            project = _mcp_data(
+                await _await_bounded(
+                    budget,
+                    client_b.call_tool("get_project", {"project_id": project_id}),
+                    stage="MCP B verify latest",
+                )
+            )
             updated_index_id = updated["index"]["index"]["index_id"]
             if project.get("project", {}).get("latest_index_id") != updated_index_id:
                 raise RuntimeError(f"MCP B read disagreed with HTTP A: {project} vs {updated}")
@@ -510,24 +718,21 @@ async def _scenario_http_active_mcp_conflict() -> dict[str, Any]:
         return {"scenario": "http_a_mcp_b_active_conflict", "state": final}
     finally:
         _touch(release)
-        if refresh_task is not None:
-            try:
-                await asyncio.wait_for(refresh_task, timeout=5)
-            except Exception:
-                pass
-        _stop_http_process(process_a)
+        await _cancel_task(refresh_task, budget.cleanup_timeout)
+        _cleanup_http_process(process_a, timeout=budget.cleanup_timeout, label="HTTP A")
         if success:
             shutil.rmtree(data_root, ignore_errors=True)
         else:
             _log(f"[offline] retained failed scenario logs at {data_root}")
 
 
-async def _scenario_mcp_active_http_conflict() -> dict[str, Any]:
+async def _scenario_mcp_active_http_conflict(budget: _ScenarioBudget) -> dict[str, Any]:
     data_root = Path(tempfile.mkdtemp(prefix="codetrail-github-mcp-active-"))
     log_dir = data_root / "logs"
     gate = data_root / "a-download-started"
     release = data_root / "a-download-release"
     process_b: subprocess.Popen[bytes] | None = None
+    refresh_task: asyncio.Task[Any] | None = None
     success = False
     try:
         from mcp import Client
@@ -539,12 +744,17 @@ async def _scenario_mcp_active_http_conflict() -> dict[str, Any]:
             pause_download_call=2,
             gate=gate,
             release=release,
+            release_timeout=budget.release_timeout,
         )
-        async with Client(parameters_a, read_timeout_seconds=10) as client_a:
+        async with Client(parameters_a, read_timeout_seconds=MCP_READ_TIMEOUT_SECONDS) as client_a:
             imported = _mcp_data(
-                await client_a.call_tool(
-                    "import_github_repository",
-                    {"name": "Process MCP A", "url": GITHUB_URL, "ref": "main"},
+                await _await_bounded(
+                    budget,
+                    client_a.call_tool(
+                        "import_github_repository",
+                        {"name": "Process MCP A", "url": GITHUB_URL, "ref": "main"},
+                    ),
+                    stage="seed MCP A",
                 )
             )
             if not imported.get("ok"):
@@ -557,7 +767,11 @@ async def _scenario_mcp_active_http_conflict() -> dict[str, Any]:
                     {"project_id": project_id, "index_id": baseline_index_id},
                 )
             )
-            await _wait_for_gate(gate)
+            await _wait_for_gate(
+                gate,
+                timeout=budget.remaining("wait MCP A download gate"),
+                stage=budget.stage,
+            )
             active = _registry_state(data_root, project_id)
             if len(active["updates"]) != 1 or active["attempt"]["status"] != "acquiring":
                 raise RuntimeError(f"MCP A active update was not preserved: {active}")
@@ -567,11 +781,14 @@ async def _scenario_mcp_active_http_conflict() -> dict[str, Any]:
                 [SECOND_COMMIT, SECOND_COMMIT],
                 log_dir=log_dir,
                 label="http-b",
+                release_timeout=budget.release_timeout,
+                startup_timeout=min(HTTP_STARTUP_TIMEOUT_SECONDS, budget.remaining("start HTTP B")),
             )
-            status, conflict = await asyncio.to_thread(
-                _http_json,
+            status, conflict = await _http_request(
+                budget,
                 f"{base_b}/api/projects/{project_id}/indexes/{baseline_index_id}/github-refresh",
-                "POST",
+                stage="HTTP B conflict request",
+                method="POST",
             )
             if status != 409 or conflict.get("code") != "conflict":
                 raise RuntimeError(f"HTTP B did not return project conflict: {status} {conflict}")
@@ -579,11 +796,23 @@ async def _scenario_mcp_active_http_conflict() -> dict[str, Any]:
             if len(after_b_start["updates"]) != 1 or after_b_start["attempt"]["status"] != "acquiring":
                 raise RuntimeError(f"HTTP B startup interrupted MCP A: {after_b_start}")
             _touch(release)
-            updated = _mcp_data(await asyncio.wait_for(refresh_task, timeout=20))
+            updated = _mcp_data(
+                await _await_bounded(
+                    budget,
+                    refresh_task,
+                    stage="finish MCP A refresh",
+                    timeout=20,
+                )
+            )
+            refresh_task = None
             if not updated.get("ok") or updated["result"].get("mode") != "created":
                 raise RuntimeError(f"MCP A update failed after HTTP conflict: {updated}")
             updated_index_id = updated["result"]["index"]["index"]["index_id"]
-            status, project = await asyncio.to_thread(_http_json, f"{base_b}/api/projects/{project_id}")
+            status, project = await _http_request(
+                budget,
+                f"{base_b}/api/projects/{project_id}",
+                stage="HTTP B verify latest",
+            )
             if status != 200 or project.get("latest_index_id") != updated_index_id:
                 raise RuntimeError(f"HTTP B read disagreed with MCP A: {status} {project} vs {updated}")
         final = _registry_state(data_root, project_id)
@@ -593,14 +822,15 @@ async def _scenario_mcp_active_http_conflict() -> dict[str, Any]:
         return {"scenario": "mcp_a_http_b_active_conflict", "state": final}
     finally:
         _touch(release)
-        _stop_http_process(process_b)
+        await _cancel_task(refresh_task, budget.cleanup_timeout)
+        _cleanup_http_process(process_b, timeout=budget.cleanup_timeout, label="HTTP B")
         if success:
             shutil.rmtree(data_root, ignore_errors=True)
         else:
             _log(f"[offline] retained failed scenario logs at {data_root}")
 
 
-async def _scenario_exit_before_latest() -> dict[str, Any]:
+async def _scenario_exit_before_latest(budget: _ScenarioBudget) -> dict[str, Any]:
     data_root = Path(tempfile.mkdtemp(prefix="codetrail-github-exit-before-latest-"))
     log_dir = data_root / "logs"
     gate = data_root / "a-download-started"
@@ -622,46 +852,62 @@ async def _scenario_exit_before_latest() -> dict[str, Any]:
             gate=gate,
             release=release,
             crash=crash,
+            release_timeout=budget.release_timeout,
+            startup_timeout=min(HTTP_STARTUP_TIMEOUT_SECONDS, budget.remaining("start HTTP A")),
         )
-        status, imported = await asyncio.to_thread(
-            _http_json,
+        status, imported = await _http_request(
+            budget,
             f"{base_a}/api/imports/github",
-            "POST",
-            {"name": "Exit Before Latest", "url": GITHUB_URL, "ref": "main"},
+            stage="seed HTTP A",
+            method="POST",
+            payload={"name": "Exit Before Latest", "url": GITHUB_URL, "ref": "main"},
         )
         if status != 200:
             raise RuntimeError(f"HTTP seed failed: {status} {imported}")
         project_id = imported["project"]["project_id"]
         baseline_index_id = imported["index"]["index"]["index_id"]
         refresh_task = asyncio.create_task(
-            asyncio.to_thread(
-                _http_json,
+            _http_request(
+                budget,
                 f"{base_a}/api/projects/{project_id}/indexes/{baseline_index_id}/github-refresh",
-                "POST",
+                stage="HTTP A refresh",
+                method="POST",
             )
         )
-        await _wait_for_gate(gate, process_a)
+        await _wait_for_gate(
+            gate,
+            process_a,
+            timeout=budget.remaining("wait HTTP A download gate"),
+            stage=budget.stage,
+        )
         before_exit = _registry_state(data_root, project_id)
         interrupted_attempt_id = before_exit["attempt"]["attempt_id"]
         if before_exit["latest_index_id"] != baseline_index_id or len(before_exit["updates"]) != 1:
             raise RuntimeError(f"before-latest window was not captured: {before_exit}")
         _touch(crash)
-        await asyncio.to_thread(_wait_for_process_exit, process_a)
+        await asyncio.to_thread(
+            _wait_for_process_exit,
+            process_a,
+            min(10, budget.remaining("wait HTTP A exit")),
+        )
         process_a = None
-        if refresh_task is not None:
-            try:
-                await asyncio.wait_for(refresh_task, timeout=5)
-            except Exception:
-                pass
-            refresh_task = None
+        await _cancel_task(refresh_task, budget.cleanup_timeout)
+        refresh_task = None
 
+        budget.set_stage("start recovery HTTP worker")
         recovery, base_recovery, _ = _start_http_worker(
             data_root,
             [],
             log_dir=log_dir,
             label="before-latest-recovery",
+            release_timeout=budget.release_timeout,
+            startup_timeout=min(HTTP_STARTUP_TIMEOUT_SECONDS, budget.remaining()),
         )
-        status, attempt = await asyncio.to_thread(_http_json, f"{base_recovery}/api/imports/{interrupted_attempt_id}")
+        status, attempt = await _http_request(
+            budget,
+            f"{base_recovery}/api/imports/{interrupted_attempt_id}",
+            stage="read before-latest recovery",
+        )
         if status != 200 or attempt["attempt"]["status"] != "failed":
             raise RuntimeError(f"before-latest recovery did not fail the interrupted attempt: {status} {attempt}")
         recovered = _registry_state(data_root, project_id)
@@ -672,17 +918,26 @@ async def _scenario_exit_before_latest() -> dict[str, Any]:
             or recovered["attempt"]["status"] != "failed"
         ):
             raise RuntimeError(f"before-latest recovery changed old state: {recovered}")
-        _stop_http_process(recovery)
+        if not _cleanup_http_process(
+            recovery,
+            timeout=budget.cleanup_timeout,
+            label="before-latest recovery",
+        ):
+            raise RuntimeError("before-latest recovery worker could not be reclaimed")
         recovery = None
+        budget.set_stage("start second recovery HTTP worker")
         second_recovery, base_second, _ = _start_http_worker(
             data_root,
             [],
             log_dir=log_dir,
             label="before-latest-recovery-second",
+            release_timeout=budget.release_timeout,
+            startup_timeout=min(HTTP_STARTUP_TIMEOUT_SECONDS, budget.remaining()),
         )
-        status, second_attempt = await asyncio.to_thread(
-            _http_json,
+        status, second_attempt = await _http_request(
+            budget,
             f"{base_second}/api/imports/{interrupted_attempt_id}",
+            stage="read second before-latest recovery",
         )
         if status != 200 or second_attempt["attempt"]["status"] != "failed":
             raise RuntimeError(f"second before-latest restart was not idempotent: {status} {second_attempt}")
@@ -693,21 +948,21 @@ async def _scenario_exit_before_latest() -> dict[str, Any]:
         return {"scenario": "http_exit_before_latest", "state": final}
     finally:
         _touch(release)
-        if refresh_task is not None:
-            try:
-                await asyncio.wait_for(refresh_task, timeout=5)
-            except Exception:
-                pass
-        _stop_http_process(process_a)
-        _stop_http_process(recovery)
-        _stop_http_process(second_recovery)
+        await _cancel_task(refresh_task, budget.cleanup_timeout)
+        _cleanup_http_process(process_a, timeout=budget.cleanup_timeout, label="before-latest A")
+        _cleanup_http_process(recovery, timeout=budget.cleanup_timeout, label="before-latest recovery")
+        _cleanup_http_process(
+            second_recovery,
+            timeout=budget.cleanup_timeout,
+            label="before-latest second recovery",
+        )
         if success:
             shutil.rmtree(data_root, ignore_errors=True)
         else:
             _log(f"[offline] retained failed scenario logs at {data_root}")
 
 
-async def _scenario_exit_after_latest_before_registry_commit() -> dict[str, Any]:
+async def _scenario_exit_after_latest_before_registry_commit(budget: _ScenarioBudget) -> dict[str, Any]:
     data_root = Path(tempfile.mkdtemp(prefix="codetrail-github-exit-after-latest-"))
     log_dir = data_root / "logs"
     gate = data_root / "a-registry-commit-started"
@@ -729,25 +984,34 @@ async def _scenario_exit_after_latest_before_registry_commit() -> dict[str, Any]
             gate=gate,
             release=release,
             crash=crash,
+            release_timeout=budget.release_timeout,
+            startup_timeout=min(HTTP_STARTUP_TIMEOUT_SECONDS, budget.remaining("start HTTP A")),
         )
-        status, imported = await asyncio.to_thread(
-            _http_json,
+        status, imported = await _http_request(
+            budget,
             f"{base_a}/api/imports/github",
-            "POST",
-            {"name": "Exit After Latest", "url": GITHUB_URL, "ref": "main"},
+            stage="seed HTTP A",
+            method="POST",
+            payload={"name": "Exit After Latest", "url": GITHUB_URL, "ref": "main"},
         )
         if status != 200:
             raise RuntimeError(f"HTTP seed failed: {status} {imported}")
         project_id = imported["project"]["project_id"]
         baseline_index_id = imported["index"]["index"]["index_id"]
         refresh_task = asyncio.create_task(
-            asyncio.to_thread(
-                _http_json,
+            _http_request(
+                budget,
                 f"{base_a}/api/projects/{project_id}/indexes/{baseline_index_id}/github-refresh",
-                "POST",
+                stage="HTTP A refresh",
+                method="POST",
             )
         )
-        await _wait_for_gate(gate, process_a)
+        await _wait_for_gate(
+            gate,
+            process_a,
+            timeout=budget.remaining("wait HTTP A registry gate"),
+            stage=budget.stage,
+        )
         before_exit = _registry_state(data_root, project_id)
         interrupted_attempt_id = before_exit["attempt"]["attempt_id"]
         pending = before_exit["updates"]
@@ -761,22 +1025,29 @@ async def _scenario_exit_after_latest_before_registry_commit() -> dict[str, Any]
             raise RuntimeError(f"after-latest window was not captured: {before_exit}")
         recovered_index_id = before_exit["latest_index_id"]
         _touch(crash)
-        await asyncio.to_thread(_wait_for_process_exit, process_a)
+        await asyncio.to_thread(
+            _wait_for_process_exit,
+            process_a,
+            min(10, budget.remaining("wait HTTP A exit")),
+        )
         process_a = None
-        if refresh_task is not None:
-            try:
-                await asyncio.wait_for(refresh_task, timeout=5)
-            except Exception:
-                pass
-            refresh_task = None
+        await _cancel_task(refresh_task, budget.cleanup_timeout)
+        refresh_task = None
 
+        budget.set_stage("start recovery HTTP worker")
         recovery, base_recovery, _ = _start_http_worker(
             data_root,
             [],
             log_dir=log_dir,
             label="after-latest-recovery",
+            release_timeout=budget.release_timeout,
+            startup_timeout=min(HTTP_STARTUP_TIMEOUT_SECONDS, budget.remaining()),
         )
-        status, attempt = await asyncio.to_thread(_http_json, f"{base_recovery}/api/imports/{interrupted_attempt_id}")
+        status, attempt = await _http_request(
+            budget,
+            f"{base_recovery}/api/imports/{interrupted_attempt_id}",
+            stage="read after-latest recovery",
+        )
         if status != 200 or attempt["attempt"]["status"] != "ready":
             raise RuntimeError(f"after-latest recovery did not complete the attempt: {status} {attempt}")
         recovered = _registry_state(data_root, project_id)
@@ -788,17 +1059,26 @@ async def _scenario_exit_after_latest_before_registry_commit() -> dict[str, Any]
             or recovered["attempt"]["index_id"] != recovered_index_id
         ):
             raise RuntimeError(f"after-latest recovery did not converge: {recovered}")
-        _stop_http_process(recovery)
+        if not _cleanup_http_process(
+            recovery,
+            timeout=budget.cleanup_timeout,
+            label="after-latest recovery",
+        ):
+            raise RuntimeError("after-latest recovery worker could not be reclaimed")
         recovery = None
+        budget.set_stage("start second recovery HTTP worker")
         second_recovery, base_second, _ = _start_http_worker(
             data_root,
             [],
             log_dir=log_dir,
             label="after-latest-recovery-second",
+            release_timeout=budget.release_timeout,
+            startup_timeout=min(HTTP_STARTUP_TIMEOUT_SECONDS, budget.remaining()),
         )
-        status, second_attempt = await asyncio.to_thread(
-            _http_json,
+        status, second_attempt = await _http_request(
+            budget,
             f"{base_second}/api/imports/{interrupted_attempt_id}",
+            stage="read second after-latest recovery",
         )
         if status != 200 or second_attempt["attempt"]["status"] != "ready":
             raise RuntimeError(f"second after-latest restart was not idempotent: {status} {second_attempt}")
@@ -809,14 +1089,14 @@ async def _scenario_exit_after_latest_before_registry_commit() -> dict[str, Any]
         return {"scenario": "http_exit_after_latest_before_registry_commit", "state": final}
     finally:
         _touch(release)
-        if refresh_task is not None:
-            try:
-                await asyncio.wait_for(refresh_task, timeout=5)
-            except Exception:
-                pass
-        _stop_http_process(process_a)
-        _stop_http_process(recovery)
-        _stop_http_process(second_recovery)
+        await _cancel_task(refresh_task, budget.cleanup_timeout)
+        _cleanup_http_process(process_a, timeout=budget.cleanup_timeout, label="after-latest A")
+        _cleanup_http_process(recovery, timeout=budget.cleanup_timeout, label="after-latest recovery")
+        _cleanup_http_process(
+            second_recovery,
+            timeout=budget.cleanup_timeout,
+            label="after-latest second recovery",
+        )
         if success:
             shutil.rmtree(data_root, ignore_errors=True)
         else:
@@ -860,6 +1140,28 @@ def _try_public_github() -> dict[str, Any]:
         shutil.rmtree(data_root, ignore_errors=True)
 
 
+async def _run_scenario(
+    name: str,
+    scenario: Any,
+    *,
+    scenario_timeout: float,
+    release_timeout: float,
+) -> dict[str, Any]:
+    budget = _ScenarioBudget(name, scenario_timeout, release_timeout)
+    try:
+        return await asyncio.wait_for(
+            scenario(budget),
+            timeout=scenario_timeout,
+        )
+    except _ScenarioTimeout:
+        raise
+    except asyncio.TimeoutError as exc:
+        raise _ScenarioTimeout(
+            f"scenario={name} stage={budget.stage} exceeded "
+            f"the {scenario_timeout:.1f}s total timeout"
+        ) from exc
+
+
 async def _run_parent(args: argparse.Namespace) -> None:
     scenarios = {
         "http-a-mcp-b": _scenario_http_active_mcp_conflict,
@@ -871,7 +1173,18 @@ async def _run_parent(args: argparse.Namespace) -> None:
     results: list[dict[str, Any]] = []
     for name in selected:
         _log(f"[offline] starting scenario {name}")
-        results.append(await scenarios[name]())
+        try:
+            results.append(
+                await _run_scenario(
+                    name,
+                    scenarios[name],
+                    scenario_timeout=args.scenario_timeout,
+                    release_timeout=args.release_timeout,
+                )
+            )
+        except _ScenarioTimeout as exc:
+            _log(f"[offline] bounded scenario failure: {exc}")
+            raise
     result: dict[str, Any] = {"offline": results}
     if args.public_github:
         result["public_github"] = await asyncio.to_thread(_try_public_github)
@@ -880,13 +1193,35 @@ async def _run_parent(args: argparse.Namespace) -> None:
     print(json.dumps(result, ensure_ascii=False, indent=2), flush=True)
 
 
+def _positive_float(value: str) -> float:
+    try:
+        parsed = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a number") from exc
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be positive")
+    return parsed
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--worker", choices=("http", "mcp"))
     parser.add_argument(
         "--scenario",
         choices=("all", "http-a-mcp-b", "mcp-a-http-b", "before-latest", "after-latest"),
-        default="all",
+        default="http-a-mcp-b",
+    )
+    parser.add_argument(
+        "--scenario-timeout",
+        type=_positive_float,
+        default=DEFAULT_SCENARIO_TIMEOUT_SECONDS,
+        help="total parent timeout per selected scenario (default: 90s)",
+    )
+    parser.add_argument(
+        "--release-timeout",
+        type=_positive_float,
+        default=DEFAULT_RELEASE_TIMEOUT_SECONDS,
+        help="worker release-gate timeout (default: 30s)",
     )
     parser.add_argument("--public-github", action="store_true")
     parser.add_argument("--data-root")
@@ -904,7 +1239,11 @@ def _parser() -> argparse.ArgumentParser:
 def main() -> None:
     args = _parser().parse_args()
     if args.worker is None:
-        asyncio.run(_run_parent(args))
+        try:
+            asyncio.run(_run_parent(args))
+        except _ScenarioTimeout as exc:
+            _log(f"[offline] FAILED: {exc}")
+            raise SystemExit(2) from exc
         return
     if not args.data_root:
         raise SystemExit("--data-root is required in worker mode")

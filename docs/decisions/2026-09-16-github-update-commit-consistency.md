@@ -22,9 +22,11 @@ GitHub 更新同时改变不可变 index 库中的项目 latest，以及管理�
 ## 验收与证据
 
 - `apps/api/tests/test_github.py` 受控交错测试验证独立服务实例中旧请求不能覆盖新 latest/source，历史复用 CAS 冲突不改写来源 identity；registry 提交故障测试验证候选 latest、持久化意图、owner 释放和重启补提交。
-- `apps/api/tests/test_process_liveness.py` 使用伪造 Win32 API 验证存活/退出/权限失败、句柄关闭、无信号分派和 unknown 恢复保护；本轮 5 passed，GitHub/storage 回归 32 passed。新增 `scripts/verify-github-process-lifecycle.py` 提供单场景、阶段日志、无控制台 HTTP worker 和显式公网开关，但本轮不运行真实子进程。
-- GitHub、freshness、storage、MCP 定向回归为 `57 passed`；后端全量 `uv run pytest -q` 为 `180 passed`，Python `compileall`、`pnpm docs:check`、`pnpm docs:check:local` 和 `git diff --check` 通过。
-- 既有同 commit 复用、分支变化、规则升级、旧 Session/evidence 保留、cleanup 重试、HTTP/MCP 归属和错误契约继续由原有回归覆盖。真实 HTTP/MCP 双进程、浏览器联合流程、GitHub 公网和真实供应商语义质量仍未验证。
+- `apps/api/tests/test_process_liveness.py` 使用伪造 Win32 API 验证存活/退出/权限失败、句柄关闭、无信号分派和 unknown 恢复保护；`apps/api/tests/test_github_process_lifecycle_script.py` 另验证 release 超时、阶段报告、默认单场景和 worker 回收/日志保留。本轮受影响的 process_liveness/GitHub/storage/脚本定向回归为 41 passed。`scripts/verify-github-process-lifecycle.py` 的 worker 参数在边界统一转换为 `Path`，提供单调 release deadline、每场景总超时、阶段日志、无控制台 HTTP worker、受控失败日志和显式公网开关。
+- 既有 GitHub、freshness、storage、MCP 定向回归为 `57 passed`，既有后端全量为 `180 passed`；本轮新增脚本回归与受影响存储/生命周期定向回归为 `41 passed`，并重新通过 Python 编译、文档检查和 diff 检查。
+- 本轮显式运行 `--scenario all`，四个真实 HTTP/MCP 进程场景均通过：双向活动更新冲突、latest CAS 前退出恢复、latest CAS 后管理库提交前退出恢复及第二次重启幂等；每个场景最终无 pending `project_updates`、无 `building_index_id`，并保留与预期一致的 latest/source/attempt。默认不运行 `all`，公网仍需显式 `--public-github`。浏览器联合流程、GitHub 公网和真实供应商语义质量仍未验证。
+- 脚本中的 HTTP 请求在 `asyncio.to_thread` 中执行；取消等待不会停止已运行线程，故 `_http_json` 保持独立 5 秒 socket 超时，worker 进程则由受控 cleanup 单独回收。浏览器联合流程、GitHub 公网和真实供应商语义质量仍未验证。
+- 既有同 commit 复用、分支变化、规则升级、旧 Session/evidence 保留、cleanup 重试、HTTP/MCP 归属和错误契约继续由原有回归覆盖；本轮不引用历史全量 180 项作为本轮证据。
 
 ## 后果
 
