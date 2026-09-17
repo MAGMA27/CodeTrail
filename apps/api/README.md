@@ -41,7 +41,7 @@ fixture Run 继续接受三个场景：候选、证据不足和工具失败。re
 
 ## 使用与配置
 
-从仓库根目录启动当前 API 与 Codex external 联合验收环境；脚本固定使用 `D:/Dev/CodeTrail-runtime`，从该服务数据目录读取已注册 managed source，不需要手工设置临时环境变量。完整步骤见 [MVP 操作说明](../../docs/mvp-operation.md)：
+从仓库根目录启动当前 API 与 Codex external 联合验收环境；脚本使用仓库根目录下的 `.codetrail-runtime`，从该服务数据目录读取已注册 managed source，不需要手工设置临时环境变量。完整步骤见 [MVP 操作说明](../../docs/mvp-operation.md)：
 
 ```powershell
 pwsh -File .\scripts\start-local.ps1 -Service api
@@ -98,7 +98,7 @@ args = ["run", "--directory", "D:/Dev/CodeTrail/apps/api", "python", "-m", "app.
 startup_timeout_sec = 120
 
 [mcp_servers.codetrail.env]
-CODETRAIL_DATA_DIR = "D:/Dev/CodeTrail-runtime"
+CODETRAIL_DATA_DIR = "D:/Dev/CodeTrail/.codetrail-runtime"
 CODETRAIL_REPOSITORIES = "{}" # 使用 CODETRAIL_DATA_DIR 中已注册的 managed source
 CODETRAIL_WORKBENCH_URL = "http://localhost:3000"
 CODETRAIL_MCP_EXTERNAL_RUN_ENABLED = "1"

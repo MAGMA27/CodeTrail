@@ -4,7 +4,7 @@
 
 ## 启动 API 与工作台
 
-本地联合演示固定使用 `D:/Dev/CodeTrail-runtime` 作为服务管理目录。该目录中的已注册 managed source、Project、Index、Session 和 Run 会被 API 与 Codex MCP 共同读取；启动脚本不会创建、清空或迁移数据，也不需要在当前 PowerShell 会话中手工设置临时环境变量。
+本地联合演示使用仓库根目录下被 Git 忽略的 `.codetrail-runtime` 作为服务管理目录（当前路径为 `D:/Dev/CodeTrail/.codetrail-runtime`）。该目录中的已注册 managed source、Project、Index、Session 和 Run 会被 API 与 Codex MCP 共同读取；启动脚本不会创建或清空数据，也不需要在当前 PowerShell 会话中手工设置临时环境变量。
 
 从仓库根目录启动 API：
 
@@ -36,7 +36,7 @@ MCP `get_overview` 使用同一 `project_id`、`index_id`、结构规则和预�
 
 ## 加载 Codex MCP
 
-当前 Codex 主机的 `codetrail` stdio 配置已经使用与 API 相同的代码目录、`D:/Dev/CodeTrail-runtime` 和 `CODETRAIL_MCP_EXTERNAL_RUN_ENABLED=1`；配置示例和完整字段见 [API README](../apps/api/README.md)。MCP 进程在启动时加载代码和工具契约，因此代码更新后只需对 `codetrail` MCP 做一次 reload（如果宿主没有单独的 reload，则重启 Codex 一次）。不要通过清空数据或手工填写项目/索引 ID 来修复版本不一致。external Run 不需要真实模型供应商密钥。
+当前 Codex 主机的 `codetrail` stdio 配置已经使用与 API 相同的代码目录、`D:/Dev/CodeTrail/.codetrail-runtime` 和 `CODETRAIL_MCP_EXTERNAL_RUN_ENABLED=1`；配置示例和完整字段见 [API README](../apps/api/README.md)。MCP 进程在启动时加载代码和工具契约，因此代码更新后只需对 `codetrail` MCP 做一次 reload（如果宿主没有单独的 reload，则重启 Codex 一次）。不要通过清空数据或手工填写项目/索引 ID 来修复版本不一致。external Run 不需要真实模型供应商密钥。
 
 2026-09-14 reload 前曾发现宿主旧 MCP 进程返回 `python-entry-v1`；本轮重载后已由实际 Codex MCP 重新通过 `list_projects`/`get_overview` 发现目标，并返回 `python-entry-v4`、结构组和模块关系。当前联合验收结果以本节停止后复现步骤和本轮实际 HTTP/MCP/工作台对照为准，不把旧响应当作当前状态。
 

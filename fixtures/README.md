@@ -5,6 +5,8 @@
 ## 目录
 
 - `repos/timeout-demo/`：被分析的固定 Python 仓库，索引根目录指向这里。只依赖 Python 标准库。
+- `repos/object-method-demo/`：直接构造对象后调用实例方法的正例与重绑定 unresolved 反例，供关系解析测试和人工验收使用。
+- `repos/relation-upgrade-demo/`：关系语义版本升级用的最小 Python 仓库，供旧索引升级验收使用。
 - `scenarios/issues/`：只包含用户可见的 Issue 输入，不包含预期答案。
 - `scenarios/success-timeout-missing/`：缺少 `timeout` 的成功定位场景。
 - `scenarios/insufficient-external-service/`：样本没有外部服务证据的证据不足场景。
@@ -14,6 +16,8 @@
 - `../contracts/schemas/codetrail.json`：版本为 `0.1.0` 的聚合 JSON Schema。
 
 每个场景目录的 `scenario.json` 具有稳定场景 ID，并引用独立的 Issue、演示控制和预期结果文件。工具失败场景的 `read_source` 注入由本地 Run 执行器实际驱动，仍只允许 fixture 模式，不代表真实供应商或任意仓库执行已经开放。
+
+fixture 仓库只保留源码；`.codetrail` 索引、`__pycache__` 和运行数据库均为可重新生成的本地产物，不进入 fixture 归档。
 
 ## 已知 Bug 与复现
 

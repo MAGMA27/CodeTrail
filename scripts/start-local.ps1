@@ -5,7 +5,7 @@ param(
 )
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$runtimeRoot = "D:\Dev\CodeTrail-runtime"
+$runtimeRoot = Join-Path $repoRoot ".codetrail-runtime"
 
 Set-Location -LiteralPath $repoRoot
 

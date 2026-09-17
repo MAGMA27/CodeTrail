@@ -38,7 +38,7 @@ Run 拒绝空消息、跨 Project/Session/Index/Generation、不合法 cutoff �
 
 ## 使用与配置
 
-当前本地联合环境使用 [共享启动脚本](../../scripts/start-local.ps1)，固定让 API 使用 `D:/Dev/CodeTrail-runtime` 中已有的 managed source；API 与 Codex MCP 必须共用该目录。完整步骤见 [MVP 操作说明](../mvp-operation.md)：
+当前本地联合环境使用 [共享启动脚本](../../scripts/start-local.ps1)，让 API 使用仓库根目录下 `.codetrail-runtime` 中已有的 managed source；API 与 Codex MCP 必须共用该目录。完整步骤见 [MVP 操作说明](../mvp-operation.md)：
 
 ```powershell
 pwsh -File .\scripts\start-local.ps1 -Service api

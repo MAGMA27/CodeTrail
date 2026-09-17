@@ -10,7 +10,7 @@ Status: implemented
 
 ## 决定
 
-1. 本地联合演示统一使用现有 `D:/Dev/CodeTrail-runtime` 作为服务管理目录。API 设置 `CODETRAIL_REPOSITORIES={}`，从该目录读取已有 managed source 和项目数据；不创建、清空或迁移目录。
+1. 本地联合演示统一使用仓库根目录下被 Git 忽略的 `.codetrail-runtime` 作为服务管理目录。原 `D:/Dev/CodeTrail-runtime` 中的 managed source 和项目数据已于 2026-09-17 完整迁入新位置；API 仍设置 `CODETRAIL_REPOSITORIES={}`，不清空历史数据。
 2. 新增 `scripts/start-local.ps1`，用 `-Service api|web` 在两个独立终端启动服务。API 侧固定共享目录、工作台来源和 external Run 开关；不引入进程管理器、后台队列或手工 ID。
 3. Codex 的 `codetrail` stdio 配置继续使用当前仓库 `apps/api` 和同一共享目录。MCP 进程缓存代码和工具契约，源码更新后只需要一次宿主 reload；宿主 reload 是外部操作，不由仓库脚本杀掉其他 MCP 实例。
 4. 结构总览通过项目/索引列表发现 `CodeTrail 自用验收` 的最新 `relations-v2` ready index；external Run 验收读取已有完成报告，报告仍绑定自己的固定旧 index，不能与最新结构 index 混用。
@@ -30,4 +30,4 @@ Status: implemented
 
 ## 后果
 
-共享目录和脚本减少了启动漂移，但运行目录仍是本机外部持久数据，不纳入 Git。脚本只保证 API/工作台启动参数一致，不能替代 Codex 宿主 reload。`memory-bank/` 继续 Git 忽略，`next.md` 由用户控制，不由本决策或实现自动更新。
+共享目录和脚本减少了启动漂移，运行目录现在位于仓库根目录下并由 Git 忽略，不纳入 Git。脚本只保证 API/工作台启动参数一致，不能替代 Codex 宿主 reload。`memory-bank/` 继续 Git 忽略，`next.md` 由用户控制，不由本决策或实现自动更新。
