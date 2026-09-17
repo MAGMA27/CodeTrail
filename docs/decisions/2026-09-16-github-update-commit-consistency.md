@@ -8,7 +8,7 @@ GitHub 更新同时改变不可变 index 库中的项目 latest，以及管理�
 
 ## 决定
 
-1. ManagementStore 增加 `project_updates` 持久化提交意图，并以 `project_id` 唯一约束作为跨进程准入保护。记录 expected latest、owner PID、attempt、候选 immutable index、目标 GitHub source metadata 和 `building`/`latest_committed` 阶段；服务启动只恢复 owner 已死亡的记录，同一活动进程的记录不会被另一个服务实例误标记为中断。
+1. ManagementStore 增加 `project_updates` 持久化提交意图，并以 `project_id` 唯一约束作为跨进程准入保护。记录 expected latest、owner PID、attempt、候选 immutable index、目标 GitHub source metadata 和 `building`/`latest_committed` 阶段；服务启动只恢复 owner 明确已退出的记录。owner 探测使用 `alive`/`exited`/`unknown` 三态：Windows 通过只读进程句柄等待状态查询，POSIX 才使用平台限定的无信号探测；权限不足或未知错误保持 `unknown`，不会误恢复活动进程。
 2. 所有项目索引创建、本地显式更新、GitHub 新 commit/历史复用/重试都沿用原始 expected latest：先在当前 project 上复核，再将 expected 传入下载后的构建、历史复用的 `finish_project_index` 和最终 CAS。候选 index 可以先成为不可变快照，但只有带 expected 检查的 `finish_project_index` 才能推进 latest；来源 identity 不在 CAS 之前改写。
 3. latest CAS 成功后，ManagementStore 在一个 `BEGIN IMMEDIATE` 事务中同时写入 GitHub source identity、attempt ready/index/hash 并删除提交意图。两库之间短暂的 latest/source 可见窗口由持久化意图解释；若 registry 提交失败，owner 被释放并保留意图，重启时若候选仍是当前 ready latest 则补提交，否则只将本次 attempt 失败并终止意图，绝不回滚或覆盖其他请求已提交的 latest/source。清理状态继续独立记录，清理失败可重试且不改变成功提交事实。
 4. 下载失败、构建失败、CAS 冲突、作用域错误和存储故障均通过现有 ServiceError/attempt 状态呈现；恢复流程只依据已持久化阶段决定完成或终止，不通过随机压力循环或盲目回滚推断状态。项目级持久化占用冲突返回可解释的 conflict，待持有者结束或服务重启恢复后再重试。
@@ -22,9 +22,10 @@ GitHub 更新同时改变不可变 index 库中的项目 latest，以及管理�
 ## 验收与证据
 
 - `apps/api/tests/test_github.py` 受控交错测试验证独立服务实例中旧请求不能覆盖新 latest/source，历史复用 CAS 冲突不改写来源 identity；registry 提交故障测试验证候选 latest、持久化意图、owner 释放和重启补提交。
+- `apps/api/tests/test_process_liveness.py` 使用伪造 Win32 API 验证存活/退出/权限失败、句柄关闭、无信号分派和 unknown 恢复保护；本轮 5 passed，GitHub/storage 回归 32 passed。新增 `scripts/verify-github-process-lifecycle.py` 提供单场景、阶段日志、无控制台 HTTP worker 和显式公网开关，但本轮不运行真实子进程。
 - GitHub、freshness、storage、MCP 定向回归为 `57 passed`；后端全量 `uv run pytest -q` 为 `180 passed`，Python `compileall`、`pnpm docs:check`、`pnpm docs:check:local` 和 `git diff --check` 通过。
-- 既有同 commit 复用、分支变化、规则升级、旧 Session/evidence 保留、cleanup 重试、HTTP/MCP 归属和错误契约继续由原有回归覆盖。真实 GitHub 公网与真实供应商语义质量仍未验证。
+- 既有同 commit 复用、分支变化、规则升级、旧 Session/evidence 保留、cleanup 重试、HTTP/MCP 归属和错误契约继续由原有回归覆盖。真实 HTTP/MCP 双进程、浏览器联合流程、GitHub 公网和真实供应商语义质量仍未验证。
 
 ## 后果
 
-每个项目同一时刻最多一个索引更新意图，跨进程竞争从“可能覆盖”变为 conflict；进程异常后的首次新服务启动会执行有界恢复。由于 latest 和 source 位于不同数据库，恢复前可能短暂看到“latest 已变、source identity 尚未更新”，但 pending intent 可解释该状态，重启会完成或终止它；不存在把新 commit 配到旧 latest 的成功提交路径。未完成恢复的意图会暂时阻止同项目的新更新，避免在状态不明时继续叠加写入。
+每个项目同一时刻最多一个索引更新意图，跨进程竞争从“可能覆盖”变为 conflict；进程异常后的首次新服务启动会执行有界恢复。由于 latest 和 source 位于不同数据库，恢复前可能短暂看到“latest 已变、source identity 尚未更新”，但 pending intent 可解释该状态，重启会完成或终止它；不存在把新 commit 配到旧 latest 的成功提交路径。Windows 或 POSIX owner 探测无法确认时保留意图并保护对应 active attempt，避免把未知状态误标为中断；未完成恢复的意图会暂时阻止同项目的新更新，避免在状态不明时继续叠加写入。

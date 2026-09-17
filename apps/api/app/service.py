@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ctypes
 import hashlib
 import ipaddress
 import json
@@ -15,7 +16,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Callable, Literal, TypeVar
+from typing import Any, Callable, Literal, TypeVar
 from uuid import uuid4
 
 from .contracts import (
@@ -172,6 +173,14 @@ class ServiceError(RuntimeError):
 
 _ACTIVE_PROJECT_UPDATE_OPERATIONS: set[str] = set()
 _ACTIVE_PROJECT_UPDATE_OPERATIONS_LOCK = threading.Lock()
+
+_ProcessLiveness = Literal["alive", "exited", "unknown"]
+_WINDOWS_SYNCHRONIZE = 0x00100000
+_WINDOWS_WAIT_OBJECT_0 = 0x00000000
+_WINDOWS_WAIT_TIMEOUT = 0x00000102
+_WINDOWS_WAIT_FAILED = 0xFFFFFFFF
+_WINDOWS_ERROR_INVALID_PARAMETER = 87
+_WINDOWS_ERROR_NOT_FOUND = 1168
 
 
 @dataclass(frozen=True)
@@ -594,6 +603,89 @@ _LEGACY_REBUILDABLE_FRESHNESS_REASONS: frozenset[FreshnessReasonCode] = frozense
         "source_changed",
     }
 )
+
+
+def _windows_process_liveness(pid: int, *, kernel32: Any | None = None) -> _ProcessLiveness:
+    """Query a Windows process without generating a console control event."""
+
+    if pid <= 0:
+        logger.warning("cannot query owner process with invalid PID %s", pid)
+        return "unknown"
+
+    try:
+        from ctypes import wintypes
+
+        if kernel32 is None:
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        open_process = kernel32.OpenProcess
+        open_process.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        open_process.restype = wintypes.HANDLE
+        wait_for_single_object = kernel32.WaitForSingleObject
+        wait_for_single_object.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        wait_for_single_object.restype = wintypes.DWORD
+        close_handle = kernel32.CloseHandle
+        close_handle.argtypes = [wintypes.HANDLE]
+        close_handle.restype = wintypes.BOOL
+        handle = open_process(_WINDOWS_SYNCHRONIZE, False, pid)
+    except Exception:
+        logger.warning("could not query owner process %s on Windows", pid, exc_info=True)
+        return "unknown"
+
+    if not handle:
+        error_code = ctypes.get_last_error()
+        if error_code in {_WINDOWS_ERROR_INVALID_PARAMETER, _WINDOWS_ERROR_NOT_FOUND}:
+            return "exited"
+        logger.warning(
+            "could not open owner process %s on Windows (error=%s)",
+            pid,
+            error_code,
+        )
+        return "unknown"
+
+    state: _ProcessLiveness = "unknown"
+    try:
+        wait_result = wait_for_single_object(handle, 0)
+        if wait_result == _WINDOWS_WAIT_TIMEOUT:
+            state = "alive"
+        elif wait_result == _WINDOWS_WAIT_OBJECT_0:
+            state = "exited"
+        elif wait_result == _WINDOWS_WAIT_FAILED:
+            logger.warning("could not wait for owner process %s on Windows", pid)
+        else:
+            logger.warning(
+                "owner process %s returned unknown Windows wait result %s",
+                pid,
+                wait_result,
+            )
+    except Exception:
+        logger.warning("could not inspect owner process %s on Windows", pid, exc_info=True)
+    finally:
+        try:
+            if not close_handle(handle):
+                logger.warning("could not close owner process handle for PID %s", pid)
+        except Exception:
+            logger.warning("could not close owner process handle for PID %s", pid, exc_info=True)
+    return state
+
+
+def _process_liveness(pid: int) -> _ProcessLiveness:
+    """Return process state conservatively; unknown never means safe to recover."""
+
+    if pid <= 0:
+        logger.warning("cannot query owner process with invalid PID %s", pid)
+        return "unknown"
+    if os.name == "nt":
+        return _windows_process_liveness(pid)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return "exited"
+    except PermissionError:
+        return "alive"
+    except OSError:
+        logger.warning("could not query owner process %s", pid, exc_info=True)
+        return "unknown"
+    return "alive"
 
 
 @dataclass(frozen=True)
@@ -2675,19 +2767,17 @@ class WorkspaceService:
             logger.warning("could not persist recovered GitHub cleanup for %s", attempt_id, exc_info=True)
 
     @staticmethod
-    def _project_update_owner_is_alive(operation: ProjectUpdateRecord) -> bool:
+    def _project_update_owner_liveness(operation: ProjectUpdateRecord) -> _ProcessLiveness:
         if operation.owner_pid is None:
-            return False
+            return "exited"
         if operation.owner_pid == os.getpid():
             with _ACTIVE_PROJECT_UPDATE_OPERATIONS_LOCK:
-                return operation.operation_id in _ACTIVE_PROJECT_UPDATE_OPERATIONS
-        try:
-            os.kill(operation.owner_pid, 0)
-        except PermissionError:
-            return True
-        except (OSError, ProcessLookupError):
-            return False
-        return True
+                return (
+                    "alive"
+                    if operation.operation_id in _ACTIVE_PROJECT_UPDATE_OPERATIONS
+                    else "exited"
+                )
+        return _process_liveness(operation.owner_pid)
 
     def create_project_index(
         self,
@@ -4149,25 +4239,36 @@ class WorkspaceService:
     def _recover_interrupted_builds(self) -> None:
         self._ensure_managed_projects()
         updates = self.registry.management_store.list_project_updates()
+        owner_states = {
+            operation.operation_id: self._project_update_owner_liveness(operation)
+            for operation in updates
+        }
         for operation in updates:
-            if not self._project_update_owner_is_alive(operation):
+            owner_state = owner_states[operation.operation_id]
+            if owner_state == "exited":
                 self._recover_project_update(operation)
+            elif owner_state == "unknown":
+                logger.warning(
+                    "leaving project update %s in place because owner PID %s could not be verified",
+                    operation.operation_id,
+                    operation.owner_pid,
+                )
 
         remaining_updates = self.registry.management_store.list_project_updates()
-        alive_project_ids = tuple(
+        protected_project_ids = tuple(
             operation.project_id
             for operation in remaining_updates
-            if self._project_update_owner_is_alive(operation)
+            if self._project_update_owner_liveness(operation) != "exited"
         )
         self.registry.management_store.mark_active_attempts_interrupted(
-            exclude_project_ids=alive_project_ids,
+            exclude_project_ids=protected_project_ids,
         )
         for repository_id in self.registry.repository_ids:
             database_path = self.registry.storage_root_for(repository_id) / ".codetrail" / "index.sqlite3"
             if not database_path.is_file():
                 continue
             with self.registry.store_for_repository(repository_id) as store:
-                store.recover_building_projects(exclude_project_ids=alive_project_ids)
+                store.recover_building_projects(exclude_project_ids=protected_project_ids)
 
     def _recover_interrupted_runs(self) -> None:
         """Close persisted queued/running Runs before accepting new work."""

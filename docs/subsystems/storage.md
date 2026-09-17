@@ -20,7 +20,7 @@
 
 ## 数据与生命周期
 
-索引更新还在 ManagementStore 的 `project_updates` 中保留跨数据库提交意图。该表以 `project_id` 唯一约束串行化项目更新，记录 expected latest、owner PID、attempt、候选 immutable index、GitHub source identity 和阶段；服务启动只处理 owner 已死亡的记录。应用服务将 expected 贯穿源码检查、下载、构建、历史复用和 `finish_project_index` 的 CAS，候选快照可以先写入但不会绕过 latest 校验。latest CAS 成功后，管理库用一个 `BEGIN IMMEDIATE` 事务写入 source identity、attempt ready/index/hash 并删除意图；跨库中断时，当前 latest 若仍是候选 ready 快照则补提交，否则终止意图且不回滚其他 writer。恢复前的短暂 source/latest 差异由该意图解释，待恢复意图会阻止同项目继续更新。
+索引更新还在 ManagementStore 的 `project_updates` 中保留跨数据库提交意图。该表以 `project_id` 唯一约束串行化项目更新，记录 expected latest、owner PID、attempt、候选 immutable index、GitHub source identity 和阶段；服务启动只处理 owner 明确已退出的记录。owner 探测为 `alive`、`exited`、`unknown` 三态：Windows 使用 `OpenProcess(SYNCHRONIZE)` 与 `WaitForSingleObject(..., 0)` 的只读句柄查询并始终关闭句柄，POSIX 才使用平台限定的无信号探测；权限不足、未知错误或查询失败保持 `unknown`，不会触发恢复。应用服务将 expected 贯穿源码检查、下载、构建、历史复用和 `finish_project_index` 的 CAS，候选快照可以先写入但不会绕过 latest 校验。latest CAS 成功后，管理库用一个 `BEGIN IMMEDIATE` 事务写入 source identity、attempt ready/index/hash 并删除意图；跨库中断时，当前 latest 若仍是候选 ready 快照则补提交，否则终止意图且不回滚其他 writer。恢复前的短暂 source/latest 差异由该意图解释，待恢复意图会阻止同项目继续更新。
 
 `index_snapshots` 以 nullable 的 `rules_version`、`configuration_hash` 兼容旧数据库；`definition_cache` 和 `relation_cache` 分别以 scope、repository、路径、源码 hash、对应事实规则、Python AST 版本和配置 hash 做复合键，值为带格式版本的严格 JSON，并记录 UTF-8 字节数。关系事实包含导入 alias、作用域绑定/遮蔽、构造赋值/失效事件、类继承/装饰器安全标记、有序调用目标和位置，不保存 AST、旧 index 或最终跨文件边。`rules_version` 记录当前关系语义 `relations-v3` 的来源规则组合，`configuration_hash` 同时绑定构建配置与关系语义；`relations-v4` 是新 immutable index 的构建身份，旧语义 index 不会因源码 hash 相同而被当前 freshness/历史兼容查询选中。`load_snapshot_manifest` 只读取基准快照的路径/大小/hash 和 snapshot issues，不把当前工作树写入数据库。显式更新从应用服务获得 expected latest 后写入新快照；完整安全扫描下旧 metadata 可与源码/规则/配置变化一起触发修复，安全扫描原因不满足时拒绝；`finish_project_index` 在 IMMEDIATE 事务中再次检查 latest，冲突时保留旧关联。两类缓存只在 index 成功提交后以独立 IMMEDIATE 事务写入，并按每个 scope/repository 合计的条目数和字节数清理；缓存事务回滚或读取坏行只影响后续解析，不影响历史 index、Session/Run/evidence。创建 Run 的事务校验 Session 与固定 index，保存完整连续的已保存消息前缀、cutoff、hash 和字符用量；后续追加消息不修改 run_inputs。应用服务在内部 Run 事务前从进程内执行器预留容量，容量失败不进入存储；external Run 不预留内部容量。存储异常或唯一冲突都会释放预留。`runs_active_session` 部分唯一索引限制每个 Session 同时只有一个 queued/running Run，`runs_idempotency` 绑定 project/session/idempotency key 与请求指纹。事件以 `(run_id, sequence)` 连续递增；工具完成事件与结果同事务写入并更新预算，外部 request_id 通过已持久化的开始事件和结果复用；终态事件与报告、Run 终态同事务写入。
 
@@ -28,13 +28,13 @@
 
 ## 错误与限制
 
-项目更新的持久化准入冲突返回 conflict；下载/构建失败或 latest CAS 冲突不会改写旧 source identity/latest。管理库提交失败不会被当作成功，意图会释放 owner 并等待下一次服务启动按候选 ready latest 恢复或终止；清理状态单独保留，清理失败不撤销已经提交的 latest。两套 SQLite 没有跨库原子事务，因此恢复前可能存在可解释的短暂可见差异，但不会通过回滚覆盖其他请求。
+项目更新的持久化准入冲突返回 conflict；下载/构建失败或 latest CAS 冲突不会改写旧 source identity/latest。管理库提交失败不会被当作成功，意图会释放 owner 并等待下一次服务启动按候选 ready latest 恢复或终止；清理状态单独保留，清理失败不撤销已经提交的 latest。两套 SQLite 没有跨库原子事务，因此恢复前可能存在可解释的短暂可见差异，但不会通过回滚覆盖其他请求。owner 无法确认时不会把 active attempt 标为 interrupted，意图继续作为项目级 conflict 保护状态。
 
 Run 持久化限制工具调用、模型调用/修复、单次/总源码行、输入/输出字符、模型输入/输出字符、事件和时间预算；external Run 不走内部并发槽位，但仍受相同工具、源码、输出、事件和创建时间预算。定义描述和关系事实缓存默认每个 scope/repository 合计最多 5,000 条和 16 MiB，单行 UTF-8 字节数、格式版本、路径、行号和事实形状均复核；坏行按未命中，写入/清理失败不回滚已提交 index。新鲜度检查还受文件数、总字节和时间预算约束；扫描完整且仅有旧 metadata 与源码/规则/配置变化时允许显式重建，读取错误、来源不可用、路径/符号链接异常、TOCTOU 或预算原因仍返回未知且不覆盖 latest。变化路径列表另有 100 条展示上限，不能把路径列表截断误读为扫描不完整。关系扫描达到时间或静态边预算时才设置 `index_truncated`；unresolved 达到详情上限则只设置 `index_unresolved_truncated` 并继续扫描静态边。旧索引的 unresolved 列为 NULL，查询透传为未知；邻接查询自身的 `truncated`/`truncation_reason` 只表示本次节点、边、时间或输出边界。事件页最多 100 条、工具结果页最多 40 条、Run 历史最多 40 条，游标绑定 project/session/run。影响查询默认/最大深度为 2、节点最多 40、边最多 80、路径和 unresolved 最多 40，且有时间与输出字节边界；root 不计入 reachable_node_count，重复节点和多路径去重，循环不展开为重复符号路径。唯一约束冲突映射为 conflict，坏 scope 映射为 not_found，输入或预算违反映射为 invalid_input/budget_exceeded；执行器容量满在落库前映射为可重试的 budget_exceeded/429；终态后写工具结果、事件和模型用量会被拒绝或忽略。SSE 连接/单 Run 订阅、批次、事件字节、心跳和生命周期也有独立上限，游标未来或跨 Run 不进入流；来源目录只读，索引和服务数据目录由 registry 边界控制。
 
 ## 验证
 
-`apps/api/tests/test_storage.py` 和 `apps/api/tests/test_definition_cache.py` 验证 SQLite 重开、事务、项目隔离、定义/关系事实缓存严格校验、冷/热复用、共享容量/并发和失败降级、旧快照、manifest、latest 冲突、邻接和影响路径边界；`apps/api/tests/test_freshness.py` 验证内容 hash、预算未知、显式复用/重建和旧 metadata，并验证关系语义升级时明确返回 rules/config 变化、生成 `relations-v4-rebuild` 且重复更新复用新快照；其它测试继续覆盖 Run、SSE、API 双入口和 MCP。本轮后端全量结果以本轮交付记录为准；浏览器/HTTP/MCP 原有查询未改契约，真实供应商语义质量仍未验证。
+`apps/api/tests/test_storage.py` 和 `apps/api/tests/test_definition_cache.py` 验证 SQLite 重开、事务、项目隔离、定义/关系事实缓存严格校验、冷/热复用、共享容量/并发和失败降级、旧快照、manifest、latest 冲突、邻接和影响路径边界；`apps/api/tests/test_process_liveness.py` 验证 Windows 只读进程句柄的 alive/exited/unknown 语义、句柄释放和 unknown 恢复保护；`apps/api/tests/test_freshness.py` 验证内容 hash、预算未知、显式复用/重建和旧 metadata，并验证关系语义升级时明确返回 rules/config 变化、生成 `relations-v4-rebuild` 且重复更新复用新快照；其它测试继续覆盖 Run、SSE、API 双入口和 MCP。双进程验收脚本为 `scripts/verify-github-process-lifecycle.py`，默认按单场景运行并将 HTTP worker 日志写入受控临时目录，公网需显式选择；本轮不运行它。真实供应商语义质量和真实双进程流程仍未验证。
 
 ## 相关决策
 

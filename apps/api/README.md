@@ -27,7 +27,7 @@
 
 `POST /api/projects/{project_id}/indexes/{index_id}/freshness` 以同一源码规则读取有界内容 hash manifest，返回 `consistent`、`changed` 或 `unknown`，不解析 AST、不创建索引；GitHub 项目在同一接口中只解析已跟踪的 ref 到当前 commit，返回 `remote_status`、canonical URL、请求/解析 ref、远端 commit 和检查时间，不下载归档、不访问已清理的临时目录。当前关系语义为 `relations-v3`，参与快照 `rules_version` 和 freshness，当前事实缓存规则/格式为 `python-relation-facts-v2` / `relation-facts-v2`，当前索引构建身份为 `relations-v4`。关系语义或配置变化会返回明确的 `rules_changed`/`configuration_changed`，不能复用旧语义 index；本地来源仍使用 `/refresh`，GitHub 来源使用只允许 loopback 的 `POST /api/projects/{project_id}/indexes/{index_id}/github-refresh`，由服务端再次解析并通过同一受限导入流程显式下载/更新。GitHub 更新成功返回 `reused`、`historical_reused` 或 `created`：同一 commit 且构建身份兼容时复用当前或历史 immutable index，规则/配置过期时重建；远端 ref 在检查与下载之间移动时以实际导入 attempt 的 commit/ref 为准。失败或远端状态未知时保留旧 latest、旧 Session/Run/evidence 和旧来源身份。历史快照的 revision/dirty 等来源描述不原地改写，响应保留其原 metadata。新快照构建先捕获源码，再用项目隔离的路径、内容 hash、对应事实规则、Python AST 版本和配置 hash 查询严格 JSON 定义/关系事实缓存；定义缓存命中后按新 index 重建 Symbol，关系事实命中后仍基于新快照 DefinitionMaps 全量解析目标，不复用旧跨文件边；解析还会按有序构造赋值追踪局部对象绑定，仅对无继承、无影响绑定装饰器和已知属性覆盖的直接类方法形成 calls 边。两类缓存合计默认 5,000 条/16 MiB，坏缓存安全降级，缓存不是源码 evidence 来源。HTTP 与 MCP 复用同一 WorkspaceService 和刷新语义。
 
-索引更新先在管理库登记项目级 `project_updates`，以 `project_id` 串行化同项目的 HTTP/MCP 写请求，并将 expected latest 贯穿远端检查、GitHub 下载、历史复用、构建和 latest CAS。latest 提交后，source identity 与 attempt ready 在管理库单事务中收尾；管理库故障会留下可恢复 intent，服务重启按候选 ready latest 补提交或终止，不回滚其他请求的 latest。待恢复 intent 存在时返回 conflict；这套跨库恢复语义由 [GitHub 更新的跨进程提交一致性](../../docs/decisions/2026-09-16-github-update-commit-consistency.md) 约束。
+索引更新先在管理库登记项目级 `project_updates`，以 `project_id` 串行化同项目的 HTTP/MCP 写请求，并将 expected latest 贯穿远端检查、GitHub 下载、历史复用、构建和 latest CAS。latest 提交后，source identity 与 attempt ready 在管理库单事务中收尾；管理库故障会留下可恢复 intent，服务重启只对 owner 明确退出的 intent 按候选 ready latest 补提交或终止。owner 探测采用 `alive`/`exited`/`unknown` 三态，Windows 使用只读进程句柄查询，权限不足或未知错误保持占用保护；待恢复 intent 存在时返回 conflict。跨进程恢复和 Windows 限制由 [GitHub 更新的跨进程提交一致性](../../docs/decisions/2026-09-16-github-update-commit-consistency.md) 约束。
 
 ## 数据与生命周期
 
@@ -61,7 +61,7 @@ Run 拒绝未开启能力的 `mode=real` 或 `CODETRAIL_MCP_EXTERNAL_RUN_ENABLED
 
 ## 验证
 
-从 `apps/api` 执行 `uv run pytest -q` 和 `uv run python -m compileall -q app`。`tests/test_runs.py` 覆盖 fixture 生命周期和固定 Run 报告影响查询；`tests/test_storage.py` 与 `tests/test_definition_cache.py` 覆盖静态路径、节点去重、环、容量边界、文件定义/关系事实缓存的冷/热复用、共享 AST、重启、失效、损坏、并发和失败降级；`tests/test_run_sse.py` 覆盖持久化逐帧回放、双游标续接、终态控制帧、未来/跨 Run 拒绝、断开释放容量和 health 并发；`tests/test_issue_runs.py` 覆盖 real 工具决策、证据不足、非法引用/工具、有限修复、预算、取消、持久化 config.json 和 OpenAI-compatible 请求；`tests/test_mcp.py` 覆盖 HTTP/MCP Run 与影响查询对照、默认只读、独立 Run 写开关和 real 能力开关，以及 external 的实际 stdio 工具、证据边界、幂等、时间预算、取消和终态拒写。其它项目/索引/导入/Session/O1/O2/O3 测试继续覆盖各自边界。本轮全量结果以本轮交付记录为准，compileall 通过；前端和契约未因本步改变，真实 DeepSeek 语义质量仍未验证。
+从 `apps/api` 执行 `uv run pytest -q` 和 `uv run python -m compileall -q app`。`tests/test_process_liveness.py` 使用伪造 Win32 API 覆盖存活/退出/权限失败、句柄关闭、无信号分派和 unknown 恢复保护；`tests/test_runs.py` 覆盖 fixture 生命周期和固定 Run 报告影响查询；`tests/test_storage.py` 与 `tests/test_definition_cache.py` 覆盖静态路径、节点去重、环、容量边界、文件定义/关系事实缓存的冷/热复用、共享 AST、重启、失效、损坏、并发和失败降级；`tests/test_run_sse.py` 覆盖持久化逐帧回放、双游标续接、终态控制帧、未来/跨 Run 拒绝、断开释放容量和 health 并发；`tests/test_issue_runs.py` 覆盖 real 工具决策、证据不足、非法引用/工具、有限修复、预算、取消、持久化 config.json 和 OpenAI-compatible 请求；`tests/test_mcp.py` 覆盖 HTTP/MCP Run 与影响查询对照、默认只读、独立 Run 写开关和 real 能力开关，以及 external 的实际 stdio 工具、证据边界、幂等、时间预算、取消和终态拒写。`scripts/verify-github-process-lifecycle.py` 默认支持按场景输出阶段日志，公网仅在显式传入 `--public-github` 时执行；本轮未启动真实子进程。其它项目/索引/导入/Session/O1/O2/O3 测试继续覆盖各自边界；真实 DeepSeek 语义质量和真实双进程联合流程仍未验证。
 
 ## 关联文档
 
