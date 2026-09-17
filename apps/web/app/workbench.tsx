@@ -3314,7 +3314,10 @@ export default function Workbench() {
         repositoryId,
         onNameChange: setProjectName,
         onRepositoryIdChange: setRepositoryId,
-        onSelectProject: (projectId) => setSelectedProjectId(projectId),
+        onSelectProject: (projectId) => {
+          setProjectError(null);
+          setSelectedProjectId(projectId);
+        },
         onCreate: createNewProject,
       }}
       localImport={{

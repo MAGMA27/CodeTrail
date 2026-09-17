@@ -28,7 +28,7 @@
 
 ## 错误与限制
 
-索引检查的 `changed_paths_truncated` 与 `scan_truncated` 分开显示；unknown 不能被渲染为一致，完整安全扫描且仅含 metadata/源码/规则/配置变化时会提示可全量重建，历史兼容恢复会明确显示 latest 已切换且沿用历史来源 metadata，其他 refresh 失败会明确保留旧 latest。索引更新按钮只在当前项目有 ready latest 时可用，避免隐式创建或跨项目操作。
+索引检查的 `changed_paths_truncated` 与 `scan_truncated` 分开显示；unknown 不能被渲染为一致，完整安全扫描且仅含 metadata/源码/规则/配置变化时会提示可全量重建，历史兼容恢复会明确显示 latest 已切换且沿用历史来源 metadata，其他 refresh 失败会明确保留旧 latest。选择有效项目会清除此前无效 `project_id` 引用留下的告警；索引更新按钮只在当前项目有 ready latest 时可用，避免隐式创建或跨项目操作。
 
 API 离线、归属错误、消息为空、活动 Run 冲突、预算或执行容量拒绝、模型不可用/失败、结构化输出失败、取消和 interrupted 状态显示为明确错误或状态；容量拒绝不创建本地 Run，提示可稍后重试。结构组/模块关系和入口路径受各自预算限制，工作台显示可见/总量与代表边样本边界；源码目录组可能包含因 `max_modules` 未载入的模块，下钻时明确说明。固定关系索引扫描未完成会显示“关系提取未完成”，unresolved 详情截断会显示独立告警，旧索引未记录该状态会显示未知，查询自身达到节点/边/时间/输出边界则另显示“查询已截断”；这些状态同时存在时不把空邻接当成否定证据。real Run 仍需服务端显式能力开关和持久化配置，失败不回退 fixture；fixture、real 和 external 都不执行仓库源码或 shell，external 的公开工具/报告状态只从服务端持久化事实读取。影响请求失败、无唯一映射、超出深度/节点/路径边界和 unresolved 均显示明确状态，不猜测同名符号。前端读取 Run history/events/tool-results 受服务端页大小限制，报告和证据必须绑定同一 index；请求失败不会用旧项目、旧 Session 或 latest index 的数据填补。
 
@@ -36,7 +36,7 @@ Session 草稿按 project/session 保存到 localStorage，消息保存旧响应
 
 ## 验证
 
-本轮前端新鲜度契约/交互、类型检查和生产构建，以及后端新鲜度、HTTP/MCP 对照、全量回归和文档检查通过。实际浏览器验证了旧索引缺元数据且源码变化时的 `unknown` 与安全重建提示、更新后新快照、再次检查 `consistent`、再次更新 `reused`，并确认旧 latest、Session 和 evidence 仍可读取；本项目隔离副本上的缓存/更新联合验收（含真实工作台的 changed、显式 update、consistent、reused 和历史 Session 恢复）见 [本项目索引更新与缓存效果联合验收](../decisions/2026-09-16-project-index-cache-acceptance.md)。真实供应商语义质量仍为 UNVERIFIED。
+本轮前端新鲜度契约/交互、类型检查和生产构建，以及后端新鲜度、HTTP/MCP 对照、全量回归和文档检查通过。实际浏览器验证了 consistent/changed/unknown 三态及真实原因、显式新建与重复复用、刷新恢复、旧 Session/Run/evidence 固定快照、并发冲突、服务不可用失败后的恢复；HTTP 与同数据目录 stdio MCP 的 latest、freshness 和旧源码 evidence 一致。离线 GitHub 双进程场景通过；公网 `pallets/itsdangerous` 探测受 GitHub `429 budget_exceeded` 限制，仍为 UNVERIFIED。真实供应商语义质量仍为 UNVERIFIED。
 
 ## 相关决策
 
