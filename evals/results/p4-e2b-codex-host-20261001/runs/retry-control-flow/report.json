@@ -1,0 +1,91 @@
+{
+  "schema_version": "0.1.0",
+  "report_id": "report-run-bccf8ac304b944bba82ca6ebe443daee",
+  "run_id": "run-bccf8ac304b944bba82ca6ebe443daee",
+  "project_id": "project-a3add24c57e94ef69e344d2ecb0f8e19",
+  "session_id": "session-83506ba565e04998b9c60e34c5f2357a",
+  "index_id": "index-import-da9490a1d2e185b84ac05a7bd946b4f5-relations-v4-2033251b411e241b",
+  "status": "succeeded",
+  "outcome": "candidate_found",
+  "fixture_mode": false,
+  "summary": "Likely cause identified in retry_request: the exception handler raises on the first transient error instead of continuing the retry loop.",
+  "graph": {
+    "index_id": "index-import-da9490a1d2e185b84ac05a7bd946b4f5-relations-v4-2033251b411e241b",
+    "nodes": [
+      {
+        "start_line": 1,
+        "end_line": 10,
+        "symbol_id": "sym-7f05705db676b19c2696d1e0866113b0",
+        "index_id": "index-import-da9490a1d2e185b84ac05a7bd946b4f5-relations-v4-2033251b411e241b",
+        "path": "worker.py",
+        "qualified_name": "worker",
+        "kind": "module"
+      },
+      {
+        "start_line": 5,
+        "end_line": 10,
+        "symbol_id": "sym-5712d73b0b1332c8704a088c6219ad67",
+        "index_id": "index-import-da9490a1d2e185b84ac05a7bd946b4f5-relations-v4-2033251b411e241b",
+        "path": "worker.py",
+        "qualified_name": "worker.retry_request",
+        "kind": "function"
+      }
+    ],
+    "static_edges": [],
+    "unresolved": [],
+    "candidate_links": [
+      {
+        "candidate_id": "candidate-1",
+        "index_id": "index-import-da9490a1d2e185b84ac05a7bd946b4f5-relations-v4-2033251b411e241b",
+        "source_symbol_id": "sym-5712d73b0b1332c8704a088c6219ad67",
+        "target_symbol_id": null,
+        "relation": "likely cause",
+        "evidence_ids": [
+          "evidence-e0fb3d085a218125ef93bbbef4fa0233"
+        ]
+      }
+    ],
+    "truncated": false,
+    "truncation_reason": null
+  },
+  "evidence": [
+    {
+      "start_line": 5,
+      "end_line": 10,
+      "evidence_id": "evidence-e0fb3d085a218125ef93bbbef4fa0233",
+      "index_id": "index-import-da9490a1d2e185b84ac05a7bd946b4f5-relations-v4-2033251b411e241b",
+      "path": "worker.py",
+      "excerpt": "def retry_request(send, attempts=3):\n    for attempt in range(attempts):\n        try:\n            return send()\n        except TemporaryError:\n            raise",
+      "content_hash": "34f78f9aa8902f516f548251712d9fe7e7a8ef75e34707aaea7f7608298ea218",
+      "kind": "source"
+    }
+  ],
+  "findings": [
+    {
+      "finding_id": "finding-1",
+      "kind": "observation",
+      "text": "retry_request loops for attempts, but the TemporaryError handler immediately raises, exiting on the first transient failure.",
+      "symbol_ids": [
+        "sym-5712d73b0b1332c8704a088c6219ad67"
+      ],
+      "evidence_ids": [
+        "evidence-e0fb3d085a218125ef93bbbef4fa0233"
+      ]
+    }
+  ],
+  "candidate_links": [
+    {
+      "candidate_id": "candidate-1",
+      "index_id": "index-import-da9490a1d2e185b84ac05a7bd946b4f5-relations-v4-2033251b411e241b",
+      "source_symbol_id": "sym-5712d73b0b1332c8704a088c6219ad67",
+      "target_symbol_id": null,
+      "relation": "likely cause",
+      "evidence_ids": [
+        "evidence-e0fb3d085a218125ef93bbbef4fa0233"
+      ]
+    }
+  ],
+  "explanation": null,
+  "limitations": [],
+  "terminal_sequence": 7
+}

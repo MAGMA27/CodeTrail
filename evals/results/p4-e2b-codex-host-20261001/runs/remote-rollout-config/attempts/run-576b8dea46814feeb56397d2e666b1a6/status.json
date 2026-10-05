@@ -1,0 +1,83 @@
+{
+  "schema_version": "0.1.0",
+  "run": {
+    "schema_version": "0.1.0",
+    "run_id": "run-576b8dea46814feeb56397d2e666b1a6",
+    "project_id": "project-bde03f8eac184bb585f6b5b4affe11ec",
+    "session_id": "session-162eb27cd13b4ee3bfb7e1f3c0d45707",
+    "index_id": "index-import-8bcff9ee7e029f141fa92ad0dcb40447-relations-v4-ddddb739e050a2fc",
+    "feature_generation_id": null,
+    "issue": {
+      "schema_version": "0.1.0",
+      "id": "eval-issue-remote-rollout-config",
+      "title": "Users in one region do not see the feature",
+      "body": "Users in one region do not see the feature. Determine whether the local gate or the remote rollout configuration is wrong, but no rollout response or production configuration snapshot is available.",
+      "stacktrace": null,
+      "mentioned_paths": [
+        "rollout/flags.py"
+      ]
+    },
+    "mode": "external",
+    "analysis_kind": "issue",
+    "execution_source": "codex",
+    "fixture_scenario": null,
+    "model_provider": null,
+    "model": null,
+    "prompt_version": null,
+    "execution_version": "run-external-codex-v1",
+    "status": "interrupted",
+    "budget": {
+      "max_tool_calls": 8,
+      "max_model_calls": 4,
+      "max_repair_calls": 1,
+      "max_seconds": 30,
+      "max_source_lines": 200,
+      "max_total_source_lines": 800,
+      "max_input_chars": 60000,
+      "max_model_input_chars": 80000,
+      "max_output_chars": 50000,
+      "max_model_output_chars": 20000,
+      "max_events": 100,
+      "tool_calls_used": 1,
+      "model_calls_used": 0,
+      "repair_calls_used": 0,
+      "source_lines_used": 5,
+      "input_chars_used": 240,
+      "model_input_chars_used": 0,
+      "output_chars_used": 766,
+      "model_output_chars_used": 0,
+      "model_input_tokens_used": null,
+      "model_output_tokens_used": null,
+      "events_used": 4
+    },
+    "message_end_sequence": 1,
+    "input_hash": "7b3b06d3a78d2f7447f896f56a831dbb92d0ecf2abec4502c6da0b20e1bf206a",
+    "input_chars": 240,
+    "created_at": "2026-09-30T16:35:32.228040Z",
+    "started_at": "2026-09-30T16:35:32.343089Z",
+    "ended_at": "2026-09-30T16:36:03.567883Z",
+    "report_id": "report-run-576b8dea46814feeb56397d2e666b1a6"
+  },
+  "input": {
+    "schema_version": "0.1.0",
+    "project_id": "project-bde03f8eac184bb585f6b5b4affe11ec",
+    "session_id": "session-162eb27cd13b4ee3bfb7e1f3c0d45707",
+    "index_id": "index-import-8bcff9ee7e029f141fa92ad0dcb40447-relations-v4-ddddb739e050a2fc",
+    "feature_generation_id": null,
+    "message_end_sequence": 1,
+    "messages": [
+      {
+        "schema_version": "0.1.0",
+        "message_id": "message-1c09ad86d10347ccb91b812beab3bccd",
+        "session_id": "session-162eb27cd13b4ee3bfb7e1f3c0d45707",
+        "sequence": 1,
+        "source": "human",
+        "content": "Users in one region do not see the feature\nUsers in one region do not see the feature. Determine whether the local gate or the remote rollout configuration is wrong, but no rollout response or production configuration snapshot is available.",
+        "created_at": "2026-09-30T16:14:42.207572Z"
+      }
+    ],
+    "input_hash": "7b3b06d3a78d2f7447f896f56a831dbb92d0ecf2abec4502c6da0b20e1bf206a",
+    "input_chars": 240,
+    "frozen_at": "2026-09-30T16:35:32.228040Z"
+  }
+}

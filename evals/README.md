@@ -23,6 +23,7 @@
 - `results/p4-e2a-v1/`：历史 P4-E2a 离线报告，保留为不可覆盖的事实记录。
 - `results/p4-e2a-fix-v1/`：P4-E2a 验收修复后的独立执行清单、raw Run 报告和基线对照报告；raw state 不含 gold，可用于恢复且包含 v2 执行身份与累计预算。
 - `results/p4-e2b-external-v1/`：当前 DeepSeek calibration external dry-run 清单；配置缺失时只记录 `configuration_status=missing`，不代表真实评测已执行。
+- [results/p4-e2b-codex-host-20261001/](results/p4-e2b-codex-host-20261001/codex-host-holdout.md)：实际 Codex 宿主已知案例复测，保留首轮失败和独立补充 Run；[影响链验收](results/p4-e2b-codex-host-20261001/impact-chain-acceptance.md) 记录接口、截图与未验收的 UI 边界，不代表盲测或供应商质量。
 
 ## 接口与依赖
 

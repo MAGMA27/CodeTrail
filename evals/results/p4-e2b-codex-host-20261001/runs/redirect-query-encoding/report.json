@@ -1,0 +1,91 @@
+{
+  "schema_version": "0.1.0",
+  "report_id": "report-run-19ed439e05694c49a2f55a481bef2af0",
+  "run_id": "run-19ed439e05694c49a2f55a481bef2af0",
+  "project_id": "project-2ad24ef7fd0f40129b8ccc5cccb572d5",
+  "session_id": "session-12741ac79e454b348da945b37e60831c",
+  "index_id": "index-import-efbb2859760255933134ef4a12260470-relations-v4-83b6daed08a499b1",
+  "status": "succeeded",
+  "outcome": "candidate_found",
+  "fixture_mode": false,
+  "summary": "Likely cause identified in build_login_redirect: next_path is interpolated without query encoding.",
+  "graph": {
+    "index_id": "index-import-efbb2859760255933134ef4a12260470-relations-v4-83b6daed08a499b1",
+    "nodes": [
+      {
+        "start_line": 1,
+        "end_line": 2,
+        "symbol_id": "sym-86e597cb8f28e06f7b52fd5463b91051",
+        "index_id": "index-import-efbb2859760255933134ef4a12260470-relations-v4-83b6daed08a499b1",
+        "path": "auth.py",
+        "qualified_name": "auth",
+        "kind": "module"
+      },
+      {
+        "start_line": 1,
+        "end_line": 2,
+        "symbol_id": "sym-1327460839ef1ace92cd69805c5b09cf",
+        "index_id": "index-import-efbb2859760255933134ef4a12260470-relations-v4-83b6daed08a499b1",
+        "path": "auth.py",
+        "qualified_name": "auth.build_login_redirect",
+        "kind": "function"
+      }
+    ],
+    "static_edges": [],
+    "unresolved": [],
+    "candidate_links": [
+      {
+        "candidate_id": "candidate-1",
+        "index_id": "index-import-efbb2859760255933134ef4a12260470-relations-v4-83b6daed08a499b1",
+        "source_symbol_id": "sym-1327460839ef1ace92cd69805c5b09cf",
+        "target_symbol_id": null,
+        "relation": "likely cause",
+        "evidence_ids": [
+          "evidence-64d5424002dd59001c84c5c18332f231"
+        ]
+      }
+    ],
+    "truncated": false,
+    "truncation_reason": null
+  },
+  "evidence": [
+    {
+      "start_line": 1,
+      "end_line": 2,
+      "evidence_id": "evidence-64d5424002dd59001c84c5c18332f231",
+      "index_id": "index-import-efbb2859760255933134ef4a12260470-relations-v4-83b6daed08a499b1",
+      "path": "auth.py",
+      "excerpt": "def build_login_redirect(next_path: str, state: str) -> str:\n    return f\"/login?next={next_path}&state={state}\"",
+      "content_hash": "719ec0997e476d390d8cdce2d65ebf7be07cd2260c0a5afac5d284367597c3d9",
+      "kind": "source"
+    }
+  ],
+  "findings": [
+    {
+      "finding_id": "finding-1",
+      "kind": "observation",
+      "text": "The redirect interpolates next_path directly into the next query parameter before appending state, so ampersands in next_path are parsed as query delimiters.",
+      "symbol_ids": [
+        "sym-1327460839ef1ace92cd69805c5b09cf"
+      ],
+      "evidence_ids": [
+        "evidence-64d5424002dd59001c84c5c18332f231"
+      ]
+    }
+  ],
+  "candidate_links": [
+    {
+      "candidate_id": "candidate-1",
+      "index_id": "index-import-efbb2859760255933134ef4a12260470-relations-v4-83b6daed08a499b1",
+      "source_symbol_id": "sym-1327460839ef1ace92cd69805c5b09cf",
+      "target_symbol_id": null,
+      "relation": "likely cause",
+      "evidence_ids": [
+        "evidence-64d5424002dd59001c84c5c18332f231"
+      ]
+    }
+  ],
+  "explanation": null,
+  "limitations": [],
+  "terminal_sequence": 7
+}

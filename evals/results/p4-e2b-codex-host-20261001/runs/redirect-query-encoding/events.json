@@ -1,0 +1,224 @@
+{
+  "schema_version": "0.1.0",
+  "project_id": "project-2ad24ef7fd0f40129b8ccc5cccb572d5",
+  "session_id": "session-12741ac79e454b348da945b37e60831c",
+  "run_id": "run-19ed439e05694c49a2f55a481bef2af0",
+  "events": [
+    {
+      "run_id": "run-19ed439e05694c49a2f55a481bef2af0",
+      "sequence": 1,
+      "timestamp": "2026-09-30T16:20:06.342531Z",
+      "type": "run.started",
+      "payload": {
+        "project_id": "project-2ad24ef7fd0f40129b8ccc5cccb572d5",
+        "session_id": "session-12741ac79e454b348da945b37e60831c",
+        "index_id": "index-import-efbb2859760255933134ef4a12260470-relations-v4-83b6daed08a499b1",
+        "issue_id": "eval-issue-redirect-query-encoding",
+        "mode": "external",
+        "analysis_kind": "issue",
+        "execution_source": "codex",
+        "message_end_sequence": 1,
+        "input_hash": "3e76c350263e8ab28dfb88536ee059d96ee2463f79696f2359cf2d1febcc59d8",
+        "feature_generation_id": null,
+        "execution_version": "run-external-codex-v1",
+        "budget": {
+          "max_tool_calls": 8,
+          "max_model_calls": 4,
+          "max_repair_calls": 1,
+          "max_seconds": 30,
+          "max_source_lines": 200,
+          "max_total_source_lines": 800,
+          "max_input_chars": 60000,
+          "max_model_input_chars": 80000,
+          "max_output_chars": 50000,
+          "max_model_output_chars": 20000,
+          "max_events": 100,
+          "tool_calls_used": 0,
+          "model_calls_used": 0,
+          "repair_calls_used": 0,
+          "source_lines_used": 0,
+          "input_chars_used": 177,
+          "model_input_chars_used": 0,
+          "output_chars_used": 0,
+          "model_output_chars_used": 0,
+          "model_input_tokens_used": null,
+          "model_output_tokens_used": null,
+          "events_used": 0
+        }
+      }
+    },
+    {
+      "run_id": "run-19ed439e05694c49a2f55a481bef2af0",
+      "sequence": 2,
+      "timestamp": "2026-09-30T16:20:06.353423Z",
+      "type": "tool.started",
+      "payload": {
+        "request": {
+          "request_id": "host-redirect-search-1",
+          "run_id": "run-19ed439e05694c49a2f55a481bef2af0",
+          "index_id": "index-import-efbb2859760255933134ef4a12260470-relations-v4-83b6daed08a499b1",
+          "params": {
+            "tool": "search_code",
+            "query": "next_path",
+            "limit": 40
+          }
+        }
+      }
+    },
+    {
+      "run_id": "run-19ed439e05694c49a2f55a481bef2af0",
+      "sequence": 3,
+      "timestamp": "2026-09-30T16:20:06.393887Z",
+      "type": "tool.completed",
+      "payload": {
+        "result": {
+          "request_id": "host-redirect-search-1",
+          "run_id": "run-19ed439e05694c49a2f55a481bef2af0",
+          "index_id": "index-import-efbb2859760255933134ef4a12260470-relations-v4-83b6daed08a499b1",
+          "completed_sequence": 3,
+          "kind": "search_code.succeeded",
+          "tool": "search_code",
+          "matches": [
+            {
+              "rank": 1,
+              "symbol": {
+                "start_line": 1,
+                "end_line": 2,
+                "symbol_id": "sym-86e597cb8f28e06f7b52fd5463b91051",
+                "index_id": "index-import-efbb2859760255933134ef4a12260470-relations-v4-83b6daed08a499b1",
+                "path": "auth.py",
+                "qualified_name": "auth",
+                "kind": "module"
+              },
+              "matched_terms": [
+                "next_path"
+              ]
+            },
+            {
+              "rank": 2,
+              "symbol": {
+                "start_line": 1,
+                "end_line": 2,
+                "symbol_id": "sym-1327460839ef1ace92cd69805c5b09cf",
+                "index_id": "index-import-efbb2859760255933134ef4a12260470-relations-v4-83b6daed08a499b1",
+                "path": "auth.py",
+                "qualified_name": "auth.build_login_redirect",
+                "kind": "function"
+              },
+              "matched_terms": [
+                "next_path"
+              ]
+            }
+          ],
+          "truncated": false,
+          "truncation_reason": null
+        }
+      }
+    },
+    {
+      "run_id": "run-19ed439e05694c49a2f55a481bef2af0",
+      "sequence": 4,
+      "timestamp": "2026-09-30T16:20:12.957747Z",
+      "type": "tool.started",
+      "payload": {
+        "request": {
+          "request_id": "host-redirect-source-1",
+          "run_id": "run-19ed439e05694c49a2f55a481bef2af0",
+          "index_id": "index-import-efbb2859760255933134ef4a12260470-relations-v4-83b6daed08a499b1",
+          "params": {
+            "tool": "read_source",
+            "path": "auth.py",
+            "start_line": 1,
+            "end_line": 2
+          }
+        }
+      }
+    },
+    {
+      "run_id": "run-19ed439e05694c49a2f55a481bef2af0",
+      "sequence": 5,
+      "timestamp": "2026-09-30T16:20:12.996776Z",
+      "type": "tool.completed",
+      "payload": {
+        "result": {
+          "request_id": "host-redirect-source-1",
+          "run_id": "run-19ed439e05694c49a2f55a481bef2af0",
+          "index_id": "index-import-efbb2859760255933134ef4a12260470-relations-v4-83b6daed08a499b1",
+          "completed_sequence": 5,
+          "kind": "read_source.succeeded",
+          "tool": "read_source",
+          "evidence": {
+            "start_line": 1,
+            "end_line": 2,
+            "evidence_id": "evidence-64d5424002dd59001c84c5c18332f231",
+            "index_id": "index-import-efbb2859760255933134ef4a12260470-relations-v4-83b6daed08a499b1",
+            "path": "auth.py",
+            "excerpt": "def build_login_redirect(next_path: str, state: str) -> str:\n    return f\"/login?next={next_path}&state={state}\"",
+            "content_hash": "719ec0997e476d390d8cdce2d65ebf7be07cd2260c0a5afac5d284367597c3d9",
+            "kind": "source"
+          }
+        }
+      }
+    },
+    {
+      "run_id": "run-19ed439e05694c49a2f55a481bef2af0",
+      "sequence": 6,
+      "timestamp": "2026-09-30T16:20:23.033670Z",
+      "type": "graph.updated",
+      "payload": {
+        "graph": {
+          "index_id": "index-import-efbb2859760255933134ef4a12260470-relations-v4-83b6daed08a499b1",
+          "nodes": [
+            {
+              "start_line": 1,
+              "end_line": 2,
+              "symbol_id": "sym-86e597cb8f28e06f7b52fd5463b91051",
+              "index_id": "index-import-efbb2859760255933134ef4a12260470-relations-v4-83b6daed08a499b1",
+              "path": "auth.py",
+              "qualified_name": "auth",
+              "kind": "module"
+            },
+            {
+              "start_line": 1,
+              "end_line": 2,
+              "symbol_id": "sym-1327460839ef1ace92cd69805c5b09cf",
+              "index_id": "index-import-efbb2859760255933134ef4a12260470-relations-v4-83b6daed08a499b1",
+              "path": "auth.py",
+              "qualified_name": "auth.build_login_redirect",
+              "kind": "function"
+            }
+          ],
+          "static_edges": [],
+          "unresolved": [],
+          "candidate_links": [
+            {
+              "candidate_id": "candidate-1",
+              "index_id": "index-import-efbb2859760255933134ef4a12260470-relations-v4-83b6daed08a499b1",
+              "source_symbol_id": "sym-1327460839ef1ace92cd69805c5b09cf",
+              "target_symbol_id": null,
+              "relation": "likely cause",
+              "evidence_ids": [
+                "evidence-64d5424002dd59001c84c5c18332f231"
+              ]
+            }
+          ],
+          "truncated": false,
+          "truncation_reason": null
+        }
+      }
+    },
+    {
+      "run_id": "run-19ed439e05694c49a2f55a481bef2af0",
+      "sequence": 7,
+      "timestamp": "2026-09-30T16:20:23.038682Z",
+      "type": "run.completed",
+      "payload": {
+        "status": "succeeded",
+        "outcome": "candidate_found",
+        "report_id": "report-run-19ed439e05694c49a2f55a481bef2af0"
+      }
+    }
+  ],
+  "next_after_sequence": null,
+  "has_more": false
+}

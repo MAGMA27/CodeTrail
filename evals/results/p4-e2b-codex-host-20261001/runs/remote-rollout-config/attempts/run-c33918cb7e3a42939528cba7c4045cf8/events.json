@@ -1,0 +1,126 @@
+{
+  "schema_version": "0.1.0",
+  "project_id": "project-bde03f8eac184bb585f6b5b4affe11ec",
+  "session_id": "session-162eb27cd13b4ee3bfb7e1f3c0d45707",
+  "run_id": "run-c33918cb7e3a42939528cba7c4045cf8",
+  "events": [
+    {
+      "run_id": "run-c33918cb7e3a42939528cba7c4045cf8",
+      "sequence": 1,
+      "timestamp": "2026-09-30T16:37:06.850654Z",
+      "type": "run.started",
+      "payload": {
+        "project_id": "project-bde03f8eac184bb585f6b5b4affe11ec",
+        "session_id": "session-162eb27cd13b4ee3bfb7e1f3c0d45707",
+        "index_id": "index-import-8bcff9ee7e029f141fa92ad0dcb40447-relations-v4-ddddb739e050a2fc",
+        "issue_id": "eval-issue-remote-rollout-config",
+        "mode": "external",
+        "analysis_kind": "issue",
+        "execution_source": "codex",
+        "message_end_sequence": 1,
+        "input_hash": "7b3b06d3a78d2f7447f896f56a831dbb92d0ecf2abec4502c6da0b20e1bf206a",
+        "feature_generation_id": null,
+        "execution_version": "run-external-codex-v1",
+        "budget": {
+          "max_tool_calls": 8,
+          "max_model_calls": 4,
+          "max_repair_calls": 1,
+          "max_seconds": 30,
+          "max_source_lines": 200,
+          "max_total_source_lines": 800,
+          "max_input_chars": 60000,
+          "max_model_input_chars": 80000,
+          "max_output_chars": 50000,
+          "max_model_output_chars": 20000,
+          "max_events": 100,
+          "tool_calls_used": 0,
+          "model_calls_used": 0,
+          "repair_calls_used": 0,
+          "source_lines_used": 0,
+          "input_chars_used": 240,
+          "model_input_chars_used": 0,
+          "output_chars_used": 0,
+          "model_output_chars_used": 0,
+          "model_input_tokens_used": null,
+          "model_output_tokens_used": null,
+          "events_used": 0
+        }
+      }
+    },
+    {
+      "run_id": "run-c33918cb7e3a42939528cba7c4045cf8",
+      "sequence": 2,
+      "timestamp": "2026-09-30T16:37:06.856523Z",
+      "type": "tool.started",
+      "payload": {
+        "request": {
+          "request_id": "host-remote-quick-source-1",
+          "run_id": "run-c33918cb7e3a42939528cba7c4045cf8",
+          "index_id": "index-import-8bcff9ee7e029f141fa92ad0dcb40447-relations-v4-ddddb739e050a2fc",
+          "params": {
+            "tool": "read_source",
+            "path": "rollout/flags.py",
+            "start_line": 4,
+            "end_line": 8
+          }
+        }
+      }
+    },
+    {
+      "run_id": "run-c33918cb7e3a42939528cba7c4045cf8",
+      "sequence": 3,
+      "timestamp": "2026-09-30T16:37:06.884288Z",
+      "type": "tool.completed",
+      "payload": {
+        "result": {
+          "request_id": "host-remote-quick-source-1",
+          "run_id": "run-c33918cb7e3a42939528cba7c4045cf8",
+          "index_id": "index-import-8bcff9ee7e029f141fa92ad0dcb40447-relations-v4-ddddb739e050a2fc",
+          "completed_sequence": 3,
+          "kind": "read_source.succeeded",
+          "tool": "read_source",
+          "evidence": {
+            "start_line": 4,
+            "end_line": 8,
+            "evidence_id": "evidence-2ea76da544aab2597ee281896f0a69a7",
+            "index_id": "index-import-8bcff9ee7e029f141fa92ad0dcb40447-relations-v4-ddddb739e050a2fc",
+            "path": "rollout/flags.py",
+            "excerpt": "def enabled(flag_name, user_id):\n    configured = os.getenv(flag_name)\n    if configured is None:\n        return fetch_remote(flag_name, user_id)\n    return configured == \"on\"",
+            "content_hash": "f136ad17f6c05ccdc4131300582a0d7e1a7dc4f8851f91ee4d88a8acf12e98bd",
+            "kind": "source"
+          }
+        }
+      }
+    },
+    {
+      "run_id": "run-c33918cb7e3a42939528cba7c4045cf8",
+      "sequence": 4,
+      "timestamp": "2026-09-30T16:37:07.026663Z",
+      "type": "graph.updated",
+      "payload": {
+        "graph": {
+          "index_id": "index-import-8bcff9ee7e029f141fa92ad0dcb40447-relations-v4-ddddb739e050a2fc",
+          "nodes": [],
+          "static_edges": [],
+          "unresolved": [],
+          "candidate_links": [],
+          "truncated": false,
+          "truncation_reason": null
+        }
+      }
+    },
+    {
+      "run_id": "run-c33918cb7e3a42939528cba7c4045cf8",
+      "sequence": 5,
+      "timestamp": "2026-09-30T16:37:07.030792Z",
+      "type": "run.completed",
+      "payload": {
+        "status": "succeeded",
+        "outcome": "insufficient_evidence",
+        "report_id": "report-run-c33918cb7e3a42939528cba7c4045cf8"
+      }
+    }
+  ],
+  "next_after_sequence": null,
+  "has_more": false
+}

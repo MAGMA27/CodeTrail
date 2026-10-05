@@ -1,0 +1,145 @@
+{
+  "schema_version": "0.1.0",
+  "project_id": "project-bde03f8eac184bb585f6b5b4affe11ec",
+  "session_id": "session-162eb27cd13b4ee3bfb7e1f3c0d45707",
+  "run_id": "run-193d3c2dd3ce4b90b617b445a8822e0f",
+  "results": [
+    {
+      "request_id": "host-remote-search-1",
+      "run_id": "run-193d3c2dd3ce4b90b617b445a8822e0f",
+      "index_id": "index-import-8bcff9ee7e029f141fa92ad0dcb40447-relations-v4-ddddb739e050a2fc",
+      "completed_sequence": 3,
+      "kind": "search_code.succeeded",
+      "tool": "search_code",
+      "matches": [
+        {
+          "rank": 1,
+          "symbol": {
+            "start_line": 4,
+            "end_line": 8,
+            "symbol_id": "sym-dbb0db38b6ba2b84235e798ddb868901",
+            "index_id": "index-import-8bcff9ee7e029f141fa92ad0dcb40447-relations-v4-ddddb739e050a2fc",
+            "path": "rollout/flags.py",
+            "qualified_name": "rollout.flags.enabled",
+            "kind": "function"
+          },
+          "matched_terms": [
+            "enabled"
+          ]
+        },
+        {
+          "rank": 2,
+          "symbol": {
+            "start_line": 1,
+            "end_line": 13,
+            "symbol_id": "sym-21b484e4c7cce0c9b9da27c7f4970a27",
+            "index_id": "index-import-8bcff9ee7e029f141fa92ad0dcb40447-relations-v4-ddddb739e050a2fc",
+            "path": "rollout/flags.py",
+            "qualified_name": "rollout.flags",
+            "kind": "module"
+          },
+          "matched_terms": [
+            "enabled"
+          ]
+        }
+      ],
+      "truncated": false,
+      "truncation_reason": null
+    },
+    {
+      "request_id": "host-remote-source-1",
+      "run_id": "run-193d3c2dd3ce4b90b617b445a8822e0f",
+      "index_id": "index-import-8bcff9ee7e029f141fa92ad0dcb40447-relations-v4-ddddb739e050a2fc",
+      "completed_sequence": 5,
+      "kind": "read_source.succeeded",
+      "tool": "read_source",
+      "evidence": {
+        "start_line": 4,
+        "end_line": 8,
+        "evidence_id": "evidence-2ea76da544aab2597ee281896f0a69a7",
+        "index_id": "index-import-8bcff9ee7e029f141fa92ad0dcb40447-relations-v4-ddddb739e050a2fc",
+        "path": "rollout/flags.py",
+        "excerpt": "def enabled(flag_name, user_id):\n    configured = os.getenv(flag_name)\n    if configured is None:\n        return fetch_remote(flag_name, user_id)\n    return configured == \"on\"",
+        "content_hash": "f136ad17f6c05ccdc4131300582a0d7e1a7dc4f8851f91ee4d88a8acf12e98bd",
+        "kind": "source"
+      }
+    },
+    {
+      "request_id": "host-remote-search-2",
+      "run_id": "run-193d3c2dd3ce4b90b617b445a8822e0f",
+      "index_id": "index-import-8bcff9ee7e029f141fa92ad0dcb40447-relations-v4-ddddb739e050a2fc",
+      "completed_sequence": 7,
+      "kind": "search_code.succeeded",
+      "tool": "search_code",
+      "matches": [
+        {
+          "rank": 1,
+          "symbol": {
+            "start_line": 11,
+            "end_line": 13,
+            "symbol_id": "sym-24fe7a64c48344276dad2c509276c99b",
+            "index_id": "index-import-8bcff9ee7e029f141fa92ad0dcb40447-relations-v4-ddddb739e050a2fc",
+            "path": "rollout/flags.py",
+            "qualified_name": "rollout.flags.fetch_remote",
+            "kind": "function"
+          },
+          "matched_terms": [
+            "fetch_remote"
+          ]
+        },
+        {
+          "rank": 2,
+          "symbol": {
+            "start_line": 1,
+            "end_line": 13,
+            "symbol_id": "sym-21b484e4c7cce0c9b9da27c7f4970a27",
+            "index_id": "index-import-8bcff9ee7e029f141fa92ad0dcb40447-relations-v4-ddddb739e050a2fc",
+            "path": "rollout/flags.py",
+            "qualified_name": "rollout.flags",
+            "kind": "module"
+          },
+          "matched_terms": [
+            "fetch_remote"
+          ]
+        },
+        {
+          "rank": 3,
+          "symbol": {
+            "start_line": 4,
+            "end_line": 8,
+            "symbol_id": "sym-dbb0db38b6ba2b84235e798ddb868901",
+            "index_id": "index-import-8bcff9ee7e029f141fa92ad0dcb40447-relations-v4-ddddb739e050a2fc",
+            "path": "rollout/flags.py",
+            "qualified_name": "rollout.flags.enabled",
+            "kind": "function"
+          },
+          "matched_terms": [
+            "fetch_remote"
+          ]
+        }
+      ],
+      "truncated": false,
+      "truncation_reason": null
+    },
+    {
+      "request_id": "host-remote-source-2",
+      "run_id": "run-193d3c2dd3ce4b90b617b445a8822e0f",
+      "index_id": "index-import-8bcff9ee7e029f141fa92ad0dcb40447-relations-v4-ddddb739e050a2fc",
+      "completed_sequence": 9,
+      "kind": "read_source.succeeded",
+      "tool": "read_source",
+      "evidence": {
+        "start_line": 11,
+        "end_line": 13,
+        "evidence_id": "evidence-14eab60461724ac880ea8ad512621bc5",
+        "index_id": "index-import-8bcff9ee7e029f141fa92ad0dcb40447-relations-v4-ddddb739e050a2fc",
+        "path": "rollout/flags.py",
+        "excerpt": "def fetch_remote(flag_name, user_id):\n    method_name = \"fetch\"\n    return getattr(remote_client, method_name)(flag_name, user_id)",
+        "content_hash": "f136ad17f6c05ccdc4131300582a0d7e1a7dc4f8851f91ee4d88a8acf12e98bd",
+        "kind": "source"
+      }
+    }
+  ],
+  "next_after_sequence": null,
+  "has_more": false
+}

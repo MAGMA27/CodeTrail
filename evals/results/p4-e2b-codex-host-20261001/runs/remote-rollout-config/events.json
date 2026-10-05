@@ -1,0 +1,304 @@
+{
+  "schema_version": "0.1.0",
+  "project_id": "project-bde03f8eac184bb585f6b5b4affe11ec",
+  "session_id": "session-162eb27cd13b4ee3bfb7e1f3c0d45707",
+  "run_id": "run-193d3c2dd3ce4b90b617b445a8822e0f",
+  "events": [
+    {
+      "run_id": "run-193d3c2dd3ce4b90b617b445a8822e0f",
+      "sequence": 1,
+      "timestamp": "2026-09-30T16:21:13.407347Z",
+      "type": "run.started",
+      "payload": {
+        "project_id": "project-bde03f8eac184bb585f6b5b4affe11ec",
+        "session_id": "session-162eb27cd13b4ee3bfb7e1f3c0d45707",
+        "index_id": "index-import-8bcff9ee7e029f141fa92ad0dcb40447-relations-v4-ddddb739e050a2fc",
+        "issue_id": "eval-issue-remote-rollout-config",
+        "mode": "external",
+        "analysis_kind": "issue",
+        "execution_source": "codex",
+        "message_end_sequence": 1,
+        "input_hash": "7b3b06d3a78d2f7447f896f56a831dbb92d0ecf2abec4502c6da0b20e1bf206a",
+        "feature_generation_id": null,
+        "execution_version": "run-external-codex-v1",
+        "budget": {
+          "max_tool_calls": 8,
+          "max_model_calls": 4,
+          "max_repair_calls": 1,
+          "max_seconds": 30,
+          "max_source_lines": 200,
+          "max_total_source_lines": 800,
+          "max_input_chars": 60000,
+          "max_model_input_chars": 80000,
+          "max_output_chars": 50000,
+          "max_model_output_chars": 20000,
+          "max_events": 100,
+          "tool_calls_used": 0,
+          "model_calls_used": 0,
+          "repair_calls_used": 0,
+          "source_lines_used": 0,
+          "input_chars_used": 240,
+          "model_input_chars_used": 0,
+          "output_chars_used": 0,
+          "model_output_chars_used": 0,
+          "model_input_tokens_used": null,
+          "model_output_tokens_used": null,
+          "events_used": 0
+        }
+      }
+    },
+    {
+      "run_id": "run-193d3c2dd3ce4b90b617b445a8822e0f",
+      "sequence": 2,
+      "timestamp": "2026-09-30T16:21:13.411516Z",
+      "type": "tool.started",
+      "payload": {
+        "request": {
+          "request_id": "host-remote-search-1",
+          "run_id": "run-193d3c2dd3ce4b90b617b445a8822e0f",
+          "index_id": "index-import-8bcff9ee7e029f141fa92ad0dcb40447-relations-v4-ddddb739e050a2fc",
+          "params": {
+            "tool": "search_code",
+            "query": "enabled",
+            "limit": 40
+          }
+        }
+      }
+    },
+    {
+      "run_id": "run-193d3c2dd3ce4b90b617b445a8822e0f",
+      "sequence": 3,
+      "timestamp": "2026-09-30T16:21:13.428782Z",
+      "type": "tool.completed",
+      "payload": {
+        "result": {
+          "request_id": "host-remote-search-1",
+          "run_id": "run-193d3c2dd3ce4b90b617b445a8822e0f",
+          "index_id": "index-import-8bcff9ee7e029f141fa92ad0dcb40447-relations-v4-ddddb739e050a2fc",
+          "completed_sequence": 3,
+          "kind": "search_code.succeeded",
+          "tool": "search_code",
+          "matches": [
+            {
+              "rank": 1,
+              "symbol": {
+                "start_line": 4,
+                "end_line": 8,
+                "symbol_id": "sym-dbb0db38b6ba2b84235e798ddb868901",
+                "index_id": "index-import-8bcff9ee7e029f141fa92ad0dcb40447-relations-v4-ddddb739e050a2fc",
+                "path": "rollout/flags.py",
+                "qualified_name": "rollout.flags.enabled",
+                "kind": "function"
+              },
+              "matched_terms": [
+                "enabled"
+              ]
+            },
+            {
+              "rank": 2,
+              "symbol": {
+                "start_line": 1,
+                "end_line": 13,
+                "symbol_id": "sym-21b484e4c7cce0c9b9da27c7f4970a27",
+                "index_id": "index-import-8bcff9ee7e029f141fa92ad0dcb40447-relations-v4-ddddb739e050a2fc",
+                "path": "rollout/flags.py",
+                "qualified_name": "rollout.flags",
+                "kind": "module"
+              },
+              "matched_terms": [
+                "enabled"
+              ]
+            }
+          ],
+          "truncated": false,
+          "truncation_reason": null
+        }
+      }
+    },
+    {
+      "run_id": "run-193d3c2dd3ce4b90b617b445a8822e0f",
+      "sequence": 4,
+      "timestamp": "2026-09-30T16:21:17.956393Z",
+      "type": "tool.started",
+      "payload": {
+        "request": {
+          "request_id": "host-remote-source-1",
+          "run_id": "run-193d3c2dd3ce4b90b617b445a8822e0f",
+          "index_id": "index-import-8bcff9ee7e029f141fa92ad0dcb40447-relations-v4-ddddb739e050a2fc",
+          "params": {
+            "tool": "read_source",
+            "path": "rollout/flags.py",
+            "start_line": 4,
+            "end_line": 8
+          }
+        }
+      }
+    },
+    {
+      "run_id": "run-193d3c2dd3ce4b90b617b445a8822e0f",
+      "sequence": 5,
+      "timestamp": "2026-09-30T16:21:17.971948Z",
+      "type": "tool.completed",
+      "payload": {
+        "result": {
+          "request_id": "host-remote-source-1",
+          "run_id": "run-193d3c2dd3ce4b90b617b445a8822e0f",
+          "index_id": "index-import-8bcff9ee7e029f141fa92ad0dcb40447-relations-v4-ddddb739e050a2fc",
+          "completed_sequence": 5,
+          "kind": "read_source.succeeded",
+          "tool": "read_source",
+          "evidence": {
+            "start_line": 4,
+            "end_line": 8,
+            "evidence_id": "evidence-2ea76da544aab2597ee281896f0a69a7",
+            "index_id": "index-import-8bcff9ee7e029f141fa92ad0dcb40447-relations-v4-ddddb739e050a2fc",
+            "path": "rollout/flags.py",
+            "excerpt": "def enabled(flag_name, user_id):\n    configured = os.getenv(flag_name)\n    if configured is None:\n        return fetch_remote(flag_name, user_id)\n    return configured == \"on\"",
+            "content_hash": "f136ad17f6c05ccdc4131300582a0d7e1a7dc4f8851f91ee4d88a8acf12e98bd",
+            "kind": "source"
+          }
+        }
+      }
+    },
+    {
+      "run_id": "run-193d3c2dd3ce4b90b617b445a8822e0f",
+      "sequence": 6,
+      "timestamp": "2026-09-30T16:21:28.315907Z",
+      "type": "tool.started",
+      "payload": {
+        "request": {
+          "request_id": "host-remote-search-2",
+          "run_id": "run-193d3c2dd3ce4b90b617b445a8822e0f",
+          "index_id": "index-import-8bcff9ee7e029f141fa92ad0dcb40447-relations-v4-ddddb739e050a2fc",
+          "params": {
+            "tool": "search_code",
+            "query": "fetch_remote",
+            "limit": 20
+          }
+        }
+      }
+    },
+    {
+      "run_id": "run-193d3c2dd3ce4b90b617b445a8822e0f",
+      "sequence": 7,
+      "timestamp": "2026-09-30T16:21:28.332771Z",
+      "type": "tool.completed",
+      "payload": {
+        "result": {
+          "request_id": "host-remote-search-2",
+          "run_id": "run-193d3c2dd3ce4b90b617b445a8822e0f",
+          "index_id": "index-import-8bcff9ee7e029f141fa92ad0dcb40447-relations-v4-ddddb739e050a2fc",
+          "completed_sequence": 7,
+          "kind": "search_code.succeeded",
+          "tool": "search_code",
+          "matches": [
+            {
+              "rank": 1,
+              "symbol": {
+                "start_line": 11,
+                "end_line": 13,
+                "symbol_id": "sym-24fe7a64c48344276dad2c509276c99b",
+                "index_id": "index-import-8bcff9ee7e029f141fa92ad0dcb40447-relations-v4-ddddb739e050a2fc",
+                "path": "rollout/flags.py",
+                "qualified_name": "rollout.flags.fetch_remote",
+                "kind": "function"
+              },
+              "matched_terms": [
+                "fetch_remote"
+              ]
+            },
+            {
+              "rank": 2,
+              "symbol": {
+                "start_line": 1,
+                "end_line": 13,
+                "symbol_id": "sym-21b484e4c7cce0c9b9da27c7f4970a27",
+                "index_id": "index-import-8bcff9ee7e029f141fa92ad0dcb40447-relations-v4-ddddb739e050a2fc",
+                "path": "rollout/flags.py",
+                "qualified_name": "rollout.flags",
+                "kind": "module"
+              },
+              "matched_terms": [
+                "fetch_remote"
+              ]
+            },
+            {
+              "rank": 3,
+              "symbol": {
+                "start_line": 4,
+                "end_line": 8,
+                "symbol_id": "sym-dbb0db38b6ba2b84235e798ddb868901",
+                "index_id": "index-import-8bcff9ee7e029f141fa92ad0dcb40447-relations-v4-ddddb739e050a2fc",
+                "path": "rollout/flags.py",
+                "qualified_name": "rollout.flags.enabled",
+                "kind": "function"
+              },
+              "matched_terms": [
+                "fetch_remote"
+              ]
+            }
+          ],
+          "truncated": false,
+          "truncation_reason": null
+        }
+      }
+    },
+    {
+      "run_id": "run-193d3c2dd3ce4b90b617b445a8822e0f",
+      "sequence": 8,
+      "timestamp": "2026-09-30T16:21:34.715471Z",
+      "type": "tool.started",
+      "payload": {
+        "request": {
+          "request_id": "host-remote-source-2",
+          "run_id": "run-193d3c2dd3ce4b90b617b445a8822e0f",
+          "index_id": "index-import-8bcff9ee7e029f141fa92ad0dcb40447-relations-v4-ddddb739e050a2fc",
+          "params": {
+            "tool": "read_source",
+            "path": "rollout/flags.py",
+            "start_line": 11,
+            "end_line": 13
+          }
+        }
+      }
+    },
+    {
+      "run_id": "run-193d3c2dd3ce4b90b617b445a8822e0f",
+      "sequence": 9,
+      "timestamp": "2026-09-30T16:21:34.739167Z",
+      "type": "tool.completed",
+      "payload": {
+        "result": {
+          "request_id": "host-remote-source-2",
+          "run_id": "run-193d3c2dd3ce4b90b617b445a8822e0f",
+          "index_id": "index-import-8bcff9ee7e029f141fa92ad0dcb40447-relations-v4-ddddb739e050a2fc",
+          "completed_sequence": 9,
+          "kind": "read_source.succeeded",
+          "tool": "read_source",
+          "evidence": {
+            "start_line": 11,
+            "end_line": 13,
+            "evidence_id": "evidence-14eab60461724ac880ea8ad512621bc5",
+            "index_id": "index-import-8bcff9ee7e029f141fa92ad0dcb40447-relations-v4-ddddb739e050a2fc",
+            "path": "rollout/flags.py",
+            "excerpt": "def fetch_remote(flag_name, user_id):\n    method_name = \"fetch\"\n    return getattr(remote_client, method_name)(flag_name, user_id)",
+            "content_hash": "f136ad17f6c05ccdc4131300582a0d7e1a7dc4f8851f91ee4d88a8acf12e98bd",
+            "kind": "source"
+          }
+        }
+      }
+    },
+    {
+      "run_id": "run-193d3c2dd3ce4b90b617b445a8822e0f",
+      "sequence": 10,
+      "timestamp": "2026-09-30T16:21:46.243620Z",
+      "type": "run.interrupted",
+      "payload": {
+        "status": "interrupted",
+        "reason": "external Run exceeded its wall-clock budget"
+      }
+    }
+  ],
+  "next_after_sequence": null,
+  "has_more": false
+}

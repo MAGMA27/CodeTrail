@@ -1,0 +1,28 @@
+{
+  "schema_version": "0.1.0",
+  "project_id": "project-bde03f8eac184bb585f6b5b4affe11ec",
+  "session_id": "session-162eb27cd13b4ee3bfb7e1f3c0d45707",
+  "run_id": "run-576b8dea46814feeb56397d2e666b1a6",
+  "results": [
+    {
+      "request_id": "host-remote-supplement-source-1",
+      "run_id": "run-576b8dea46814feeb56397d2e666b1a6",
+      "index_id": "index-import-8bcff9ee7e029f141fa92ad0dcb40447-relations-v4-ddddb739e050a2fc",
+      "completed_sequence": 3,
+      "kind": "read_source.succeeded",
+      "tool": "read_source",
+      "evidence": {
+        "start_line": 4,
+        "end_line": 8,
+        "evidence_id": "evidence-2ea76da544aab2597ee281896f0a69a7",
+        "index_id": "index-import-8bcff9ee7e029f141fa92ad0dcb40447-relations-v4-ddddb739e050a2fc",
+        "path": "rollout/flags.py",
+        "excerpt": "def enabled(flag_name, user_id):\n    configured = os.getenv(flag_name)\n    if configured is None:\n        return fetch_remote(flag_name, user_id)\n    return configured == \"on\"",
+        "content_hash": "f136ad17f6c05ccdc4131300582a0d7e1a7dc4f8851f91ee4d88a8acf12e98bd",
+        "kind": "source"
+      }
+    }
+  ],
+  "next_after_sequence": null,
+  "has_more": false
+}

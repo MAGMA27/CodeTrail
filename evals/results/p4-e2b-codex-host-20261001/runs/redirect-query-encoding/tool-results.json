@@ -1,0 +1,70 @@
+{
+  "schema_version": "0.1.0",
+  "project_id": "project-2ad24ef7fd0f40129b8ccc5cccb572d5",
+  "session_id": "session-12741ac79e454b348da945b37e60831c",
+  "run_id": "run-19ed439e05694c49a2f55a481bef2af0",
+  "results": [
+    {
+      "request_id": "host-redirect-search-1",
+      "run_id": "run-19ed439e05694c49a2f55a481bef2af0",
+      "index_id": "index-import-efbb2859760255933134ef4a12260470-relations-v4-83b6daed08a499b1",
+      "completed_sequence": 3,
+      "kind": "search_code.succeeded",
+      "tool": "search_code",
+      "matches": [
+        {
+          "rank": 1,
+          "symbol": {
+            "start_line": 1,
+            "end_line": 2,
+            "symbol_id": "sym-86e597cb8f28e06f7b52fd5463b91051",
+            "index_id": "index-import-efbb2859760255933134ef4a12260470-relations-v4-83b6daed08a499b1",
+            "path": "auth.py",
+            "qualified_name": "auth",
+            "kind": "module"
+          },
+          "matched_terms": [
+            "next_path"
+          ]
+        },
+        {
+          "rank": 2,
+          "symbol": {
+            "start_line": 1,
+            "end_line": 2,
+            "symbol_id": "sym-1327460839ef1ace92cd69805c5b09cf",
+            "index_id": "index-import-efbb2859760255933134ef4a12260470-relations-v4-83b6daed08a499b1",
+            "path": "auth.py",
+            "qualified_name": "auth.build_login_redirect",
+            "kind": "function"
+          },
+          "matched_terms": [
+            "next_path"
+          ]
+        }
+      ],
+      "truncated": false,
+      "truncation_reason": null
+    },
+    {
+      "request_id": "host-redirect-source-1",
+      "run_id": "run-19ed439e05694c49a2f55a481bef2af0",
+      "index_id": "index-import-efbb2859760255933134ef4a12260470-relations-v4-83b6daed08a499b1",
+      "completed_sequence": 5,
+      "kind": "read_source.succeeded",
+      "tool": "read_source",
+      "evidence": {
+        "start_line": 1,
+        "end_line": 2,
+        "evidence_id": "evidence-64d5424002dd59001c84c5c18332f231",
+        "index_id": "index-import-efbb2859760255933134ef4a12260470-relations-v4-83b6daed08a499b1",
+        "path": "auth.py",
+        "excerpt": "def build_login_redirect(next_path: str, state: str) -> str:\n    return f\"/login?next={next_path}&state={state}\"",
+        "content_hash": "719ec0997e476d390d8cdce2d65ebf7be07cd2260c0a5afac5d284367597c3d9",
+        "kind": "source"
+      }
+    }
+  ],
+  "next_after_sequence": null,
+  "has_more": false
+}

@@ -123,8 +123,12 @@ python -m timeout_demo
 
 # Git 与协作
 
-保留用户修改。提交采用 Conventional Commits，仅在用户要求时提交或推送。交付说明修改、验证和限制；完成阶段后同步 memory-bank。
+保留用户修改。提交采用 Conventional Commits，仅在用户要求时推送。交付说明修改、验证和限制；完成阶段后同步 memory-bank。
 
 ## AI native 接口目标
 
 新能力采用应用服务统一业务逻辑与 Pydantic 契约，HTTP 面向工作台，MCP 面向外部 Agent；项目归属、预算、证据规则不在适配器中另写一套。A1 本地只读 MCP、W2 的 loopback HTTP/可选 MCP 本地导入和 O2 的 HTTP/可选 MCP 功能生成已实现，下载/费用能力单独开放。见 [统一接口决策](docs/decisions/2026-09-11-agent-native-interfaces.md)。
+
+## 项目与会话目标
+
+Session 复用项目固定索引/概览，各自保存消息和调查结论；Run 是一次显式执行，冻结输入与证据。不同会话的推断不自动共享，HTTP/MCP 使用相同归属和预算。设计见 [项目与会话决策](docs/decisions/2026-09-11-project-session-workspace.md)，当前行为和限制见 [Run 执行](docs/subsystems/execution.md) 与 [工作台](docs/subsystems/workbench.md)。

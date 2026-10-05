@@ -1,0 +1,30 @@
+{
+  "schema_version": "0.1.0",
+  "report": {
+    "schema_version": "0.1.0",
+    "report_id": "report-run-576b8dea46814feeb56397d2e666b1a6",
+    "run_id": "run-576b8dea46814feeb56397d2e666b1a6",
+    "project_id": "project-bde03f8eac184bb585f6b5b4affe11ec",
+    "session_id": "session-162eb27cd13b4ee3bfb7e1f3c0d45707",
+    "index_id": "index-import-8bcff9ee7e029f141fa92ad0dcb40447-relations-v4-ddddb739e050a2fc",
+    "status": "interrupted",
+    "outcome": "interrupted",
+    "fixture_mode": false,
+    "summary": "Run was interrupted after its wall-clock budget was exhausted.",
+    "graph": {
+      "index_id": "index-import-8bcff9ee7e029f141fa92ad0dcb40447-relations-v4-ddddb739e050a2fc",
+      "nodes": [],
+      "static_edges": [],
+      "unresolved": [],
+      "candidate_links": [],
+      "truncated": false,
+      "truncation_reason": null
+    },
+    "evidence": [],
+    "findings": [],
+    "candidate_links": [],
+    "explanation": null,
+    "limitations": [],
+    "terminal_sequence": 4
+  }
+}

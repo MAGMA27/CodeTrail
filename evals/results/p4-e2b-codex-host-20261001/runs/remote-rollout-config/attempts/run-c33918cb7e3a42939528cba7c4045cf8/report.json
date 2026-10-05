@@ -1,0 +1,43 @@
+{
+  "schema_version": "0.1.0",
+  "report": {
+    "schema_version": "0.1.0",
+    "report_id": "report-run-c33918cb7e3a42939528cba7c4045cf8",
+    "run_id": "run-c33918cb7e3a42939528cba7c4045cf8",
+    "project_id": "project-bde03f8eac184bb585f6b5b4affe11ec",
+    "session_id": "session-162eb27cd13b4ee3bfb7e1f3c0d45707",
+    "index_id": "index-import-8bcff9ee7e029f141fa92ad0dcb40447-relations-v4-ddddb739e050a2fc",
+    "status": "succeeded",
+    "outcome": "insufficient_evidence",
+    "fixture_mode": false,
+    "summary": "Local source shows an environment override with a remote fallback, but the frozen Issue lacks runtime values and a rollout response; root cause remains unverified.",
+    "graph": {
+      "index_id": "index-import-8bcff9ee7e029f141fa92ad0dcb40447-relations-v4-ddddb739e050a2fc",
+      "nodes": [],
+      "static_edges": [],
+      "unresolved": [],
+      "candidate_links": [],
+      "truncated": false,
+      "truncation_reason": null
+    },
+    "evidence": [
+      {
+        "start_line": 4,
+        "end_line": 8,
+        "evidence_id": "evidence-2ea76da544aab2597ee281896f0a69a7",
+        "index_id": "index-import-8bcff9ee7e029f141fa92ad0dcb40447-relations-v4-ddddb739e050a2fc",
+        "path": "rollout/flags.py",
+        "excerpt": "def enabled(flag_name, user_id):\n    configured = os.getenv(flag_name)\n    if configured is None:\n        return fetch_remote(flag_name, user_id)\n    return configured == \"on\"",
+        "content_hash": "f136ad17f6c05ccdc4131300582a0d7e1a7dc4f8851f91ee4d88a8acf12e98bd",
+        "kind": "source"
+      }
+    ],
+    "findings": [],
+    "candidate_links": [],
+    "explanation": null,
+    "limitations": [
+      "No production environment value, rollout configuration snapshot, or remote response is available; the regional cause cannot be established."
+    ],
+    "terminal_sequence": 5
+  }
+}
