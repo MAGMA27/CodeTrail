@@ -14,7 +14,15 @@ from mcp import Client
 from mcp.client.stdio import StdioServerParameters
 import pytest
 
-from app.contracts import CreateRunRequest, Issue, RunBudget, SearchCodeParams
+from app.contracts import (
+    CreateRunRequest,
+    GetNeighborsParams,
+    GetNeighborsSuccess,
+    Issue,
+    RunBudget,
+    SearchCodeParams,
+    UnresolvedReference,
+)
 from app.main import create_app
 from app.service import ServiceError
 
@@ -1733,6 +1741,109 @@ def test_mcp_external_run_persists_actual_tools_and_report(tmp_path: Path) -> No
             assert event_types == ["run.cancelled"]
 
     asyncio.run(exercise_boundaries())
+
+
+def test_external_neighbors_bounds_large_unresolved_result(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repository = copy_fixture(tmp_path)
+    application = create_app(
+        {"timeout-demo": repository},
+        data_root=tmp_path / "data",
+        mcp_external_run_enabled=True,
+    )
+    status, project = request(
+        application,
+        "POST",
+        "/api/projects",
+        {"name": "External neighbors boundary", "repository_id": "timeout-demo"},
+    )
+    assert status == 200
+    project_id = project["project_id"]
+    status, created_index = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/indexes",
+        {"revision": "external-neighbors-boundary", "dirty": False},
+    )
+    assert status == 200
+    index_id = created_index["index"]["index_id"]
+    status, session = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/sessions",
+        {"topic": "External neighbors boundary", "index_id": index_id},
+    )
+    assert status == 200
+    session_id = session["session"]["session_id"]
+    status, _ = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/sessions/{session_id}/messages",
+        {"source": "human", "content": "Inspect the bounded neighbors result."},
+    )
+    assert status == 200
+    status, search = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/indexes/{index_id}/search?query=load_settings&limit=4",
+    )
+    assert status == 200
+    symbol_id = next(
+        item["symbol"]["symbol_id"]
+        for item in search["matches"]
+        if item["symbol"]["qualified_name"] == "timeout_demo.config.load_settings"
+    )
+
+    index_service = application.state.index_service
+    base_result = index_service.neighbors(index_id, symbol_id, "callers", 1, 40)
+    oversized_unresolved = [
+        UnresolvedReference(
+            unresolved_id=f"synthetic-neighbor-unresolved-{number}",
+            index_id=index_id,
+            source_symbol_id=base_result.root.symbol_id,
+            path=base_result.root.path,
+            expression=f"dynamic_call_{number}()",
+            reason="dynamic_call_target",
+            start_line=base_result.root.start_line,
+            end_line=base_result.root.start_line,
+        )
+        for number in range(41)
+    ]
+    oversized_result = base_result.model_copy(update={"unresolved": oversized_unresolved})
+    monkeypatch.setattr(index_service, "neighbors", lambda *_args, **_kwargs: oversized_result)
+
+    run_response = application.state.workspace_service.create_run(
+        project_id,
+        session_id,
+        CreateRunRequest(
+            index_id=index_id,
+            issue=Issue(id="external-neighbors-boundary", title="Neighbors", body="Inspect neighbors."),
+            mode="external",
+            execution_source="codex",
+            execution_version="run-external-codex-v1",
+            budget=RunBudget(max_tool_calls=2),
+        ),
+        via_mcp=True,
+    )
+    result = application.state.workspace_service.execute_external_tool(
+        project_id,
+        session_id,
+        run_response.run_id,
+        "external-neighbors-boundary-1",
+        index_id,
+        GetNeighborsParams(symbol_id=symbol_id, direction="callers", depth=1, limit=40),
+    )
+
+    assert isinstance(result, GetNeighborsSuccess)
+    assert len(result.unresolved) == 40
+    assert result.truncated is True
+    assert result.truncation_reason == "max_unresolved result limit reached"
+    assert result.index_unresolved_truncated == oversized_result.index_unresolved_truncated
+    persisted = application.state.workspace_service.list_run_tool_results(
+        project_id,
+        session_id,
+        run_response.run_id,
+    )
+    assert persisted.results == [result]
 
 
 def test_mcp_external_first_completion_with_multiple_evidence_is_idempotent(tmp_path: Path) -> None:

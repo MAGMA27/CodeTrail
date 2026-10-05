@@ -595,6 +595,8 @@ _FRESHNESS_MAX_SECONDS = 2.0
 _FRESHNESS_MAX_CHANGED_PATHS = 100
 _DEFINITION_CACHE_MAX_ENTRIES = 5_000
 _DEFINITION_CACHE_MAX_BYTES = 16 * 1024 * 1024
+# Internal and external Run ToolResult responses share this contract detail limit.
+_RUN_NEIGHBOR_UNRESOLVED_LIMIT = 40
 _LEGACY_REBUILDABLE_FRESHNESS_REASONS: frozenset[FreshnessReasonCode] = frozenset(
     {
         "missing_index_metadata",
@@ -1341,6 +1343,18 @@ class IndexService:
                     request.params.depth,
                     request.params.limit,
                 )
+                unresolved = list(result.unresolved)
+                truncated = result.truncated
+                truncation_reason = result.truncation_reason
+                if len(unresolved) > _RUN_NEIGHBOR_UNRESOLVED_LIMIT:
+                    unresolved = unresolved[:_RUN_NEIGHBOR_UNRESOLVED_LIMIT]
+                    unresolved_reason = "max_unresolved result limit reached"
+                    if truncation_reason:
+                        if unresolved_reason not in truncation_reason:
+                            truncation_reason = f"{truncation_reason}; {unresolved_reason}"
+                    else:
+                        truncation_reason = unresolved_reason
+                    truncated = True
                 return GetNeighborsSuccess(
                     request_id=request.request_id,
                     run_id=request.run_id,
@@ -1349,9 +1363,9 @@ class IndexService:
                     root=result.root,
                     nodes=list(result.nodes),
                     neighbors=result.neighbors,
-                    unresolved=list(result.unresolved),
-                    truncated=result.truncated,
-                    truncation_reason=result.truncation_reason,
+                    unresolved=unresolved,
+                    truncated=truncated,
+                    truncation_reason=truncation_reason,
                     index_truncated=result.index_truncated,
                     index_truncation_reason=result.index_truncation_reason,
                     index_unresolved_truncated=result.index_unresolved_truncated,

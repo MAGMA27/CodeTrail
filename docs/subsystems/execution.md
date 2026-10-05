@@ -2,7 +2,7 @@
 
 ## 状态
 
-P2-R1 的 fixture 闭环已扩展为 P2-R2 的显式 fixture/real Run：服务端冻结 Session 输入，后台执行白名单工具；real 模式由一个有界模型工具循环决定检索计划并生成结构化结论。公开事件、工具结果、报告、取消、历史读取和重启中断继续复用同一生命周期；P3-S1 已增加基于持久化事件表的有界 SSE 回放与断线续接；P3-I1 已从终态报告候选提供固定快照上的有界静态影响读取，不改变 Run 生命周期；Codex external Run 已由本地 MCP 驱动同一生命周期并自动进入工作台；代码理解 explanation 结果已复用该生命周期，按有序步骤保存同快照证据和覆盖边界。LangGraph、多 Agent、任意仓库代码执行和真实供应商语义质量仍未实现或验证；实际 Codex 主机热加载已于 2026-09-14 完成并与 HTTP/工作台结构结果对照。
+P2-R1 的 fixture 闭环已扩展为 P2-R2 的显式 fixture/real Run：服务端冻结 Session 输入，后台执行白名单工具；real 模式由一个有界模型工具循环决定检索计划并生成结构化结论。公开事件、工具结果、报告、取消、历史读取和重启中断继续复用同一生命周期；P3-S1 已增加基于持久化事件表的有界 SSE 回放与断线续接；P3-I1 已从终态报告候选提供固定快照上的有界静态影响读取，不改变 Run 生命周期；Codex external Run 已由本地 MCP 驱动同一生命周期并自动进入工作台；代码理解 explanation 结果已复用该生命周期，按有序步骤保存同快照证据和覆盖边界。LangGraph、多 Agent、任意仓库代码执行和真实供应商语义质量仍未实现或验证；2026-09-30 当前 Codex 宿主在默认 50,000 字符输出预算下成功重放 neighbors 并完成 explanation 报告，与 HTTP/普通 MCP 领域结果及工作台证据联动对照通过。
 
 ## 职责与范围
 
@@ -26,7 +26,7 @@ Run 固定 `project_id/session_id/index_id`、Issue、模式、场景、版本�
 
 状态迁移为 queued → running → succeeded/failed/cancelled/interrupted；终态不可逆且只写一个 terminal event。名额从预留开始由提交生命周期持有，worker 启动失败、执行异常、超时、取消和正常终态均恰好释放；若已保存 Run 但 worker 无法启动，服务端先保存可查询的 failed 报告再返回 503。工具开始、完成/失败、阶段、finding、graph 和终态事件使用服务端连续 sequence，工具完成事件与结果原子保存。模型调用在发送完整 prompt 前原子预留调用/修复次数和输入字符，响应返回后只保存输出字符及可用 token 用量；不保存原始模型文本。取消和服务重启都保存对应终态报告；worker 发现终态后忽略迟到结果，运行中的供应商请求返回前不释放容量。
 
-三个 fixture 场景继续组装候选结论、证据不足和工具失败。real 模式每轮只接受一个白名单工具请求或一个 `IssueModelFinal`，允许一次有限修复；完整冻结 Issue/消息、工具历史和本次返回的 evidence 组成每轮上下文，最终引用必须属于本 Run 的同一 `index_id`。external 模式由 Codex 负责调查编排，服务端只接受白名单工具的实际返回和结构化 `IssueModelFinal` 或 `CodeUnderstandingFinal`，并以创建时间兑现 `max_seconds`，超时只写当前 Run 的 interrupted 终态。explanation 使用最多 12 个有序步骤：confirmed 必须带 evidence，complete 不得含 unknown，partial/unknown 明确未确认范围，且不生成 findings/candidate links；重复同内容提交复用报告，不同步骤返回 conflict。证据不足是成功终态，非法引用、非法工具、供应商失败和预算耗尽是明确失败；报告中的 graph/evidence/candidate link/finding 仅来自本次 Run 的同快照结果，同时把工具看到的固定索引扫描/unresolved 覆盖限制写入公开 Report limitations。P3-I1 的影响读取只接受报告内精确 candidate/finding ID；若没有唯一 source symbol 返回 unmapped 空结果，否则只在固定 index 的静态 `calls` 上按 callers/callees、深度不超过 2 遍历，返回同一固定索引的扫描与 unresolved 覆盖事实，去重节点/路径并保留 unresolved 未知边界，静态可达不升级为确认影响。公开事件通过 `events/stream` 按 `{run_id}:{sequence}` 先回放后追踪，终态事件后结束，终态游标收到只接受四类终态的 `run.stream.end`；工作台优先 SSE，`onopen` 不重置无进展重连预算，只有有效前进事件重置，达到上限后才回退 450ms 有界轮询且不并行保留 SSE，切换/刷新会恢复而不重复创建。
+三个 fixture 场景继续组装候选结论、证据不足和工具失败。real 模式每轮只接受一个白名单工具请求或一个 `IssueModelFinal`，允许一次有限修复；完整冻结 Issue/消息、工具历史和本次返回的 evidence 组成每轮上下文，最终引用必须属于本 Run 的同一 `index_id`。external 模式由 Codex 负责调查编排，服务端只接受白名单工具的实际返回和结构化 `IssueModelFinal` 或 `CodeUnderstandingFinal`，并以创建时间兑现 `max_seconds`，超时只写当前 Run 的 interrupted 终态。内部与 external Run 都经 `IndexService.execute_tool`；Run `get_neighbors` ToolResult 的 `unresolved` 详情最多保留 40 条，超出时将 `truncated` 设为 true 并报告 `max_unresolved result limit reached`，不改变 `index_unresolved_truncated` 的固定索引覆盖语义；HTTP 和普通 MCP neighbors 查询仍使用原有查询结果，不走该 Run ToolResult 上限。explanation 使用最多 12 个有序步骤：confirmed 必须带 evidence，complete 不得含 unknown，partial/unknown 明确未确认范围，且不生成 findings/candidate links；重复同内容提交复用报告，不同步骤返回 conflict。证据不足是成功终态，非法引用、非法工具、供应商失败和预算耗尽是明确失败；报告中的 graph/evidence/candidate link/finding 仅来自本次 Run 的同快照结果，同时把工具看到的固定索引扫描/unresolved 覆盖限制写入公开 Report limitations。P3-I1 的影响读取只接受报告内精确 candidate/finding ID；若没有唯一 source symbol 返回 unmapped 空结果，否则只在固定 index 的静态 `calls` 上按 callers/callees、深度不超过 2 遍历，返回同一固定索引的扫描与 unresolved 覆盖事实，去重节点/路径并保留 unresolved 未知边界，静态可达不升级为确认影响。公开事件通过 `events/stream` 按 `{run_id}:{sequence}` 先回放后追踪，终态事件后结束，终态游标收到只接受四类终态的 `run.stream.end`；工作台优先 SSE，`onopen` 不重置无进展重连预算，只有有效前进事件重置，达到上限后才回退 450ms 有界轮询且不并行保留 SSE，切换/刷新会恢复而不重复创建。
 
 ## 错误与限制
 
@@ -34,7 +34,7 @@ Run 固定 `project_id/session_id/index_id`、Issue、模式、场景、版本�
 
 ## 验证
 
-`apps/api/tests/test_runs.py` 覆盖 fixture 生命周期和固定 Run 报告影响查询；`apps/api/tests/test_storage.py` 覆盖有界静态路径、环、去重和未知边界；`apps/api/tests/test_run_sse.py` 覆盖 HTTP 逐帧回放、双游标续接、终态控制帧、边界拒绝、断开释放容量和 health 并发；`apps/api/tests/test_issue_runs.py` 覆盖不同问题的工具计划、证据不足、非法工具/引用、有限修复、模型预算、供应商失败、持久化 DeepSeek-compatible 协议、token/字符用量、取消和无凭据能力边界；`apps/api/tests/test_mcp.py` 覆盖 HTTP/MCP 的 real 能力开关、共享 Run 读取和影响结果对照，以及 external 工具实际结果、代码理解有序步骤、证据边界、幂等、时间预算、取消和终态拒写；`apps/web/lib/run-event-stream.test.ts` 和 `apps/web/lib/api.test.ts` 覆盖前端实际订阅与 explanation 解析。本轮全量结果以最终验证为准；真实 DeepSeek 语义质量仍为 UNVERIFIED。
+`apps/api/tests/test_runs.py` 覆盖 fixture 生命周期、固定 Run 报告影响查询，以及 internal Run 中 neighbors unresolved 溢出后静态边/截断/evidence 的持久化；`apps/api/tests/test_storage.py` 覆盖有界静态路径、环、去重和未知边界；`apps/api/tests/test_run_sse.py` 覆盖 HTTP 逐帧回放、双游标续接、终态控制帧、边界拒绝、断开释放容量和 health 并发；`apps/api/tests/test_issue_runs.py` 覆盖不同问题的工具计划、证据不足、非法工具/引用、有限修复、模型预算、供应商失败、持久化 DeepSeek-compatible 协议、token/字符用量、取消和无凭据能力边界；`apps/api/tests/test_mcp.py` 覆盖 HTTP/MCP 的 real 能力开关、共享 Run 读取和影响结果对照，以及 external 工具实际结果、代码理解有序步骤、证据边界、幂等、时间预算、取消和终态拒写；`apps/web/lib/run-event-stream.test.ts` 和 `apps/web/lib/api.test.ts` 覆盖前端实际订阅与 explanation 解析。本轮全量结果以最终验证为准；真实 DeepSeek 语义质量仍为 UNVERIFIED。
 
 ## 相关决策
 

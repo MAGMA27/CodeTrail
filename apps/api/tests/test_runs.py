@@ -13,6 +13,7 @@ from urllib.parse import urlsplit
 
 import pytest
 
+from app.contracts import UnresolvedReference
 from app.main import create_app
 from app.run_sse import RunEventStreamConfig
 from app.storage import IndexStore, StorageError
@@ -222,6 +223,7 @@ def test_http_run_freezes_saved_input_and_returns_same_snapshot_evidence(tmp_pat
     assert report["report"]["graph"]["index_id"] == index_id
     assert appended["message"]["sequence"] == 2
 
+
     source_root = application.state.workspace_service.registry.root_for("timeout-demo")
     config_path = source_root / "timeout_demo" / "config.py"
     config_path.write_text(
@@ -247,6 +249,72 @@ def test_http_run_freezes_saved_input_and_returns_same_snapshot_evidence(tmp_pat
     status, health = request(application, "GET", "/api/health")
     assert status == 200
     assert health["status"] == "ok"
+
+def test_internal_run_neighbors_bounds_unresolved_without_losing_graph_or_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    application, project_id, index_id = setup_workspace(tmp_path)
+    session_id = create_session(application, project_id, index_id, "internal neighbors result bound")
+    index_service = application.state.index_service
+    original_neighbors = index_service.neighbors
+    original_results = []
+
+    def neighbors_with_oversized_unresolved(index: str, symbol: str, direction: str, depth: int, limit: int):
+        result = original_neighbors(index, symbol, direction, depth, limit)
+        assert result.root is not None
+        original_results.append(result)
+        unresolved = [
+            UnresolvedReference(
+                unresolved_id=f"run-unresolved-{number}",
+                index_id=index_id,
+                source_symbol_id=result.root.symbol_id,
+                path=result.root.path,
+                expression=f"dynamic_call_{number}()",
+                reason="dynamic_call_target",
+                start_line=result.root.start_line,
+                end_line=result.root.start_line,
+            )
+            for number in range(41)
+        ]
+        return result.model_copy(update={"unresolved": unresolved})
+
+    monkeypatch.setattr(index_service, "neighbors", neighbors_with_oversized_unresolved)
+
+    run_id = start_run(application, project_id, session_id, run_payload(index_id))
+    terminal = wait_for_terminal(application, project_id, session_id, run_id)
+    assert terminal["run"]["status"] == "succeeded"
+
+    status, tool_results = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/sessions/{session_id}/runs/{run_id}/tool-results",
+    )
+    assert status == 200
+    result = next(item for item in tool_results["results"] if item["tool"] == "get_neighbors")
+    base = original_results[0]
+    assert len(result["unresolved"]) == 40
+    assert result["root"]["symbol_id"] == base.root.symbol_id
+    assert result["neighbors"] == [item.model_dump(mode="json") for item in base.neighbors]
+    assert result["truncated"] is True
+    assert "max_unresolved result limit reached" in result["truncation_reason"]
+    if base.truncation_reason:
+        assert base.truncation_reason in result["truncation_reason"]
+    assert result["index_truncated"] == base.index_truncated
+    assert result["index_unresolved_truncated"] == base.index_unresolved_truncated
+
+    status, report = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/sessions/{session_id}/runs/{run_id}/report",
+    )
+    assert status == 200
+    assert report["report"]["outcome"] == "candidate_found"
+    assert report["report"]["evidence"]
+    assert report["report"]["graph"]["static_edges"] == [
+        item["edge"] for item in result["neighbors"]
+    ]
+
 
 
 def test_fixture_run_outcomes_and_real_mode_boundary(tmp_path: Path) -> None:
