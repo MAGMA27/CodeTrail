@@ -24,7 +24,7 @@ HTTP/MCP 共用 Session 创建、列表、读取、追加消息和后续 Run 启
 
 ## 验收与证据
 
-Session/消息持久化、固定快照 Run、HTTP/MCP 归属与证据校验、公开事件和工作台恢复已实施。验收与回归入口见 [Run 执行](../subsystems/execution.md)、[工作台](../subsystems/workbench.md) 和 [MVP 操作说明](../mvp-operation.md)。[Codex 宿主复测](../../evals/results/p4-e2b-codex-host-20261001/codex-host-holdout.md) 保存独立项目/Session 的实际 Run 记录；[影响链验收](../../evals/results/p4-e2b-codex-host-20261001/impact-chain-acceptance.md) 记录固定快照源码、切换和刷新流程。已知案例复测不代表盲测或真实供应商质量；影响面板部分边界 UI 状态仍待验收，不能由本决策 implemented 推定全部产品验收完成。
+Session/消息持久化、固定快照 Run、HTTP/MCP 归属与证据校验、公开事件和工作台恢复已实施。验收与回归入口见 [Run 执行](../../apps/api/execution.md)、[工作台](../../apps/web/workbench.md) 和 [MVP 操作说明](../mvp-operation.md)。[Codex 宿主复测](../../evals/results/p4-e2b-codex-host-20261001/codex-host-holdout.md) 保存独立项目/Session 的实际 Run 记录；[影响链验收](../../evals/results/p4-e2b-codex-host-20261001/impact-chain-acceptance.md) 记录固定快照源码、切换和刷新流程。已知案例复测不代表盲测或真实供应商质量；影响面板部分边界 UI 状态仍待验收，不能由本决策 implemented 推定全部产品验收完成。
 
 ## 后果
 

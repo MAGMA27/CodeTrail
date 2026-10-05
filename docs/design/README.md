@@ -1,6 +1,6 @@
 # 设计文档
 
-本目录维护 CodeTrail 的目标界面规范、可浏览原型和截图证据。这里的目标设计不等于生产页面已经实现；当前真实 API 与工作台行为仍以 [工作台子系统说明](../subsystems/workbench.md) 和 [Web 工作台 README](../../apps/web/README.md) 为准。
+本目录维护 CodeTrail 的目标界面规范、可浏览原型和截图证据。这里的目标设计不等于生产页面已经实现；当前真实 API 与工作台行为仍以 [工作台子系统说明](../../apps/web/workbench.md) 和 [Web 工作台 README](../../apps/web/README.md) 为准。
 
 | 文档 | 内容 | 状态 |
 | --- | --- | --- |

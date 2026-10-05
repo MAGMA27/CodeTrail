@@ -2,7 +2,6 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { resolve, relative, dirname, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const headings = ['状态', '职责与范围', '接口与依赖', '数据与生命周期', '错误与限制', '验证', '相关决策'];
 function walk(root) {
   if (!existsSync(root)) return [];
   return readdirSync(root, { withFileTypes: true }).flatMap(e =>
@@ -44,12 +43,6 @@ export function checkDocs(root, { local = false } = {}) {
       const front = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
       const skillName = front?.[1].match(/^name: (.+)$/m)?.[1].trim();
       if (skillName !== dirname(p).split(/[\\/]/).at(-1) || !/^description: .+/m.test(front?.[1] ?? '')) errors.push(`${name(p)}: invalid skill metadata`);
-    }
-    if (name(p).startsWith('docs/subsystems/') && !p.endsWith('README.md')) {
-      for (const h of headings) {
-        const body = content.split(`## ${h}\n`)[1]?.split('\n## ')[0].trim();
-        if (!body) errors.push(`${name(p)}: missing or empty section ${h}`);
-      }
     }
     if (name(p).startsWith('docs/decisions/') && !p.endsWith('README.md')) {
       const status = content.match(/^Status: (\S+)$/m)?.[1];

@@ -21,7 +21,7 @@ Status: implemented
 
 ## 验收与证据
 
-实现入口为 [evals README](../../evals/README.md)、[evals pipeline](../../evals/pipeline.py) 和 [评测子系统说明](../subsystems/evals.md)。本轮验收命令及结果补充在交付时同步到本记录和本地进度：
+实现入口为 [evals README](../../evals/README.md)、[evals pipeline](../../evals/pipeline.py) 和 [评测子系统说明](../../evals/README.md)。本轮验收命令及结果补充在交付时同步到本记录和本地进度：
 
 - `pnpm evals:validate` 通过，校验六例、源码集合、hash、划分和标注隔离。
 - `pnpm evals:test` 通过（9 passed），覆盖评分边界、失败/分母、预算、同名/跨快照、manifest 变化和连续运行一致性。

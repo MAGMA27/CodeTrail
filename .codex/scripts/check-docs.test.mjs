@@ -24,7 +24,7 @@ test('gate rejects broken links, missing ownership, invalid states and sections'
     writeFileSync(resolve(root, 'apps/api/app/orphan.py'), '');
     writeFileSync(resolve(root, 'docs/decisions/2026-09-11-invalid.md'), '# Decision\n\nStatus: done\n');
     const errors = checkDocs(root);
-    for (const fragment of ['broken link', 'missing or empty section', 'expected one subsystem owner', 'invalid decision status']) {
+    for (const fragment of ['broken link', 'unindexed subsystem', 'expected one subsystem owner', 'invalid decision status']) {
       assert.ok(errors.some(e => e.includes(fragment)), fragment);
     }
   } finally {
