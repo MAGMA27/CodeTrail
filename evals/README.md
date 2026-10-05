@@ -27,11 +27,11 @@
 
 ## 接口与依赖
 
-评测复用 [快照与关系](../docs/subsystems/indexing.md) 的只读 `build_source_snapshot`、定义/关系提取和 [存储与查询](../docs/subsystems/storage.md) 的 `IndexStore`/FTS5 搜索与快照 evidence。评测自己的数据与报告模型在 `models.py`；产品运行时契约仍由 [API contracts](../apps/api/app/contracts.py) 拥有。
+评测复用 [快照与关系](../apps/api/indexing.md) 的只读 `build_source_snapshot`、定义/关系提取和 [存储与查询](../apps/api/storage.md) 的 `IndexStore`/FTS5 搜索与快照 evidence。评测自己的数据与报告模型在 `models.py`；产品运行时契约仍由 [API contracts](../apps/api/app/contracts.py) 拥有。
 
 关键词基线只接收当前案例的 `Issue.title`/`Issue.body` 和该案例 `index_id`，按固定 tokenizer、首次出现去重、每词上限、候选聚合排序和 evidence 读取规则运行；`mentioned_paths` 不参与查询。P4-E2a 只给每个 real Run 传入该案例 Issue、完整保存 Session 消息前缀和 Run 工具返回的同快照上下文；工具根目录是单案例源码副本，annotation、修复参考、其他案例和基线候选不进入执行路径。评分编排在所有执行结果持久化后才读取独立标注。
 
-模型候选只从最终报告的 `candidate_links` 和 `findings` 转换，工具中间观察符号不算答案；同一位置稳定去重，非法/跨快照/缺失 evidence 记录映射失败并清空可评分候选。Run 失败、取消、中断和超时保留原状态与原因，不继承已有中间命中；整次预算不足时未启动的案例保留为 `budget_skipped`，仍进入总样本与定位指标分母。模型 token 用量未知时输出 `null`/`unknown`，不以零代替；整次预算以可执行的调用/字符/墙钟最坏预留约束。external 另外要求显式费用上限，并按已核实的 cache-miss 最坏价格预留；供应商未返回 token 或请求中断时整例保留最坏费用，不能把未知费用记为零。
+模型候选只从最终报告的 `candidate_links` 和 `findings` 转换，工具中间观察符号不算答案；候选按现有评分配置最多取三名，同一位置稳定去重；非法/跨快照/缺失 evidence 记录映射失败并清空可评分候选。Run 失败、取消、中断和超时保留原状态与原因，不继承已有中间命中；整次预算不足时未启动的案例保留为 `budget_skipped`，仍进入总样本与定位指标分母。模型 token 用量未知时输出 `null`/`unknown`，不以零代替；整次预算以可执行的调用/字符/墙钟最坏预留约束。external 另外要求显式费用上限，并按已核实的 cache-miss 最坏价格预留；供应商未返回 token 或请求中断时整例保留最坏费用，不能把未知费用记为零。
 
 ## 数据与生命周期
 
@@ -65,7 +65,6 @@ uv run --project apps/api python -m evals.cli render-baseline
 
 `run` 会生成 `baseline-all.json` 和 `baseline-all.md`；也可传 `--split calibration` 或 `--split holdout`。配置由 `BaselineConfig` 固定记录，当前 `model_calls=0`、`network_calls=0`，不从环境变量读取评测参数。
 
-`model-plan` 只生成不含标注的 dry-run 清单；`model-run` 默认使用本地假供应商和独立的 `p4-e2a-fix-v1` 结果目录，自动生成 `model-<split>.json/.md`、`comparison-<split>.json/.md` 和每例原始 Run 报告。已有 `raw-state.json` 时默认恢复，但必须通过包含 Issue、源码/index、输入构造、方法和累计预算的 v2 身份核对；不一致时拒绝并保持既有计划、状态和报告不变。`--no-resume` 只用于明确拒绝旧状态；`--provider external` 在 P4-E2a 中会失败，不能绕过显式授权调用外网。
 `model-plan` 只生成不含标注的 dry-run 清单；`model-run` 默认使用本地假供应商和独立的 `p4-e2a-fix-v1` 结果目录，自动生成 `model-<split>.json/.md`、`comparison-<split>.json/.md` 和每例原始 Run 报告。已有 `raw-state.json` 时默认恢复，但必须通过包含 Issue、源码/index、输入构造、方法、配置指纹、费用策略和累计预算的 v2 身份核对；不一致时拒绝并保持既有计划、状态和报告不变。
 
 external 入口必须显式指定 DeepSeek 配置文件和费用上限；计划不需要 key，缺 key 会标记为 `missing`，实际执行还必须同时传 `--allow-external`，否则在任何 Run/网络写入前拒绝。配置示例位于 `apps/api/config.example.json`，复制到服务数据目录的持久化 `config.json` 后填写 key；评测 CLI 也可用 `--config-file` 指定该文件。当前成本策略以官方 [DeepSeek Models & Pricing](https://api-docs.deepseek.com/quick_start/pricing) 在 2026-09-13 核实的 USD peak/cache-miss 档为依据：输入 `$0.44/1M`、输出 `$1.32/1M`，未知 token 采用整例最坏预留，实际结算仍是保守估算。

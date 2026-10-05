@@ -1,0 +1,60 @@
+# 工作台
+
+## 状态
+
+已实现多项目真实工作台、Project/Index/Session/消息、索引新鲜度检查/显式更新、O1/O2/O3 浏览和 P2-R1/P2-R2 Session 内显式 fixture/real Run 面板。概览默认先展示 `python-entry-v4` 的 HTTP 路径组、源码目录组、计数和静态模块关系；选择组后可查看真实路由/模块，再从入口 evidence 进入源码或从处理函数/模块进入既有关系图。Run 面板支持模式选择、真实模式警告、启动、状态同步、持久化 SSE 事件流、有限重连/轮询回退、工具结果、Issue/代码理解报告 evidence、候选位置与有界静态影响、取消、历史选择和刷新/切换恢复；Codex external Run 会从 Session history 自动发现、选择并订阅，代码理解结果按顺序步骤和覆盖级别展示。
+
+## 职责与范围
+
+通过公开 HTTP API 创建/列出/切换项目、建立索引、读取概览/功能/图/源码证据，管理 Session 消息并显式启动 fixture 或 real Run；概览结构组按固定快照的声明路径/handler 模块和源码目录生成，模块关系只显示可追溯的静态 imports/calls 样本，不与语义功能混合。可从结构组中的 FastAPI 路由查看声明路径及处理函数的同快照证据，并从处理函数/模块打开既有关系图；也可从已保存 Run 报告的 candidate/finding 进入固定快照影响画布，并自动发现 MCP 创建的 Codex external Run。影响画布在桌面占据工作区主区域并与 Run 报告并列，窄屏覆盖中央内容以保持可读尺寸；源码/普通关系仍使用可调侧栏。代码关系面板把查询截断与固定关系索引未完成分开显示；大目录分组默认收起，展开后聚焦选中节点及有限相邻节点，仍可通过平移/展开查看已加载的其余内容。前端负责当前视图、请求取消/过期响应、草稿和 Run 展示，不负责冻结消息、执行工具、鉴权、预算或组装报告；这些由 API 应用服务拥有。
+
+## 接口与依赖
+
+项目、索引、新鲜度、概览、Session/消息和 Run 均通过 `/api/projects/*` 调用；索引管理提供检查更新和显式更新，前端展示 `consistent`、`changed`、`unknown`、变化计数、扫描预算及有界路径，更新返回复用或新快照结果。GitHub freshness 额外展示 `remote_status`、来源 URL、请求/解析 ref、远端 commit 和基线索引 commit；检查只解析远端 metadata，不下载归档，显式 GitHub 更新调用独立的 `github-refresh` 入口。概览先展示固定索引中的结构组：HTTP 路径按静态声明前缀与 handler 模块分组，源码按相对目录分组；选择分组后查看真实入口或可见模块。FastAPI 路由入口显示 HTTP 方法、声明路径和处理函数，点击入口先打开装饰器到函数结束的同快照 evidence，关系图按钮则以处理函数作为既有静态图根节点；模块关系区域展示聚合的静态 imports/calls、总边数和最多 8 条源码位置样本。结构组与模块关系是静态组织事实，不是语义功能，前端对组、模块和关系的可见/总量分别显示预算边界。Run 使用同一 Session 的 list/detail/events、`events/stream`、tool-results/report/impact/cancel 端点。启动按钮只发送 Issue/模式/fixture 场景/固定 index_id，服务端独立冻结已保存消息；前端不把已加载的消息页当作 Run 输入。Codex external Run 不由网页创建，工作台在 Session history 成功后有界轮询 `execution_source=codex` 的活动 Run，再复用 detail/events/SSE 读取链。代码关系面板区分邻接查询 `truncated`、固定关系扫描 `index_truncated` 和 unresolved 详情 `index_unresolved_truncated`，并对旧索引的未知状态单独提示；大目录分组默认收起，展开后按选中节点及有限相邻节点聚焦。影响面板从报告候选或唯一 finding symbol 发起，重新查询 Run 固定 index 的静态 `calls`，方向/深度由用户控制且不修改 Run。HTTP 响应在 [lib/api.ts](lib/api.ts) 经过形状和 project/session/index/hash 边界校验，SSE 事件按 schema、Run 和连续 sequence 校验；`run.stream.end` 只接受 `succeeded`、`failed`、`cancelled`、`interrupted` 四类 Run 终态。
+
+工作台只保留一个稳定的“源代码与索引”项目操作入口。入口页内分为“源代码来源”和“固定索引”两个页签：前者承载本地/GitHub 导入及 ImportAttempt 状态，后者承载固定版本、检查更新和显式更新。两者共享项目上下文，但仍分别调用导入和项目索引接口；前端不直接访问来源路径或 SQLite。
+
+固定索引页签的本地检查结果由服务端读取源码 manifest，按内容 hash 区分 `consistent`、`changed`、`unknown`；GitHub 检查只做跟踪 ref→commit 的 bounded metadata 请求，远端状态与本地规则/配置状态分别显示，远端 commit 一致不代表索引规则一致。前端同时显示变化统计、扫描预算、路径列表和扫描不完整告警，完整安全扫描且仅为旧 metadata/源码/规则/配置变化时提示可全量重建。更新成功显示复用或新建快照，GitHub ref 在检查与下载之间移动时以实际导入 commit 为准，失败不替换旧 latest。
+
+索引更新的响应模式为 `reused`、`historical_reused` 或 `created`。当源码恢复到同项目中规则、配置、schema 和完整 manifest 均兼容的历史内容时，工作台提示 latest 已切换到历史 immutable index，并保留历史 revision/dirty 等来源 metadata；前端不把该场景伪装成当前快照复用。
+
+## 设计原型与生产边界
+
+生产 `/` 使用真实服务端数据；`/prototype` 仅是演示数据原型，不调用 API、不写入项目状态。UI 布局和证据侧栏沿用 [工作区 UI 规范](../../docs/design/workspace-ui-spec.md)，Run 面板是现有 Session 视图中的显式操作，不自动随消息保存触发。
+
+## 数据与生命周期
+
+影响范围打开时，桌面画布与报告按剩余宽度分配，窄屏覆盖中央内容；普通源码/关系面板仍使用可调侧栏。断点和布局约束见 [工作区 UI 规范](../../docs/design/workspace-ui-spec.md)。
+
+当 Run 报告的 `outcome=explanation` 时，工作台在结果区域显示覆盖级别和最多 12 个有序步骤；每步显示 confirmed/inferred/unknown 状态、说明、同一报告的源码 evidence 按钮。partial/unknown 会明确显示未确认范围；只有一个有效 symbol 时可进入现有局部关系图，多符号或无符号步骤保留源码证据，不显示候选影响按钮。旧 Issue 报告继续使用候选/影响展示。
+
+Session 内的 fixture/real 分析必须由用户显式点击对应启动按钮；Codex external 分析由 MCP Agent 启动，网页只发现和展示。真实模式启动前显示会发送冻结 Issue、已保存消息和有界源码证据、可能产生费用且失败不回退的提示；启动前若有草稿也会显示提示，但草稿不进入 Run。服务端返回 queued 的 run_id 后，工作台先读取已持久化事件建立历史，再以 `after_sequence` 订阅 SSE 逐项接收新增公开事件；连接失败经过有限退避后回退到有界轮询。`onopen` 只表示握手成功，不清零无进展重连计数；只有连续 sequence 的新事件重置重连预算，达到上限后只保留一个轮询定时器。面板展示模式、execution source、固定消息范围、input hash、index、execution version、事件时间线、工具结果、报告 evidence 和限制，并可从报告 evidence 打开既有源码证据侧栏。
+
+切换 Session 或项目会取消/忽略旧的 Run 请求和轮询，关闭旧 EventSource、取消影响查询并使旧回调失效，清空旧 Run 详情，再读取新 Session 的 Run 历史；刷新后先恢复项目/Session，再从服务端历史选择活动或最新 Run，重新载入状态，不重复创建。Run 事件以 Run/sequence 去重，断线使用最后成功处理的 sequence 续接；连接状态独立于 Run 状态，终态后停止订阅和刷新。Run 取消使用独立写请求，成功后继续读取终态；消息保存仍只保存消息，不会隐式启动 Run。影响节点和源码证据优先使用返回的 symbol.index_id，选择旧 Run 时不会回退到当前 latest index；请求失败、切换和刷新都会清理影响面板。其它项目/索引/功能历史状态继续按既有 project_id/index_id 键隔离。
+
+## 错误与限制
+
+API 离线、项目/Session/index 不属于当前范围、索引不在 latest、源码扫描不完整或来源不可用、消息未保存、空 Session、Run 活动冲突、预算或执行容量拒绝、模型不可用/失败、结构化输出无效、取消和重启中断都会显示明确状态；unknown 不渲染为一致，完整安全扫描下的旧 metadata 组合会提示可重建，其他更新失败保留旧 latest。容量满时服务端在落库前返回可重试错误，工作台不会伪造 queued Run；Run 失败不会伪造成功结论。工作台不显示隐藏思维链，只显示服务端公开事件、工具结果、证据、报告和限制；real Run 的能力开关和配置由服务端控制，fixture/real/external 都不会执行仓库源码或 shell。固定关系扫描未完成、unresolved 详情截断和旧索引未知状态分别显示覆盖告警，查询自身截断时另显示查询告警；空邻接不能证明没有关系。Run 历史、事件和工具结果使用服务端有界分页，影响查询最多返回 40 个节点、40 条解释路径和 40 个 unresolved；前端显式显示 mapped/unmapped、截断、静态 calls、未知边界和范围说明。报告 evidence 与影响节点必须和 Run 的固定 index_id 一致，否则拒绝载入；外部 Run 终态或超时后不会继续显示新工具活动。
+
+草稿继续按 project/session 保存到浏览器 localStorage，切换范围不串入；消息保存中的旧响应不能清除新草稿。证据链接携带 project_id、index_id、路径、行范围、content hash 和 evidence_id，Session 链接携带 project_id/session_id，不回退到 latest index。
+
+## 验证
+
+从仓库根目录执行 `pnpm --dir apps/web test`、`pnpm web:typecheck` 和 `pnpm web:build`。浏览器流程与已知案例限制见 [影响链验收](../../evals/results/p4-e2b-codex-host-20261001/impact-chain-acceptance.md)；该记录明确保留未验收的边界状态，不能由构建或单测推定 UI 全部通过。
+
+## 相关决策
+
+- [Run 执行决策](../../docs/decisions/2026-09-12-run-execution.md)
+- [P2-R2 模型驱动 Issue 分析决策](../../docs/decisions/2026-09-12-run-model-analysis.md)
+- [Run SSE 决策](../../docs/decisions/2026-09-12-run-sse.md)
+- [Run 影响查询决策](../../docs/decisions/2026-09-13-run-impact.md)
+- [项目与会话决策](../../docs/decisions/2026-09-11-project-session-workspace.md)
+- [工作区 UI 规范](../../docs/design/workspace-ui-spec.md)
+- [Codex 外部 Agent Run 决策](../../docs/decisions/2026-09-13-external-agent-run.md)
+- [external Run 的代码理解流程与证据报告](../../docs/decisions/2026-09-14-code-understanding-explanation.md)
+- [关系扫描与 unresolved 覆盖语义](../../docs/decisions/2026-09-13-relation-coverage.md)
+- [FastAPI 路由入口概览](../../docs/decisions/2026-09-14-fastapi-route-overview.md)
+- [项目结构总览](../../docs/decisions/2026-09-14-project-structure-overview.md)
+- [本地项目索引新鲜度与显式更新](../../docs/decisions/2026-09-15-index-freshness.md)
+- [GitHub 远端 ref 新鲜度与显式更新](../../docs/decisions/2026-09-16-github-remote-freshness.md)
+- [本项目索引更新与缓存效果联合验收](../../docs/decisions/2026-09-16-project-index-cache-acceptance.md)

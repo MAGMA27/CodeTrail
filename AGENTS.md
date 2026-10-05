@@ -10,80 +10,15 @@
 - 审查发现设计、实现或文档问题时回到对应阶段，只复查受影响部分。纯机械修改执行相关轻量检查；只读问答不启动修改流程。
 - 文档与 skill 改动执行 `pnpm docs:check`；契约改动执行 `pnpm contracts:check`；`pnpm doc-sync` 聚合两者。修改本地 memory-bank 后额外执行 `pnpm docs:check:local`。检查命令与能力边界见共同规范。
 
-CodeTrail 的产品目标是可切换项目的代码理解工作区：支持本地/GitHub 来源，展示入口、主要功能与代码关系，再以 Issue 检索和 Agent 分析高亮候选问题及潜在影响。当前已实现 Python 索引、代码图、W1 项目工作区、W2 受限本地路径导入、W3 GitHub 来源、A1 本地 MCP、O1 规则驱动概览骨架和 O2 有证据功能生成；Issue 分析仍待实施，见 [产品方向决策](docs/decisions/2026-09-11-project-workspace.md)。
+CodeTrail 的产品目标与设计取舍见 [项目工作区决策](docs/decisions/2026-09-11-project-workspace.md)。当前实现以 [API 目录](apps/api/README.md)、[Web 目录](apps/web/README.md) 及其就近专题文档为准；集中子系统页面只提供导航，不重复维护当前行为。
 
-任务开始时先阅读 memory-bank/README.md 文档索引和 progress.md，再按任务阅读 project-design-doc.md、architecture.md、implementation-plan.md 及相关调研。用户最新明确需求优先；重要决策变化须同步相关文档，阶段完成后更新 progress.md，不得将计划描述成已实现。新增或重命名文档时同步索引。
+任务开始时如本地 memory-bank 存在，先阅读 README.md、progress.md 和本次 next.md；历史设计、调研仅按需查阅，不能覆盖当前源码和就近文档。用户最新明确需求优先；完成阶段后更新本地 progress.md。新增共享文档同步目录导航；新增本地记录同步 memory-bank 索引。memory-bank 保持 Git 忽略，不是干净克隆的运行依赖。
 
 # 构建与测试
 
-## 已核实运行时与依赖
+前端命令从仓库根目录执行 `pnpm --dir apps/web test`、`pnpm web:typecheck`、`pnpm web:build`。后端初始化使用 `uv sync --project apps/api --locked`，按变更范围运行 `uv run --directory apps/api pytest tests/<相关文件>.py -q` 与 `uv run --directory apps/api python -m compileall -q app`。
 
-- Node.js `24.11.1`（Next.js `16.3.4` 要求 `>=20.9.0`）、npm `11.6.2`、pnpm `11.22.0`。
-- Python 系统命令为 `3.13.9`；uv `0.11.26` 为 API 虚拟环境选择 CPython `3.13.12`。
-- 前端依赖已锁定为 Next.js `16.3.4`、React/React DOM `19.3.0`、TypeScript `5.9.3`，见 `apps/web/package.json` 和根目录 `pnpm-lock.yaml`。
-- 后端依赖已锁定为 FastAPI `0.141.1`、Pydantic `2.13.5`、Uvicorn `0.52.4`，见 `apps/api/pyproject.toml` 和 `apps/api/uv.lock`。
-
-## 已验证命令
-
-在 PowerShell 中从仓库根目录执行：
-
-```powershell
-pnpm install
-pnpm web:typecheck
-pnpm web:build
-```
-
-初始化并检查 API：
-
-```powershell
-Set-Location apps/api
-uv sync --locked
-uv run python -m compileall -q app
-uv run pytest -q
-uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
-```
-
-生成契约 Schema 和固定响应：
-
-```powershell
-Set-Location apps/api
-uv run python -m app.export_schema
-uv run pytest -q
-Set-Location ../..
-uv run --project apps/api python fixtures/generate_responses.py
-```
-
-另开 PowerShell 请求健康接口：
-
-```powershell
-Invoke-WebRequest http://127.0.0.1:8000/api/health -Headers @{ Origin = 'http://localhost:3000' } -UseBasicParsing
-```
-
-前端开发服务器：
-
-```powershell
-pnpm --dir apps/web dev
-```
-
-演示样本复现与校验：
-
-```powershell
-Set-Location fixtures/repos/timeout-demo
-Remove-Item Env:TIMEOUT_DEMO_TIMEOUT -ErrorAction SilentlyContinue
-$env:TIMEOUT_DEMO_ENDPOINT = 'https://example.test'
-python -m timeout_demo
-# 预期退出码 1，包含 KeyError: 'timeout'
-
-$env:TIMEOUT_DEMO_TIMEOUT = '5'
-python -m timeout_demo
-# 预期退出码 0，输出固定 JSON
-```
-
-样本场景 JSON 解析、源码 manifest 校验、同名/动态调用检查、三套固定响应的 Pydantic 校验和契约 pytest 已实际通过；当前工具失败场景仍只是定义，不是已实现的注入测试。
-
-已实际验证：API 健康请求返回 HTTP `200` 和 `{"status":"ok","service":"codetrail-api","version":"0.1.0"}`；前端交互测试 7 passed、严格类型检查和生产构建通过，Python 编译检查和后端 O2 全套离线测试通过，契约检查 18 passed，覆盖快照/定义提取、保守导入/调用关系、SQLite/FTS5 持久化、事务回滚、全文检索、旧快照证据、受限邻接查询、项目隔离、受限本地导入、本地 MCP stdio、O1 入口/概览和 O2 工具上下文/fixture/模型协议/缓存/证据约束；SQLite FTS5 在当前运行时可用。实际 HTTP/MCP 闭环验证了 health、项目/索引、search、neighbors、source、导入、概览、fixture 功能生成、功能读取、八项默认只读工具及可选功能工具发现、HTTP/MCP 结果对照和固定证据引用；浏览器已验证项目打开后自动载入概览、显式 fixture 生成、功能 evidence 钻取、real 未配置失败且不回退、入口源码证据、模块进入关系图、MCP 证据链接、归属拒绝、load_settings 搜索、调用方方向、分组折叠、源码 hash/行号、dynamic_call_target unresolved，以及 API 停止后的错误提示和恢复重试。当前仍不是 Run/Agent/SSE 驱动的端到端离线分析演示，真实供应商语义质量未验证。
-
-计划技术：Next.js、React Flow、TypeScript、Python、FastAPI、Pydantic、LangGraph、SQLite FTS5、Python ast。依赖版本在脚手架阶段核实兼容性并锁定。
+依赖版本以 apps/web/package.json、pnpm-lock.yaml、apps/api/pyproject.toml 和 apps/api/uv.lock 为准。当前使用和配置见 [API README](apps/api/README.md)、[Web README](apps/web/README.md)；样本复现见 [fixtures README](fixtures/README.md)，评测入口见 [evals README](evals/README.md)，Schema 生成见 [contracts README](contracts/README.md)。历史运行结果保留在验收记录，不在本指南另维护“当前全部通过”的清单。
 
 # 实现约束
 

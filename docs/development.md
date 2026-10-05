@@ -12,7 +12,7 @@
 | --- | --- |
 | 常驻开发约束与 skill 路由 | [AGENTS.md](../AGENTS.md) |
 | 文档格式与验证规则 | 本文 |
-| 目录当前职责、使用与限制 | 最近的源码目录 README；尚未迁移的事实暂由现有子系统页面拥有 |
+| 目录当前职责、使用与限制 | 最近的源码目录 README 及其链接的同目录专题文档 |
 | 跨目录协作和子系统导航 | [子系统索引](subsystems/README.md) 指向的页面，链接局部 README |
 | 方法、类型与事件的精确语义 | 声明旁的 docstring/JSDoc |
 | Python 数据契约 | [contracts.py](../apps/api/app/contracts.py) |
@@ -21,7 +21,7 @@
 | 设计取舍与替代关系 | [决策记录](decisions/README.md) |
 | 工作区目标 UI 结构与截图验收 | [UI 规范](design/workspace-ui-spec.md)；当前实现仍以工作台子系统为准 |
 | MVP 本地操作流程 | [MVP 操作说明](mvp-operation.md) |
-| 本地产品计划与阶段进度 | memory-bank，保持现有 Git 忽略策略 |
+| 本地任务计划、进度与历史记录 | memory-bank，保持现有 Git 忽略策略 |
 
 同一事实只在一处详细维护，其他位置链接。当前文档写当前行为；历史理由写决策，计划明确标为未实现。记录验证必须带实际范围，不把过去运行结果当作当前证据。
 
@@ -37,7 +37,7 @@
 
 AGENTS.md 仅记录该目录额外的开发规则、所需阅读和检查命令。没有额外规则就不创建；不复制根级规则或 README。新 README 的栏目均需有具体内容，不适用时解释原因，不留下模板占位说明。
 
-子系统页面使用 [模板](templates/subsystem.md)，栏目保留且内容非空，不适用时解释原因。一个子系统可以对应多个文件，不强制按目录拆包。索引 owners 是根目录相对路径前缀或文件，覆盖 apps/api/app、apps/web/app、contracts、fixtures 下受检源码；新增独立子系统才增加页面。
+集中子系统页面使用 [导航模板](templates/subsystem.md)，栏目保留且内容非空；当前实现细节只在就近 README 或专题文档维护，不适用时解释原因。一个子系统可以对应多个文件，不强制按目录拆包。索引 owners 是根目录相对路径前缀或文件，覆盖 apps/api/app、apps/web/app、contracts、fixtures 下受检源码；新增独立子系统才增加页面。
 
 段落一行，标题后空一行，链接使用相对路径，文件以一个换行结束。代码是机械定义的权威，文档说明用途、限制和非显然语义。避免复制完整 Schema、临时推理、过时测试数量与重复进度。
 
@@ -56,7 +56,7 @@ AGENTS.md 仅记录该目录额外的开发规则、所需阅读和检查命令�
 
 根目录运行后端测试：uv run --directory apps/api pytest tests/test_api.py -q。按修改面替换测试文件。pnpm doc-sync 聚合共享文档检查与契约测试，测试不调用网络或真实模型；首次依赖安装可能需要网络。首次准备环境使用 uv sync --project apps/api --locked。
 
-docs:check 验证本仓库约定的内联文件链接、栏目、状态、源码归属及 skill 元数据，不验证外部 URL、Markdown 锚点、自然语言语义或运行时正确性。docs:check:local 另检查存在的 memory-bank 内联文件链接，不将其作为干净克隆的依赖。
+docs:check 同时扫描根目录以及 apps/api、apps/web、contracts、fixtures、evals 的顶层 Markdown，并验证本仓库约定的内联文件链接、栏目、状态、源码归属及 skill 元数据，不验证外部 URL、Markdown 锚点、自然语言语义或运行时正确性。docs:check:local 另检查存在的 memory-bank 内联文件链接，不将其作为干净克隆的依赖。
 
 ## 完成条件
 

@@ -55,3 +55,7 @@ uv run --project apps/api python fixtures/generate_responses.py
 ```
 
 当前校验不启动 API、不调用真实模型，也不执行场景 JSON 中的任意 `command`。Run 的工具失败响应会保留失败前已返回的同快照 evidence，并把注入的失败结果写入事件/工具结果；证据不足响应正常结束但 outcome 为 `insufficient_evidence`。完整 Run 生命周期由 API fixture executor 另行验证。
+
+## 功能生成与验证边界
+
+O2 的 fixture-feature-v1 从真实索引的入口、search、neighbors 和源码 evidence 确定性生成主要功能结果，不另存一份模拟模型报告。`apps/api/tests/test_features.py` 验证工具上下文、生成、保存、读取和证据钻取；fixture 通过不代表真实模型语义质量。

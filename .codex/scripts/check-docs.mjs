@@ -12,14 +12,18 @@ function walk(root) {
 // Check only local files and declared structure; semantic claims need review.
 export function checkDocs(root, { local = false } = {}) {
   const errors = [];
-  const read = p => readFileSync(p, 'utf8');
+  const read = p => readFileSync(p, 'utf8').replaceAll('\r\n', '\n');
   const name = p => relative(root, p).replaceAll('\\', '/');
   const required = ['AGENTS.md', 'docs/development.md', 'docs/subsystems/README.md',
     'docs/templates/subsystem.md', 'docs/templates/decision.md', 'docs/templates/review.md',
     ...['design-change', 'sync-subsystem', 'review-subsystem'].map(s => `.codex/skills/codetrail-${s}/SKILL.md`)];
   for (const p of required) if (!existsSync(resolve(root, p))) errors.push(`missing required file: ${p}`);
   const docs = [...walk(resolve(root, 'docs')), ...walk(resolve(root, '.codex/skills')),
-    ...(existsSync(resolve(root, 'AGENTS.md')) ? [resolve(root, 'AGENTS.md')] : []),
+    ...['.', 'apps/api', 'apps/web', 'contracts', 'fixtures', 'evals'].flatMap(d => {
+      const dir = resolve(root, d);
+      return existsSync(dir) ? readdirSync(dir, { withFileTypes: true })
+        .filter(e => e.isFile() && e.name.endsWith('.md')).map(e => resolve(dir, e.name)) : [];
+    }),
     ...(local ? walk(resolve(root, 'memory-bank')) : [])].filter(p => p.endsWith('.md'));
   for (const p of docs) {
     const content = read(p);

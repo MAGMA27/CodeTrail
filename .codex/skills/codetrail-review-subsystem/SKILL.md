@@ -11,7 +11,7 @@ description: 审查 CodeTrail 子系统实现、接口与文档并验证变更�
 
 按 docs/development.md 的“就近文档”规则和 docs/templates/local-readme.md 核对文档归属：受影响的独立职责目录是否有 README，已有 README 是否覆盖必需内容，公共接口说明是否靠近声明，父级导航和集中子系统页面是否能到达局部文档，迁移后是否残留重复或矛盾事实。检查局部 AGENTS.md 只含该目录额外开发约束，不复制产品文档。平铺模块采用共享 README 与 docstring 是有效布局。发现缺口时明确所需路径与内容；已授权实现或文档修复任务调用同步 skill 补齐，只读审查报告缺口。
 
-docs:check 当前不扫描或强制校验所有局部 README；局部栏目完整性、链接有效性和语义一致性需实际审查，不得由集中页面检查通过推定。
+docs:check 扫描根目录及 apps/api、apps/web、contracts、fixtures、evals 的顶层 Markdown 文件链接；不强制校验所有嵌套 README、局部栏目完整性或自然语言语义。仍需实际审查，不得由链接检查通过推定当前事实正确。
 
 按 docs/development.md 选择最小充分验证。文档检查不能证明语义正确，fixture 不能证明真实模型效果，内部单测不能替代用户可见流程。缺少证据标记 UNVERIFIED，实际失败或阻断问题标记 NEEDS_FIX；全部必要验收满足才给 PASS。
 
