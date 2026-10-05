@@ -1582,7 +1582,7 @@ export default function WorkbenchUi(props: WorkbenchUiProps) {
   const alert = props.index.error ?? props.project.error ?? props.session.error ?? props.localImport.error ?? props.githubImport.error ?? props.connection.error;
   const style = { "--ct-panel-width": `${panelWidth}px` } as CSSProperties;
   return (
-    <main className={`ct-app${props.panelMode !== "none" ? " has-side-panel" : ""}`} style={style}>
+    <main className={`ct-app${props.panelMode !== "none" ? " has-side-panel" : ""}${props.panelMode === "impact" ? " has-impact-panel" : ""}`} style={style}>
       <header className="ct-topbar">
         <button type="button" className="ct-mobile-menu" onClick={() => setMobileSidebarOpen(true)}>项目</button>
         <div className="ct-brand"><span className="ct-brand-mark">CT</span><span><strong>CODETRAIL</strong><small>CODE INTELLIGENCE WORKSPACE</small></span></div>
@@ -1599,7 +1599,7 @@ export default function WorkbenchUi(props: WorkbenchUiProps) {
         </section>
         {props.panelMode === "source" ? <EvidencePanel evidence={props.evidence} /> : props.panelMode === "graph" || props.panelMode === "feature_graph" || props.panelMode === "impact" ? <GraphPanel graph={props.graph} /> : null}
       </div>
-      {props.panelMode !== "none" ? <div className="ct-panel-width-control"><label htmlFor="panel-width">面板宽度</label><input id="panel-width" type="range" min="300" max="440" step="10" value={panelWidth} onChange={(event) => setPanelWidth(Number(event.target.value))} /><output>{panelWidth}px</output></div> : null}
+      {props.panelMode !== "none" && props.panelMode !== "impact" ? <div className="ct-panel-width-control"><label htmlFor="panel-width">面板宽度</label><input id="panel-width" type="range" min="300" max="440" step="10" value={panelWidth} onChange={(event) => setPanelWidth(Number(event.target.value))} /><output>{panelWidth}px</output></div> : null}
       <footer className="ct-footer"><span>STATIC FACTS / FIXED EVIDENCE</span><span>Run：fixture / real 或 Codex 外部 Agent · 有界工具循环 · SSE 事件流与轮询回退</span><span>{props.index.response ? `${props.graph.codeSymbolCount} nodes · ${props.graph.codeEdgeCount} edges` : "No snapshot loaded"}</span></footer>
     </main>
   );

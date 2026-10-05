@@ -52,6 +52,7 @@ code { font-family: var(--ct-mono); }
 
 .ct-workspace-frame { display: grid; min-height: 0; flex: 1; grid-template-columns: 264px minmax(0, 1fr); }
 .ct-app.has-side-panel .ct-workspace-frame { grid-template-columns: 264px minmax(0, 1fr) var(--ct-panel-width, 360px); }
+.ct-app.has-impact-panel .ct-workspace-frame { grid-template-columns: 264px minmax(0, .72fr) minmax(0, 1.28fr); }
 .ct-sidebar-slot { min-width: 0; border-right: 1px solid var(--ct-border); background: var(--ct-surface); }
 .ct-sidebar { display: flex; height: calc(100dvh - 56px); min-width: 0; flex-direction: column; }
 .ct-sidebar-header { display: flex; align-items: start; justify-content: space-between; gap: 10px; padding: 22px 17px 16px; border-bottom: 1px solid var(--ct-border); }
@@ -526,6 +527,7 @@ code { font-family: var(--ct-mono); }
 @media (max-width: 1100px) {
   .ct-workspace-frame, .ct-app.has-side-panel .ct-workspace-frame { grid-template-columns: 236px minmax(360px, 1fr); }
   .ct-app.has-side-panel .ct-workspace-frame { grid-template-columns: 236px minmax(360px, 1fr) 320px; }
+  .ct-app.has-impact-panel .ct-workspace-frame { grid-template-columns: 236px minmax(0, .72fr) minmax(0, 1.28fr); }
   .ct-topbar { grid-template-columns: auto minmax(180px, 1fr) auto; gap: 13px; padding: 0 15px; }
   .ct-topbar-project { display: none; }
   .ct-context-header, .ct-page { padding-right: 26px; padding-left: 26px; }
@@ -537,6 +539,7 @@ code { font-family: var(--ct-mono); }
 @media (max-width: 939px) and (min-width: 768px) {
   .ct-app.has-side-panel .ct-workspace-frame { grid-template-columns: 236px minmax(0, 1fr); }
   .ct-side-panel { position: fixed; top: 56px; right: 0; bottom: 27px; z-index: 6; width: min(320px, calc(100vw - 236px)); min-height: 0; border-left: 1px solid var(--ct-border); box-shadow: -7px 0 24px rgb(32 38 51 / 13%); }
+  .ct-app.has-impact-panel .ct-side-panel { left: 236px; width: auto; }
   .ct-panel-width-control { display: none; }
 }
 
@@ -550,6 +553,7 @@ code { font-family: var(--ct-mono); }
   .ct-brand strong { font-size: 11px; }
   .ct-connection { font-size: 9px; }
   .ct-workspace-frame, .ct-app.has-side-panel .ct-workspace-frame { display: block; min-height: calc(100dvh - 56px); }
+  .ct-app.has-impact-panel .ct-workspace-frame { display: block; }
   .ct-sidebar-slot { display: none; }
   .ct-sidebar-slot.is-open { position: fixed; top: 56px; bottom: 0; left: 0; z-index: 5; display: block; width: min(86vw, 304px); box-shadow: 7px 0 20px rgb(32 38 51 / 16%); }
   .ct-sidebar { height: 100%; }

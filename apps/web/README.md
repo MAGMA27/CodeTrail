@@ -27,6 +27,8 @@
 
 ## 数据与生命周期
 
+影响范围打开时，桌面画布与报告按剩余宽度分配，窄屏覆盖中央内容；普通源码/关系面板仍使用可调侧栏。断点和布局约束见 [工作区 UI 规范](../../docs/design/workspace-ui-spec.md)。
+
 当 Run 报告的 `outcome=explanation` 时，工作台在结果区域显示覆盖级别和最多 12 个有序步骤；每步显示 confirmed/inferred/unknown 状态、说明、同一报告的源码 evidence 按钮。partial/unknown 会明确显示未确认范围；只有一个有效 symbol 时可进入现有局部关系图，多符号或无符号步骤保留源码证据，不显示候选影响按钮。旧 Issue 报告继续使用候选/影响展示。
 
 Session 内的 fixture/real 分析必须由用户显式点击对应启动按钮；Codex external 分析由 MCP Agent 启动，网页只发现和展示。真实模式启动前显示会发送冻结 Issue、已保存消息和有界源码证据、可能产生费用且失败不回退的提示；启动前若有草稿也会显示提示，但草稿不进入 Run。服务端返回 queued 的 run_id 后，工作台先读取已持久化事件建立历史，再以 `after_sequence` 订阅 SSE 逐项接收新增公开事件；连接失败经过有限退避后回退到有界轮询。`onopen` 只表示握手成功，不清零无进展重连计数；只有连续 sequence 的新事件重置重连预算，达到上限后只保留一个轮询定时器。面板展示模式、execution source、固定消息范围、input hash、index、execution version、事件时间线、工具结果、报告 evidence 和限制，并可从报告 evidence 打开既有源码证据侧栏。
