@@ -58,12 +58,16 @@ export type ArchitectureGraphModel = {
   summarizedHttpAssociationCount: number;
   unmatchedHttpModuleCount: number;
   focusNodeIds: string[];
+  focusHiddenGroupCount: number;
+  focusHiddenRelationCount: number;
+  focusHiddenHttpAssociationCount: number;
 };
 
 export function buildArchitectureGraph(
   overview: ProjectOverview,
   options: {
     expandedGroupIds?: string[];
+    focusedGroupId?: string | null;
     selectedHttpGroupId?: string | null;
     selectedGroupId?: string | null;
     relationKinds?: Array<"imports" | "calls">;
@@ -97,13 +101,49 @@ export function buildArchitectureGraph(
     }
   }
 
-  const expandedGroupIds = [...new Set(options.expandedGroupIds ?? [])].filter((groupId) => groupById.has(groupId));
+  const selectedHttpGroup = overview.groups.find(
+    (group) => group.group_kind === "http_path" && group.group_id === options.selectedHttpGroupId && group.index_id === indexId,
+  ) ?? null;
+  const httpModuleIds = new Set(selectedHttpGroup?.module_ids ?? []);
+  const relationKinds = new Set(options.relationKinds ?? ["imports", "calls"]);
+  const focusedGroup = directoryGroups.find((group) => group.group_id === options.focusedGroupId && group.group_kind === "responsibility") ?? null;
+  const retainedGroupIds = new Set<string>();
+  let focusHiddenRelationCount = 0;
+  let focusHiddenHttpAssociationCount = 0;
+  if (focusedGroup) {
+    retainedGroupIds.add(focusedGroup.group_id);
+    const includeNeighbor = (sourceModuleId: string, targetModuleId: string) => {
+      const sourceGroupId = groupByModuleId.get(sourceModuleId);
+      const targetGroupId = groupByModuleId.get(targetModuleId);
+      if (sourceGroupId === focusedGroup.group_id && targetGroupId) retainedGroupIds.add(targetGroupId);
+      if (targetGroupId === focusedGroup.group_id && sourceGroupId) retainedGroupIds.add(sourceGroupId);
+    };
+    for (const relation of overview.module_relations) {
+      if (relation.index_id !== indexId || relation.source_module.index_id !== indexId || relation.target_module.index_id !== indexId) continue;
+      if (relationKinds.size > 0 && !relation.relation_kinds.some((kind) => relationKinds.has(kind))) continue;
+      includeNeighbor(relation.source_module_id, relation.target_module_id);
+    }
+    if (options.showHttpAssociations !== false) {
+      for (const association of overview.http_associations) {
+        if (association.index_id !== indexId || association.client_module.index_id !== indexId || association.server_module.index_id !== indexId) continue;
+        includeNeighbor(association.client_module.symbol_id, association.server_module.symbol_id);
+      }
+    }
+  }
+  const visibleDirectoryGroups = focusedGroup
+    ? directoryGroups.filter((group) => retainedGroupIds.has(group.group_id))
+    : directoryGroups;
+  const visibleGroupIds = new Set(visibleDirectoryGroups.map((group) => group.group_id));
+  const focusHiddenGroupCount = focusedGroup ? directoryGroups.length - visibleDirectoryGroups.length : 0;
+
+  const expandedGroupIds = [...new Set(options.expandedGroupIds ?? [])].filter((groupId) => visibleGroupIds.has(groupId));
   const expandedGroups = new Set(expandedGroupIds);
   const maxVisibleModules = Math.max(0, Math.min(options.maxVisibleModules ?? ARCHITECTURE_MODULE_LIMIT, ARCHITECTURE_MODULE_LIMIT));
   const visibleModuleIdsByGroup = new Map<string, string[]>();
   let remainingModuleSlots = maxVisibleModules;
-  const allocationOrder = options.selectedGroupId && expandedGroups.has(options.selectedGroupId)
-    ? [options.selectedGroupId, ...expandedGroupIds.filter((groupId) => groupId !== options.selectedGroupId)]
+  const priorityGroupId = focusedGroup?.group_id ?? options.selectedGroupId;
+  const allocationOrder = priorityGroupId && expandedGroups.has(priorityGroupId)
+    ? [priorityGroupId, ...expandedGroupIds.filter((groupId) => groupId !== priorityGroupId)]
     : expandedGroupIds;
   for (const groupId of allocationOrder) {
     const moduleIds = (moduleIdsByGroup.get(groupId) ?? [])
@@ -121,11 +161,6 @@ export function buildArchitectureGraph(
   }
   const visibleModuleIds = new Set([...visibleModuleIdsByGroup.values()].flat());
 
-  const selectedHttpGroup = overview.groups.find(
-    (group) => group.group_kind === "http_path" && group.group_id === options.selectedHttpGroupId && group.index_id === indexId,
-  ) ?? null;
-  const httpModuleIds = new Set(selectedHttpGroup?.module_ids ?? []);
-  const relationKinds = new Set(options.relationKinds ?? ["imports", "calls"]);
   const relationsByDisplayPair = new Map<string, {
     source: string;
     target: string;
@@ -152,6 +187,10 @@ export function buildArchitectureGraph(
     if (!sourceGroupId || !targetGroupId) {
       omittedRelationCount += 1;
       omittedRelationEdgeCount += relation.edge_count;
+      continue;
+    }
+    if (focusedGroup && (!retainedGroupIds.has(sourceGroupId) || !retainedGroupIds.has(targetGroupId))) {
+      focusHiddenRelationCount += 1;
       continue;
     }
     const sourceVisible = visibleModuleIds.has(relation.source_module_id);
@@ -224,6 +263,10 @@ export function buildArchitectureGraph(
         omittedHttpAssociationCount += 1;
         continue;
       }
+      if (focusedGroup && (!retainedGroupIds.has(sourceGroupId) || !retainedGroupIds.has(targetGroupId))) {
+        focusHiddenHttpAssociationCount += 1;
+        continue;
+      }
       const sourceVisible = visibleModuleIds.has(association.client_module.symbol_id);
       const targetVisible = visibleModuleIds.has(association.server_module.symbol_id);
       const sourceExpandedButHidden = expandedGroups.has(sourceGroupId) && !sourceVisible;
@@ -254,12 +297,12 @@ export function buildArchitectureGraph(
   const groupWidth = 350;
   const groupColumnGap = 370;
   const groupRowGap = 20;
-  const groupHeights = directoryGroups.map((group) => {
+  const groupHeights = visibleDirectoryGroups.map((group) => {
     const visibleCount = visibleModuleIdsByGroup.get(group.group_id)?.length ?? 0;
     return visibleCount > 0 ? 82 + Math.ceil(visibleCount / 2) * 80 : 96;
   });
   const rowHeights: number[] = [];
-  for (let index = 0; index < directoryGroups.length; index += 1) {
+  for (let index = 0; index < visibleDirectoryGroups.length; index += 1) {
     const row = Math.floor(index / groupColumnCount);
     rowHeights[row] = Math.max(rowHeights[row] ?? 0, groupHeights[index]);
   }
@@ -271,13 +314,16 @@ export function buildArchitectureGraph(
 
   const selectedGroup = groupById.get(options.selectedGroupId ?? "") ?? null;
   const focusGroupIds = new Set<string>();
-  if (selectedGroup) {
+  if (focusedGroup) {
+    for (const groupId of retainedGroupIds) focusGroupIds.add(groupId);
+  }
+  if (selectedGroup && visibleGroupIds.has(selectedGroup.group_id)) {
     focusGroupIds.add(selectedGroup.group_id);
   }
   if (selectedHttpGroup) {
     for (const moduleId of httpModuleIds) {
       const groupId = groupByModuleId.get(moduleId);
-      if (groupId) focusGroupIds.add(groupId);
+      if (groupId && visibleGroupIds.has(groupId)) focusGroupIds.add(groupId);
     }
   }
   const focusNodeIds = new Set<string>();
@@ -289,7 +335,7 @@ export function buildArchitectureGraph(
   }
 
   let visibleModuleCount = 0;
-  const directories = directoryGroups.map((group, index): ArchitectureDirectory => {
+  const directories = visibleDirectoryGroups.map((group, index): ArchitectureDirectory => {
     const moduleIds = moduleIdsByGroup.get(group.group_id) ?? [];
     const loadedModules = moduleIds.filter((moduleId) => moduleById.has(moduleId));
     const visibleModules = visibleModuleIdsByGroup.get(group.group_id) ?? [];
@@ -373,5 +419,8 @@ export function buildArchitectureGraph(
     summarizedHttpAssociationCount,
     unmatchedHttpModuleCount,
     focusNodeIds: [...focusNodeIds],
+    focusHiddenGroupCount,
+    focusHiddenRelationCount,
+    focusHiddenHttpAssociationCount,
   };
 }

@@ -13,7 +13,7 @@ import {
   type NodeTypes,
   type ReactFlowInstance,
 } from "@xyflow/react";
-import { useEffect, useMemo, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
 
 import type {
   CodeEdge,
@@ -1030,6 +1030,8 @@ const architectureNodeTypes: NodeTypes = {
 
 function ArchitectureSection({ overview, knowledge }: { overview: ProjectOverview; knowledge: KnowledgeUi }) {
   const [expandedGroupIds, setExpandedGroupIds] = useState<string[]>([]);
+  const [focusedGroupId, setFocusedGroupId] = useState<string | null>(null);
+  const expandedBeforeFocus = useRef<string[] | null>(null);
   const [selectedHttpGroupId, setSelectedHttpGroupId] = useState<string | null>(null);
   const [relationKinds, setRelationKinds] = useState<Array<"imports" | "calls">>(["imports", "calls"]);
   const [showHttpAssociations, setShowHttpAssociations] = useState(true);
@@ -1041,13 +1043,23 @@ function ArchitectureSection({ overview, knowledge }: { overview: ProjectOvervie
     partial: "覆盖不完整；保留目录 fallback",
     invalid: "无效；按源码目录回退",
   }[overview.responsibility_status];
+  const focusedGroup = overview.groups.find((group) => group.group_id === focusedGroupId && group.group_kind === "responsibility" && group.index_id === overview.index.index_id) ?? null;
+  const selectedResponsibility = overview.groups.find((group) => group.group_id === knowledge.selectedOverviewGroupId && group.group_kind === "responsibility" && group.index_id === overview.index.index_id) ?? null;
+  useEffect(() => {
+    if (focusedGroupId && !focusedGroup) {
+      setFocusedGroupId(null);
+      setExpandedGroupIds(expandedBeforeFocus.current ?? []);
+      expandedBeforeFocus.current = null;
+    }
+  }, [focusedGroup, focusedGroupId]);
   const model = useMemo(() => buildArchitectureGraph(overview, {
     expandedGroupIds,
+    focusedGroupId,
     selectedHttpGroupId,
     selectedGroupId: knowledge.selectedOverviewGroupId,
     relationKinds,
     showHttpAssociations,
-  }), [expandedGroupIds, knowledge.selectedOverviewGroupId, overview, relationKinds, selectedHttpGroupId, showHttpAssociations]);
+  }), [expandedGroupIds, focusedGroupId, knowledge.selectedOverviewGroupId, overview, relationKinds, selectedHttpGroupId, showHttpAssociations]);
   const focusedDirectoryNodeIds = useMemo(() => {
     const focused = new Set(model.focusNodeIds);
     return model.directories.filter((directory) => focused.has(directory.group.group_id)).map((directory) => directory.group.group_id);
@@ -1147,6 +1159,9 @@ function ArchitectureSection({ overview, knowledge }: { overview: ProjectOvervie
     overview.http_association_coverage.path_analysis === "literal_only" ? "此旧索引只分析静态字面量 URL；参数化路径尚未分析" : null,
     overview.http_association_coverage.analysis_status === "incomplete" ? "TypeScript HTTP 形状关联分析不完整，部分客户端或路由仍为 unknown" : null,
     overview.http_association_coverage.visible_match_count < overview.http_association_coverage.matched_count ? `HTTP 形状关联仅显示 ${overview.http_association_coverage.visible_match_count}/${overview.http_association_coverage.matched_count} 条` : null,
+    model.focusHiddenGroupCount > 0 ? `职责聚焦隐藏 ${model.focusHiddenGroupCount} 个职责/目录；概览预算截断另行提示` : null,
+    model.focusHiddenRelationCount > 0 ? `聚焦范围外还有 ${model.focusHiddenRelationCount} 条可用静态关系` : null,
+    model.focusHiddenHttpAssociationCount > 0 ? `聚焦范围外还有 ${model.focusHiddenHttpAssociationCount} 条可用 HTTP 形状关联` : null,
   ].filter((item): item is string => item !== null);
   const selectHttpGroup = (groupId: string) => {
     const group = httpGroups.find((item) => item.group_id === groupId) ?? null;
@@ -1172,6 +1187,24 @@ function ArchitectureSection({ overview, knowledge }: { overview: ProjectOvervie
     const nodeIds = focusedDirectoryNodeIds.length > 0 ? focusedDirectoryNodeIds : model.directories.map((directory) => directory.group.group_id);
     void flow.fitView({ nodes: nodeIds.map((id) => ({ id })), padding: 0.18, duration: 240 });
   };
+  const focusResponsibility = (group: OverviewGroup) => {
+    if (expandedBeforeFocus.current === null) {
+      expandedBeforeFocus.current = expandedGroupIds;
+      setExpandedGroupIds([group.group_id]);
+    } else {
+      setExpandedGroupIds((current) => current.includes(group.group_id) ? current : [...current, group.group_id]);
+    }
+    setFocusedGroupId(group.group_id);
+    setSelectedHttpGroupId(null);
+    knowledge.onSelectOverviewGroup(group);
+  };
+  const returnToOverview = () => {
+    setFocusedGroupId(null);
+    setExpandedGroupIds(expandedBeforeFocus.current ?? []);
+    expandedBeforeFocus.current = null;
+    setSelectedHttpGroupId(null);
+    knowledge.onClearOverviewGroup();
+  };
 
   return (
     <section className="ct-architecture-section" aria-label="项目架构画布">
@@ -1196,7 +1229,13 @@ function ArchitectureSection({ overview, knowledge }: { overview: ProjectOvervie
         <label className="ct-architecture-kind"><input type="checkbox" checked={relationKinds.includes("calls")} onChange={() => toggleRelationKind("calls")} /><span>calls</span></label>
         <label className="ct-architecture-kind ct-architecture-http-kind"><input type="checkbox" checked={showHttpAssociations} onChange={() => setShowHttpAssociations((current) => !current)} /><span>HTTP 形状</span></label>
         <button type="button" className="ct-button ct-button-secondary" onClick={focusGraph} disabled={reactFlowModel.nodes.length === 0}>聚焦画布</button>
+        {focusedGroup ? <span>职责聚焦 · {focusedGroup.label}</span> : null}
+        {!focusedGroup && selectedResponsibility ? <button type="button" className="ct-button ct-button-secondary" onClick={() => focusResponsibility(selectedResponsibility)}>聚焦此职责</button> : null}
+        {focusedGroup && selectedResponsibility && selectedResponsibility.group_id !== focusedGroup.group_id ? <button type="button" className="ct-button ct-button-secondary" onClick={() => focusResponsibility(selectedResponsibility)}>切换到所选职责</button> : null}
+        {focusedGroup ? <button type="button" className="ct-link-button" onClick={returnToOverview}>返回项目总览</button> : null}
         <button type="button" className="ct-link-button" onClick={() => {
+          setFocusedGroupId(null);
+          expandedBeforeFocus.current = null;
           setExpandedGroupIds([]);
           setSelectedHttpGroupId(null);
           setRelationKinds(["imports", "calls"]);
@@ -1204,7 +1243,8 @@ function ArchitectureSection({ overview, knowledge }: { overview: ProjectOvervie
           knowledge.onClearOverviewGroup();
         }}>重置画布</button>
       </div>
-      <p className="ct-architecture-filter-note">类型筛选只影响静态 imports/calls 画布。HTTP method/path shape 关联单独列示，不混入静态调用边，也不证明请求实际发送到本地服务。</p>
+      <p className="ct-architecture-filter-note">类型筛选只影响静态 imports/calls 画布。HTTP method/path shape 关联单独列示，不混入静态调用边，也不证明请求实际发送到本地服务。职责聚焦按当前筛选保留一跳双向邻接；邻接职责初始折叠，聚焦范围外事实计数与服务端截断分开显示。</p>
+      {focusedGroup && model.directories.length === 1 ? <p className="ct-architecture-filter-note">当前筛选下没有一跳相邻职责或目录。</p> : null}
       {coverageWarnings.length > 0 ? <div className="ct-architecture-warnings" role="status">{coverageWarnings.map((warning) => <span key={warning}>{warning}</span>)}</div> : null}
       {model.directories.length === 0 ? (
         <div className="ct-architecture-empty"><strong>当前索引没有可绘制的职责或源码目录</strong><span>概览可能未返回源码分组；不以 HTTP 路由组替代源码架构。</span></div>

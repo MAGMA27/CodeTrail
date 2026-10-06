@@ -350,3 +350,95 @@ test("HTTP associations count endpoints hidden by the 40-module canvas ceiling",
   assert.equal(model.httpRelations[0].source, "group-large");
   assert.equal(model.httpRelations[0].target, "group-web");
 });
+
+test("responsibility focus keeps only filtered bidirectional one-hop groups and real relations", () => {
+  const c1 = moduleRecord("c1", "storage/db.py");
+  const d1 = moduleRecord("d1", "workers/job.py");
+  const value = overview(
+    [a1, b1, c1, d1],
+    [
+      { ...directory("role-api", "api", [a1.module_id]), group_kind: "responsibility", group_key: "api", label: "API" },
+      { ...directory("role-web", "web", [b1.module_id]), group_kind: "responsibility", group_key: "web", label: "Web" },
+      { ...directory("role-storage", "storage", [c1.module_id]), group_kind: "responsibility", group_key: "storage", label: "Storage" },
+      { ...directory("role-worker", "workers", [d1.module_id]), group_kind: "responsibility", group_key: "workers", label: "Workers" },
+    ],
+    [
+      relation("api-web", a1, b1, ["imports"], [codeEdge("api-web-import", a1.module_id, b1.module_id, "imports", a1.symbol.path)]),
+      relation("storage-api", c1, a1, ["calls"], [codeEdge("storage-api-call", c1.module_id, a1.module_id, "calls", c1.symbol.path)]),
+      relation("web-storage", b1, c1, ["calls"], [codeEdge("web-storage-call", b1.module_id, c1.module_id, "calls", b1.symbol.path)]),
+      relation("storage-worker", c1, d1, ["imports"], [codeEdge("storage-worker-import", c1.module_id, d1.module_id, "imports", c1.symbol.path)]),
+    ],
+  );
+
+  const importsOnly = buildArchitectureGraph(value, {
+    focusedGroupId: "role-api",
+    relationKinds: ["imports"],
+    showHttpAssociations: false,
+  });
+  assert.deepEqual(importsOnly.directories.map(({ group }) => group.group_id), ["role-api", "role-web"]);
+  assert.deepEqual(importsOnly.relations.map(({ id }) => id), [`architecture:${JSON.stringify(["role-api", "role-web"])}`]);
+  assert.equal(importsOnly.focusHiddenGroupCount, 2);
+
+  const bothKinds = buildArchitectureGraph(value, {
+    focusedGroupId: "role-api",
+    relationKinds: ["imports", "calls"],
+    showHttpAssociations: false,
+  });
+  assert.deepEqual(bothKinds.directories.map(({ group }) => group.group_id), ["role-api", "role-storage", "role-web"]);
+  assert.equal(bothKinds.relations.length, 3);
+  assert.equal(bothKinds.relations.some(({ source, target }) => source === "role-storage" && target === "role-worker"), false);
+  assert.equal(bothKinds.focusHiddenGroupCount, 1);
+  assert.equal(bothKinds.focusHiddenRelationCount, 1);
+  assert.equal(bothKinds.focusHiddenHttpAssociationCount, 0);
+});
+
+test("HTTP focus neighbors stay independent from static filters and preserve folded endpoints", () => {
+  const value = overview(
+    [a1, b1],
+    [
+      { ...directory("role-api", "api", [a1.module_id]), group_kind: "responsibility", group_key: "api", label: "API" },
+      { ...directory("role-web", "web", [b1.module_id]), group_kind: "responsibility", group_key: "web", label: "Web" },
+    ],
+    [],
+    [httpAssociation("http-api-web", a1, b1)],
+  );
+  const enabled = buildArchitectureGraph(value, { focusedGroupId: "role-api", showHttpAssociations: true });
+  assert.deepEqual(enabled.directories.map(({ group }) => group.group_id), ["role-api", "role-web"]);
+  assert.equal(enabled.relations.length, 0);
+  assert.equal(enabled.httpRelations.length, 1);
+  assert.equal(enabled.httpRelations[0].source, "role-api");
+  assert.equal(enabled.httpRelations[0].target, "role-web");
+
+  const disabled = buildArchitectureGraph(value, { focusedGroupId: "role-api", showHttpAssociations: false });
+  assert.deepEqual(disabled.directories.map(({ group }) => group.group_id), ["role-api"]);
+  assert.equal(disabled.httpRelations.length, 0);
+  assert.equal(disabled.focusHiddenGroupCount, 1);
+  assert.equal(disabled.focusHiddenHttpAssociationCount, 0);
+});
+
+test("focused adjacency uses available module ownership before the 40-module canvas allocation", () => {
+  const modules = Array.from({ length: ARCHITECTURE_MODULE_LIMIT }, (_, index) =>
+    moduleRecord(`large-${index}`, `src/mod${index.toString().padStart(2, "0")}.py`),
+  );
+  const hiddenSource = moduleRecord("large-hidden", "src/z-hidden.py");
+  const value = overview(
+    [...modules, hiddenSource, b1],
+    [
+      { ...directory("role-large", "src", [...modules, hiddenSource].map((module) => module.module_id)), group_kind: "responsibility", group_key: "src", label: "Large" },
+      { ...directory("role-web", "web", [b1.module_id]), group_kind: "responsibility", group_key: "web", label: "Web" },
+    ],
+    [relation("hidden-to-web", hiddenSource, b1, ["imports"], [codeEdge("hidden-import", hiddenSource.module_id, b1.module_id, "imports", hiddenSource.symbol.path)])],
+  );
+
+  const model = buildArchitectureGraph(value, {
+    expandedGroupIds: ["role-large"],
+    focusedGroupId: "role-large",
+    selectedGroupId: "role-large",
+  });
+  assert.equal(model.visibleModuleCount, ARCHITECTURE_MODULE_LIMIT);
+  assert.deepEqual(model.directories.map(({ group }) => group.group_id), ["role-large", "role-web"]);
+  assert.equal(model.relations[0].source, "role-large");
+  assert.equal(model.relations[0].target, "role-web");
+  assert.equal(model.focusHiddenGroupCount, 0);
+  assert.equal(model.focusHiddenRelationCount, 0);
+});
