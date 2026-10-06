@@ -8,6 +8,7 @@ import {
   isIndexFreshness,
   isIndexResponse,
   isIndexRefreshResponse,
+  isModuleSymbolsPageResponse,
   isNeighborsResponse,
   isProjectOverviewResponse,
   isRunImpactResponse,
@@ -22,6 +23,40 @@ const indexId = "index-overview-test";
 const moduleId = "symbol-module";
 const functionId = "symbol-main";
 const entryId = "entry-main";
+
+test("module symbol page validator enforces fixed module scope and cursor consistency", () => {
+  const module = {
+    symbol_id: moduleId,
+    index_id: indexId,
+    path: "pkg/__main__.py",
+    qualified_name: "pkg.__main__",
+    kind: "module",
+    start_line: 1,
+    end_line: 2,
+  };
+  const symbol = {
+    symbol_id: functionId,
+    index_id: indexId,
+    path: module.path,
+    qualified_name: "pkg.__main__.main",
+    kind: "function",
+    start_line: 2,
+    end_line: 2,
+  };
+  const page = {
+    schema_version: SCHEMA_VERSION,
+    project_id: "project-overview-test",
+    index_id: indexId,
+    module,
+    symbols: [symbol],
+    next_cursor: "opaque-cursor",
+    has_more: true,
+  };
+  assert.equal(isModuleSymbolsPageResponse(page), true);
+  assert.equal(isModuleSymbolsPageResponse({ ...page, symbols: [{ ...symbol, path: "other.py" }] }), false);
+  assert.equal(isModuleSymbolsPageResponse({ ...page, symbols: [symbol, symbol] }), false);
+  assert.equal(isModuleSymbolsPageResponse({ ...page, has_more: false }), false);
+});
 
 function overview() {
   return {

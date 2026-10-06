@@ -1196,6 +1196,44 @@ class SearchIndexResponse(VersionedModel):
         return self
 
 
+class ModuleSymbolsPageResponse(VersionedModel):
+    """One bounded page of definitions from a fixed snapshot module.
+
+    This lists definitions persisted by the indexer for the module's captured
+    path; it does not assert that parsing or symbol extraction was complete.
+    """
+
+    project_id: Identifier
+    index_id: Identifier
+    module: Symbol
+    symbols: list[Symbol] = Field(default_factory=list, max_length=40)
+    next_cursor: str | None = Field(default=None, max_length=500)
+    has_more: bool = False
+
+    @model_validator(mode="after")
+    def validate_module_scope(self) -> ModuleSymbolsPageResponse:
+        if self.module.index_id != self.index_id or self.module.kind != "module":
+            raise ValueError("module symbols page must include its module root from the selected index")
+        symbol_ids = {symbol.symbol_id for symbol in self.symbols}
+        if len(symbol_ids) != len(self.symbols):
+            raise ValueError("module symbols page must contain unique symbols")
+        if any(
+            symbol.index_id != self.index_id
+            or symbol.path != self.module.path
+            or symbol.kind not in {"class", "function", "test"}
+            for symbol in self.symbols
+        ):
+            raise ValueError("module symbols page crossed its index or module scope")
+        order_keys = [(symbol.start_line, symbol.symbol_id) for symbol in self.symbols]
+        if order_keys != sorted(order_keys):
+            raise ValueError("module symbol pages must use stable source order")
+        if self.has_more and (not self.next_cursor or not self.symbols):
+            raise ValueError("module symbol pages with more results must include a cursor")
+        if not self.has_more and self.next_cursor is not None:
+            raise ValueError("complete module symbol pages cannot include a cursor")
+        return self
+
+
 class SourceIndexResponse(VersionedModel):
     index_id: Identifier
     evidence: Evidence
@@ -2373,6 +2411,10 @@ class McpIndexRefreshResponse(McpResultBase):
 
 class McpSearchResponse(McpResultBase):
     result: SearchIndexResponse | None = None
+
+
+class McpModuleSymbolsResponse(McpResultBase):
+    result: ModuleSymbolsPageResponse | None = None
 
 
 class McpSourceResponse(McpResultBase):

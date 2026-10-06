@@ -18,10 +18,12 @@ from app.contracts import (
     FixtureResponseSet,
     IndexFreshness,
     McpSourceResponse,
+    ModuleSymbolsPageResponse,
     ReadSourceParams,
     ReadSourceSuccess,
     Project,
     SourceIndexResponse,
+    Symbol,
     SseEventFrame,
     SseStreamEnd,
     SseStreamEndFrame,
@@ -151,6 +153,51 @@ def test_schema_artifact_includes_freshness_contracts() -> None:
         "McpIndexFreshnessResponse",
         "McpIndexRefreshResponse",
     } <= models.keys()
+
+
+def test_schema_artifact_includes_module_symbol_paging_contracts() -> None:
+    models = build_schema_document()["models"]
+
+    assert {"ModuleSymbolsPageResponse", "McpModuleSymbolsResponse"} <= models.keys()
+
+
+def test_module_symbol_page_contract_keeps_definitions_inside_the_module_snapshot() -> None:
+    module = Symbol(
+        symbol_id="module-symbol",
+        index_id="index-symbol-page",
+        path="pkg/module.py",
+        qualified_name="pkg.module",
+        kind="module",
+        start_line=1,
+        end_line=5,
+    )
+    function = Symbol(
+        symbol_id="function-symbol",
+        index_id="index-symbol-page",
+        path=module.path,
+        qualified_name="pkg.module.run",
+        kind="function",
+        start_line=3,
+        end_line=4,
+    )
+
+    page = ModuleSymbolsPageResponse(
+        project_id="project-symbol-page",
+        index_id=module.index_id,
+        module=module,
+        symbols=[function],
+        next_cursor="opaque-cursor",
+        has_more=True,
+    )
+    assert page.symbols == [function]
+
+    with pytest.raises(ValidationError, match="module scope"):
+        ModuleSymbolsPageResponse(
+            project_id="project-symbol-page",
+            index_id=module.index_id,
+            module=module,
+            symbols=[function.model_copy(update={"path": "pkg/other.py"})],
+        )
 
 
 def test_failed_tool_bundle_preserves_prior_evidence_without_fake_source() -> None:

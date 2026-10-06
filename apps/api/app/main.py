@@ -54,6 +54,7 @@ from .contracts import (
     RunStatusResponse,
     RunToolResultsResponse,
     SearchIndexResponse,
+    ModuleSymbolsPageResponse,
     SessionListResponse,
     SessionMessageResponse,
     SessionMessagesResponse,
@@ -768,6 +769,27 @@ def create_app(
         limit: int = Query(default=40, ge=1, le=40),
     ) -> SearchIndexResponse:
         return await run_in_threadpool(workspace_service.search, project_id, index_id, query, limit)
+
+    @application.get(
+        "/api/projects/{project_id}/indexes/{index_id}/modules/{module_id}/symbols",
+        response_model=ModuleSymbolsPageResponse,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def list_project_module_symbols(
+        project_id: str,
+        index_id: str,
+        module_id: str,
+        limit: int = Query(default=40, ge=1, le=40),
+        cursor: str | None = Query(default=None, max_length=500),
+    ) -> ModuleSymbolsPageResponse:
+        return await run_in_threadpool(
+            workspace_service.list_module_symbols,
+            project_id,
+            index_id,
+            module_id,
+            limit,
+            cursor,
+        )
 
     @application.get(
         "/api/projects/{project_id}/indexes/{index_id}/neighbors",

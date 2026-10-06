@@ -33,6 +33,7 @@ import type {
   IndexRefreshMode,
   IndexResponse,
   IndexSnapshot,
+  ModuleSymbolsPageResponse,
   NeighborDirection,
   OverviewEntryPoint,
   OverviewHttpAssociation,
@@ -193,12 +194,20 @@ type KnowledgeUi = {
   overviewError: string | null;
   selectedOverviewEntryId: string | null;
   selectedOverviewGroupId: string | null;
+  moduleSymbolsRoot: SymbolRecord | null;
+  moduleSymbolsPage: ModuleSymbolsPageResponse | null;
+  moduleSymbolsStatus: UiAsyncStatus;
+  moduleSymbolsError: string | null;
   onSelectOverviewEntry: (entry: OverviewEntryPoint) => void;
   onSelectOverviewGroup: (group: OverviewGroup) => void;
   onClearOverviewGroup: () => void;
   onOpenOverviewGraph: (entry: OverviewEntryPoint) => void;
   onOpenHttpChain: (association: OverviewHttpAssociation) => void;
   onOpenOverviewModule: (module: OverviewModule) => void;
+  onOpenModuleSymbols: (module: OverviewModule) => void;
+  onLoadMoreModuleSymbols: Action;
+  onRetryModuleSymbols: Action;
+  onSelectModuleSymbol: (symbol: SymbolRecord) => void;
   onOpenArchitectureSource: (location: { indexId: string; path: string; startLine: number; endLine: number; expectedContentHash?: string }) => void;
   onRetryOverview: Action;
   featureStatus: UiAsyncStatus;
@@ -1369,14 +1378,54 @@ function OverviewEntryRow({ entry, knowledge }: { entry: OverviewEntryPoint; kno
 
 function OverviewModuleRow({ module, knowledge }: { module: OverviewModule; knowledge: KnowledgeUi }) {
   return (
-    <button type="button" className="ct-module-row" onClick={() => knowledge.onOpenOverviewModule(module)}>
-      <span className={`ct-reachability${module.entry_reachable ? " is-reachable" : ""}`}>{module.entry_reachable ? "REACHABLE" : "OTHER"}</span>
-      <span>
-        <strong>{module.symbol.qualified_name}</strong>
-        <small>{module.symbol.path} · {module.entry_point_ids.length > 0 ? `${module.entry_point_ids.length} 个入口` : "未从入口路径到达"}</small>
-      </span>
-      <span aria-hidden="true">↗</span>
-    </button>
+    <div className="ct-module-row-container">
+      <button type="button" className="ct-module-row" onClick={() => knowledge.onOpenOverviewModule(module)} title="打开模块关系图">
+        <span className={`ct-reachability${module.entry_reachable ? " is-reachable" : ""}`}>{module.entry_reachable ? "REACHABLE" : "OTHER"}</span>
+        <span>
+          <strong>{module.symbol.qualified_name}</strong>
+          <small>{module.symbol.path} · {module.entry_point_ids.length > 0 ? `${module.entry_point_ids.length} 个入口` : "未从入口路径到达"}</small>
+        </span>
+        <span aria-hidden="true">↗</span>
+      </button>
+      <button
+        type="button"
+        className={`ct-module-symbols-action${knowledge.moduleSymbolsRoot?.symbol_id === module.symbol.symbol_id ? " is-selected" : ""}`}
+        onClick={() => knowledge.onOpenModuleSymbols(module)}
+        aria-pressed={knowledge.moduleSymbolsRoot?.symbol_id === module.symbol.symbol_id}
+      >
+        定义
+      </button>
+    </div>
+  );
+}
+
+function ModuleSymbolList({ knowledge }: { knowledge: KnowledgeUi }) {
+  const root = knowledge.moduleSymbolsRoot;
+  if (!root) return null;
+  const page = knowledge.moduleSymbolsPage?.module.symbol_id === root.symbol_id ? knowledge.moduleSymbolsPage : null;
+  return (
+    <section className="ct-module-symbols" aria-label="模块定义列表">
+      <div className="ct-structure-subheading">
+        <strong>{root.qualified_name} · 索引定义</strong>
+        {page ? <span>{page.symbols.length} 项已加载</span> : null}
+      </div>
+      <p className="ct-muted">仅列出固定快照中捕获的类、函数和测试定义；不代表解析覆盖完整。</p>
+      {knowledge.moduleSymbolsStatus === "loading" && !page ? <p className="ct-muted">正在读取固定索引…</p> : null}
+      {knowledge.moduleSymbolsError ? <div className="ct-error-block compact" role="alert"><span>{knowledge.moduleSymbolsError}</span><button type="button" className="ct-link-button" onClick={knowledge.onRetryModuleSymbols}>重试</button></div> : null}
+      {page && page.symbols.length > 0 ? (
+        <div className="ct-module-symbol-list">
+          {page.symbols.map((symbol) => (
+            <button type="button" className="ct-module-symbol-row" key={symbol.symbol_id} onClick={() => knowledge.onSelectModuleSymbol(symbol)}>
+              <span className="ct-kind-chip">{symbol.kind}</span>
+              <span><strong>{symbol.qualified_name}</strong><small>{symbol.path}:L{symbol.start_line}–L{symbol.end_line}</small></span>
+              <span aria-hidden="true">↗</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+      {knowledge.moduleSymbolsStatus === "empty" ? <p className="ct-muted">当前模块没有捕获到类、函数或测试定义。</p> : null}
+      {page?.has_more ? <button type="button" className="ct-link-button" onClick={knowledge.onLoadMoreModuleSymbols} disabled={knowledge.moduleSymbolsStatus === "loading"}>{knowledge.moduleSymbolsStatus === "loading" ? "正在加载…" : "继续加载定义"}</button> : null}
+    </section>
   );
 }
 
@@ -1443,6 +1492,7 @@ function OverviewSections({ overview, knowledge }: { overview: ProjectOverview; 
             ) : (
               selectedModules.length > 0 ? <div className="ct-module-list">{selectedModules.map((module) => <OverviewModuleRow module={module} knowledge={knowledge} key={module.module_id} />)}</div> : <p className="ct-muted">{selectedGroup.group_kind === "responsibility" && selectedGroup.module_ids.length === 0 ? "该职责的 owner 路径未匹配到已索引模块。" : selectedGroup.module_ids.length > 0 ? `该组 ${selectedGroup.module_ids.length} 个模块被当前概览模块预算省略。` : "该源码目录没有可见模块。"}</p>
             )}
+            {selectedGroup.group_kind !== "http_path" ? <ModuleSymbolList knowledge={knowledge} /> : null}
             <div className="ct-structure-related">
               <div className="ct-structure-subheading"><strong>相关模块依赖</strong><span>{relatedRelations.length} 条可见关系</span></div>
               <OverviewModuleRelationList relations={relatedRelations.slice(0, 12)} onOpenSource={(location) => knowledge.onOpenArchitectureSource({ indexId: overview.index.index_id, ...location })} />

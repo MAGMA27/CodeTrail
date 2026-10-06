@@ -24,7 +24,7 @@ GitHub 和本地索引更新先登记项目级持久化 update intent；expected
 
 ## 数据与生命周期
 
-`get_overview` 可读取快照根目录中的可选 `codetrail-subsystems.json`，按明确 owner 路径将已索引模块放进职责组；未覆盖模块继续保留在源码目录 fallback 组，未命中的声明组保持可见并使状态为 `partial`。无配置或无效配置分别返回 `not_configured` 或 `invalid` 并使用目录 fallback；无效配置携带同快照 `manifest_invalid` issue，不能静默读取 live worktree。overview 只返回一个 manifest provenance evidence，职责容器展开到模块，现阶段不提供模块下的完整 symbol 清单。HTTP 和 MCP `get_overview` 由同一个 WorkspaceService 投影，因此共用职责状态、覆盖计数、依赖方向、证据和预算。格式与 owner 边界见[职责分组决策](../../docs/decisions/2026-10-06-subsystem-responsibility-manifest.md)。
+`get_overview` 可读取快照根目录中的可选 `codetrail-subsystems.json`，按明确 owner 路径将已索引模块放进职责组；未覆盖模块继续保留在源码目录 fallback 组，未命中的声明组保持可见并使状态为 `partial`。无配置或无效配置分别返回 `not_configured` 或 `invalid` 并使用目录 fallback；无效配置携带同快照 `manifest_invalid` issue，不能静默读取 live worktree。职责容器展开到概览返回的模块；模块下的 class/function/test 定义通过项目级 `GET /api/projects/{project_id}/indexes/{index_id}/modules/{module_id}/symbols` 有界分页读取，返回同一 index 的 module root、定义页和绑定 project/index/module 的游标。该目录只表示固定索引捕获的定义，不保证解析完整；HTTP 与 MCP `list_module_symbols` 共用 WorkspaceService、稳定源码行/符号 ID 顺序及 40,000 字节响应预算，不遍历 FTS 或关系邻居。格式与 owner 边界见[职责分组决策](../../docs/decisions/2026-10-06-subsystem-responsibility-manifest.md)及[模块定义分页决策](../../docs/decisions/2026-10-06-module-symbol-pagination.md)。
 
 Run 的 `analysis_kind` 默认是 `issue`；只有 external Run 可声明 `understanding`。该类型提交 `CodeUnderstandingFinal`，包含最多 12 个有序 `ExplanationStep`、`complete/partial` 覆盖和同一 Run 返回的源码 evidence；confirmed 必须有 evidence，complete 不能含 unknown，服务端不生成 findings/candidate links。旧 Run JSON 缺少该字段时按 Issue 读取，不做存储迁移。
 

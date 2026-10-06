@@ -28,6 +28,7 @@ from .contracts import (
     GraphSnapshot,
     ImpactPath,
     IndexSnapshot,
+    ModuleSymbolsPageResponse,
     Neighbor,
     ReadSourceParams,
     Report,
@@ -85,6 +86,8 @@ _SEARCH_BODY_BATCH_SIZE = 32
 _SEARCH_MAX_SOURCE_FILES = 32
 _SEARCH_MAX_SOURCE_BYTES = 256 * 1024
 _SEARCH_PROGRESS_OPS = 1_000
+_MODULE_SYMBOL_PAGE_LIMIT = 40
+_MODULE_SYMBOLS_MAX_OUTPUT_BYTES = 40_000
 
 
 def _feature_generation_from_json(result_json: str) -> FeatureGeneration:
@@ -140,6 +143,10 @@ class StorageNotFoundError(StorageError):
 
 class StorageInputError(StorageError):
     """A storage or query input violates the bounded local contract."""
+
+
+class StorageBudgetError(StorageError):
+    """A requested bounded page cannot fit the shared serialized response budget."""
 
 
 @dataclass(frozen=True)
@@ -300,6 +307,16 @@ class FeatureGenerationPage:
     """One stable page of saved feature generations."""
 
     generations: tuple[FeatureGeneration, ...]
+    next_cursor: str | None
+    has_more: bool
+
+
+@dataclass(frozen=True)
+class ModuleSymbolPage:
+    """One bounded definitions page and its fixed-snapshot module root."""
+
+    module: Symbol
+    symbols: tuple[Symbol, ...]
     next_cursor: str | None
     has_more: bool
 
@@ -580,6 +597,9 @@ CREATE TABLE IF NOT EXISTS symbols (
     FOREIGN KEY (index_id) REFERENCES index_snapshots(index_id) ON DELETE CASCADE,
     UNIQUE (index_id, symbol_id)
 );
+
+CREATE INDEX IF NOT EXISTS symbols_module_page
+    ON symbols(index_id, path, start_line, symbol_id);
 
 CREATE TABLE IF NOT EXISTS static_edges (
     index_id TEXT NOT NULL,
@@ -3808,6 +3828,97 @@ class IndexStore:
 
         return self.search_symbols_bounded(index_id, query, limit=limit).matches
 
+    def list_module_symbols(
+        self,
+        project_id: str,
+        index_id: str,
+        module_id: str,
+        *,
+        limit: int = _MODULE_SYMBOL_PAGE_LIMIT,
+        cursor: str | None = None,
+    ) -> ModuleSymbolPage:
+        """Page indexed definitions from one module path without reading source files."""
+
+        self._require_index(index_id)
+        if type(limit) is not int or not 1 <= limit <= _MODULE_SYMBOL_PAGE_LIMIT:
+            raise StorageInputError("module symbol page limit is outside the allowed range")
+        module_row = self._connection.execute(
+            "SELECT symbol_id, path, qualified_name, kind, start_line, end_line "
+            "FROM symbols WHERE index_id = ? AND symbol_id = ?",
+            (index_id, module_id),
+        ).fetchone()
+        if module_row is None or module_row["kind"] != "module":
+            raise StorageNotFoundError("module was not found in the requested index")
+        module = _symbol_from_row(index_id, module_row)
+        position = _decode_module_symbols_cursor(
+            cursor,
+            project_id=project_id,
+            index_id=index_id,
+            module_id=module_id,
+        )
+        where = "index_id = ? AND path = ? AND kind IN ('class', 'function', 'test')"
+        parameters: tuple[object, ...] = (index_id, module.path)
+        if position is not None:
+            where += " AND (start_line > ? OR (start_line = ? AND symbol_id COLLATE BINARY > ?))"
+            parameters += (position[0], position[0], position[1])
+        rows = self._connection.execute(
+            "SELECT symbol_id, path, qualified_name, kind, start_line, end_line FROM symbols "
+            f"WHERE {where} ORDER BY start_line ASC, symbol_id COLLATE BINARY ASC LIMIT ?",
+            (*parameters, limit + 1),
+        ).fetchall()
+
+        symbols: list[Symbol] = []
+        for row in rows[:limit]:
+            item = _symbol_from_row(index_id, row)
+            candidate_symbols = [*symbols, item]
+            has_more = len(rows) > len(candidate_symbols)
+            next_cursor = (
+                _encode_module_symbols_cursor(
+                    item,
+                    project_id=project_id,
+                    index_id=index_id,
+                    module_id=module_id,
+                )
+                if has_more
+                else None
+            )
+            candidate = ModuleSymbolsPageResponse(
+                project_id=project_id,
+                index_id=index_id,
+                module=module,
+                symbols=candidate_symbols,
+                next_cursor=next_cursor,
+                has_more=has_more,
+            )
+            if _model_size(candidate) > _MODULE_SYMBOLS_MAX_OUTPUT_BYTES:
+                if not symbols:
+                    raise StorageBudgetError("first module definition exceeds the page output budget")
+                break
+            symbols.append(item)
+
+        has_more = len(rows) > len(symbols)
+        next_cursor = (
+            _encode_module_symbols_cursor(
+                symbols[-1],
+                project_id=project_id,
+                index_id=index_id,
+                module_id=module_id,
+            )
+            if has_more and symbols
+            else None
+        )
+        page = ModuleSymbolsPageResponse(
+            project_id=project_id,
+            index_id=index_id,
+            module=module,
+            symbols=symbols,
+            next_cursor=next_cursor,
+            has_more=has_more,
+        )
+        if _model_size(page) > _MODULE_SYMBOLS_MAX_OUTPUT_BYTES:
+            raise StorageBudgetError("module symbol page exceeds the output budget")
+        return ModuleSymbolPage(module, tuple(symbols), next_cursor, has_more)
+
     def search_symbols_bounded(
         self,
         index_id: str,
@@ -5001,6 +5112,81 @@ def _datetime_text(value: datetime) -> str:
 
 def _datetime_value(value: str) -> datetime:
     return datetime.fromisoformat(value).astimezone(timezone.utc)
+
+
+def _module_symbols_scope_fingerprint(project_id: str, index_id: str, module_id: str) -> str:
+    scope = json.dumps(
+        [project_id, index_id, module_id],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(scope).hexdigest()
+
+
+def _encode_module_symbols_cursor(
+    symbol: Symbol,
+    *,
+    project_id: str,
+    index_id: str,
+    module_id: str,
+) -> str:
+    payload = json.dumps(
+        {
+            "version": 1,
+            "scope": _module_symbols_scope_fingerprint(project_id, index_id, module_id),
+            "start_line": symbol.start_line,
+            "symbol_id": symbol.symbol_id,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    cursor = base64.urlsafe_b64encode(payload).decode("ascii")
+    if len(cursor) > 500:
+        raise StorageInputError("module symbol cursor exceeds the allowed length")
+    return cursor
+
+
+def _decode_module_symbols_cursor(
+    cursor: str | None,
+    *,
+    project_id: str,
+    index_id: str,
+    module_id: str,
+) -> tuple[int, str] | None:
+    if cursor is None:
+        return None
+    if not cursor or len(cursor) > 500:
+        raise StorageInputError("module symbol cursor is invalid")
+    try:
+        encoded = cursor.encode("ascii")
+        payload = json.loads(
+            base64.b64decode(encoded, altchars=b"-_", validate=True).decode("utf-8")
+        )
+        if not isinstance(payload, dict) or set(payload) != {
+            "version",
+            "scope",
+            "start_line",
+            "symbol_id",
+        }:
+            raise ValueError("module symbol cursor fields are invalid")
+        version = payload["version"]
+        scope = payload["scope"]
+        start_line = payload["start_line"]
+        symbol_id = payload["symbol_id"]
+    except (ValueError, KeyError, TypeError, UnicodeError, binascii.Error, json.JSONDecodeError) as exc:
+        raise StorageInputError("module symbol cursor is invalid") from exc
+    if (
+        type(version) is not int
+        or version != 1
+        or scope != _module_symbols_scope_fingerprint(project_id, index_id, module_id)
+        or type(start_line) is not int
+        or start_line < 1
+        or not isinstance(symbol_id, str)
+        or not symbol_id
+        or len(symbol_id) > 200
+    ):
+        raise StorageInputError("module symbol cursor does not match the requested scope")
+    return start_line, symbol_id
 
 
 def _encode_feature_generation_cursor(

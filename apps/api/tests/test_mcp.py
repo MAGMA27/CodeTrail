@@ -106,6 +106,157 @@ def copy_fixture(tmp_path: Path, *, name: str = "timeout-demo", default_timeout:
     return destination
 
 
+def test_module_symbol_http_pages_match_cold_stdio_mcp(tmp_path: Path) -> None:
+    repository = copy_fixture(tmp_path, name="module-symbol-pages")
+    bulk_path = repository / "timeout_demo" / "bulk.py"
+    bulk_path.write_text(
+        "\n\n".join(f"def item_{number:02d}():\n    return {number}" for number in range(48)) + "\n",
+        encoding="utf-8",
+    )
+    data_root = tmp_path / "service-data"
+    application = create_app({"timeout-demo": repository}, data_root=data_root)
+    status, project = request(
+        application,
+        "POST",
+        "/api/projects",
+        {"name": "Module symbol pages", "repository_id": "timeout-demo"},
+    )
+    assert status == 200
+    project_id = project["project_id"]
+    status, created = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/indexes",
+        {"revision": "module-symbol-pages-v1", "dirty": False},
+    )
+    assert status == 200
+    index_id = created["index"]["index_id"]
+    with application.state.registry.store_for_repository("timeout-demo") as store:
+        relation = store.load_index(index_id)
+        module = next(symbol for symbol in relation.symbols if symbol.kind == "module" and symbol.path == "timeout_demo/bulk.py")
+        other_module = next(symbol for symbol in relation.symbols if symbol.kind == "module" and symbol.path == "timeout_demo/config.py")
+        non_module = next(symbol for symbol in relation.symbols if symbol.kind == "function")
+
+    route = f"/api/projects/{project_id}/indexes/{index_id}/modules/{module.symbol_id}/symbols"
+    status, first = request(application, "GET", f"{route}?limit=25")
+    assert status == 200
+    assert first["module"]["symbol_id"] == module.symbol_id
+    assert first["module"]["path"] == "timeout_demo/bulk.py"
+    assert first["has_more"] is True
+    assert len(first["symbols"]) == 25
+    status, second = request(application, "GET", f"{route}?limit=25&cursor={first['next_cursor']}")
+    assert status == 200
+    assert second["has_more"] is False
+    assert second["next_cursor"] is None
+    symbols = [*first["symbols"], *second["symbols"]]
+    assert [symbol["qualified_name"].rsplit(".", 1)[-1] for symbol in symbols] == [
+        f"item_{number:02d}" for number in range(48)
+    ]
+    assert len({symbol["symbol_id"] for symbol in symbols}) == 48
+    status, source = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/indexes/{index_id}/source?path=timeout_demo%2Fbulk.py"
+        f"&start_line={first['symbols'][0]['start_line']}&end_line={first['symbols'][0]['end_line']}",
+    )
+    assert status == 200
+    expected_source_hash = next(
+        source_file.content_hash
+        for source_file in relation.definitions.snapshot.files
+        if source_file.path == "timeout_demo/bulk.py"
+    )
+    assert source["evidence"]["content_hash"] == expected_source_hash
+    assert "def item_00" in source["evidence"]["excerpt"]
+
+    status, switched = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/indexes/{index_id}/modules/{other_module.symbol_id}/symbols?limit=1",
+    )
+    assert status == 200
+    assert switched["module"]["path"] == "timeout_demo/config.py"
+
+    status, error = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/indexes/{index_id}/modules/{non_module.symbol_id}/symbols",
+    )
+    assert status == 404
+    assert error["code"] == "not_found"
+    status, error = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/indexes/{index_id}/modules/{other_module.symbol_id}/symbols"
+        f"?limit=25&cursor={first['next_cursor']}",
+    )
+    assert status == 400
+    assert error["code"] == "invalid_input"
+
+    status, other_project = request(
+        application,
+        "POST",
+        "/api/projects",
+        {"name": "Second module project", "repository_id": "timeout-demo"},
+    )
+    assert status == 200
+    other_project_id = other_project["project_id"]
+    bulk_path.write_text(bulk_path.read_text(encoding="utf-8") + "# new immutable revision\n", encoding="utf-8")
+    status, other_index = request(
+        application,
+        "POST",
+        f"/api/projects/{other_project_id}/indexes",
+        {"revision": "module-symbol-pages-v2", "dirty": False},
+    )
+    assert status == 200, other_index
+    other_index_id = other_index["index"]["index_id"]
+    with application.state.registry.store_for_repository("timeout-demo") as store:
+        other_relation = store.load_index(other_index_id)
+        other_bulk_module = next(
+            symbol
+            for symbol in other_relation.symbols
+            if symbol.kind == "module" and symbol.path == "timeout_demo/bulk.py"
+        )
+    status, error = request(
+        application,
+        "GET",
+        f"/api/projects/{other_project_id}/indexes/{other_index_id}"
+        f"/modules/{other_bulk_module.symbol_id}/symbols?limit=25&cursor={first['next_cursor']}",
+    )
+    assert status == 400
+    assert error["code"] == "invalid_input"
+
+    parameters = StdioServerParameters(
+        command=sys.executable,
+        args=["-m", "app.mcp_server"],
+        env={
+            "CODETRAIL_REPOSITORIES": json.dumps({"timeout-demo": str(repository)}),
+            "CODETRAIL_DATA_DIR": str(data_root),
+            "CODETRAIL_WORKBENCH_URL": "http://localhost:3000",
+        },
+        cwd=API_ROOT,
+    )
+
+    async def exercise() -> None:
+        async with Client(parameters, read_timeout_seconds=15) as client:
+            tools = {tool.name for tool in (await client.list_tools()).tools}
+            assert "list_module_symbols" in tools
+            for expected, page_cursor in ((first, None), (second, first["next_cursor"])):
+                result = await client.call_tool(
+                    "list_module_symbols",
+                    {
+                        "project_id": project_id,
+                        "index_id": index_id,
+                        "module_id": module.symbol_id,
+                        "limit": 25,
+                        "cursor": page_cursor,
+                    },
+                )
+                assert result.structured_content["ok"] is True
+                assert result.structured_content["result"] == expected
+
+    asyncio.run(exercise())
+
+
 def test_real_stdio_client_matches_http_and_returns_evidence_link(tmp_path: Path) -> None:
     repository = copy_fixture(tmp_path)
     (repository / "codetrail-subsystems.json").write_text(
@@ -386,6 +537,7 @@ def test_mcp_local_import_is_opt_in_and_shares_http_state(tmp_path: Path) -> Non
                 "get_index",
                 "check_index_freshness",
                 "search_code",
+                "list_module_symbols",
                 "read_source",
                 "get_neighbors",
                 "get_overview",
@@ -444,6 +596,7 @@ def test_mcp_local_import_is_opt_in_and_shares_http_state(tmp_path: Path) -> Non
                 "get_index",
                 "check_index_freshness",
                 "search_code",
+                "list_module_symbols",
                 "read_source",
                 "get_neighbors",
                 "get_overview",
@@ -757,6 +910,7 @@ def test_mcp_feature_generation_is_separately_opt_in_and_returns_citations(tmp_p
                 "get_index",
                 "check_index_freshness",
                 "search_code",
+                "list_module_symbols",
                 "read_source",
                 "get_neighbors",
                 "get_overview",
@@ -993,6 +1147,7 @@ async def _exercise_stdio(
         "get_index",
         "check_index_freshness",
         "search_code",
+        "list_module_symbols",
         "read_source",
         "get_neighbors",
         "get_overview",

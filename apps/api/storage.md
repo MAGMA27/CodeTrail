@@ -10,6 +10,8 @@
 
 搜索的 `symbol_fts` 保持文件级 `qualified_name/source_text` 候选索引，以兼容已有不可变快照；`search_symbols_bounded` 先执行完整限定名/后缀、叶子名精确和名称部分三层有界查询，再以小批次读取 FTS 正文候选。正文候选只读取 `symbol_id/path/bm25`，再按 Symbol 的 `start_line/end_line` 从 `snapshot_files` 复核；同一文件在一次查询中只读取、切分和缓存一次。每次搜索最多检查 256 个候选、正文批次为 32、源码最多 32 个文件和 256 KiB UTF-8，并为每条 SQL 安装 SQLite progress handler，Python 循环也共享 0.5 秒预算；预算停止时保留已确认结果并返回 `search budget exceeded: ...`，与确认仍有更多结果的 `max_results reached` 区分。模块 Symbol 保留整文件范围用于导航，函数/类不继承同文件其他 Symbol 的正文命中；同层使用限定名、路径、`symbol_id` 稳定排序，同名定义不合并。该查询修复不修改 FTS 格式、快照 hash、Symbol ID 或历史 Run，不需要重建旧索引。
 
+`list_module_symbols` 先从指定 immutable index 校验 `kind=module` 的 root，再按其固定 `path` 查询 `class`、`function`、`test` 定义；它不读 live source、不使用 FTS 或 neighbors，也不计算全量计数。排序为 `(start_line, symbol_id)`，用 `(start_line, symbol_id)` keyset 续页；游标含 v1、完整 SHA-256 project/index/module scope fingerprint 与最后排序键，最多 500 字符。页默认/最多 40 项，响应序列化含 module root 在 40,000 字节内；预算只容纳部分定义时返回短页和可续游标，连首项也放不下时返回 `budget_exceeded`。`symbols_module_page(index_id,path,start_line,symbol_id)` 是兼容旧库的 `CREATE INDEX IF NOT EXISTS` 辅助查询索引；它不改变既有 symbols、immutable snapshot 或 Symbol identity。
+
 ## 接口与依赖
 
 应用服务通过 [service.py](app/service.py) 的 registry 获取对应 IndexStore；Run executor 只通过同一存储接口写事件、工具结果和报告，[run_sse.py](app/run_sse.py) 只调用有界事件读取。Run 表、run_inputs、run_events、run_tool_results、run_reports 与 sessions 使用 project/session/index 外键和索引，所有读取要求显式作用域。JSON 行在读写边界再次通过 Pydantic Event/ToolResult/Report/Run/RunInput 校验。

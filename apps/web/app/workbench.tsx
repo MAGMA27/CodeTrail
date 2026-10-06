@@ -39,6 +39,7 @@ import {
   getProjectSessionRunReport,
   listProjectIndexes,
   listProjectFeatureGenerations,
+  listProjectModuleSymbols,
   listProjectSessionMessages,
   listProjectSessionRunEvents,
   listProjectSessionRunToolResults,
@@ -79,6 +80,7 @@ import {
   type OverviewHttpAssociation,
   type OverviewGroup,
   type OverviewModule,
+  type ModuleSymbolsPageResponse,
   type ProjectOverview,
   type ProjectRecord,
   type RunEvent,
@@ -525,6 +527,11 @@ export default function Workbench() {
   const [overviewStatus, setOverviewStatus] = useState<AsyncStatus>("idle");
   const [overview, setOverview] = useState<ProjectOverview | null>(null);
   const [overviewError, setOverviewError] = useState<string | null>(null);
+  const [moduleSymbolsRoot, setModuleSymbolsRoot] = useState<SymbolRecord | null>(null);
+  const [moduleSymbolsPage, setModuleSymbolsPage] = useState<ModuleSymbolsPageResponse | null>(null);
+  const [moduleSymbolsStatus, setModuleSymbolsStatus] = useState<AsyncStatus>("idle");
+  const [moduleSymbolsError, setModuleSymbolsError] = useState<string | null>(null);
+  const [moduleSymbolsRetry, setModuleSymbolsRetry] = useState<{ cursor: string | null; append: boolean } | null>(null);
   const [selectedOverviewEntryId, setSelectedOverviewEntryId] = useState<string | null>(null);
   const [selectedOverviewGroupId, setSelectedOverviewGroupId] = useState<string | null>(null);
   const [httpEntryChain, setHttpEntryChain] = useState<HttpEntryChain | null>(null);
@@ -618,6 +625,7 @@ export default function Workbench() {
   const graphController = useRef<AbortController | null>(null);
   const sourceController = useRef<AbortController | null>(null);
   const overviewController = useRef<AbortController | null>(null);
+  const moduleSymbolsController = useRef<AbortController | null>(null);
   const featureController = useRef<AbortController | null>(null);
   const featureHistoryController = useRef<AbortController | null>(null);
   const featureGraphController = useRef<AbortController | null>(null);
@@ -637,6 +645,7 @@ export default function Workbench() {
   const graphRequestId = useRef(0);
   const sourceRequestId = useRef(0);
   const overviewRequestId = useRef(0);
+  const moduleSymbolsRequestId = useRef(0);
   const featureRequestId = useRef(0);
   const featureHistoryRequestId = useRef(0);
   const featureGraphRequestId = useRef(0);
@@ -676,6 +685,29 @@ export default function Workbench() {
   const evidenceLinkApplied = useRef(false);
   const sessionLink = useRef<SessionLink | null>(null);
   const sessionLinkApplied = useRef(false);
+
+  const resetModuleSymbolSource = useCallback(() => {
+    sourceController.current?.abort();
+    sourceRequestId.current += 1;
+    setSelectedId(null);
+    setLinkedSymbol(null);
+    setSourceStatus("idle");
+    setSourceResponse(null);
+    setSourceError(null);
+    setSourceGenerationId(null);
+    setPanelMode("none");
+  }, []);
+
+  const resetModuleSymbols = useCallback(() => {
+    moduleSymbolsController.current?.abort();
+    moduleSymbolsRequestId.current += 1;
+    setModuleSymbolsRoot(null);
+    setModuleSymbolsPage(null);
+    setModuleSymbolsStatus("idle");
+    setModuleSymbolsError(null);
+    setModuleSymbolsRetry(null);
+    resetModuleSymbolSource();
+  }, [resetModuleSymbolSource]);
 
   const closeRunEventStream = useCallback(() => {
     runStreamRequestId.current += 1;
@@ -785,6 +817,7 @@ export default function Workbench() {
       graphController.current?.abort();
       sourceController.current?.abort();
       overviewController.current?.abort();
+      moduleSymbolsController.current?.abort();
       featureController.current?.abort();
       featureHistoryController.current?.abort();
       featureGraphController.current?.abort();
@@ -810,6 +843,7 @@ export default function Workbench() {
     graphController.current?.abort();
     sourceController.current?.abort();
     overviewController.current?.abort();
+    resetModuleSymbols();
     featureController.current?.abort();
     featureHistoryController.current?.abort();
     featureGraphController.current?.abort();
@@ -861,7 +895,7 @@ export default function Workbench() {
     setRunImpactSelection(null);
     setExpandedGroups(new Set());
     knownGroupKeys.current.clear();
-  }, []);
+  }, [resetModuleSymbols]);
 
   const loadLinkedEvidence = useCallback(
     async (link: EvidenceLink, generationId: string | null = null) => {
@@ -925,6 +959,7 @@ export default function Workbench() {
 
   const loadOverview = useCallback(async (projectId: string, indexId: string) => {
     overviewController.current?.abort();
+    resetModuleSymbols();
     const controller = new AbortController();
     overviewController.current = controller;
     const requestId = ++overviewRequestId.current;
@@ -947,7 +982,97 @@ export default function Workbench() {
       setOverviewStatus("error");
       setOverviewError(errorMessage(error));
     }
-  }, []);
+  }, [resetModuleSymbols]);
+
+  const loadModuleSymbolsPage = useCallback(
+    async (module: SymbolRecord, cursor: string | null = null, append = false) => {
+      if (!selectedProjectId || !indexResponse || module.kind !== "module" || module.index_id !== indexResponse.index.index_id) {
+        return;
+      }
+      if (append && !cursor) {
+        return;
+      }
+      moduleSymbolsController.current?.abort();
+      const controller = new AbortController();
+      moduleSymbolsController.current = controller;
+      const requestId = ++moduleSymbolsRequestId.current;
+      setModuleSymbolsRoot(module);
+      setModuleSymbolsRetry({ cursor, append });
+      if (!append) {
+        setModuleSymbolsPage(null);
+      }
+      setModuleSymbolsStatus("loading");
+      setModuleSymbolsError(null);
+      try {
+        const response = await listProjectModuleSymbols(
+          selectedProjectId,
+          indexResponse.index.index_id,
+          module.symbol_id,
+          40,
+          cursor ?? undefined,
+          controller.signal,
+        );
+        if (
+          !isLatestRequest(requestId, moduleSymbolsRequestId.current)
+        ) {
+          return;
+        }
+        if (
+          response.project_id !== selectedProjectId ||
+          response.index_id !== indexResponse.index.index_id ||
+          response.module.symbol_id !== module.symbol_id ||
+          response.module.path !== module.path
+        ) {
+          throw new Error("返回的模块定义与当前固定索引或模块不匹配。");
+        }
+        setModuleSymbolsPage((previous) => {
+          if (!append || !previous || previous.module.symbol_id !== module.symbol_id) {
+            return response;
+          }
+          const existing = new Set(previous.symbols.map((symbol) => symbol.symbol_id));
+          return {
+            ...response,
+            symbols: [...previous.symbols, ...response.symbols.filter((symbol) => !existing.has(symbol.symbol_id))],
+          };
+        });
+        setModuleSymbolsStatus(response.symbols.length > 0 || append ? "success" : "empty");
+        setModuleSymbolsRetry(null);
+      } catch (error) {
+        if (isAbortError(error) || !isLatestRequest(requestId, moduleSymbolsRequestId.current)) {
+          return;
+        }
+        setModuleSymbolsStatus("error");
+        setModuleSymbolsError(errorMessage(error));
+      }
+    },
+    [indexResponse, selectedProjectId],
+  );
+
+  const openModuleSymbols = useCallback(
+    (module: OverviewModule) => {
+      if (moduleSymbolsRoot?.symbol_id !== module.symbol.symbol_id) {
+        resetModuleSymbolSource();
+      }
+      void loadModuleSymbolsPage(module.symbol);
+    },
+    [loadModuleSymbolsPage, moduleSymbolsRoot?.symbol_id, resetModuleSymbolSource],
+  );
+
+  const loadMoreModuleSymbols = useCallback(() => {
+    if (moduleSymbolsPage?.has_more && moduleSymbolsPage.next_cursor) {
+      void loadModuleSymbolsPage(moduleSymbolsPage.module, moduleSymbolsPage.next_cursor, true);
+    }
+  }, [loadModuleSymbolsPage, moduleSymbolsPage]);
+
+  const retryModuleSymbols = useCallback(() => {
+    if (moduleSymbolsRoot) {
+      void loadModuleSymbolsPage(
+        moduleSymbolsRoot,
+        moduleSymbolsRetry?.cursor ?? null,
+        moduleSymbolsRetry?.append ?? false,
+      );
+    }
+  }, [loadModuleSymbolsPage, moduleSymbolsRetry, moduleSymbolsRoot]);
 
   const applyFeatureGenerationResponse = useCallback((generation: FeatureGeneration) => {
     setFeatureGeneration(generation);
@@ -2752,6 +2877,14 @@ export default function Workbench() {
     [loadSource],
   );
 
+  const selectModuleSymbol = useCallback(
+    (symbol: SymbolRecord) => {
+      setLinkedSymbol(symbol);
+      selectSymbol(symbol);
+    },
+    [selectSymbol],
+  );
+
   const openArchitectureSource = useCallback(
     async ({ indexId, path, startLine, endLine, expectedContentHash }: { indexId: string; path: string; startLine: number; endLine: number; expectedContentHash?: string }) => {
       if (!selectedProjectId || indexResponse?.index.index_id !== indexId) {
@@ -2888,6 +3021,7 @@ export default function Workbench() {
 
   const selectOverviewEntry = useCallback(
     (entry: OverviewEntryPoint) => {
+      resetModuleSymbols();
       setSelectedOverviewEntryId(entry.entry_point_id);
       if (!entry.evidence || !indexResponse || !selectedProjectId) {
         setSelectedId(null);
@@ -2912,7 +3046,7 @@ export default function Workbench() {
         },
       );
     },
-    [indexResponse, loadLinkedEvidence, selectedProjectId],
+    [indexResponse, loadLinkedEvidence, resetModuleSymbols, selectedProjectId],
   );
 
   const openOverviewEntryGraph = useCallback(
@@ -2988,11 +3122,17 @@ export default function Workbench() {
   const selectOverviewGroup = useCallback((group: OverviewGroup) => {
     graphController.current?.abort();
     graphRequestId.current += 1;
+    resetModuleSymbols();
     setSelectedOverviewGroupId(group.group_id);
     setSelectedOverviewEntryId(null);
     setHttpEntryChain(null);
     setPanelMode("none");
-  }, []);
+  }, [resetModuleSymbols]);
+
+  const clearOverviewGroup = useCallback(() => {
+    resetModuleSymbols();
+    setSelectedOverviewGroupId(null);
+  }, [resetModuleSymbols]);
 
   const openOverviewModule = useCallback(
     (module: OverviewModule) => {
@@ -3658,12 +3798,20 @@ export default function Workbench() {
         overviewError,
         selectedOverviewEntryId,
         selectedOverviewGroupId,
+        moduleSymbolsRoot,
+        moduleSymbolsPage,
+        moduleSymbolsStatus,
+        moduleSymbolsError,
         onSelectOverviewEntry: selectOverviewEntry,
         onSelectOverviewGroup: selectOverviewGroup,
-        onClearOverviewGroup: () => setSelectedOverviewGroupId(null),
+        onClearOverviewGroup: clearOverviewGroup,
         onOpenOverviewGraph: openOverviewEntryGraph,
         onOpenHttpChain: openHttpEntryChain,
         onOpenOverviewModule: openOverviewModule,
+        onOpenModuleSymbols: openModuleSymbols,
+        onLoadMoreModuleSymbols: loadMoreModuleSymbols,
+        onRetryModuleSymbols: retryModuleSymbols,
+        onSelectModuleSymbol: selectModuleSymbol,
         onOpenArchitectureSource: openArchitectureSource,
         onRetryOverview: () => {
           if (selectedProjectId && indexResponse) {

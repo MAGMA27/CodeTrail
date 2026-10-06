@@ -60,6 +60,7 @@ from .contracts import (
     LocalImportRequest,
     LocalImportResponse,
     NeighborsIndexResponse,
+    ModuleSymbolsPageResponse,
     ProjectOverview,
     Project,
     ProjectIndexListResponse,
@@ -148,6 +149,7 @@ from .storage import (
     ProjectRecord,
     ProjectUpdateRecord,
     StorageConflictError,
+    StorageBudgetError,
     StorageError,
     StorageInputError,
     StorageNotFoundError,
@@ -3239,6 +3241,45 @@ class WorkspaceService:
     def search(self, project_id: str, index_id: str, query: str, limit: int) -> SearchIndexResponse:
         self._require_project_index(project_id, index_id)
         return self.index_service.search(index_id, query, limit)
+
+    def list_module_symbols(
+        self,
+        project_id: str,
+        index_id: str,
+        module_id: str,
+        limit: int,
+        cursor: str | None,
+    ) -> ModuleSymbolsPageResponse:
+        """Page fixed-snapshot definitions only after project/index ownership checks."""
+
+        project = self._require_project_index(project_id, index_id)
+        try:
+            with self.registry.store_for_repository(project.repository_id) as store:
+                page = store.list_module_symbols(
+                    project_id,
+                    index_id,
+                    module_id,
+                    limit=limit,
+                    cursor=cursor,
+                )
+            return ModuleSymbolsPageResponse(
+                project_id=project_id,
+                index_id=index_id,
+                module=page.module,
+                symbols=list(page.symbols),
+                next_cursor=page.next_cursor,
+                has_more=page.has_more,
+            )
+        except ServiceError:
+            raise
+        except StorageNotFoundError as exc:
+            raise ServiceError("not_found", 404, "requested module was not found in the project index") from exc
+        except StorageInputError as exc:
+            raise ServiceError("invalid_input", 400, "module symbol page parameters are invalid") from exc
+        except StorageBudgetError as exc:
+            raise ServiceError("budget_exceeded", 429, "module symbol page exceeds its output budget") from exc
+        except StorageError as exc:
+            raise ServiceError("internal_error", 500, "local index storage failed") from exc
 
     def neighbors(
         self,

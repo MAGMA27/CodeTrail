@@ -43,6 +43,7 @@ from .contracts import (
     McpIndexFreshnessResponse,
     McpIndexRefreshResponse,
     McpNeighborsResponse,
+    McpModuleSymbolsResponse,
     McpOverviewResponse,
     McpProjectIndexesResponse,
     McpProjectListResponse,
@@ -99,6 +100,7 @@ _NeighborEdgeKind = Literal["imports", "calls"]
 _ImpactDirection = Literal["callers", "callees"]
 _ProjectId = Annotated[Identifier, Field(description="Stable CodeTrail project ID.")]
 _IndexId = Annotated[Identifier, Field(description="Immutable CodeTrail index ID.")]
+_ModuleId = Annotated[Identifier, Field(description="Module symbol ID from the selected immutable index.")]
 _Query = Annotated[str, Field(min_length=1, max_length=500, description="Symbol or source text query.")]
 _Path = Annotated[str, Field(min_length=1, max_length=500, description="Relative path in the indexed snapshot.")]
 _LocalPath = Annotated[str, Field(min_length=1, max_length=4_000, description="Absolute path visible to the local API service.")]
@@ -116,6 +118,7 @@ _OverviewModuleRelations = Annotated[
     Field(ge=1, le=400, description="Maximum returned aggregated module relations."),
 ]
 _FeatureHistoryCursor = Annotated[str | None, Field(max_length=500, description="Opaque history cursor from a previous page.")]
+_ModuleSymbolsCursor = Annotated[str | None, Field(max_length=500, description="Opaque cursor from a previous module-symbol page.")]
 _FeatureGraphNodes = Annotated[int, Field(ge=1, le=40, description="Maximum feature graph nodes.")]
 _FeatureGraphEdges = Annotated[int, Field(ge=1, le=120, description="Maximum feature graph edges.")]
 _SessionCursor = Annotated[str | None, Field(max_length=500, description="Opaque session cursor from a previous page.")]
@@ -404,6 +407,33 @@ def create_mcp_server(
             return _failure(McpSearchResponse, exc)
         except Exception:
             return _unexpected_failure("search_code", McpSearchResponse)
+
+    @server.tool(
+        name="list_module_symbols",
+        title="List definitions in an indexed module",
+        description=(
+            "List indexed class, function, and test definitions from one module path in the selected immutable project/index. "
+            "This reports definitions captured by the index and does not imply complete parsing. Pages are bounded to 40 items "
+            "and share the API output budget; pass the returned cursor unchanged to continue."
+        ),
+        structured_output=True,
+    )
+    def list_module_symbols(
+        project_id: _ProjectId,
+        index_id: _IndexId,
+        module_id: _ModuleId,
+        limit: _Limit = 40,
+        cursor: _ModuleSymbolsCursor = None,
+    ) -> McpModuleSymbolsResponse:
+        try:
+            return McpModuleSymbolsResponse(
+                ok=True,
+                result=service.list_module_symbols(project_id, index_id, module_id, limit, cursor),
+            )
+        except ServiceError as exc:
+            return _failure(McpModuleSymbolsResponse, exc)
+        except Exception:
+            return _unexpected_failure("list_module_symbols", McpModuleSymbolsResponse)
 
     @server.tool(
         name="read_source",

@@ -21898,6 +21898,212 @@
       "title": "McpIndexResponse",
       "type": "object"
     },
+    "McpModuleSymbolsResponse": {
+      "$defs": {
+        "McpError": {
+          "additionalProperties": false,
+          "description": "Domain failure returned inside a read-only MCP tool result.",
+          "properties": {
+            "code": {
+              "enum": [
+                "not_found",
+                "invalid_input",
+                "conflict",
+                "budget_exceeded",
+                "internal_error",
+                "forbidden"
+              ],
+              "title": "Code",
+              "type": "string"
+            },
+            "message": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "title": "Message",
+              "type": "string"
+            },
+            "retryable": {
+              "default": false,
+              "title": "Retryable",
+              "type": "boolean"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "title": "McpError",
+          "type": "object"
+        },
+        "ModuleSymbolsPageResponse": {
+          "additionalProperties": false,
+          "description": "One bounded page of definitions from a fixed snapshot module.\n\nThis lists definitions persisted by the indexer for the module's captured\npath; it does not assert that parsing or symbol extraction was complete.",
+          "properties": {
+            "has_more": {
+              "default": false,
+              "title": "Has More",
+              "type": "boolean"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "module": {
+              "$ref": "#/$defs/Symbol"
+            },
+            "next_cursor": {
+              "anyOf": [
+                {
+                  "maxLength": 500,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Next Cursor"
+            },
+            "project_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Project Id",
+              "type": "string"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            },
+            "symbols": {
+              "items": {
+                "$ref": "#/$defs/Symbol"
+              },
+              "maxItems": 40,
+              "title": "Symbols",
+              "type": "array"
+            }
+          },
+          "required": [
+            "project_id",
+            "index_id",
+            "module"
+          ],
+          "title": "ModuleSymbolsPageResponse",
+          "type": "object"
+        },
+        "Symbol": {
+          "additionalProperties": false,
+          "properties": {
+            "end_line": {
+              "exclusiveMinimum": 0,
+              "title": "End Line",
+              "type": "integer"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "module",
+                "file",
+                "class",
+                "function",
+                "test"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "qualified_name": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Qualified Name",
+              "type": "string"
+            },
+            "start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Start Line",
+              "type": "integer"
+            },
+            "symbol_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Symbol Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "start_line",
+            "end_line",
+            "symbol_id",
+            "index_id",
+            "path",
+            "qualified_name",
+            "kind"
+          ],
+          "title": "Symbol",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/McpError"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "result": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ModuleSymbolsPageResponse"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "schema_version": {
+          "const": "0.1.0",
+          "default": "0.1.0",
+          "title": "Schema Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ok"
+      ],
+      "title": "McpModuleSymbolsResponse",
+      "type": "object"
+    },
     "McpNeighborsResponse": {
       "$defs": {
         "CodeEdge": {
@@ -32168,6 +32374,129 @@
         "summary"
       ],
       "title": "ModelOutput",
+      "type": "object"
+    },
+    "ModuleSymbolsPageResponse": {
+      "$defs": {
+        "Symbol": {
+          "additionalProperties": false,
+          "properties": {
+            "end_line": {
+              "exclusiveMinimum": 0,
+              "title": "End Line",
+              "type": "integer"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "module",
+                "file",
+                "class",
+                "function",
+                "test"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "qualified_name": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Qualified Name",
+              "type": "string"
+            },
+            "start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Start Line",
+              "type": "integer"
+            },
+            "symbol_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Symbol Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "start_line",
+            "end_line",
+            "symbol_id",
+            "index_id",
+            "path",
+            "qualified_name",
+            "kind"
+          ],
+          "title": "Symbol",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "One bounded page of definitions from a fixed snapshot module.\n\nThis lists definitions persisted by the indexer for the module's captured\npath; it does not assert that parsing or symbol extraction was complete.",
+      "properties": {
+        "has_more": {
+          "default": false,
+          "title": "Has More",
+          "type": "boolean"
+        },
+        "index_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Index Id",
+          "type": "string"
+        },
+        "module": {
+          "$ref": "#/$defs/Symbol"
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Next Cursor"
+        },
+        "project_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Project Id",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "0.1.0",
+          "default": "0.1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "symbols": {
+          "items": {
+            "$ref": "#/$defs/Symbol"
+          },
+          "maxItems": 40,
+          "title": "Symbols",
+          "type": "array"
+        }
+      },
+      "required": [
+        "project_id",
+        "index_id",
+        "module"
+      ],
+      "title": "ModuleSymbolsPageResponse",
       "type": "object"
     },
     "OverviewCoverage": {

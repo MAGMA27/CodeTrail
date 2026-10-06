@@ -559,6 +559,16 @@ export type SearchResponse = {
   truncation_reason: string | null;
 };
 
+export type ModuleSymbolsPageResponse = {
+  schema_version: typeof SCHEMA_VERSION;
+  project_id: string;
+  index_id: string;
+  module: SymbolRecord;
+  symbols: SymbolRecord[];
+  next_cursor: string | null;
+  has_more: boolean;
+};
+
 export type Neighbor = {
   symbol: SymbolRecord;
   edge: CodeEdge;
@@ -1819,6 +1829,42 @@ export function isSearchResponse(value: unknown): value is SearchResponse {
   );
 }
 
+export function isModuleSymbolsPageResponse(value: unknown): value is ModuleSymbolsPageResponse {
+  if (
+    !isRecord(value) ||
+    value.schema_version !== SCHEMA_VERSION ||
+    !isString(value.project_id) ||
+    !isString(value.index_id) ||
+    !isSymbolRecord(value.module) ||
+    value.module.kind !== "module" ||
+    value.module.index_id !== value.index_id ||
+    !Array.isArray(value.symbols) ||
+    value.symbols.length > 40 ||
+    !value.symbols.every(isSymbolRecord) ||
+    !isNullableString(value.next_cursor) ||
+    (typeof value.next_cursor === "string" && value.next_cursor.length > 500) ||
+    typeof value.has_more !== "boolean" ||
+    value.has_more !== (value.next_cursor !== null)
+  ) {
+    return false;
+  }
+  const module = value.module as SymbolRecord;
+  const indexId = value.index_id as string;
+  const symbolIds = new Set<string>();
+  return value.symbols.every((symbol) => {
+    if (
+      symbol.index_id !== indexId ||
+      symbol.path !== module.path ||
+      !["class", "function", "test"].includes(symbol.kind) ||
+      symbolIds.has(symbol.symbol_id)
+    ) {
+      return false;
+    }
+    symbolIds.add(symbol.symbol_id);
+    return true;
+  });
+}
+
 function isNeighbor(value: unknown): value is Neighbor {
   return isRecord(value) && isSymbolRecord(value.symbol) && isCodeEdge(value.edge);
 }
@@ -3047,6 +3093,26 @@ export function searchProjectIndex(
   return requestJson(
     `/api/projects/${encodeURIComponent(projectId)}/indexes/${encodeURIComponent(indexId)}/search?${params.toString()}`,
     isSearchResponse,
+    { signal },
+  );
+}
+
+export function listProjectModuleSymbols(
+  projectId: string,
+  indexId: string,
+  moduleId: string,
+  limit = 40,
+  cursor?: string,
+  signal?: AbortSignal,
+): Promise<ModuleSymbolsPageResponse> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (cursor) {
+    params.set("cursor", cursor);
+  }
+  return requestJson(
+    `/api/projects/${encodeURIComponent(projectId)}/indexes/${encodeURIComponent(indexId)}` +
+      `/modules/${encodeURIComponent(moduleId)}/symbols?${params.toString()}`,
+    isModuleSymbolsPageResponse,
     { signal },
   );
 }

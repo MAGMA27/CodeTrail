@@ -13,6 +13,7 @@ from app.indexing import build_source_snapshot, extract_definitions
 from app.relations import RelationIndex, extract_relations
 from app.storage import (
     IndexStore,
+    StorageBudgetError,
     StorageConflictError,
     StorageInputError,
     StorageNotFoundError,
@@ -67,6 +68,147 @@ def test_fts5_roundtrip_and_reopen_preserve_the_complete_relation_index(tmp_path
 
     with IndexStore(database) as reopened:
         assert reopened.load_index(relation.snapshot.index.index_id) == relation
+
+
+def test_module_symbol_pages_are_scoped_stable_and_share_the_serialized_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    (repository / "pkg.py").write_text("def actual():\n    return 1\n", encoding="utf-8")
+    (repository / "other.py").write_text("def unrelated():\n    return 2\n", encoding="utf-8")
+    relation = relation_for_repository(repository, repository_id="module-page", index_id="module-page-index")
+    module = next(symbol for symbol in relation.symbols if symbol.kind == "module" and symbol.path == "pkg.py")
+    other_module = next(symbol for symbol in relation.symbols if symbol.kind == "module" and symbol.path == "other.py")
+    non_module = next(symbol for symbol in relation.symbols if symbol.kind == "function")
+
+    with IndexStore(tmp_path / "module-page.sqlite3") as store:
+        store.write_index(relation)
+        for ordinal in range(45):
+            store.connection.execute(
+                "INSERT INTO symbols (index_id, symbol_id, path, qualified_name, kind, start_line, end_line) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    module.index_id,
+                    f"module-page-symbol-{ordinal:02d}",
+                    module.path,
+                    f"pkg.synthetic_{ordinal}",
+                    ("class", "function", "test")[ordinal % 3],
+                    20 + ordinal // 3,
+                    20 + ordinal // 3,
+                ),
+            )
+        first = store.list_module_symbols("project-page", module.index_id, module.symbol_id)
+        assert first.module == module
+        assert first.has_more is True
+        assert len(first.symbols) == 40
+        assert first.next_cursor is not None and len(first.next_cursor) <= 500
+
+        second = store.list_module_symbols(
+            "project-page",
+            module.index_id,
+            module.symbol_id,
+            cursor=first.next_cursor,
+        )
+        assert second.has_more is False
+        assert second.next_cursor is None
+        combined = (*first.symbols, *second.symbols)
+        assert len(combined) == 46  # 45 injected definitions plus the parsed function.
+        assert len({symbol.symbol_id for symbol in combined}) == len(combined)
+        assert all(symbol.path == module.path for symbol in combined)
+        assert all(symbol.kind in {"class", "function", "test"} for symbol in combined)
+        assert [(symbol.start_line, symbol.symbol_id) for symbol in combined] == sorted(
+            (symbol.start_line, symbol.symbol_id) for symbol in combined
+        )
+        assert not any(symbol.qualified_name.endswith("unrelated") for symbol in combined)
+
+        with pytest.raises(StorageInputError, match="scope"):
+            store.list_module_symbols("another-project", module.index_id, module.symbol_id, cursor=first.next_cursor)
+        with pytest.raises(StorageInputError, match="scope"):
+            store.list_module_symbols("project-page", module.index_id, other_module.symbol_id, cursor=first.next_cursor)
+        for invalid_limit in (True, 1.5):
+            with pytest.raises(StorageInputError, match="limit"):
+                store.list_module_symbols(
+                    "project-page",
+                    module.index_id,
+                    module.symbol_id,
+                    limit=invalid_limit,  # type: ignore[arg-type]
+                )
+        with pytest.raises(StorageNotFoundError, match="module"):
+            store.list_module_symbols("project-page", module.index_id, non_module.symbol_id)
+
+        cursor_scope = storage_module._module_symbols_scope_fingerprint(
+            "project-page", module.index_id, module.symbol_id
+        )
+        cursor_fields = {
+            "version": 1,
+            "scope": cursor_scope,
+            "start_line": 20,
+            "symbol_id": "module-page-symbol-00",
+        }
+        for invalid_fields in (
+            {**cursor_fields, "extra": True},
+            {**cursor_fields, "version": 1.0},
+            {**cursor_fields, "start_line": 20.0},
+        ):
+            invalid_cursor = storage_module.base64.urlsafe_b64encode(
+                storage_module.json.dumps(invalid_fields, separators=(",", ":")).encode("utf-8")
+            ).decode("ascii")
+            with pytest.raises(StorageInputError):
+                store.list_module_symbols(
+                    "project-page", module.index_id, module.symbol_id, cursor=invalid_cursor
+                )
+
+        one = first.symbols[0]
+        one_cursor = storage_module._encode_module_symbols_cursor(
+            one,
+            project_id="project-page",
+            index_id=module.index_id,
+            module_id=module.symbol_id,
+        )
+        one_item = storage_module.ModuleSymbolsPageResponse(
+            project_id="project-page",
+            index_id=module.index_id,
+            module=module,
+            symbols=[one],
+            next_cursor=one_cursor,
+            has_more=True,
+        )
+        monkeypatch.setattr(storage_module, "_MODULE_SYMBOLS_MAX_OUTPUT_BYTES", storage_module._model_size(one_item))
+        budget_page = store.list_module_symbols("project-page", module.index_id, module.symbol_id, limit=40)
+        assert len(budget_page.symbols) == 1
+        assert budget_page.has_more is True
+        assert budget_page.next_cursor is not None
+
+        monkeypatch.setattr(storage_module, "_MODULE_SYMBOLS_MAX_OUTPUT_BYTES", storage_module._model_size(one_item) - 1)
+        with pytest.raises(StorageBudgetError, match="first module definition"):
+            store.list_module_symbols("project-page", module.index_id, module.symbol_id, limit=40)
+
+
+def test_module_symbol_cursor_rejects_version_and_other_module_scope(tmp_path: Path) -> None:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    (repository / "pkg.py").write_text("def first():\n    return 1\n\ndef second():\n    return 2\n", encoding="utf-8")
+    (repository / "other.py").write_text("def unrelated():\n    return 3\n", encoding="utf-8")
+    relation = relation_for_repository(repository, repository_id="module-cursor", index_id="module-cursor-index")
+    module = next(symbol for symbol in relation.symbols if symbol.kind == "module" and symbol.path == "pkg.py")
+    other_module = next(symbol for symbol in relation.symbols if symbol.kind == "module" and symbol.path == "other.py")
+    with IndexStore(tmp_path / "module-cursor.sqlite3") as store:
+        store.write_index(relation)
+        first = store.list_module_symbols("project-cursor", module.index_id, module.symbol_id, limit=1)
+        assert first.has_more is True
+        with pytest.raises(StorageInputError, match="scope"):
+            store.list_module_symbols(
+                "project-cursor", module.index_id, other_module.symbol_id, cursor=first.next_cursor
+            )
+        bad_version = storage_module.base64.urlsafe_b64encode(
+            b'{"scope":"' + storage_module._module_symbols_scope_fingerprint(
+                "project-cursor", module.index_id, module.symbol_id
+            ).encode("ascii") + b'","start_line":1,"symbol_id":"s","version":2}'
+        ).decode("ascii")
+        with pytest.raises(StorageInputError, match="scope"):
+            store.list_module_symbols("project-cursor", module.index_id, module.symbol_id, cursor=bad_version)
 
 
 def test_static_impact_keeps_simple_paths_deduplicates_nodes_and_retains_cycle_edges(tmp_path: Path) -> None:

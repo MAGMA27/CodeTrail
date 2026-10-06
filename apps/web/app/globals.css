@@ -323,8 +323,19 @@ code { font-family: var(--ct-mono); }
 .ct-kind-chip, .ct-reachability { padding: 4px 6px; border: 1px solid #b9c7f2; border-radius: 4px; color: var(--ct-blue); font-family: var(--ct-mono); font-size: 8px; letter-spacing: .08em; }
 .ct-reachability { border-color: var(--ct-border-strong); color: var(--ct-muted); }
 .ct-reachability.is-reachable { border-color: #afd4c0; color: var(--ct-success); }
-.ct-module-row { width: 100%; border-bottom: 1px solid var(--ct-border); }
-.ct-module-row:last-child { border-bottom: 0; }
+.ct-module-row-container { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 5px; border-bottom: 1px solid var(--ct-border); }
+.ct-module-row { width: 100%; }
+.ct-module-symbols-action { padding: 6px 8px; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--ct-blue); font-size: 10px; white-space: nowrap; }
+.ct-module-symbols-action:hover, .ct-module-symbols-action.is-selected { border-color: var(--ct-border); background: var(--ct-blue-soft); }
+.ct-module-symbols { display: grid; gap: 7px; padding: 10px; border: 1px solid var(--ct-border); border-radius: 6px; background: var(--ct-surface); }
+.ct-module-symbols > p { margin: 0; }
+.ct-module-symbol-list { display: grid; gap: 3px; max-height: 340px; overflow: auto; }
+.ct-module-symbol-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; min-width: 0; padding: 8px; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--ct-text); text-align: left; }
+.ct-module-symbol-row:hover { border-color: var(--ct-border); background: var(--ct-subtle); }
+.ct-module-symbol-row > span:nth-child(2) { display: grid; min-width: 0; gap: 2px; }
+.ct-module-symbol-row strong, .ct-module-symbol-row small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ct-module-symbol-row strong { font-size: 11px; }
+.ct-module-symbol-row small { color: var(--ct-muted); font-size: 9px; }
 .ct-structure-group-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
 .ct-structure-group { display: grid; min-width: 0; gap: 5px; padding: 10px; border: 1px solid var(--ct-border); border-radius: 6px; background: var(--ct-surface); color: var(--ct-text); text-align: left; }
 .ct-structure-group:hover, .ct-structure-group.is-selected { border-color: var(--ct-blue); background: var(--ct-blue-soft); }

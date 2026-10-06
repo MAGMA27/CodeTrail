@@ -2,7 +2,9 @@
 
 `python -m app.mcp_server` 启动 MCP SDK `2.2.0` 的本地 stdio 服务；stdout 只承载协议帧，日志写 stderr。服务复用 WorkspaceService，不直接访问 SQLite，不创建索引，不执行仓库代码。
 
-默认只读工具包括项目、索引、`check_index_freshness`、Session/消息、`get_overview`、`get_neighbors`、`read_source`、功能历史/版本/图，以及 `list_session_runs`、`get_session_run`、`list_run_events`、`list_run_tool_results`、`get_run_report`、`get_run_impact`。新鲜度检查按当前本地源码内容 hash 做有界只读核对，不创建索引；Run 读取和影响查询只返回持久化报告及其固定快照上的静态结果，不重新执行分析。
+默认只读工具包括项目、索引、`check_index_freshness`、Session/消息、`get_overview`、`list_module_symbols`、`get_neighbors`、`read_source`、功能历史/版本/图，以及 `list_session_runs`、`get_session_run`、`list_run_events`、`list_run_tool_results`、`get_run_report`、`get_run_impact`。新鲜度检查按当前本地源码内容 hash 做有界只读核对，不创建索引；模块列表只分页读取固定快照中指定 module path 的 class/function/test definitions；Run 读取和影响查询只返回持久化报告及其固定快照上的静态结果，不重新执行分析。
+
+`list_module_symbols(project_id,index_id,module_id,limit=40,cursor)` 与 HTTP 的 `/api/projects/{project_id}/indexes/{index_id}/modules/{module_id}/symbols` 使用相同参数、cursor 和 response page。页最多 40 项，HTTP/MCP 共用 40,000 字节序列化预算；跨页传回原 cursor，跨 Project/Index/Module 的 cursor 返回 `invalid_input`，module 不存在或 symbol 不是 module root 返回 `not_found`。该工具只描述 indexer 在固定 snapshot 捕获到的定义，不保证解析完整；详情见[模块定义分页决策](../../docs/decisions/2026-10-06-module-symbol-pagination.md)。
 
 HTTP 入口链路没有额外 MCP 工具：外部 Agent 从 `get_overview` 读取同一 `project_id/index_id` 的 HTTP association 与路由入口，再将入口的 handler symbol 传给 `get_neighbors(direction="callees", depth=2, limit=40, edge_kinds=["calls"])`，并可用 `read_source` 读取关联两端或返回静态边的同快照源码。`overview.paths` 默认 40 条是整个概览共享的上限，不是 handler 独立覆盖；因此要判断返回观察，必须直接查询 handler。MCP 和 HTTP 调用相同 WorkspaceService，保持相同节点、边、evidence 与截断字段。查询使用现有邻接默认预算：最多 200 条边、1 秒、64,000 输出字节；空邻接与 `unresolved`/索引覆盖字段均不代表静态执行链完整。
 
