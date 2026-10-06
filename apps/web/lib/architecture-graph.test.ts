@@ -1,0 +1,204 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import type {
+  CodeEdge,
+  OverviewGroup,
+  OverviewModule,
+  OverviewModuleRelation,
+  ProjectOverview,
+  SymbolRecord,
+} from "./api.ts";
+import { ARCHITECTURE_MODULE_LIMIT, buildArchitectureGraph } from "./architecture-graph.ts";
+
+const indexId = "index-architecture-test";
+
+function moduleRecord(id: string, path: string, entryReachable = false): OverviewModule {
+  const symbol: SymbolRecord = {
+    symbol_id: id,
+    index_id: indexId,
+    path,
+    qualified_name: path.replaceAll("/", ".").replace(/\.py$/, ""),
+    kind: "module",
+    start_line: 1,
+    end_line: 40,
+  };
+  return { module_id: id, index_id: indexId, symbol, entry_point_ids: [], entry_reachable: entryReachable };
+}
+
+function directory(id: string, path: string, moduleIds: string[]): OverviewGroup {
+  return {
+    group_id: id,
+    index_id: indexId,
+    group_kind: "source_directory",
+    group_key: path,
+    label: `SOURCE ${path}`,
+    module_ids: moduleIds,
+    entry_point_ids: [],
+  };
+}
+
+function codeEdge(id: string, source: string, target: string, kind: "imports" | "calls", path: string): CodeEdge {
+  return {
+    edge_id: id,
+    index_id: indexId,
+    source_id: source,
+    target_id: target,
+    kind,
+    extraction_method: "ast",
+    source_location: { path, start_line: 12, end_line: 12 },
+  };
+}
+
+function relation(
+  id: string,
+  source: OverviewModule,
+  target: OverviewModule,
+  kinds: Array<"imports" | "calls">,
+  edges: CodeEdge[],
+): OverviewModuleRelation {
+  return {
+    relation_id: id,
+    index_id: indexId,
+    source_module_id: source.module_id,
+    target_module_id: target.module_id,
+    source_module: source.symbol,
+    target_module: target.symbol,
+    relation_kinds: kinds,
+    edge_count: edges.length,
+    edges,
+  };
+}
+
+function overview(
+  modules: OverviewModule[],
+  groups: OverviewGroup[],
+  moduleRelations: OverviewModuleRelation[],
+): ProjectOverview {
+  return {
+    schema_version: "0.1.0",
+    project_id: "project-architecture-test",
+    index: {
+      index_id: indexId,
+      repository_id: "repo-test",
+      revision: "fixture",
+      snapshot_hash: "snapshot-test",
+      status: "ready",
+      dirty: false,
+      configuration_hash: null,
+      rules_version: "python-entry-v4",
+    },
+    rules_version: "python-entry-v4",
+    entry_status: "identified",
+    entries: [],
+    groups,
+    modules,
+    module_relations: moduleRelations,
+    paths: [],
+    unresolved: [],
+    coverage: {
+      total_modules: modules.length,
+      visible_modules: modules.length,
+      reachable_modules: 0,
+      unreachable_modules: modules.length,
+      entry_point_count: 0,
+      unresolved_count: 0,
+      total_groups: groups.length,
+      visible_groups: groups.length,
+      total_module_relations: moduleRelations.length,
+      visible_module_relations: moduleRelations.length,
+    },
+    notes: [],
+    truncated: false,
+    truncation_reason: null,
+  };
+}
+
+const a1 = moduleRecord("a1", "apps/api/a.py", true);
+const a2 = moduleRecord("a2", "apps/api/b.py");
+const b1 = moduleRecord("b1", "apps/web/c.py");
+const baseOverview = overview(
+  [a1, a2, b1],
+  [
+    directory("group-api", "apps/api", [a1.module_id, a2.module_id]),
+    directory("group-web", "apps/web", [b1.module_id]),
+    {
+      ...directory("route-api", "/api", [a1.module_id]),
+      group_kind: "http_path",
+      entry_point_ids: ["entry-api"],
+    },
+  ],
+  [
+    relation("relation-internal", a1, a2, ["imports", "calls"], [
+      codeEdge("internal-import", a1.module_id, a2.module_id, "imports", a1.symbol.path),
+      codeEdge("internal-call", a1.module_id, a2.module_id, "calls", a1.symbol.path),
+    ]),
+    relation("relation-api-web-one", a1, b1, ["imports"], [
+      codeEdge("api-web-one", a1.module_id, b1.module_id, "imports", a1.symbol.path),
+    ]),
+    relation("relation-api-web-two", a2, b1, ["calls"], [
+      codeEdge("api-web-two", a2.module_id, b1.module_id, "calls", a2.symbol.path),
+    ]),
+  ],
+);
+
+test("folded directories aggregate unique module-pair relations and internal edges once", () => {
+  const model = buildArchitectureGraph(baseOverview);
+  assert.equal(model.directories.length, 2);
+  assert.equal(model.visibleModuleCount, 0);
+  assert.equal(model.directories[0].internalRelationCount, 1);
+  assert.equal(model.directories[0].internalEdgeCount, 2);
+  const external = model.relations.find((item) => item.source === "group-api" && item.target === "group-web");
+  assert.equal(external?.relationCount, 2);
+  assert.equal(external?.edgeCount, 2);
+  assert.deepEqual(external?.relationKinds, ["calls", "imports"]);
+  assert.equal(model.relations.every((item) => item.source !== item.target), true);
+});
+
+test("empty or relation-free overviews do not fabricate architecture nodes or edges", () => {
+  const empty = buildArchitectureGraph(overview([], [], []));
+  assert.deepEqual(empty.directories, []);
+  assert.deepEqual(empty.relations, []);
+  const relationFree = buildArchitectureGraph(overview([a1], [directory("group-api", "apps/api", [a1.module_id])], []));
+  assert.equal(relationFree.directories.length, 1);
+  assert.deepEqual(relationFree.relations, []);
+});
+
+test("expanded modules keep valid endpoints and the global 40-node ceiling", () => {
+  const expanded = buildArchitectureGraph(baseOverview, { expandedGroupIds: ["group-api"] });
+  assert.deepEqual(expanded.directories[0].visibleModules.map(({ module }) => module.module_id), ["a1", "a2"]);
+  assert.equal(expanded.relations.some((item) => item.source === "a1" && item.target === "a2"), true);
+  assert.equal(expanded.relations.every((item) => {
+    const ids = new Set([
+      ...expanded.directories.map((directory) => directory.group.group_id),
+      ...expanded.directories.flatMap((directory) => directory.visibleModules.map(({ module }) => module.module_id)),
+    ]);
+    return ids.has(item.source) && ids.has(item.target);
+  }), true);
+
+  const modules = Array.from({ length: ARCHITECTURE_MODULE_LIMIT + 5 }, (_, index) =>
+    moduleRecord(`module-${index}`, `src/mod${index}.py`),
+  );
+  const large = overview(modules, [directory("group-large", "src", modules.map((module) => module.module_id))], []);
+  const bounded = buildArchitectureGraph(large, { expandedGroupIds: ["group-large"] });
+  assert.equal(bounded.visibleModuleCount, ARCHITECTURE_MODULE_LIMIT);
+  assert.equal(bounded.directories[0].omittedByCanvasLimit, 5);
+});
+
+test("HTTP entry focus highlights its source module without changing static relation counts", () => {
+  const model = buildArchitectureGraph(baseOverview, {
+    expandedGroupIds: ["group-api"],
+    selectedHttpGroupId: "route-api",
+    relationKinds: ["imports"],
+  });
+  assert.equal(model.directories.find((item) => item.group.group_id === "group-api")?.highlighted, true);
+  assert.equal(model.directories.find((item) => item.group.group_id === "group-web")?.highlighted, false);
+  assert.equal(model.focusNodeIds.includes("group-api"), true);
+  assert.equal(model.focusNodeIds.includes("a1"), true);
+  assert.equal(model.focusNodeIds.includes("group-web"), false);
+  const mixed = model.relations.find((item) => item.source === "a1" && item.target === "a2");
+  assert.deepEqual(mixed?.relationKinds, ["calls", "imports"]);
+  assert.equal(mixed?.edgeCount, 2);
+  assert.equal(mixed?.highlighted, true);
+  assert.equal(model.relations.some((item) => item.source === "a2" && item.target === "group-web"), false);
+});

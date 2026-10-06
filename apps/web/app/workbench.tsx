@@ -2742,6 +2742,67 @@ export default function Workbench() {
     [loadSource],
   );
 
+  const openArchitectureSource = useCallback(
+    async ({ indexId, path, startLine, endLine }: { indexId: string; path: string; startLine: number; endLine: number }) => {
+      if (!selectedProjectId || indexResponse?.index.index_id !== indexId) {
+        return;
+      }
+      sourceController.current?.abort();
+      const controller = new AbortController();
+      sourceController.current = controller;
+      const requestId = ++sourceRequestId.current;
+      const symbol = {
+        symbol_id: `architecture-file:${indexId}:${path}:${startLine}:${endLine}`,
+        index_id: indexId,
+        path,
+        qualified_name: `${path}:L${startLine}–L${endLine}`,
+        kind: "file",
+        start_line: startLine,
+        end_line: endLine,
+      } satisfies SymbolRecord;
+      setLinkedSymbol(symbol);
+      setSelectedId(symbol.symbol_id);
+      setPanelMode("source");
+      setSourceGenerationId(null);
+      setSourceWindowStart(startLine);
+      setSourceStatus("loading");
+      setSourceResponse(null);
+      setSourceError(null);
+      try {
+        const response = await readProjectSource(
+          selectedProjectId,
+          indexId,
+          path,
+          startLine,
+          Math.min(endLine, startLine + 199),
+          controller.signal,
+        );
+        if (!isLatestRequest(requestId, sourceRequestId.current)) {
+          return;
+        }
+        if (
+          response.index_id !== indexId ||
+          response.evidence.index_id !== indexId ||
+          response.evidence.path !== path ||
+          response.evidence.start_line > startLine ||
+          response.evidence.end_line < startLine
+        ) {
+          throw new Error("源码响应与架构关系所属的固定索引或路径不一致。");
+        }
+        setSourceResponse(response);
+        setSourceStatus("success");
+      } catch (error) {
+        if (isAbortError(error) || !isLatestRequest(requestId, sourceRequestId.current)) {
+          return;
+        }
+        setSourceResponse(null);
+        setSourceStatus("error");
+        setSourceError(errorMessage(error));
+      }
+    },
+    [indexResponse?.index.index_id, selectedProjectId],
+  );
+
   const loadNeighborhood = useCallback(
     async (
       indexId: string,
@@ -3315,8 +3376,20 @@ export default function Workbench() {
         onNameChange: setProjectName,
         onRepositoryIdChange: setRepositoryId,
         onSelectProject: (projectId) => {
+          if (projectId === selectedProjectId) return;
           setProjectError(null);
+          sessionLink.current = null;
+          sessionLinkApplied.current = true;
+          evidenceLink.current = null;
+          evidenceLinkApplied.current = true;
+          setSelectedSessionId(null);
+          setViewMode("overview");
+          setPanelMode("none");
           setSelectedProjectId(projectId);
+          const url = new URL(window.location.href);
+          url.search = "";
+          url.searchParams.set("project_id", projectId);
+          window.history.replaceState(null, "", `${url.pathname}?${url.searchParams.toString()}${url.hash}`);
         },
         onCreate: createNewProject,
       }}
@@ -3453,6 +3526,7 @@ export default function Workbench() {
         onClearOverviewGroup: () => setSelectedOverviewGroupId(null),
         onOpenOverviewGraph: openOverviewEntryGraph,
         onOpenOverviewModule: openOverviewModule,
+        onOpenArchitectureSource: openArchitectureSource,
         onRetryOverview: () => {
           if (selectedProjectId && indexResponse) {
             void loadOverview(selectedProjectId, indexResponse.index.index_id);
@@ -3511,7 +3585,7 @@ export default function Workbench() {
           }
         },
         onExpandRelation: () => {
-          if (selectedSymbol) {
+          if (selectedSymbol && selectedSymbol.kind !== "file") {
             setViewMode("overview");
             setPanelMode("graph");
             void loadNeighborhood(selectedSymbol.index_id, selectedSymbol.symbol_id, false);

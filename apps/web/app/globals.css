@@ -157,6 +157,53 @@ code { font-family: var(--ct-mono); }
 .ct-result-rank { color: var(--ct-blue); font-family: var(--ct-mono); font-size: 10px; }
 
 .ct-knowledge-content { display: grid; max-width: 900px; gap: 25px; margin: 0 auto; }
+.ct-architecture-section { display: grid; gap: 11px; width: 100%; margin: 0 0 30px; }
+.ct-architecture-heading { display: flex; align-items: end; justify-content: space-between; gap: 18px; }
+.ct-architecture-heading h3 { margin: 4px 0 2px; font-size: clamp(20px, 2.3vw, 27px); letter-spacing: -.035em; }
+.ct-architecture-heading p:last-child { max-width: 780px; margin: 0; color: var(--ct-muted); font-size: 12px; }
+.ct-architecture-count { display: grid; flex: 0 0 auto; justify-items: end; gap: 1px; color: var(--ct-muted); font-size: 10px; }
+.ct-architecture-count strong { color: var(--ct-text); font-family: var(--ct-mono); font-size: 20px; font-weight: 500; }
+.ct-architecture-toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: 9px; padding: 10px 12px; border: 1px solid var(--ct-border); border-radius: 8px 8px 0 0; background: var(--ct-surface); }
+.ct-architecture-toolbar > label:first-child { display: grid; min-width: min(320px, 100%); gap: 3px; color: var(--ct-muted); font-size: 10px; }
+.ct-architecture-toolbar select { min-height: 34px; padding: 6px 9px; border: 1px solid var(--ct-border-strong); border-radius: 6px; background: var(--ct-surface); color: var(--ct-text); font-size: 11px; }
+.ct-architecture-kind { display: flex; min-height: 34px; align-items: center; gap: 6px; padding: 0 7px; border: 1px solid var(--ct-border); border-radius: 6px; color: var(--ct-muted); font-family: var(--ct-mono); font-size: 10px; }
+.ct-architecture-kind input { accent-color: var(--ct-blue); }
+.ct-architecture-toolbar .ct-link-button { min-height: 34px; padding: 0 6px; }
+.ct-architecture-filter-note { margin: -11px 0 0; padding: 0 12px 9px; border: 1px solid var(--ct-border); border-top: 0; background: var(--ct-surface); color: var(--ct-faint); font-size: 10px; }
+.ct-architecture-warnings { display: grid; gap: 3px; padding: 8px 11px; border-left: 3px solid var(--ct-warning); background: var(--ct-warning-soft); color: var(--ct-warning); font-size: 10px; line-height: 1.45; }
+.ct-architecture-canvas { position: relative; height: min(78dvh, 900px); min-height: 660px; overflow: hidden; border: 1px solid var(--ct-border-strong); border-radius: 9px; background: var(--ct-subtle); box-shadow: 0 8px 25px rgb(32 38 51 / 7%); }
+.ct-architecture-canvas .react-flow { position: absolute; inset: 0; }
+.ct-architecture-canvas .react-flow__controls { overflow: hidden; border: 1px solid var(--ct-border-strong) !important; border-radius: 7px !important; box-shadow: 0 2px 8px rgb(32 38 51 / 14%) !important; }
+.ct-architecture-canvas .react-flow__controls-button { width: 31px !important; height: 31px !important; border-bottom: 1px solid var(--ct-border) !important; background: var(--ct-surface) !important; fill: var(--ct-muted) !important; }
+.ct-architecture-canvas .react-flow__minimap { overflow: hidden; border: 1px solid var(--ct-border-strong); border-radius: 7px; background: var(--ct-surface); }
+.ct-architecture-canvas .react-flow__edge-text { fill: var(--ct-muted); font-family: var(--ct-mono); font-size: 10px; }
+.ct-architecture-canvas .react-flow__edge-textbg { fill: var(--ct-surface); }
+.ct-architecture-directory-node, .ct-architecture-module-node { padding: 0 !important; border: 0 !important; border-radius: 0 !important; background: transparent !important; box-shadow: none !important; }
+.ct-architecture-directory { position: relative; display: flex; height: 100%; flex-direction: column; overflow: visible; border: 1px solid var(--ct-border-strong); border-radius: 9px; background: rgb(255 255 255 / 94%); box-shadow: 0 3px 12px rgb(32 38 51 / 8%); transition: border-color .15s, opacity .15s, box-shadow .15s; }
+.ct-architecture-directory.is-selected { border-color: var(--ct-blue); box-shadow: 0 0 0 2px rgb(49 88 217 / 13%), 0 4px 15px rgb(32 38 51 / 9%); }
+.ct-architecture-directory.is-dimmed, .ct-architecture-module.is-dimmed { opacity: .28; }
+.ct-architecture-directory-heading { display: flex; min-width: 0; align-items: start; gap: 5px; padding: 10px 10px 7px; border-bottom: 1px solid var(--ct-border); }
+.ct-architecture-directory-title { display: grid; min-width: 0; flex: 1; gap: 3px; padding: 0; border: 0; background: transparent; color: var(--ct-text); text-align: left; }
+.ct-architecture-directory-title span { color: var(--ct-blue); font-family: var(--ct-mono); font-size: 8px; letter-spacing: .09em; }
+.ct-architecture-directory-title strong { overflow: hidden; font-family: var(--ct-mono); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.ct-architecture-expand { display: grid; width: 25px; height: 25px; flex: 0 0 auto; place-items: center; border: 1px solid var(--ct-border-strong); border-radius: 6px; background: var(--ct-surface); color: var(--ct-blue); font-size: 17px; line-height: 1; }
+.ct-architecture-expand:hover { border-color: var(--ct-blue); background: var(--ct-blue-soft); }
+.ct-architecture-directory-meta { display: flex; flex-wrap: wrap; gap: 3px 8px; padding: 5px 10px 7px; color: var(--ct-muted); font-family: var(--ct-mono); font-size: 8px; }
+.ct-architecture-module { position: relative; display: flex; width: 100%; height: 100%; flex-direction: column; justify-content: center; gap: 2px; overflow: hidden; padding: 7px 8px; border: 1px solid var(--ct-border-strong); border-radius: 7px; background: var(--ct-surface); color: var(--ct-text); text-align: left; box-shadow: 0 2px 6px rgb(32 38 51 / 8%); }
+.ct-architecture-module:hover { border-color: var(--ct-blue); background: var(--ct-blue-soft); }
+.ct-architecture-module strong, .ct-architecture-module small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ct-architecture-module strong { font-family: var(--ct-mono); font-size: 10px; }
+.ct-architecture-module small { color: var(--ct-muted); font-family: var(--ct-mono); font-size: 9px; }
+.ct-architecture-module > span { color: var(--ct-blue); font-size: 9px; }
+.ct-architecture-directory .react-flow__handle, .ct-architecture-module .react-flow__handle { width: 6px; height: 6px; border: 1px solid #fff; background: #71809a; }
+.ct-architecture-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 17px; color: var(--ct-muted); font-size: 10px; }
+.ct-architecture-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.ct-architecture-legend i { display: inline-block; width: 18px; height: 10px; border: 1px solid var(--ct-border-strong); border-radius: 3px; background: var(--ct-surface); }
+.ct-architecture-legend i.is-architecture-edge { width: 21px; height: 0; border: 0; border-top: 2px solid var(--ct-blue); border-radius: 0; background: transparent; }
+.ct-architecture-legend small { flex-basis: 100%; color: var(--ct-faint); }
+.ct-architecture-empty { display: grid; min-height: 340px; place-content: center; justify-items: center; gap: 7px; border: 1px dashed var(--ct-border-strong); border-radius: 8px; background: var(--ct-subtle); text-align: center; }
+.ct-architecture-empty strong { font-size: 14px; }
+.ct-architecture-empty span { color: var(--ct-muted); font-size: 11px; }
 .ct-summary-card { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, .9fr); gap: 22px; padding: 21px; border: 1px solid var(--ct-border-strong); border-radius: 9px; background: var(--ct-surface); }
 .ct-summary-copy h3, .ct-summary-copy p { margin: 0; }
 .ct-summary-copy h3 { margin-top: 5px; font-size: 20px; letter-spacing: -.03em; }
@@ -566,6 +613,13 @@ code { font-family: var(--ct-mono); }
   .ct-global-alert { margin-right: 16px; margin-left: 16px; }
   .ct-page { padding: 22px 16px 34px; }
   .ct-page-intro { display: grid; gap: 14px; margin-bottom: 18px; }
+  .ct-architecture-heading { align-items: start; }
+  .ct-architecture-count { display: none; }
+  .ct-architecture-canvas { height: 70dvh; min-height: 540px; }
+  .ct-architecture-toolbar { align-items: center; }
+  .ct-architecture-toolbar > label:first-child { flex: 1 1 100%; }
+  .ct-architecture-toolbar > .ct-button { flex: 1 1 auto; }
+  .ct-architecture-legend { align-items: start; flex-direction: column; }
   .ct-page-actions { justify-content: start; }
   .ct-index-strip { align-items: start; gap: 10px 13px; margin-bottom: 18px; }
   .ct-index-strip-primary { flex-basis: 100%; }

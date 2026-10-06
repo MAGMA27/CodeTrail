@@ -1,11 +1,15 @@
 import {
   Background,
   Controls,
+  Handle,
+  MarkerType,
   MiniMap,
   ReactFlow,
+  Position,
   useReactFlow,
   type Edge,
   type Node,
+  type NodeProps,
   type NodeTypes,
   type ReactFlowInstance,
 } from "@xyflow/react";
@@ -52,6 +56,7 @@ import type {
   UnresolvedReference,
 } from "../lib/api";
 import type { GraphState } from "../lib/graph";
+import { buildArchitectureGraph, type ArchitectureDirectory } from "../lib/architecture-graph";
 
 export type UiAsyncStatus = "idle" | "loading" | "success" | "empty" | "error";
 export type UiIndexStatus = "unindexed" | "creating" | "loading" | "ready" | "partial" | "error";
@@ -192,6 +197,7 @@ type KnowledgeUi = {
   onClearOverviewGroup: () => void;
   onOpenOverviewGraph: (entry: OverviewEntryPoint) => void;
   onOpenOverviewModule: (module: OverviewModule) => void;
+  onOpenArchitectureSource: (location: { indexId: string; path: string; startLine: number; endLine: number }) => void;
   onRetryOverview: Action;
   featureStatus: UiAsyncStatus;
   featureGeneration: FeatureGeneration | null;
@@ -904,24 +910,6 @@ function KnowledgeView({
   const overview = knowledge.overview;
   return (
     <div className="ct-page ct-knowledge-page">
-      <div className="ct-page-intro">
-        <div>
-          <p className="ct-overline">FIXED SNAPSHOT / {index.response ? index.response.index.revision : "NO INDEX"}</p>
-          <h2>从入口到功能</h2>
-          <p>先建立当前项目的静态事实，再从证据和受限关系中继续排查。图上的可达关系不等于已确认影响。</p>
-        </div>
-      </div>
-
-      {index.response ? (
-        <div className="ct-index-strip" aria-label="当前固定索引">
-          <div className="ct-index-strip-primary"><span className="ct-status-dot" aria-hidden="true" /><strong>{indexStatusLabel(index.status)}</strong></div>
-          <span><small>REVISION</small><code>{index.response.index.revision}</code></span>
-          <span><small>INDEX</small><code title={index.response.index.index_id}>{index.response.index.index_id}</code></span>
-          <span><small>SNAPSHOT</small><code title={index.response.index.snapshot_hash}>{shortHash(index.response.index.snapshot_hash)}</code></span>
-          <span><small>WORKTREE</small><code>{index.response.index.dirty ? "DIRTY" : "CLEAN"}</code></span>
-        </div>
-      ) : null}
-
       {!project.selectedProject ? (
         <EmptyState
           title="还没有选中的项目"
@@ -936,22 +924,256 @@ function KnowledgeView({
         />
       ) : (
         <>
-          <SearchBlock knowledge={knowledge} disabled={!index.response} />
           {knowledge.overviewStatus === "loading" ? <LoadingNote>正在从当前不可变快照生成概览…</LoadingNote> : null}
           {knowledge.overviewStatus === "error" ? (
             <div className="ct-error-block" role="alert"><div><strong>项目概览请求失败</strong><span>{knowledge.overviewError ?? "请重试或切换到其他索引。"}</span></div><button type="button" className="ct-button ct-button-secondary" onClick={() => void knowledge.onRetryOverview()}>重试</button></div>
           ) : overview ? (
-            <div className="ct-knowledge-content">
-              <OverviewSummary overview={overview} />
-              <FeatureSection knowledge={knowledge} />
-              <OverviewSections overview={overview} knowledge={knowledge} />
-            </div>
+            <>
+              <ArchitectureSection key={`${overview.project_id}:${overview.index.index_id}`} overview={overview} knowledge={knowledge} />
+              <div className="ct-index-strip" aria-label="当前固定索引">
+                <div className="ct-index-strip-primary"><span className="ct-status-dot" aria-hidden="true" /><strong>{indexStatusLabel(index.status)}</strong></div>
+                <span><small>REVISION</small><code>{index.response.index.revision}</code></span>
+                <span><small>INDEX</small><code title={index.response.index.index_id}>{index.response.index.index_id}</code></span>
+                <span><small>SNAPSHOT</small><code title={index.response.index.snapshot_hash}>{shortHash(index.response.index.snapshot_hash)}</code></span>
+                <span><small>WORKTREE</small><code>{index.response.index.dirty ? "DIRTY" : "CLEAN"}</code></span>
+              </div>
+              <div className="ct-knowledge-content">
+                <SearchBlock knowledge={knowledge} disabled={!index.response} />
+                <OverviewSummary overview={overview} />
+                <FeatureSection knowledge={knowledge} />
+                <OverviewSections overview={overview} knowledge={knowledge} />
+              </div>
+            </>
           ) : (
             <EmptyState title="等待项目概览" detail="概览绑定同一 project_id 与 index_id，不执行来源仓库代码。" />
           )}
         </>
       )}
     </div>
+  );
+}
+
+type ArchitectureDirectoryNodeData = {
+  directory: ArchitectureDirectory;
+  selected: boolean;
+  onSelect: (group: OverviewGroup) => void;
+  onToggle: (group: OverviewGroup) => void;
+};
+
+type ArchitectureModuleNodeData = {
+  module: OverviewModule;
+  highlighted: boolean;
+  onOpen: (module: OverviewModule) => void;
+};
+
+function ArchitectureDirectoryNode({ data }: NodeProps<Node<ArchitectureDirectoryNodeData, "architecture-directory">>) {
+  const { directory } = data;
+  return (
+    <div className={`ct-architecture-directory${data.selected ? " is-selected" : ""}${directory.highlighted ? " is-highlighted" : " is-dimmed"}`}>
+      <Handle type="target" position={Position.Left} />
+      <Handle type="source" position={Position.Right} />
+      <div className="ct-architecture-directory-heading">
+        <button type="button" className="ct-architecture-directory-title" onClick={() => data.onSelect(directory.group)} title={directory.group.group_key}>
+          <span>SOURCE DIRECTORY</span><strong>{directory.group.group_key}</strong>
+        </button>
+        <button type="button" className="ct-architecture-expand" onClick={() => data.onToggle(directory.group)} aria-label={`${directory.expanded ? "折叠" : "展开"} ${directory.group.group_key}`} aria-expanded={directory.expanded}>
+          {directory.expanded ? "−" : "+"}
+        </button>
+      </div>
+      <div className="ct-architecture-directory-meta">
+        <span>{directory.loadedModuleCount} modules</span>
+        {directory.internalRelationCount > 0 ? <span>{directory.internalRelationCount} 内部关系 · {directory.internalEdgeCount} 边</span> : null}
+        {directory.omittedIndexModuleCount > 0 ? <span>索引未返回 {directory.omittedIndexModuleCount}</span> : null}
+        {directory.omittedByCanvasLimit > 0 ? <span>画布限额省略 {directory.omittedByCanvasLimit}</span> : null}
+      </div>
+    </div>
+  );
+}
+
+function ArchitectureModuleNode({ data }: NodeProps<Node<ArchitectureModuleNodeData, "architecture-module">>) {
+  return (
+    <button type="button" className={`ct-architecture-module${data.highlighted ? " is-highlighted" : " is-dimmed"}`} onClick={() => data.onOpen(data.module)} title={`${data.module.symbol.path}:L${data.module.symbol.start_line} · 打开模块关系图`}>
+      <Handle type="target" position={Position.Left} />
+      <Handle type="source" position={Position.Right} />
+      <strong>{data.module.symbol.qualified_name}</strong>
+      <small>{data.module.symbol.path}:L{data.module.symbol.start_line}</small>
+      <span>{data.module.entry_reachable ? "入口可达" : "静态模块"} · 打开关系图 ↗</span>
+    </button>
+  );
+}
+
+const architectureNodeTypes: NodeTypes = {
+  "architecture-directory": ArchitectureDirectoryNode,
+  "architecture-module": ArchitectureModuleNode,
+};
+
+function ArchitectureSection({ overview, knowledge }: { overview: ProjectOverview; knowledge: KnowledgeUi }) {
+  const [expandedGroupIds, setExpandedGroupIds] = useState<string[]>([]);
+  const [selectedHttpGroupId, setSelectedHttpGroupId] = useState<string | null>(null);
+  const [relationKinds, setRelationKinds] = useState<Array<"imports" | "calls">>(["imports", "calls"]);
+  const [flow, setFlow] = useState<ReactFlowInstance<Node, Edge> | null>(null);
+  const httpGroups = overview.groups.filter((group) => group.group_kind === "http_path" && group.index_id === overview.index.index_id);
+  const model = useMemo(() => buildArchitectureGraph(overview, {
+    expandedGroupIds,
+    selectedHttpGroupId,
+    selectedGroupId: knowledge.selectedOverviewGroupId,
+    relationKinds,
+  }), [expandedGroupIds, knowledge.selectedOverviewGroupId, overview, relationKinds, selectedHttpGroupId]);
+  const focusedDirectoryNodeIds = useMemo(() => {
+    const focused = new Set(model.focusNodeIds);
+    return model.directories.filter((directory) => focused.has(directory.group.group_id)).map((directory) => directory.group.group_id);
+  }, [model.directories, model.focusNodeIds]);
+  useEffect(() => {
+    if (!flow || model.directories.length === 0) return;
+    const timer = window.setTimeout(() => {
+      const nodeIds = focusedDirectoryNodeIds.length > 0
+        ? focusedDirectoryNodeIds
+        : model.directories.map((directory) => directory.group.group_id);
+      void flow.fitView({ nodes: nodeIds.map((id) => ({ id })), padding: focusedDirectoryNodeIds.length > 0 ? 0.3 : 0.16, duration: 260, minZoom: 0.28, maxZoom: 1.15 });
+    }, 100);
+    return () => window.clearTimeout(timer);
+  }, [flow, focusedDirectoryNodeIds, model.directories]);
+  const reactFlowModel = useMemo(() => {
+    const nodes: Node[] = model.directories.map((directory) => ({
+      id: directory.group.group_id,
+      type: "architecture-directory",
+      position: directory.position,
+      data: {
+        directory,
+        selected: knowledge.selectedOverviewGroupId === directory.group.group_id,
+        onSelect: (group: OverviewGroup) => {
+          setSelectedHttpGroupId(null);
+          knowledge.onSelectOverviewGroup(group);
+        },
+        onToggle: (group: OverviewGroup) => {
+          setSelectedHttpGroupId(null);
+          knowledge.onSelectOverviewGroup(group);
+          setExpandedGroupIds((current) => current.includes(group.group_id)
+            ? current.filter((item) => item !== group.group_id)
+            : [...current, group.group_id]);
+        },
+      },
+      style: { width: directory.width, height: directory.height },
+      className: "ct-architecture-directory-node",
+      zIndex: 0,
+    }));
+    for (const directory of model.directories) {
+      for (const visible of directory.visibleModules) {
+        nodes.push({
+          id: visible.module.module_id,
+          type: "architecture-module",
+          parentId: directory.group.group_id,
+          extent: "parent",
+          position: visible.position,
+          data: {
+            module: visible.module,
+            highlighted: visible.highlighted,
+            onOpen: knowledge.onOpenOverviewModule,
+          },
+          style: { width: 156, height: 68 },
+          className: "ct-architecture-module-node",
+          zIndex: 2,
+        });
+      }
+    }
+    const edges: Edge[] = model.relations.map((relation) => ({
+      id: relation.id,
+      source: relation.source,
+      target: relation.target,
+      type: "smoothstep",
+      label: `${relation.relationKinds.join(" + ")} · ${relation.relationCount} 对 / ${relation.edgeCount} 边`,
+      markerEnd: { type: MarkerType.ArrowClosed, color: relation.highlighted ? "#3158d9" : "#b2bac7" },
+      style: { stroke: relation.highlighted ? "#3158d9" : "#aeb7c5", strokeWidth: relation.highlighted ? 1.8 : 1.1, opacity: relation.highlighted ? 0.78 : 0.18 },
+      labelStyle: { fill: relation.highlighted ? "#43516a" : "#8b93a0", fontSize: 10 },
+      labelBgStyle: { fill: "#fff", fillOpacity: relation.highlighted ? 0.92 : 0.55 },
+      interactionWidth: 18,
+      data: { relation },
+    }));
+    return { nodes, edges };
+  }, [knowledge, model, overview.index.index_id]);
+  const coverageWarnings = [
+    overview.truncated ? `概览已截断：${overview.truncation_reason ?? "服务端预算"}` : null,
+    overview.coverage.visible_groups < overview.coverage.total_groups ? `概览仅返回 ${overview.coverage.visible_groups}/${overview.coverage.total_groups} 组（含 HTTP 路由组）` : null,
+    overview.coverage.visible_modules < overview.coverage.total_modules ? `概览仅返回 ${overview.coverage.visible_modules}/${overview.coverage.total_modules} 个模块` : null,
+    overview.coverage.visible_module_relations < overview.coverage.total_module_relations ? `概览仅返回 ${overview.coverage.visible_module_relations}/${overview.coverage.total_module_relations} 条模块关系` : null,
+    overview.unresolved.length > 0 ? `${overview.unresolved.length} 条 unresolved 保留为未知，不绘制成确定依赖` : null,
+    model.omittedRelationCount > 0 ? `${model.omittedRelationCount} 条关系（${model.omittedRelationEdgeCount} 边）因端点不在可见源码目录中未绘制` : null,
+    model.unmatchedHttpModuleCount > 0 ? `所选 HTTP 路由有 ${model.unmatchedHttpModuleCount} 个模块未映射到可见源码目录` : null,
+  ].filter((item): item is string => item !== null);
+  const selectHttpGroup = (groupId: string) => {
+    const group = httpGroups.find((item) => item.group_id === groupId) ?? null;
+    setSelectedHttpGroupId(group?.group_id ?? null);
+    if (group) {
+      knowledge.onSelectOverviewGroup(group);
+      const moduleIds = new Set(group.module_ids);
+      const directoryIds = model.directories
+        .filter((directory) => directory.group.module_ids.some((moduleId) => moduleIds.has(moduleId)))
+        .map((directory) => directory.group.group_id);
+      setExpandedGroupIds((current) => [...new Set([...current, ...directoryIds])]);
+    } else {
+      knowledge.onClearOverviewGroup();
+    }
+  };
+  const toggleRelationKind = (kind: "imports" | "calls") => {
+    setRelationKinds((current) => current.includes(kind)
+      ? current.length === 1 ? current : current.filter((item) => item !== kind)
+      : [...current, kind]);
+  };
+  const focusGraph = () => {
+    if (!flow || reactFlowModel.nodes.length === 0) return;
+    const nodeIds = focusedDirectoryNodeIds.length > 0 ? focusedDirectoryNodeIds : model.directories.map((directory) => directory.group.group_id);
+    void flow.fitView({ nodes: nodeIds.map((id) => ({ id })), padding: 0.18, duration: 240 });
+  };
+
+  return (
+    <section className="ct-architecture-section" aria-label="项目架构画布">
+      <div className="ct-architecture-heading">
+        <div><p className="ct-overline">ARCHITECTURE / FIXED INDEX</p><h3>项目架构</h3><p>先看源码目录间依赖；展开目录查看模块，点模块进入关系图，点边读取同一快照的代表源码证据。</p></div>
+        <div className="ct-architecture-count"><strong>{model.directories.length}</strong><span>源码目录 · {overview.coverage.visible_modules}/{overview.coverage.total_modules} 模块可见</span></div>
+      </div>
+      <div className="ct-architecture-toolbar">
+        <label>HTTP 入口<select aria-label="筛选 HTTP 入口" value={selectedHttpGroupId ?? ""} onChange={(event) => selectHttpGroup(event.target.value)}><option value="">全部源码依赖</option>{httpGroups.map((group) => <option value={group.group_id} key={group.group_id}>{group.label} · {group.module_ids.length} modules</option>)}</select></label>
+        <label className="ct-architecture-kind"><input type="checkbox" checked={relationKinds.includes("imports")} onChange={() => toggleRelationKind("imports")} /><span>imports</span></label>
+        <label className="ct-architecture-kind"><input type="checkbox" checked={relationKinds.includes("calls")} onChange={() => toggleRelationKind("calls")} /><span>calls</span></label>
+        <button type="button" className="ct-button ct-button-secondary" onClick={focusGraph} disabled={reactFlowModel.nodes.length === 0}>聚焦画布</button>
+        <button type="button" className="ct-link-button" onClick={() => {
+          setExpandedGroupIds([]);
+          setSelectedHttpGroupId(null);
+          setRelationKinds(["imports", "calls"]);
+          knowledge.onClearOverviewGroup();
+        }}>重置画布</button>
+      </div>
+      <p className="ct-architecture-filter-note">类型筛选只选择包含该类型的模块关系；同一模块对若同时有 imports/calls，边数仍按完整聚合值显示。</p>
+      {coverageWarnings.length > 0 ? <div className="ct-architecture-warnings" role="status">{coverageWarnings.map((warning) => <span key={warning}>{warning}</span>)}</div> : null}
+      {model.directories.length === 0 ? (
+        <div className="ct-architecture-empty"><strong>当前索引没有可绘制的源码目录</strong><span>概览可能未返回源码分组；不以 HTTP 路由组替代源码架构。</span></div>
+      ) : (
+        <div className="ct-architecture-canvas">
+          <ReactFlow<Node, Edge>
+            nodes={reactFlowModel.nodes}
+            edges={reactFlowModel.edges}
+            nodeTypes={architectureNodeTypes}
+            onInit={setFlow}
+            onEdgeClick={(_event, edge) => {
+              const relation = model.relations.find((item) => item.id === edge.id);
+              if (relation?.representative) knowledge.onOpenArchitectureSource({ indexId: overview.index.index_id, ...relation.representative });
+            }}
+            nodesConnectable={false}
+            nodesDraggable={false}
+            elementsSelectable
+            minZoom={0.18}
+            maxZoom={1.8}
+            fitView
+            fitViewOptions={{ padding: 0.16, minZoom: 0.18, maxZoom: 0.9 }}
+          >
+            <Background color="#d7dee8" gap={28} size={1} />
+            <Controls showInteractive={false} position="bottom-left" />
+            <MiniMap pannable zoomable nodeColor={(node) => node.type === "architecture-directory" ? "#aab5c4" : "#3158d9"} maskColor="rgba(247, 248, 250, 0.78)" position="bottom-right" />
+          </ReactFlow>
+        </div>
+      )}
+      <div className="ct-architecture-legend"><span><i className="is-directory" />源码目录（可展开）</span><span><i className="is-architecture-edge" />静态 imports / calls</span><span>内部折叠关系显示为目录摘要 · 边上的“对”是模块对数量</span><small>当前是 Python 索引视图，不代表 TypeScript、部署拓扑或全部运行时架构。</small></div>
+    </section>
   );
 }
 
@@ -1080,13 +1302,14 @@ function OverviewModuleRow({ module, knowledge }: { module: OverviewModule; know
   );
 }
 
-function OverviewModuleRelationList({ relations }: { relations: OverviewModuleRelation[] }) {
+function OverviewModuleRelationList({ relations, onOpenSource }: { relations: OverviewModuleRelation[]; onOpenSource: (location: { path: string; startLine: number; endLine: number }) => void }) {
   if (relations.length === 0) {
     return <p className="ct-muted">当前可见结构没有可确认的跨模块 imports/calls 边。</p>;
   }
   return (
     <div className="ct-structure-relation-list">
       {relations.map((relation) => {
+        const representative = relation.edges.find((edge) => edge.index_id === relation.index_id) ?? null;
         const locations = relation.edges
           .slice(0, 3)
           .map((edge) => `${edge.source_location.path}:L${edge.source_location.start_line}`)
@@ -1102,6 +1325,7 @@ function OverviewModuleRelationList({ relations }: { relations: OverviewModuleRe
             <div className="ct-structure-relation-meta">
               <span className="ct-kind-chip">{relation.relation_kinds.join(" + ")}</span>
               <small>{relation.edge_count} 条静态边 · {locations}{extraLocations > 0 ? ` · 代表位置 +${extraLocations}` : ""}</small>
+              {representative ? <button type="button" className="ct-link-button" onClick={() => onOpenSource({ path: representative.source_location.path, startLine: representative.source_location.start_line, endLine: representative.source_location.end_line })}>打开代表源码</button> : null}
             </div>
           </article>
         );
@@ -1123,34 +1347,13 @@ function OverviewSections({ overview, knowledge }: { overview: ProjectOverview; 
   const relatedRelations = selectedGroup
     ? overview.module_relations.filter((relation) => selectedGroup.module_ids.includes(relation.source_module_id) || selectedGroup.module_ids.includes(relation.target_module_id))
     : overview.module_relations;
-  const primaryModules = overview.modules.filter((module) => module.entry_reachable).slice(0, 12);
-  const modulePreview = primaryModules.length > 0 ? primaryModules : overview.modules.slice(0, 12);
-
   return (
     <>
-      <section className="ct-section ct-structure-section" aria-label="项目结构总览">
+      <section className="ct-section ct-structure-section" aria-label="所选结构详情">
         <div className="ct-section-heading">
-          <div><p className="ct-overline">STRUCTURE / STATIC FACTS</p><h3>项目结构</h3></div>
-          <span className="ct-count-label">{overview.coverage.visible_groups}/{overview.coverage.total_groups} 组</span>
+          <div><p className="ct-overline">STRUCTURE DETAILS / FIXED INDEX</p><h3>结构详情</h3></div>
+          <span className="ct-count-label">{overview.coverage.visible_groups}/{overview.coverage.total_groups} 组可见</span>
         </div>
-        <p className="ct-section-lede">路径组和源码目录组只表示固定索引中的组织结构；它们不是模型确认的业务功能。选择一组后查看真实入口、模块和关系来源。</p>
-        {overview.groups.length > 0 ? (
-          <div className="ct-structure-group-list">
-            {overview.groups.map((group) => (
-              <button
-                type="button"
-                className={`ct-structure-group${selectedGroup?.group_id === group.group_id ? " is-selected" : ""}`}
-                key={group.group_id}
-                onClick={() => knowledge.onSelectOverviewGroup(group)}
-                aria-pressed={selectedGroup?.group_id === group.group_id}
-              >
-                <span className="ct-structure-group-kind">{group.group_kind === "http_path" ? "HTTP PATH" : "SOURCE DIRECTORY"}</span>
-                <strong>{group.label}</strong>
-                <small>{group.group_key} · {group.entry_point_ids.length} 个入口 · {group.module_ids.length} 个模块</small>
-              </button>
-            ))}
-          </div>
-        ) : <p className="ct-muted">当前索引没有可展示的结构分组。</p>}
         {selectedGroup ? (
           <div className="ct-structure-detail">
             <div className="ct-structure-detail-heading">
@@ -1164,22 +1367,11 @@ function OverviewSections({ overview, knowledge }: { overview: ProjectOverview; 
             )}
             <div className="ct-structure-related">
               <div className="ct-structure-subheading"><strong>相关模块依赖</strong><span>{relatedRelations.length} 条可见关系</span></div>
-              <OverviewModuleRelationList relations={relatedRelations.slice(0, 12)} />
+              <OverviewModuleRelationList relations={relatedRelations.slice(0, 12)} onOpenSource={(location) => knowledge.onOpenArchitectureSource({ indexId: overview.index.index_id, ...location })} />
               {relatedRelations.length > 12 ? <p className="ct-muted">仅显示 12 条关系；可见关系仍受模块关系预算限制。</p> : null}
             </div>
           </div>
         ) : null}
-        <div className="ct-structure-related">
-          <div className="ct-structure-subheading"><strong>静态模块依赖</strong><span>{overview.coverage.visible_module_relations}/{overview.coverage.total_module_relations}</span></div>
-          <OverviewModuleRelationList relations={overview.module_relations.slice(0, 10)} />
-          {overview.module_relations.length > 10 ? <p className="ct-muted">默认显示前 10 条；选择结构组可查看该组相关关系。</p> : null}
-        </div>
-      </section>
-      <section className="ct-section" aria-label="主要源码模块">
-        <div className="ct-section-heading"><div><p className="ct-overline">SOURCE MODULES</p><h3>主要源码模块</h3></div><span className="ct-count-label">{overview.modules.length}/{overview.coverage.total_modules}</span></div>
-        <p className="ct-section-lede">模块按固定源码路径归属，不代表业务功能；点击模块进入现有 React Flow 局部关系图。</p>
-        <div className="ct-module-list">{modulePreview.map((module) => <OverviewModuleRow module={module} knowledge={knowledge} key={module.module_id} />)}</div>
-        {overview.modules.length > modulePreview.length ? <p className="ct-muted">其余模块可从源码目录组下钻；当前概览显示主要入口可达模块。</p> : null}
       </section>
       <section className="ct-section ct-boundaries" aria-label="边界与限制">
         <div className="ct-section-heading"><div><p className="ct-overline">BOUNDARIES</p><h3>边界与限制</h3></div><span className="ct-count-label">{overview.notes.length}</span></div>
@@ -1379,7 +1571,7 @@ function SessionView({ session, onBack }: { session: SessionUi; onBack: () => vo
 function EvidencePanel({ evidence }: { evidence: EvidenceUi }) {
   const selected = evidence.selectedSymbol;
   const sourceResponse = evidence.sourceResponse;
-  const canExpandRelation = selected !== null && !selected.symbol_id.startsWith("evidence-");
+  const canExpandRelation = selected !== null && selected.kind !== "file" && !selected.symbol_id.startsWith("evidence-");
   return (
     <aside className="ct-side-panel ct-evidence-panel" aria-label="源码证据面板">
       <div className="ct-side-panel-header"><div><p className="ct-overline">EVIDENCE</p><h2>源码证据</h2></div><button type="button" className="ct-close-button" onClick={evidence.onClose}>关闭</button></div>

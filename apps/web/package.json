@@ -8,7 +8,7 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test": "node --test lib/graph.test.ts lib/api.test.ts lib/session-draft.test.ts lib/run-event-stream.test.ts"
+    "test": "node --test lib/graph.test.ts lib/architecture-graph.test.ts lib/api.test.ts lib/session-draft.test.ts lib/run-event-stream.test.ts"
   },
   "dependencies": {
     "@xyflow/react": "12.11.6",

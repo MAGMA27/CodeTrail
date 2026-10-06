@@ -14,6 +14,7 @@
 - [lib/api.ts](lib/api.ts)：HTTP 请求和 Project/Index/Session/Run/Report/Impact 响应运行时校验。
 - [lib/run-event-stream.ts](lib/run-event-stream.ts)：注入式 EventSource/计时器订阅状态机，负责 SSE 校验、续接、终态和有界回退。
 - [lib/graph.ts](lib/graph.ts)：局部静态图合并、分组和 unresolved 选择逻辑。
+- [lib/architecture-graph.ts](lib/architecture-graph.ts)：固定 `ProjectOverview` 到项目架构画布的有界确定性投影；测试见同目录 `architecture-graph.test.ts`。
 - [app/globals.css](app/globals.css)：工作台全局样式。
 - [app/prototype/page.tsx](app/prototype/page.tsx)：只使用演示数据的 `/prototype` 评审原型，不调用 API。
 
