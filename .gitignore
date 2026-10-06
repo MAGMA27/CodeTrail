@@ -29,3 +29,4 @@ evals/results/p4-e2a-fix-v1/raw-state.json
 
 # Local logs
 *.log
+.ruff_cache
