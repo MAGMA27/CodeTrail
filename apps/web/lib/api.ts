@@ -609,7 +609,7 @@ export type OverviewModule = {
 export type OverviewGroup = {
   group_id: string;
   index_id: string;
-  group_kind: "http_path" | "source_directory";
+  group_kind: "http_path" | "source_directory" | "responsibility";
   group_key: string;
   label: string;
   module_ids: string[];
@@ -683,6 +683,8 @@ export type ProjectOverview = {
   index: IndexSnapshot;
   rules_version: string;
   entry_status: "identified" | "not_identified" | "partial";
+  responsibility_status: "not_configured" | "ready" | "partial" | "invalid";
+  responsibility_evidence: Evidence | null;
   entries: OverviewEntryPoint[];
   groups: OverviewGroup[];
   modules: OverviewModule[];
@@ -1903,13 +1905,14 @@ function isOverviewGroup(value: unknown): value is OverviewGroup {
     isRecord(value) &&
     isString(value.group_id) &&
     isString(value.index_id) &&
-    ["http_path", "source_directory"].includes(String(value.group_kind)) &&
+    ["http_path", "source_directory", "responsibility"].includes(String(value.group_kind)) &&
     isString(value.group_key) &&
     isString(value.label) &&
     isStringArray(value.module_ids) &&
     isStringArray(value.entry_point_ids) &&
     (value.group_kind !== "http_path" || (value.group_key.startsWith("/") && value.entry_point_ids.length > 0)) &&
-    (value.group_kind !== "source_directory" || value.module_ids.length > 0)
+    (value.group_kind !== "source_directory" || value.module_ids.length > 0) &&
+    (value.group_kind !== "responsibility" || value.entry_point_ids.length === 0)
   );
 }
 
@@ -2022,6 +2025,16 @@ function isOverviewHttpAssociation(value: unknown, indexId: string): value is Ov
 }
 
 export function isProjectOverviewResponse(value: unknown): value is ProjectOverview {
+  const validGroups = isRecord(value) && Array.isArray(value.groups) && value.groups.every(isOverviewGroup);
+  const hasResponsibilityGroups = isRecord(value) && Array.isArray(value.groups) &&
+    value.groups.some((group) => isRecord(group) && group.group_kind === "responsibility");
+  const responsibilityStatus = isRecord(value) ? value.responsibility_status : null;
+  const responsibilityEvidence = isRecord(value) ? value.responsibility_evidence : undefined;
+  const responsibilityGroupsMatchStatus =
+    (responsibilityStatus === "not_configured" && !hasResponsibilityGroups && responsibilityEvidence === null) ||
+    (responsibilityStatus === "invalid" && !hasResponsibilityGroups) ||
+    ((responsibilityStatus === "ready" || responsibilityStatus === "partial") && hasResponsibilityGroups);
+
   return (
     isRecord(value) &&
     value.schema_version === SCHEMA_VERSION &&
@@ -2029,10 +2042,15 @@ export function isProjectOverviewResponse(value: unknown): value is ProjectOverv
     isIndexSnapshot(value.index) &&
     isString(value.rules_version) &&
     ["identified", "not_identified", "partial"].includes(String(value.entry_status)) &&
+    responsibilityGroupsMatchStatus &&
+    (value.responsibility_evidence === null || (
+      isEvidence(value.responsibility_evidence) &&
+      value.responsibility_evidence.index_id === value.index.index_id &&
+      value.responsibility_evidence.path === "codetrail-subsystems.json"
+    )) &&
     Array.isArray(value.entries) &&
     value.entries.every(isOverviewEntryPoint) &&
-    Array.isArray(value.groups) &&
-    value.groups.every(isOverviewGroup) &&
+    validGroups &&
     Array.isArray(value.modules) &&
     value.modules.every(isOverviewModule) &&
     Array.isArray(value.module_relations) &&

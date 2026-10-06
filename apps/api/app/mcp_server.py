@@ -1510,8 +1510,9 @@ def _mcp_github_import_response(result: GitHubImportResponse) -> McpImportRespon
 def _mcp_overview_response(result: ProjectOverview, base_url: str) -> McpOverviewResponse:
     references: list[EvidenceReference] = []
     seen_evidence_ids: set[str] = set()
-    for entry in result.entries:
-        evidence = entry.evidence
+    evidence_items = [entry.evidence for entry in result.entries]
+    evidence_items.append(result.responsibility_evidence)
+    for evidence in evidence_items:
         if evidence is None or evidence.evidence_id in seen_evidence_ids:
             continue
         seen_evidence_ids.add(evidence.evidence_id)

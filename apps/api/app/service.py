@@ -119,6 +119,7 @@ from .indexing import (
     current_source_rules_version,
     extract_definitions,
     index_configuration_hash,
+    is_source_code_path,
     scan_source_manifest,
 )
 from .github import GitHubArchive, GitHubClient, GitHubError, GitHubRepository, GitHubResolution, parse_github_repository_url
@@ -774,7 +775,7 @@ class IndexService:
                     rules_version=self.rules_version,
                     configuration_hash=build_configuration_hash,
                 )
-                if not snapshot.files:
+                if not any(is_source_code_path(source_file.path) for source_file in snapshot.files):
                     raise ServiceError(
                         "invalid_input",
                         400,
@@ -855,7 +856,9 @@ class IndexService:
                     try:
                         on_build_stats(
                             IndexBuildStats(
-                                source_file_count=len(snapshot.files),
+                                source_file_count=sum(
+                                    1 for source_file in snapshot.files if is_source_code_path(source_file.path)
+                                ),
                                 definition_cache_hits=definitions.cache_hits,
                                 definition_cache_misses=definitions.cache_misses,
                                 definition_ast_parse_count=definitions.ast_parse_count,
@@ -992,6 +995,8 @@ class IndexService:
         for issue in scan.issues:
             if issue.kind == "read_error":
                 add_reason("source_read_error")
+            elif issue.kind == "manifest_invalid":
+                add_reason("manifest_invalid")
             elif issue.kind in {"decode_error", "file_too_large", "symlink", "outside_root"}:
                 add_reason(issue.kind)  # type: ignore[arg-type]
         if scan.unstable_paths:

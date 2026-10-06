@@ -25,6 +25,14 @@ from .contracts import (
     Symbol,
     UnresolvedReference,
 )
+from .indexing import (
+    SUBSYSTEM_MANIFEST_PATH,
+    SnapshotFile,
+    SubsystemManifestError,
+    SubsystemOwner,
+    SubsystemSpec,
+    parse_subsystem_manifest,
+)
 from .relations import RelationIndex, relation_coverage_limitations
 
 
@@ -370,7 +378,45 @@ def build_project_overview(
         )
         for module in visible_modules
     ]
-    groups, total_groups = _build_overview_groups(
+    responsibility_status: str = "not_configured"
+    responsibility_specs: tuple[SubsystemSpec, ...] = ()
+    responsibility_evidence: Evidence | None = None
+    responsibility_error: str | None = None
+    manifest_file = next(
+        (source_file for source_file in relation.snapshot.files if source_file.path == SUBSYSTEM_MANIFEST_PATH),
+        None,
+    )
+    manifest_issue = next(
+        (issue for issue in relation.snapshot.issues if issue.kind == "manifest_invalid"),
+        None,
+    )
+    if manifest_issue is not None:
+        responsibility_status = "invalid"
+        responsibility_error = manifest_issue.message
+    elif manifest_file is not None:
+        try:
+            responsibility_specs = parse_subsystem_manifest(manifest_file.text)
+            responsibility_status = "ready"
+        except SubsystemManifestError as exc:
+            responsibility_status = "invalid"
+            responsibility_error = f"manifest invalid: {exc.code}"
+    if manifest_file is not None:
+        responsibility_evidence = _read_manifest_evidence(
+            index_id=index.index_id,
+            source_file=manifest_file,
+            read_evidence=read_evidence,
+        )
+    if responsibility_status == "invalid":
+        notes.append(
+            f"职责 manifest 无效（{SUBSYSTEM_MANIFEST_PATH}）：{responsibility_error or 'manifest invalid'}；"
+            "本次完整回退到源码目录分组。"
+        )
+        if manifest_file is not None and responsibility_evidence is None:
+            notes.append("manifest 来源文件已固定在快照中，但其 bounded excerpt 超出证据上限，不能生成可打开的证据片段。")
+    elif responsibility_status == "ready" and responsibility_evidence is None:
+        notes.append("职责 manifest 已固定在快照中，但其 bounded excerpt 超出证据上限，不能生成可打开的证据片段。")
+
+    groups, total_groups, uncovered_module_count, unmatched_owner_count = _build_overview_groups(
         index_id=index.index_id,
         entries=entries,
         modules=modules,
@@ -378,7 +424,15 @@ def build_project_overview(
         reachable_module_ids=reachable_module_ids,
         module_by_path=module_by_path,
         max_groups=max_groups,
+        responsibility_specs=responsibility_specs,
     )
+    if responsibility_specs:
+        if uncovered_module_count or unmatched_owner_count:
+            responsibility_status = "partial"
+            notes.append(
+                f"职责覆盖不完整：{uncovered_module_count} 个未归属模块保留在源码目录 fallback，"
+                f"{unmatched_owner_count} 个 owner 路径未命中已索引模块。"
+            )
     if total_groups > len(groups):
         reasons.append("max_groups reached")
 
@@ -437,6 +491,8 @@ def build_project_overview(
         index=index,
         rules_version=RULES_VERSION,
         entry_status=entry_status,  # type: ignore[arg-type]
+        responsibility_status=responsibility_status,  # type: ignore[arg-type]
+        responsibility_evidence=responsibility_evidence,
         entries=entries,
         groups=groups,
         modules=module_models,
@@ -703,7 +759,8 @@ def _build_overview_groups(
     reachable_module_ids: set[str],
     module_by_path: dict[str, Symbol],
     max_groups: int,
-) -> tuple[list[OverviewGroup], int]:
+    responsibility_specs: tuple[SubsystemSpec, ...] = (),
+) -> tuple[list[OverviewGroup], int, int, int]:
     http_entry_ids: dict[tuple[str, str], set[str]] = defaultdict(set)
     http_module_ids: dict[tuple[str, str], set[str]] = defaultdict(set)
     http_module_labels: dict[tuple[str, str], str] = {}
@@ -739,12 +796,38 @@ def _build_overview_groups(
                 label=f"HTTP {group_key} · {module_label}",
                 module_ids=module_ids,
                 entry_point_ids=tuple(sorted(entry_ids)),
-                sort_key=(0, group_key, module_label, module_key),
+                sort_key=(1 if responsibility_specs else 0, group_key, module_label, module_key),
+            )
+        )
+
+    responsibility_module_ids: dict[str, list[str]] = defaultdict(list)
+    module_responsibility: dict[str, str] = {}
+    matched_owner_paths: set[str] = set()
+    for spec in responsibility_specs:
+        for module in modules:
+            matching_owner = next((owner for owner in spec.owners if _owner_matches_module(owner, module.path)), None)
+            if matching_owner is None:
+                continue
+            module_responsibility[module.symbol_id] = spec.subsystem_id
+            responsibility_module_ids[spec.subsystem_id].append(module.symbol_id)
+            matched_owner_paths.add(matching_owner.path)
+    for spec in responsibility_specs:
+        module_ids = tuple(sorted(responsibility_module_ids.get(spec.subsystem_id, [])))
+        specs.append(
+            _OverviewGroupSpec(
+                group_kind="responsibility",
+                group_key=spec.subsystem_id,
+                label=spec.label,
+                module_ids=module_ids,
+                entry_point_ids=(),
+                sort_key=(0, spec.subsystem_id),
             )
         )
 
     source_modules: dict[str, list[Symbol]] = defaultdict(list)
     for module in modules:
+        if module.symbol_id in module_responsibility:
+            continue
         source_modules[_source_directory_key(module.path)].append(module)
     for directory, directory_modules in source_modules.items():
         directory_modules.sort(
@@ -773,7 +856,7 @@ def _build_overview_groups(
                 module_ids=module_ids,
                 entry_point_ids=entry_ids,
                 sort_key=(
-                    1,
+                    2 if responsibility_specs else 1,
                     not any(module.symbol_id in reachable_module_ids for module in directory_modules),
                     directory,
                 ),
@@ -804,7 +887,41 @@ def _build_overview_groups(
                 entry_point_ids=list(spec.entry_point_ids),
             )
         )
-    return groups, len(specs)
+    unmatched_owners = sum(
+        1
+        for subsystem in responsibility_specs
+        for owner in subsystem.owners
+        if owner.path not in matched_owner_paths
+    )
+    uncovered_modules = sum(1 for module in modules if module.symbol_id not in module_responsibility)
+    return groups, len(specs), uncovered_modules, unmatched_owners
+
+
+def _owner_matches_module(owner: SubsystemOwner, module_path: str) -> bool:
+    return module_path.startswith(owner.path) if owner.directory_prefix else module_path == owner.path
+
+
+def _read_manifest_evidence(
+    *,
+    index_id: str,
+    source_file: SnapshotFile,
+    read_evidence: EvidenceReader,
+) -> Evidence | None:
+    """Return a bounded prefix excerpt while preserving the full captured file hash."""
+
+    lines = source_file.text.splitlines()
+    selected_lines = 0
+    excerpt_bytes = 0
+    for line in lines[:_MAX_EVIDENCE_LINES]:
+        line_bytes = len(line.encode("utf-8"))
+        candidate_bytes = excerpt_bytes + line_bytes + (1 if selected_lines else 0)
+        if candidate_bytes > 50_000:
+            break
+        selected_lines += 1
+        excerpt_bytes = candidate_bytes
+    if selected_lines == 0 or not "\n".join(lines[:selected_lines]).strip():
+        return None
+    return read_evidence(index_id, SUBSYSTEM_MANIFEST_PATH, 1, selected_lines)
 
 
 def _build_module_relations(

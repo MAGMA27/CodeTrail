@@ -30,7 +30,15 @@ IssueKind = Literal[
     "parser_unavailable",
     "parser_error",
     "typescript_syntax_error",
+    "manifest_invalid",
 ]
+
+SUBSYSTEM_MANIFEST_PATH = "codetrail-subsystems.json"
+SUBSYSTEM_MANIFEST_MAX_BYTES = 64 * 1024
+SUBSYSTEM_MANIFEST_MAX_GROUPS = 80
+SUBSYSTEM_MANIFEST_MAX_OWNERS = 400
+SUBSYSTEM_MANIFEST_MAX_PATH_LENGTH = 500
+_SUBSYSTEM_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")
 
 _EXCLUDED_DIRECTORIES = {
     ".codetrail",
@@ -88,7 +96,7 @@ class SnapshotIssue:
 
 @dataclass(frozen=True)
 class SnapshotFile:
-    """One UTF-8 Python file read into the immutable in-memory snapshot."""
+    """One bounded UTF-8 source or metadata file in the immutable snapshot."""
 
     path: str
     size: int
@@ -169,6 +177,157 @@ class SourceManifestScan:
         """Return the same content identity used by a source snapshot."""
 
         return _snapshot_hash(list(self.files), list(self.issues))
+
+
+@dataclass(frozen=True)
+class SubsystemOwner:
+    """One exact file or directory-prefix ownership declaration."""
+
+    path: str
+    directory_prefix: bool
+
+
+@dataclass(frozen=True)
+class SubsystemSpec:
+    """One author-declared runtime responsibility group."""
+
+    subsystem_id: str
+    label: str
+    owners: tuple[SubsystemOwner, ...]
+
+
+class SubsystemManifestError(ValueError):
+    """A bounded, safe diagnostic code for an invalid subsystem manifest."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
+
+
+def is_source_code_path(path: str) -> bool:
+    """Return whether the path is parsed as Python or TypeScript source."""
+
+    return Path(path).suffix.lower() in {".py", ".ts", ".tsx"}
+
+
+def parse_subsystem_manifest(text: str) -> tuple[SubsystemSpec, ...]:
+    """Parse a strict, bounded runtime-ownership manifest without touching disk."""
+
+    try:
+        encoded_size = len(text.encode("utf-8"))
+    except UnicodeEncodeError as exc:
+        raise SubsystemManifestError("invalid_unicode") from exc
+    if encoded_size > SUBSYSTEM_MANIFEST_MAX_BYTES:
+        raise SubsystemManifestError("file_too_large")
+    try:
+        payload = json.loads(text, object_pairs_hook=_manifest_object_without_duplicate_keys)
+    except _DuplicateManifestKey as exc:
+        raise SubsystemManifestError("duplicate_key") from exc
+    except (json.JSONDecodeError, RecursionError) as exc:
+        raise SubsystemManifestError("invalid_json") from exc
+
+    if not isinstance(payload, dict) or set(payload) != {"schema_version", "subsystems"}:
+        raise SubsystemManifestError("invalid_shape")
+    schema_version = payload.get("schema_version")
+    if type(schema_version) is not int or schema_version != 1:
+        raise SubsystemManifestError("unsupported_schema_version")
+    raw_subsystems = payload.get("subsystems")
+    if not isinstance(raw_subsystems, list) or not raw_subsystems:
+        raise SubsystemManifestError("empty_or_invalid_subsystems")
+    if len(raw_subsystems) > SUBSYSTEM_MANIFEST_MAX_GROUPS:
+        raise SubsystemManifestError("too_many_subsystems")
+
+    specs: list[SubsystemSpec] = []
+    seen_ids: set[str] = set()
+    all_owners: list[SubsystemOwner] = []
+    for raw_spec in raw_subsystems:
+        if not isinstance(raw_spec, dict) or set(raw_spec) != {"id", "label", "owners"}:
+            raise SubsystemManifestError("invalid_subsystem_shape")
+        subsystem_id = raw_spec.get("id")
+        label = raw_spec.get("label")
+        raw_owners = raw_spec.get("owners")
+        if (
+            not isinstance(subsystem_id, str)
+            or _SUBSYSTEM_ID_PATTERN.fullmatch(subsystem_id) is None
+            or subsystem_id in seen_ids
+        ):
+            raise SubsystemManifestError("invalid_or_duplicate_id")
+        if not isinstance(label, str) or not label.strip() or len(label) > 200 or not _manifest_text_is_safe(label):
+            raise SubsystemManifestError("invalid_label")
+        if not isinstance(raw_owners, list) or not raw_owners:
+            raise SubsystemManifestError("empty_or_invalid_owners")
+        seen_ids.add(subsystem_id)
+        owners: list[SubsystemOwner] = []
+        for raw_owner in raw_owners:
+            if not isinstance(raw_owner, str) or len(raw_owner) > SUBSYSTEM_MANIFEST_MAX_PATH_LENGTH:
+                raise SubsystemManifestError("invalid_owner_path")
+            owner = _parse_subsystem_owner(raw_owner)
+            owners.append(owner)
+            all_owners.append(owner)
+            if len(all_owners) > SUBSYSTEM_MANIFEST_MAX_OWNERS:
+                raise SubsystemManifestError("too_many_owners")
+        specs.append(SubsystemSpec(subsystem_id=subsystem_id, label=label.strip(), owners=tuple(owners)))
+
+    ordered_owners = sorted(all_owners, key=lambda item: (item.path.rstrip("/"), item.directory_prefix))
+    for offset, owner in enumerate(ordered_owners):
+        for other in ordered_owners[offset + 1 :]:
+            if _subsystem_owners_overlap(owner, other):
+                raise SubsystemManifestError("overlapping_owners")
+    return tuple(specs)
+
+
+class _DuplicateManifestKey(ValueError):
+    pass
+
+
+def _manifest_object_without_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise _DuplicateManifestKey(key)
+        result[key] = value
+    return result
+
+
+def _manifest_text_is_safe(value: str) -> bool:
+    return all(
+        not (ord(character) < 32 or ord(character) == 127 or 0xD800 <= ord(character) <= 0xDFFF)
+        for character in value
+    )
+
+
+def _parse_subsystem_owner(value: str) -> SubsystemOwner:
+    if (
+        not value
+        or "\\" in value
+        or value.startswith("/")
+        or (len(value) > 1 and value[1] == ":")
+        or ":" in value
+        or not _manifest_text_is_safe(value)
+    ):
+        raise SubsystemManifestError("invalid_owner_path")
+    is_directory = value.endswith("/")
+    candidate = value[:-1] if is_directory else value
+    parts = candidate.split("/")
+    if (
+        not candidate
+        or any(not part or part in {".", ".."} or part.endswith((".", " ")) for part in parts)
+        or value != "/".join(parts) + ("/" if is_directory else "")
+    ):
+        raise SubsystemManifestError("invalid_owner_path")
+    return SubsystemOwner(path=value, directory_prefix=is_directory)
+
+
+def _subsystem_owners_overlap(left: SubsystemOwner, right: SubsystemOwner) -> bool:
+    left_path = left.path.rstrip("/")
+    right_path = right.path.rstrip("/")
+    if left_path == right_path:
+        return True
+    return (
+        left.directory_prefix and right_path.startswith(f"{left_path}/")
+    ) or (
+        right.directory_prefix and left_path.startswith(f"{right_path}/")
+    )
 
 
 DefinitionKind = Literal["module", "class", "function"]
@@ -271,8 +430,10 @@ def build_source_snapshot(
 
     The caller supplies revision metadata because inspecting a repository must not
     execute arbitrary commands. The default explicitly describes an uncommitted
-    working tree. Only regular ``.py``, ``.ts`` and ``.tsx`` files are read; excluded directories,
-    secrets, symlinks, undecodable files, and oversized files are not parsed.
+    working tree. Only regular ``.py``, ``.ts`` and ``.tsx`` files plus the bounded
+    root subsystem metadata file are captured; metadata is not parsed as source.
+    Excluded directories, secrets, symlinks, undecodable files, and oversized source
+    files are not parsed.
     """
 
     if max_file_bytes < 1:
@@ -310,7 +471,7 @@ def build_source_snapshot(
     return SourceSnapshot(index, tuple(snapshot_files), tuple(issues))
 
 
-SOURCE_CAPTURE_RULES_VERSION = "source-v3"
+SOURCE_CAPTURE_RULES_VERSION = "source-v4"
 DEFINITION_EXTRACTION_RULES_VERSION = "python-definitions-v1"
 TYPESCRIPT_COMPILER_VERSION = "5.9.3"
 TYPESCRIPT_FACT_RULES_VERSION = "typescript-facts-v2"
@@ -385,6 +546,8 @@ def scan_source_manifest(
     unstable_paths: list[str] = []
     scanned_files = 0
     scanned_bytes = 0
+    scanned_source_files = 0
+    scanned_source_bytes = 0
     scan_complete = True
     scan_truncated = False
     scan_truncation_reason: str | None = None
@@ -402,11 +565,20 @@ def scan_source_manifest(
         return True
 
     def visit(directory: Path) -> None:
-        nonlocal scanned_files, scanned_bytes, scan_complete
+        nonlocal scanned_files, scanned_bytes, scanned_source_files, scanned_source_bytes, scan_complete
         if scan_truncated or not check_time():
             return
         try:
-            entries = sorted(directory.iterdir(), key=lambda entry: entry.name.casefold())
+            entries = sorted(
+                directory.iterdir(),
+                key=lambda entry: (
+                    0
+                    if directory == root
+                    and entry.name.casefold() == SUBSYSTEM_MANIFEST_PATH.casefold()
+                    else 1,
+                    entry.name.casefold(),
+                ),
+            )
         except OSError as exc:
             relative = _relative_path_for_issue(root, directory)
             issues.append(SnapshotIssue(relative, "read_error", f"could not list directory: {exc}"))
@@ -417,23 +589,47 @@ def scan_source_manifest(
             if scan_truncated or not check_time():
                 return
             relative = _relative_path_for_issue(root, entry)
+            manifest_candidate = (
+                "/" not in relative
+                and relative.casefold() == SUBSYSTEM_MANIFEST_PATH.casefold()
+            )
+            if manifest_candidate and relative != SUBSYSTEM_MANIFEST_PATH:
+                issues.append(SnapshotIssue(relative, "manifest_invalid", "manifest invalid: path_alias"))
+                continue
+            is_subsystem_manifest = relative == SUBSYSTEM_MANIFEST_PATH
+
+            def manifest_invalid(code: str, size: int | None = None) -> None:
+                issues.append(SnapshotIssue(relative, "manifest_invalid", f"manifest invalid: {code}", size=size))
+
             try:
                 is_dir = entry.is_dir()
             except OSError as exc:
-                issues.append(SnapshotIssue(relative, "read_error", f"could not inspect source: {exc}"))
-                scan_complete = False
+                if is_subsystem_manifest:
+                    manifest_invalid("unreadable")
+                else:
+                    issues.append(SnapshotIssue(relative, "read_error", f"could not inspect source: {exc}"))
+                    scan_complete = False
                 continue
             if is_dir and entry.name.lower() in _EXCLUDED_DIRECTORIES:
                 continue
             if _is_secret_name(entry.name):
                 continue
+            if is_subsystem_manifest and is_dir:
+                manifest_invalid("not_a_file")
+                continue
             try:
                 if entry.is_symlink():
-                    issues.append(SnapshotIssue(relative, "symlink", "symbolic links are not indexed"))
+                    if is_subsystem_manifest:
+                        manifest_invalid("symlink")
+                    else:
+                        issues.append(SnapshotIssue(relative, "symlink", "symbolic links are not indexed"))
                     continue
             except OSError as exc:
-                issues.append(SnapshotIssue(relative, "read_error", f"could not inspect source: {exc}"))
-                scan_complete = False
+                if is_subsystem_manifest:
+                    manifest_invalid("unreadable")
+                else:
+                    issues.append(SnapshotIssue(relative, "read_error", f"could not inspect source: {exc}"))
+                    scan_complete = False
                 continue
             if is_dir:
                 visit(entry)
@@ -441,28 +637,47 @@ def scan_source_manifest(
             try:
                 is_file = entry.is_file()
             except OSError as exc:
-                issues.append(SnapshotIssue(relative, "read_error", f"could not inspect source: {exc}"))
-                scan_complete = False
+                if is_subsystem_manifest:
+                    manifest_invalid("unreadable")
+                else:
+                    issues.append(SnapshotIssue(relative, "read_error", f"could not inspect source: {exc}"))
+                    scan_complete = False
                 continue
-            if entry.suffix.lower() not in {".py", ".ts", ".tsx"} or not is_file:
+            if not is_file:
+                if is_subsystem_manifest:
+                    manifest_invalid("not_regular_file")
                 continue
-            if scanned_files >= max_files:
+            if not is_subsystem_manifest and not is_source_code_path(relative):
+                continue
+            if not is_subsystem_manifest and scanned_source_files >= max_files:
                 truncate("max_files")
                 return
             scanned_files += 1
+            if not is_subsystem_manifest:
+                scanned_source_files += 1
             try:
                 resolved = entry.resolve(strict=False)
                 resolved.relative_to(root)
             except (OSError, ValueError):
-                issues.append(SnapshotIssue(relative, "outside_root", "source resolves outside root"))
+                if is_subsystem_manifest:
+                    manifest_invalid("outside_root")
+                else:
+                    issues.append(SnapshotIssue(relative, "outside_root", "source resolves outside root"))
                 continue
             try:
                 before = entry.stat()
             except OSError as exc:
-                issues.append(SnapshotIssue(relative, "read_error", f"could not stat source: {exc}"))
-                scan_complete = False
+                if is_subsystem_manifest:
+                    manifest_invalid("unreadable")
+                else:
+                    issues.append(SnapshotIssue(relative, "read_error", f"could not stat source: {exc}"))
+                    scan_complete = False
                 continue
-            if before.st_size > max_file_bytes:
+            file_byte_limit = SUBSYSTEM_MANIFEST_MAX_BYTES if is_subsystem_manifest else max_file_bytes
+            if before.st_size > file_byte_limit:
+                if is_subsystem_manifest:
+                    manifest_invalid("file_too_large", before.st_size)
+                    continue
                 issues.append(
                     SnapshotIssue(
                         relative,
@@ -472,29 +687,47 @@ def scan_source_manifest(
                     )
                 )
                 continue
-            if scanned_bytes + before.st_size > max_total_bytes:
+            if not is_subsystem_manifest and scanned_source_bytes + before.st_size > max_total_bytes:
                 truncate("max_total_bytes")
                 return
             try:
-                raw = entry.read_bytes()
+                if is_subsystem_manifest:
+                    with entry.open("rb") as source:
+                        raw = source.read(SUBSYSTEM_MANIFEST_MAX_BYTES + 1)
+                else:
+                    raw = entry.read_bytes()
             except OSError as exc:
-                issues.append(SnapshotIssue(relative, "read_error", f"could not read source: {exc}"))
-                scan_complete = False
+                if is_subsystem_manifest:
+                    manifest_invalid("unreadable")
+                else:
+                    issues.append(SnapshotIssue(relative, "read_error", f"could not read source: {exc}"))
+                    scan_complete = False
                 continue
             scanned_bytes += len(raw)
-            if scanned_bytes > max_total_bytes:
+            if not is_subsystem_manifest:
+                scanned_source_bytes += len(raw)
+            if not is_subsystem_manifest and scanned_source_bytes > max_total_bytes:
                 truncate("max_total_bytes_after_read")
                 return
             try:
                 after = entry.stat()
             except OSError as exc:
-                issues.append(SnapshotIssue(relative, "read_error", f"could not stat source after read: {exc}"))
-                scan_complete = False
+                if is_subsystem_manifest:
+                    manifest_invalid("unreadable")
+                else:
+                    issues.append(SnapshotIssue(relative, "read_error", f"could not stat source after read: {exc}"))
+                    scan_complete = False
                 continue
             if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+                if is_subsystem_manifest:
+                    manifest_invalid("changed_during_capture", after.st_size)
+                    continue
                 unstable_paths.append(relative)
                 scan_complete = False
-            if len(raw) > max_file_bytes:
+            if len(raw) > file_byte_limit:
+                if is_subsystem_manifest:
+                    manifest_invalid("file_too_large", after.st_size)
+                    continue
                 issues.append(
                     SnapshotIssue(
                         relative,
@@ -507,8 +740,16 @@ def scan_source_manifest(
             try:
                 text = raw.decode("utf-8-sig")
             except UnicodeDecodeError as exc:
-                issues.append(SnapshotIssue(relative, "decode_error", f"source is not UTF-8: {exc}"))
+                if is_subsystem_manifest:
+                    manifest_invalid("invalid_utf8", len(raw))
+                else:
+                    issues.append(SnapshotIssue(relative, "decode_error", f"source is not UTF-8: {exc}"))
                 continue
+            if is_subsystem_manifest:
+                try:
+                    parse_subsystem_manifest(text)
+                except SubsystemManifestError as exc:
+                    manifest_invalid(exc.code, len(raw))
             files.append(
                 SnapshotFile(
                     path=relative,
@@ -558,6 +799,8 @@ def extract_definitions(
     typescript_parse_file_count = 0
     for source_file in snapshot.files:
         if source_file.path.lower().endswith((".ts", ".tsx")):
+            continue
+        if not source_file.path.lower().endswith(".py"):
             continue
         entry = cached.get(source_file.path) if cached is not None else None
         if entry is None:

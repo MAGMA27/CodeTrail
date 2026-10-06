@@ -98,6 +98,7 @@ FreshnessReasonCode: TypeAlias = Literal[
     "source_changed",
     "source_read_error",
     "source_unavailable",
+    "manifest_invalid",
     "decode_error",
     "file_too_large",
     "symlink",
@@ -185,6 +186,7 @@ IndexIssueKind: TypeAlias = Literal[
     "parser_unavailable",
     "parser_error",
     "typescript_syntax_error",
+    "manifest_invalid",
 ]
 
 
@@ -1396,7 +1398,7 @@ OverviewHttpMethod: TypeAlias = Literal[
     "TRACE",
 ]
 OverviewEntryStatus: TypeAlias = Literal["identified", "not_identified", "partial"]
-OverviewGroupKind: TypeAlias = Literal["http_path", "source_directory"]
+OverviewGroupKind: TypeAlias = Literal["http_path", "source_directory", "responsibility"]
 OverviewModuleRelationKind: TypeAlias = Literal["imports", "calls"]
 
 
@@ -1498,8 +1500,10 @@ class OverviewGroup(ContractModel):
                 raise ValueError("HTTP overview group keys must be path prefixes")
             if not self.entry_point_ids:
                 raise ValueError("HTTP overview groups must contain entries")
-        elif not self.module_ids:
+        elif self.group_kind == "source_directory" and not self.module_ids:
             raise ValueError("source directory overview groups must contain modules")
+        elif self.group_kind == "responsibility" and self.entry_point_ids:
+            raise ValueError("responsibility groups cannot contain entry points")
         return self
 
 
@@ -1679,6 +1683,8 @@ class ProjectOverview(VersionedModel):
     index: IndexSnapshot
     rules_version: Identifier
     entry_status: OverviewEntryStatus
+    responsibility_status: Literal["not_configured", "ready", "partial", "invalid"] = "not_configured"
+    responsibility_evidence: Evidence | None = None
     entries: list[OverviewEntryPoint] = Field(default_factory=list)
     groups: list[OverviewGroup] = Field(default_factory=list)
     modules: list[OverviewModule] = Field(default_factory=list)
@@ -1719,6 +1725,23 @@ class ProjectOverview(VersionedModel):
         if len({path.path_id for path in self.paths}) != len(self.paths):
             raise ValueError("overview path IDs must be unique")
         entry_ids = {entry.entry_point_id for entry in self.entries}
+        has_responsibility_groups = any(group.group_kind == "responsibility" for group in self.groups)
+        if self.responsibility_status == "not_configured":
+            if self.responsibility_evidence is not None or has_responsibility_groups:
+                raise ValueError("unconfigured responsibility overview cannot include manifest data")
+        elif self.responsibility_status in {"ready", "partial"}:
+            if not has_responsibility_groups:
+                raise ValueError("valid responsibility overview requires responsibility groups")
+        elif has_responsibility_groups:
+            raise ValueError("invalid responsibility metadata cannot produce responsibility groups")
+        if (
+            self.responsibility_evidence is not None
+            and (
+                self.responsibility_evidence.index_id != self.index.index_id
+                or self.responsibility_evidence.path != "codetrail-subsystems.json"
+            )
+        ):
+            raise ValueError("responsibility evidence must identify the same-index manifest")
         for entry in self.entries:
             if entry.index_id != self.index.index_id:
                 raise ValueError("overview entry belongs to a different index_id")
@@ -2396,9 +2419,11 @@ class McpOverviewResponse(McpResultBase):
                 for entry in self.overview.entries
                 if entry.evidence is not None
             }
+            if self.overview.responsibility_evidence is not None:
+                evidence_ids.add(self.overview.responsibility_evidence.evidence_id)
             for reference in self.references:
                 if reference.index_id != self.overview.index.index_id or reference.evidence_id not in evidence_ids:
-                    raise ValueError("overview references must match returned entry evidence")
+                    raise ValueError("overview references must match returned evidence")
         elif self.overview is not None or self.references:
             raise ValueError("failed overview results cannot include overview data")
         return self

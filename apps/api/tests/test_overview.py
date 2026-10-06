@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import shutil
 from pathlib import Path
@@ -304,6 +305,117 @@ def test_overview_groups_routes_and_aggregates_module_relations(tmp_path: Path) 
         for relation in overview["module_relations"]
     )
     assert symbols
+
+
+def test_overview_uses_explicit_subsystems_and_keeps_unowned_modules_visible(tmp_path: Path) -> None:
+    repository = _copy_fixture(tmp_path)
+    manifest_text = json.dumps(
+        {
+            "schema_version": 1,
+            "subsystems": [
+                {"id": "api", "label": "API", "owners": ["timeout_demo/app.py"]},
+                {"id": "storage", "label": "Storage", "owners": ["timeout_demo/config.py"]},
+            ],
+        },
+        ensure_ascii=False,
+        indent=2,
+    )
+    manifest_path = repository / "codetrail-subsystems.json"
+    manifest_path.write_text(manifest_text, encoding="utf-8")
+    application = create_app({"timeout-demo": repository})
+    project_id, index_id = _create_index(application, "Manifest overview")
+
+    status, overview = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/indexes/{index_id}/overview",
+    )
+    assert status == 200, overview
+    assert overview["responsibility_status"] == "partial"
+    evidence = overview["responsibility_evidence"]
+    assert evidence["path"] == "codetrail-subsystems.json"
+    assert evidence["index_id"] == index_id
+    assert evidence["content_hash"] == hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    responsibility_groups = {
+        group["group_key"]: group
+        for group in overview["groups"]
+        if group["group_kind"] == "responsibility"
+    }
+    assert {group["label"] for group in responsibility_groups.values()} == {"API", "Storage"}
+    module_by_id = {module["module_id"]: module["symbol"]["path"] for module in overview["modules"]}
+    assert [module_by_id[module_id] for module_id in responsibility_groups["api"]["module_ids"]] == [
+        "timeout_demo/app.py"
+    ]
+    assert [module_by_id[module_id] for module_id in responsibility_groups["storage"]["module_ids"]] == [
+        "timeout_demo/config.py"
+    ]
+    fallback_groups = [group for group in overview["groups"] if group["group_kind"] == "source_directory"]
+    fallback_module_ids = {module_id for group in fallback_groups for module_id in group["module_ids"]}
+    assert fallback_module_ids
+    assert fallback_module_ids.isdisjoint(
+        {module_id for group in responsibility_groups.values() for module_id in group["module_ids"]}
+    )
+    assert any("未归属模块保留在源码目录 fallback" in note for note in overview["notes"])
+    app_to_config = next(
+        relation
+        for relation in overview["module_relations"]
+        if module_by_id[relation["source_module_id"]] == "timeout_demo/app.py"
+        and module_by_id[relation["target_module_id"]] == "timeout_demo/config.py"
+    )
+    group_by_module = {
+        module_id: group["group_key"]
+        for group in responsibility_groups.values()
+        for module_id in group["module_ids"]
+    }
+    assert group_by_module[app_to_config["source_module_id"]] == "api"
+    assert group_by_module[app_to_config["target_module_id"]] == "storage"
+
+    status, bounded = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/indexes/{index_id}/overview?max_groups=1",
+    )
+    assert status == 200
+    assert bounded["coverage"]["visible_groups"] == 1
+    assert bounded["coverage"]["total_groups"] > 1
+    assert bounded["groups"][0]["group_kind"] == "responsibility"
+
+
+def test_invalid_subsystem_manifest_is_persisted_and_old_index_never_reads_live_file(tmp_path: Path) -> None:
+    repository = _copy_fixture(tmp_path)
+    manifest_path = repository / "codetrail-subsystems.json"
+    invalid_text = json.dumps(
+        {
+            "schema_version": 1,
+            "subsystems": [
+                {"id": "api", "label": "API", "owners": ["timeout_demo/"]},
+                {"id": "handler", "label": "Handler", "owners": ["timeout_demo/app.py"]},
+            ],
+        }
+    )
+    manifest_path.write_text(invalid_text, encoding="utf-8")
+    application = create_app({"timeout-demo": repository})
+    project_id, index_id = _create_index(application, "Invalid manifest overview")
+
+    status, index = request(application, "GET", f"/api/projects/{project_id}/indexes/{index_id}")
+    assert status == 200
+    assert index["index"]["status"] == "ready"
+    assert any(issue["kind"] == "manifest_invalid" for issue in index["issues"])
+
+    manifest_path.write_text(
+        json.dumps({"schema_version": 1, "subsystems": [{"id": "api", "label": "API", "owners": ["timeout_demo/"]}]}),
+        encoding="utf-8",
+    )
+    status, overview = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/indexes/{index_id}/overview",
+    )
+    assert status == 200
+    assert overview["responsibility_status"] == "invalid"
+    assert overview["responsibility_evidence"]["content_hash"] == hashlib.sha256(invalid_text.encode("utf-8")).hexdigest()
+    assert not any(group["group_kind"] == "responsibility" for group in overview["groups"])
+    assert any(group["group_kind"] == "source_directory" for group in overview["groups"])
 
 
 def test_overview_invalidates_skipped_bindings_without_cross_scope_pollution(tmp_path: Path) -> None:

@@ -32,7 +32,7 @@ RELATION_FACT_EXTRACTION_RULES_VERSION = "python-relation-facts-v3"
 _RELATION_FACTS_FORMAT_VERSION = "relation-facts-v3"
 # This namespace is part of generated immutable index IDs. Bump it when source
 # boundaries or build rules can change an index with the same content hash.
-INDEX_BUILD_IDENTITY_VERSION = "relations-v8"
+INDEX_BUILD_IDENTITY_VERSION = "relations-v9"
 
 
 def relation_coverage_limitations(

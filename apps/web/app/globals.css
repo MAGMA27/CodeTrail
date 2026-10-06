@@ -163,6 +163,8 @@ code { font-family: var(--ct-mono); }
 .ct-architecture-heading p:last-child { max-width: 780px; margin: 0; color: var(--ct-muted); font-size: 12px; }
 .ct-architecture-count { display: grid; flex: 0 0 auto; justify-items: end; gap: 1px; color: var(--ct-muted); font-size: 10px; }
 .ct-architecture-count strong { color: var(--ct-text); font-family: var(--ct-mono); font-size: 20px; font-weight: 500; }
+.ct-architecture-responsibility { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 11px; border: 1px solid var(--ct-border); border-radius: 7px; background: var(--ct-surface); color: var(--ct-muted); font-size: 10px; }
+.ct-architecture-responsibility strong { margin-right: 7px; color: var(--ct-text); }
 .ct-architecture-toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: 9px; padding: 10px 12px; border: 1px solid var(--ct-border); border-radius: 8px 8px 0 0; background: var(--ct-surface); }
 .ct-architecture-toolbar > label:first-child { display: grid; min-width: min(320px, 100%); gap: 3px; color: var(--ct-muted); font-size: 10px; }
 .ct-architecture-toolbar select { min-height: 34px; padding: 6px 9px; border: 1px solid var(--ct-border-strong); border-radius: 6px; background: var(--ct-surface); color: var(--ct-text); font-size: 11px; }

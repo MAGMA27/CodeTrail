@@ -120,6 +120,17 @@ function overview(
     },
     rules_version: "python-entry-v5+http-shape-v1",
     entry_status: "identified",
+    responsibility_status: groups.some((group) => group.group_kind === "responsibility") ? "ready" : "not_configured",
+    responsibility_evidence: groups.some((group) => group.group_kind === "responsibility") ? {
+      evidence_id: "evidence-manifest",
+      index_id: indexId,
+      path: "codetrail-subsystems.json",
+      start_line: 1,
+      end_line: 1,
+      excerpt: "{}",
+      content_hash: "hash",
+      kind: "source",
+    } : null,
     entries: [],
     groups,
     modules,
@@ -194,6 +205,26 @@ test("folded directories aggregate unique module-pair relations and internal edg
   assert.equal(external?.edgeCount, 2);
   assert.deepEqual(external?.relationKinds, ["calls", "imports"]);
   assert.equal(model.relations.every((item) => item.source !== item.target), true);
+});
+
+test("responsibility containers preserve source-to-target dependency direction", () => {
+  const roles = overview(
+    [a1, b1],
+    [
+      { ...directory("role-api", "api", [a1.module_id]), group_kind: "responsibility", group_key: "api", label: "API" },
+      { ...directory("role-web", "web", [b1.module_id]), group_kind: "responsibility", group_key: "web", label: "Web" },
+    ],
+    [relation("api-to-web", a1, b1, ["imports"], [codeEdge("api-imports-web", a1.module_id, b1.module_id, "imports", a1.symbol.path)])],
+  );
+
+  const folded = buildArchitectureGraph(roles);
+  assert.deepEqual(folded.directories.map((item) => item.group.label), ["API", "Web"]);
+  assert.equal(folded.relations[0].source, "role-api");
+  assert.equal(folded.relations[0].target, "role-web");
+
+  const apiExpanded = buildArchitectureGraph(roles, { expandedGroupIds: ["role-api"] });
+  assert.equal(apiExpanded.relations[0].source, "a1");
+  assert.equal(apiExpanded.relations[0].target, "role-web");
 });
 
 test("empty or relation-free overviews do not fabricate architecture nodes or edges", () => {

@@ -2,11 +2,13 @@
 
 ## 状态
 
-已实现 Python 与 TypeScript/TSX 的有界不可变源码快照、定义、相对导入和保守 HTTP path facts，以及本地 freshness 检查和显式索引更新；Python 继续使用文件级定义/关系事实缓存，TypeScript 使用每次有界冷 AST 解析，不计入 Python AST/cache 统计。TypeScript 语法错误、锁定解析器不可用和快照扫描不完整都会显式令新索引 failed。源码捕获规则为 `source-v3`，TypeScript 编译器锁定 `5.9.3`，当前静态 facts 规则为 `typescript-facts-v2`，关系语义为 `relations-v5`，Python 关系事实缓存规则/格式为 `python-relation-facts-v3` / `relation-facts-v3`，索引身份为 `relations-v8`；定义/关系目标仍基于当前快照全量解析，不是完整增量索引。
+已实现 Python 与 TypeScript/TSX 的有界不可变源码快照、定义、相对导入和保守 HTTP path facts，以及本地 freshness 检查和显式索引更新；Python 继续使用文件级定义/关系事实缓存，TypeScript 使用每次有界冷 AST 解析，不计入 Python AST/cache 统计。TypeScript 语法错误、锁定解析器不可用和快照扫描不完整都会显式令新索引 failed。源码捕获规则为 `source-v4`，TypeScript 编译器锁定 `5.9.3`，当前静态 facts 规则为 `typescript-facts-v2`，关系语义为 `relations-v5`，Python 关系事实缓存规则/格式为 `python-relation-facts-v3` / `relation-facts-v3`，索引身份为 `relations-v9`；定义/关系目标仍基于当前快照全量解析，不是完整增量索引。
 
 ## 职责与范围
 
 读取受限 `.py`、`.ts`、`.tsx` 源码并提取静态事实；不执行目标仓库，不把动态猜测当确定边。目录扫描和 freshness 使用一致的文件数、字节、单文件大小和时间预算；同时排除 `.next`、`.turbo`、`.vercel`、`.vite`、`.parcel-cache`、`coverage`、`out`、`storybook-static`、`target` 及既有依赖/运行数据目录。
+
+可选根文件 [`codetrail-subsystems.json`](../../codetrail-subsystems.json) 为运行时职责分组声明稳定 ID、显示名称和精确文件/目录 owner；它与文档导航 owner 分开维护。捕获器先观察这个确切路径，再应用源码文件/字节预算；metadata 自身单独限 64 KiB，不作为 Python/TS 源码解析。可读但不合法的原文与 `manifest_invalid` issue 随快照保存且不阻断代码索引；缺失配置保留原目录视图。未覆盖模块也保留在目录 fallback 中。概览仅从固定 snapshot 解析配置，并只返回一个 same-index manifest evidence；完整文件 hash 绑定 captured file，供 freshness 对改动、删除和 invalid capture 作出 changed/unknown 判断。格式与错误回退见[职责分组决策](../../docs/decisions/2026-10-06-subsystem-responsibility-manifest.md)。
 
 ## 接口与依赖
 

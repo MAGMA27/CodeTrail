@@ -13083,7 +13083,8 @@
                 "capture_incomplete",
                 "parser_unavailable",
                 "parser_error",
-                "typescript_syntax_error"
+                "typescript_syntax_error",
+                "manifest_invalid"
               ],
               "title": "Kind",
               "type": "string"
@@ -14791,7 +14792,8 @@
                 "capture_incomplete",
                 "parser_unavailable",
                 "parser_error",
-                "typescript_syntax_error"
+                "typescript_syntax_error",
+                "manifest_invalid"
               ],
               "title": "Kind",
               "type": "string"
@@ -15202,6 +15204,7 @@
               "source_changed",
               "source_read_error",
               "source_unavailable",
+              "manifest_invalid",
               "decode_error",
               "file_too_large",
               "symlink",
@@ -15441,6 +15444,7 @@
                   "source_changed",
                   "source_read_error",
                   "source_unavailable",
+                  "manifest_invalid",
                   "decode_error",
                   "file_too_large",
                   "symlink",
@@ -15594,7 +15598,8 @@
                 "capture_incomplete",
                 "parser_unavailable",
                 "parser_error",
-                "typescript_syntax_error"
+                "typescript_syntax_error",
+                "manifest_invalid"
               ],
               "title": "Kind",
               "type": "string"
@@ -16985,7 +16990,8 @@
                 "capture_incomplete",
                 "parser_unavailable",
                 "parser_error",
-                "typescript_syntax_error"
+                "typescript_syntax_error",
+                "manifest_invalid"
               ],
               "title": "Kind",
               "type": "string"
@@ -19583,7 +19589,8 @@
                 "capture_incomplete",
                 "parser_unavailable",
                 "parser_error",
-                "typescript_syntax_error"
+                "typescript_syntax_error",
+                "manifest_invalid"
               ],
               "title": "Kind",
               "type": "string"
@@ -20307,7 +20314,8 @@
                 "capture_incomplete",
                 "parser_unavailable",
                 "parser_error",
-                "typescript_syntax_error"
+                "typescript_syntax_error",
+                "manifest_invalid"
               ],
               "title": "Kind",
               "type": "string"
@@ -20797,6 +20805,7 @@
                   "source_changed",
                   "source_read_error",
                   "source_unavailable",
+                  "manifest_invalid",
                   "decode_error",
                   "file_too_large",
                   "symlink",
@@ -21119,6 +21128,7 @@
                   "source_changed",
                   "source_read_error",
                   "source_unavailable",
+                  "manifest_invalid",
                   "decode_error",
                   "file_too_large",
                   "symlink",
@@ -21272,7 +21282,8 @@
                 "capture_incomplete",
                 "parser_unavailable",
                 "parser_error",
-                "typescript_syntax_error"
+                "typescript_syntax_error",
+                "manifest_invalid"
               ],
               "title": "Kind",
               "type": "string"
@@ -21611,7 +21622,8 @@
                 "capture_incomplete",
                 "parser_unavailable",
                 "parser_error",
-                "typescript_syntax_error"
+                "typescript_syntax_error",
+                "manifest_invalid"
               ],
               "title": "Kind",
               "type": "string"
@@ -22908,7 +22920,8 @@
             "group_kind": {
               "enum": [
                 "http_path",
-                "source_directory"
+                "source_directory",
+                "responsibility"
               ],
               "title": "Group Kind",
               "type": "string"
@@ -23363,6 +23376,28 @@
               "maxLength": 200,
               "minLength": 1,
               "title": "Project Id",
+              "type": "string"
+            },
+            "responsibility_evidence": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Evidence"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "responsibility_status": {
+              "default": "not_configured",
+              "enum": [
+                "not_configured",
+                "ready",
+                "partial",
+                "invalid"
+              ],
+              "title": "Responsibility Status",
               "type": "string"
             },
             "rules_version": {
@@ -33234,7 +33269,8 @@
             "group_kind": {
               "enum": [
                 "http_path",
-                "source_directory"
+                "source_directory",
+                "responsibility"
               ],
               "title": "Group Kind",
               "type": "string"
@@ -33850,6 +33886,28 @@
           "maxLength": 200,
           "minLength": 1,
           "title": "Project Id",
+          "type": "string"
+        },
+        "responsibility_evidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Evidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "responsibility_status": {
+          "default": "not_configured",
+          "enum": [
+            "not_configured",
+            "ready",
+            "partial",
+            "invalid"
+          ],
+          "title": "Responsibility Status",
           "type": "string"
         },
         "rules_version": {

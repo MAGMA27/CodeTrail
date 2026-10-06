@@ -984,7 +984,8 @@ function ArchitectureDirectoryNode({ data }: NodeProps<Node<ArchitectureDirector
       <Handle type="source" position={Position.Right} />
       <div className="ct-architecture-directory-heading">
         <button type="button" className="ct-architecture-directory-title" onClick={() => data.onSelect(directory.group)} title={directory.group.group_key}>
-          <span>SOURCE DIRECTORY</span><strong>{directory.group.group_key}</strong>
+          <span>{directory.group.group_kind === "responsibility" ? "RESPONSIBILITY" : "SOURCE DIRECTORY"}</span>
+          <strong>{directory.group.group_kind === "responsibility" ? directory.group.label : directory.group.group_key}</strong>
         </button>
         <button type="button" className="ct-architecture-expand" onClick={() => data.onToggle(directory.group)} aria-label={`${directory.expanded ? "折叠" : "展开"} ${directory.group.group_key}`} aria-expanded={directory.expanded}>
           {directory.expanded ? "−" : "+"}
@@ -994,7 +995,7 @@ function ArchitectureDirectoryNode({ data }: NodeProps<Node<ArchitectureDirector
         <span>{directory.loadedModuleCount} modules</span>
         {directory.internalRelationCount > 0 ? <span>{directory.internalRelationCount} 内部关系 · {directory.internalEdgeCount} 边</span> : null}
         {directory.internalHttpAssociationCount > 0 ? <span>{directory.internalHttpAssociationCount} 内部 HTTP 关联</span> : null}
-        {directory.omittedIndexModuleCount > 0 ? <span>索引未返回 {directory.omittedIndexModuleCount}</span> : null}
+        {directory.omittedIndexModuleCount > 0 ? <span>概览模块预算省略 {directory.omittedIndexModuleCount}</span> : null}
         {directory.omittedByCanvasLimit > 0 ? <span>画布限额省略 {directory.omittedByCanvasLimit}</span> : null}
       </div>
     </div>
@@ -1025,6 +1026,12 @@ function ArchitectureSection({ overview, knowledge }: { overview: ProjectOvervie
   const [showHttpAssociations, setShowHttpAssociations] = useState(true);
   const [flow, setFlow] = useState<ReactFlowInstance<Node, Edge> | null>(null);
   const httpGroups = overview.groups.filter((group) => group.group_kind === "http_path" && group.index_id === overview.index.index_id);
+  const responsibilityStatusLabel = {
+    not_configured: "未配置；按源码目录分组",
+    ready: "已配置；职责全部匹配",
+    partial: "覆盖不完整；保留目录 fallback",
+    invalid: "无效；按源码目录回退",
+  }[overview.responsibility_status];
   const model = useMemo(() => buildArchitectureGraph(overview, {
     expandedGroupIds,
     selectedHttpGroupId,
@@ -1160,8 +1167,19 @@ function ArchitectureSection({ overview, knowledge }: { overview: ProjectOvervie
   return (
     <section className="ct-architecture-section" aria-label="项目架构画布">
       <div className="ct-architecture-heading">
-        <div><p className="ct-overline">ARCHITECTURE / FIXED INDEX</p><h3>项目架构</h3><p>先看源码目录间 imports/calls；HTTP 客户端到服务路由以独立方法与路径形状关联展示。两端证据均来自同一固定快照。</p></div>
-        <div className="ct-architecture-count"><strong>{model.directories.length}</strong><span>源码目录 · {overview.coverage.visible_modules}/{overview.coverage.total_modules} 模块可见</span></div>
+        <div><p className="ct-overline">ARCHITECTURE / FIXED INDEX</p><h3>项目架构</h3><p>职责与未归属源码目录作为容器，静态 imports/calls 保持 source → target；HTTP 客户端到服务路由以独立方法与路径形状关联展示。</p></div>
+        <div className="ct-architecture-count"><strong>{model.directories.length}</strong><span>职责/目录容器 · {overview.coverage.visible_modules}/{overview.coverage.total_modules} 模块可见</span></div>
+      </div>
+      <div className="ct-architecture-responsibility">
+        <span><strong>职责来源</strong>{responsibilityStatusLabel} · 同一固定 index</span>
+        {overview.responsibility_evidence ? (
+          <button type="button" className="ct-link-button" onClick={() => {
+            const evidence = overview.responsibility_evidence!;
+            knowledge.onOpenArchitectureSource({ indexId: overview.index.index_id, path: evidence.path, startLine: evidence.start_line, endLine: evidence.end_line, expectedContentHash: evidence.content_hash });
+          }}>打开 codetrail-subsystems.json</button>
+        ) : overview.responsibility_status === "ready" || overview.responsibility_status === "partial" ? (
+          <span>manifest 已读取并固定于快照，但 excerpt 超出来源展示上限。</span>
+        ) : null}
       </div>
       <div className="ct-architecture-toolbar">
         <label>HTTP 入口<select aria-label="筛选 HTTP 入口" value={selectedHttpGroupId ?? ""} onChange={(event) => selectHttpGroup(event.target.value)}><option value="">全部源码依赖</option>{httpGroups.map((group) => <option value={group.group_id} key={group.group_id}>{group.label} · {group.module_ids.length} modules</option>)}</select></label>
@@ -1180,7 +1198,7 @@ function ArchitectureSection({ overview, knowledge }: { overview: ProjectOvervie
       <p className="ct-architecture-filter-note">类型筛选只影响静态 imports/calls 画布。HTTP method/path shape 关联单独列示，不混入静态调用边，也不证明请求实际发送到本地服务。</p>
       {coverageWarnings.length > 0 ? <div className="ct-architecture-warnings" role="status">{coverageWarnings.map((warning) => <span key={warning}>{warning}</span>)}</div> : null}
       {model.directories.length === 0 ? (
-        <div className="ct-architecture-empty"><strong>当前索引没有可绘制的源码目录</strong><span>概览可能未返回源码分组；不以 HTTP 路由组替代源码架构。</span></div>
+        <div className="ct-architecture-empty"><strong>当前索引没有可绘制的职责或源码目录</strong><span>概览可能未返回源码分组；不以 HTTP 路由组替代源码架构。</span></div>
       ) : (
         <div className="ct-architecture-canvas">
           <ReactFlow<Node, Edge>
@@ -1232,7 +1250,7 @@ function ArchitectureSection({ overview, knowledge }: { overview: ProjectOvervie
         )}
         <p className="ct-http-associations-coverage">覆盖 {overview.http_association_coverage.client_request_count} 个已识别 requestJson 调用：{overview.http_association_coverage.unmatched_count} unmatched、{overview.http_association_coverage.ambiguous_count} ambiguous、{overview.http_association_coverage.unknown_count} unknown。</p>
       </section>
-      <div className="ct-architecture-legend"><span><i className="is-directory" />源码目录（可展开）</span><span><i className="is-architecture-edge" />静态 Python/TypeScript imports / calls</span><span><i className="is-http-architecture-edge" />HTTP method/path 形状关联</span><span>HTTP 关联单独筛选与聚合，不写入 CodeEdge</span><small>TypeScript 静态事实使用锁定语法解析器；HTTP 匹配不等同于实际运行调用或本地部署拓扑。</small></div>
+      <div className="ct-architecture-legend"><span><i className="is-directory" />职责或目录容器（可展开）</span><span><i className="is-architecture-edge" />静态 Python/TypeScript imports / calls</span><span><i className="is-http-architecture-edge" />HTTP method/path 形状关联</span><span>HTTP 关联单独筛选与聚合，不写入 CodeEdge</span><small>依赖只展示当前快照已有静态关系；职责来自文件 manifest，不是模型推断。HTTP 匹配不等同于运行时拓扑。</small></div>
     </section>
   );
 }
@@ -1423,7 +1441,7 @@ function OverviewSections({ overview, knowledge }: { overview: ProjectOverview; 
             {selectedGroup.group_kind === "http_path" ? (
               selectedEntries.length > 0 ? <div className="ct-entry-list">{selectedEntries.map((entry) => <OverviewEntryRow entry={entry} knowledge={knowledge} key={entry.entry_point_id} />)}</div> : <p className="ct-muted">该组入口因当前概览预算未返回。</p>
             ) : (
-              selectedModules.length > 0 ? <div className="ct-module-list">{selectedModules.map((module) => <OverviewModuleRow module={module} knowledge={knowledge} key={module.module_id} />)}</div> : <p className="ct-muted">该源码目录的模块未包含在当前可见模块预算中。</p>
+              selectedModules.length > 0 ? <div className="ct-module-list">{selectedModules.map((module) => <OverviewModuleRow module={module} knowledge={knowledge} key={module.module_id} />)}</div> : <p className="ct-muted">{selectedGroup.group_kind === "responsibility" && selectedGroup.module_ids.length === 0 ? "该职责的 owner 路径未匹配到已索引模块。" : selectedGroup.module_ids.length > 0 ? `该组 ${selectedGroup.module_ids.length} 个模块被当前概览模块预算省略。` : "该源码目录没有可见模块。"}</p>
             )}
             <div className="ct-structure-related">
               <div className="ct-structure-subheading"><strong>相关模块依赖</strong><span>{relatedRelations.length} 条可见关系</span></div>

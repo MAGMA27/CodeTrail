@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "subsystems": [
+    {
+      "id": "api",
+      "label": "API",
+      "owners": [
+        "apps/api/app/main.py",
+        "apps/api/app/service.py",
+        "apps/api/app/contracts.py"
+      ]
+    },
+    {
+      "id": "index",
+      "label": "Index & Overview",
+      "owners": [
+        "apps/api/app/indexing.py",
+        "apps/api/app/relations.py",
+        "apps/api/app/overview.py"
+      ]
+    },
+    {
+      "id": "storage",
+      "label": "Storage",
+      "owners": ["apps/api/app/storage.py"]
+    },
+    {
+      "id": "run",
+      "label": "Run",
+      "owners": [
+        "apps/api/app/run_execution.py",
+        "apps/api/app/run_sse.py",
+        "apps/api/app/issue_analysis.py"
+      ]
+    },
+    {
+      "id": "mcp",
+      "label": "MCP",
+      "owners": ["apps/api/app/mcp_server.py"]
+    },
+    {
+      "id": "web",
+      "label": "Web",
+      "owners": [
+        "apps/web/app/",
+        "apps/web/lib/"
+      ]
+    }
+  ]
+}

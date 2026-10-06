@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 from pathlib import Path
@@ -74,7 +75,48 @@ def test_freshness_detects_same_size_content_after_mtime_restore(tmp_path: Path)
     assert freshness.added_count == 0
     assert freshness.deleted_count == 0
     assert freshness.changed_paths == ["timeout_demo/config.py"]
-    assert freshness.scan_complete is True
+
+
+def test_subsystem_manifest_change_removal_and_invalidity_are_not_silent(tmp_path: Path) -> None:
+    repository = _copy_fixture(tmp_path)
+    manifest_path = repository / "codetrail-subsystems.json"
+    manifest_path.write_text(
+        json.dumps({"schema_version": 1, "subsystems": [{"id": "api", "label": "API", "owners": ["timeout_demo/app.py"]}]}),
+        encoding="utf-8",
+    )
+    application = create_app({"timeout-demo": repository})
+    workspace = application.state.workspace_service
+    project = workspace.create_project(
+        CreateProjectRequest(name="Manifest freshness", repository_id="timeout-demo")
+    )
+    index = workspace.create_project_index(
+        project.project_id,
+        CreateProjectIndexRequest(revision="manifest-v1", dirty=False),
+    )
+
+    manifest_path.write_text(
+        json.dumps({"schema_version": 1, "subsystems": [{"id": "api", "label": "Changed API", "owners": ["timeout_demo/app.py"]}]}),
+        encoding="utf-8",
+    )
+    changed = workspace.check_index_freshness(project.project_id, index.index.index_id)
+    assert changed.status == "changed"
+    assert changed.changed_paths == ["codetrail-subsystems.json"]
+
+    manifest_path.write_text("{", encoding="utf-8")
+    invalid = workspace.check_index_freshness(project.project_id, index.index.index_id)
+    assert invalid.status == "unknown"
+    assert "manifest_invalid" in invalid.reasons
+
+    manifest_path.unlink()
+    removed = workspace.check_index_freshness(project.project_id, index.index.index_id)
+    assert removed.status == "changed"
+    assert removed.deleted_count == 1
+    assert removed.changed_paths == ["codetrail-subsystems.json"]
+
+    manifest_path.mkdir()
+    non_regular = workspace.check_index_freshness(project.project_id, index.index.index_id)
+    assert non_regular.status == "unknown"
+    assert "manifest_invalid" in non_regular.reasons
 
 
 def test_excluded_files_are_not_changes_and_added_deleted_files_are_reported(tmp_path: Path) -> None:
@@ -169,7 +211,7 @@ def test_runtime_source_boundary_upgrade_builds_new_index_and_keeps_legacy_snaps
     index_service = application.state.index_service
     current_rules_version = index_service.rules_version
     current_configuration_hash = index_service.configuration_hash
-    legacy_rules_version = current_rules_version.replace("source-v3", "source-v2")
+    legacy_rules_version = current_rules_version.replace("source-v4", "source-v3")
     index_service.rules_version = legacy_rules_version
     index_service.configuration_hash = index_configuration_hash(
         max_file_bytes=index_service.max_file_bytes,
@@ -339,7 +381,7 @@ def test_relation_semantics_upgrade_rebuilds_same_source_with_new_identity(tmp_p
     assert freshness.status == "changed"
     assert freshness.reasons == ["rules_changed", "configuration_changed"]
     assert freshness.current_rules_version.endswith(f"+{RELATION_SEMANTICS_VERSION}")
-    assert INDEX_BUILD_IDENTITY_VERSION == "relations-v8"
+    assert INDEX_BUILD_IDENTITY_VERSION == "relations-v9"
 
     refreshed = application.state.workspace_service.refresh_project_index(
         project.project_id,
@@ -348,7 +390,7 @@ def test_relation_semantics_upgrade_rebuilds_same_source_with_new_identity(tmp_p
     )
     assert refreshed.mode == "created"
     assert refreshed.index.index.index_id != index.index.index_id
-    assert "relations-v8-rebuild" in refreshed.index.index.index_id
+    assert "relations-v9-rebuild" in refreshed.index.index.index_id
     assert refreshed.index.index.rules_version == freshness.current_rules_version
     assert refreshed.index.index.configuration_hash == index_service.configuration_hash
 

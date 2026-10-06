@@ -7,12 +7,14 @@ from pathlib import Path
 
 import pytest
 
-import pytest
-
 from app.indexing import (
     SnapshotBoundaryError,
+    SUBSYSTEM_MANIFEST_MAX_BYTES,
+    SUBSYSTEM_MANIFEST_PATH,
+    SubsystemManifestError,
     build_source_snapshot,
     extract_definitions,
+    parse_subsystem_manifest,
     scan_source_manifest,
 )
 
@@ -62,6 +64,95 @@ def test_snapshot_hash_and_index_id_change_with_source_content(tmp_path: Path) -
 
     assert first.index.snapshot_hash != second.index.snapshot_hash
     assert first.index.index_id != second.index.index_id
+
+
+def test_subsystem_manifest_is_captured_but_never_parsed_as_python(tmp_path: Path) -> None:
+    (tmp_path / "module.py").write_text("def handler():\n    return 1\n", encoding="utf-8")
+    manifest = {
+        "schema_version": 1,
+        "subsystems": [{"id": "api", "label": "API", "owners": ["module.py"]}],
+    }
+    (tmp_path / SUBSYSTEM_MANIFEST_PATH).write_text(json.dumps(manifest), encoding="utf-8")
+
+    snapshot = build_source_snapshot(tmp_path, repository_id="manifest-capture")
+    definitions = extract_definitions(snapshot)
+
+    assert snapshot.index.status == "ready"
+    assert {item.path for item in snapshot.files} == {"module.py", SUBSYSTEM_MANIFEST_PATH}
+    assert not [issue for issue in definitions.issues if issue.path == SUBSYSTEM_MANIFEST_PATH]
+    assert {(symbol.path, symbol.qualified_name) for symbol in definitions.symbols} == {
+        ("module.py", "module"),
+        ("module.py", "module.handler"),
+    }
+    manifest_file = next(item for item in snapshot.files if item.path == SUBSYSTEM_MANIFEST_PATH)
+    assert parse_subsystem_manifest(manifest_file.text)[0].subsystem_id == "api"
+
+
+@pytest.mark.parametrize(
+    ("manifest_text", "expected_code"),
+    [
+        ("{", "invalid_json"),
+        ('{"schema_version":1,"schema_version":1,"subsystems":[]}', "duplicate_key"),
+        ('{"schema_version":1.0,"subsystems":[{"id":"api","label":"API","owners":["src/"]}]}', "unsupported_schema_version"),
+        ('{"schema_version":1,"subsystems":[{"id":"api","label":"API","owners":["../src/"]}]}', "invalid_owner_path"),
+        ('{"schema_version":1,"subsystems":[{"id":"api","label":"API","owners":["src/","src/api.py"]}]}', "overlapping_owners"),
+    ],
+)
+def test_subsystem_manifest_rejects_unsafe_or_ambiguous_ownership(
+    manifest_text: str,
+    expected_code: str,
+) -> None:
+    with pytest.raises(SubsystemManifestError) as error:
+        parse_subsystem_manifest(manifest_text)
+
+    assert error.value.code == expected_code
+
+
+def test_subsystem_manifest_capture_precedes_source_file_budget_and_has_separate_byte_budget(tmp_path: Path) -> None:
+    source_text = "value = 1\n"
+    source_path = tmp_path / "module.py"
+    source_path.write_text(source_text, encoding="utf-8")
+    (tmp_path / SUBSYSTEM_MANIFEST_PATH).write_text(
+        json.dumps({"schema_version": 1, "subsystems": [{"id": "api", "label": "API", "owners": ["module.py"]}]}),
+        encoding="utf-8",
+    )
+
+    scan = scan_source_manifest(
+        tmp_path,
+        max_files=1,
+        max_total_bytes=source_path.stat().st_size,
+    )
+
+    assert scan.scan_complete and not scan.scan_truncated
+    assert scan.scanned_files == 2
+    assert scan.scanned_bytes > source_path.stat().st_size
+    assert {item.path for item in scan.files} == {"module.py", SUBSYSTEM_MANIFEST_PATH}
+
+
+def test_non_regular_subsystem_manifest_is_an_invalid_non_blocking_issue(tmp_path: Path) -> None:
+    (tmp_path / "module.py").write_text("value = 1\n", encoding="utf-8")
+    (tmp_path / SUBSYSTEM_MANIFEST_PATH).mkdir()
+
+    snapshot = build_source_snapshot(tmp_path, repository_id="non-regular-manifest")
+
+    assert snapshot.index.status == "ready"
+    assert all(source_file.path != SUBSYSTEM_MANIFEST_PATH for source_file in snapshot.files)
+    issue = next(issue for issue in snapshot.issues if issue.path == SUBSYSTEM_MANIFEST_PATH)
+    assert issue.kind == "manifest_invalid"
+    assert "not_a_file" in issue.message
+
+
+def test_oversized_subsystem_manifest_is_non_blocking_and_not_read(tmp_path: Path) -> None:
+    (tmp_path / "module.py").write_text("value = 1\n", encoding="utf-8")
+    (tmp_path / SUBSYSTEM_MANIFEST_PATH).write_bytes(b" " * (SUBSYSTEM_MANIFEST_MAX_BYTES + 1))
+
+    snapshot = build_source_snapshot(tmp_path, repository_id="oversized-manifest")
+
+    assert snapshot.index.status == "ready"
+    assert all(item.path != SUBSYSTEM_MANIFEST_PATH for item in snapshot.files)
+    issue = next(issue for issue in snapshot.issues if issue.path == SUBSYSTEM_MANIFEST_PATH)
+    assert issue.kind == "manifest_invalid"
+    assert issue.size == SUBSYSTEM_MANIFEST_MAX_BYTES + 1
 
 
 def test_relation_rule_identity_separates_same_source_snapshot(tmp_path: Path) -> None:

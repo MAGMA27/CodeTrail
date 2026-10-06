@@ -73,8 +73,12 @@ export function buildArchitectureGraph(
 ): ArchitectureGraphModel {
   const indexId = overview.index.index_id;
   const directoryGroups = overview.groups
-    .filter((group) => group.group_kind === "source_directory" && group.index_id === indexId)
-    .sort((left, right) => left.group_key.localeCompare(right.group_key) || left.group_id.localeCompare(right.group_id));
+    .filter((group) => ["source_directory", "responsibility"].includes(group.group_kind) && group.index_id === indexId)
+    .sort((left, right) => {
+      const leftKind = left.group_kind === "responsibility" ? 0 : 1;
+      const rightKind = right.group_kind === "responsibility" ? 0 : 1;
+      return leftKind - rightKind || left.label.localeCompare(right.label) || left.group_id.localeCompare(right.group_id);
+    });
   const groupById = new Map(directoryGroups.map((group) => [group.group_id, group]));
   const moduleById = new Map(
     overview.modules

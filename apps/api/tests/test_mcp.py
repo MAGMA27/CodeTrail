@@ -108,6 +108,18 @@ def copy_fixture(tmp_path: Path, *, name: str = "timeout-demo", default_timeout:
 
 def test_real_stdio_client_matches_http_and_returns_evidence_link(tmp_path: Path) -> None:
     repository = copy_fixture(tmp_path)
+    (repository / "codetrail-subsystems.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "subsystems": [
+                    {"id": "api", "label": "API", "owners": ["timeout_demo/app.py"]},
+                    {"id": "storage", "label": "Storage", "owners": ["timeout_demo/config.py"]},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
     roots = {"timeout-demo": repository}
     application = create_app(roots)
 
@@ -165,7 +177,7 @@ def test_real_stdio_client_matches_http_and_returns_evidence_link(tmp_path: Path
         "GET",
         f"/api/projects/{project_id}/indexes/{index_id}/overview",
     )
-    assert status == 200
+    assert status == 200, http_overview
     status, http_freshness = request(
         application,
         "POST",
@@ -1103,6 +1115,9 @@ async def _exercise_stdio(
         assert references
         assert all(reference["project_id"] == project_id for reference in references)
         assert all(reference["index_id"] == index_id for reference in references)
+        manifest_evidence = http_overview["responsibility_evidence"]
+        assert manifest_evidence is not None
+        assert any(reference["evidence_id"] == manifest_evidence["evidence_id"] for reference in references)
 
         wrong_project = await client.call_tool(
             "get_index",

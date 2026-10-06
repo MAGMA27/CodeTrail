@@ -37,6 +37,8 @@ function overview() {
     },
     rules_version: "python-entry-v1",
     entry_status: "identified",
+    responsibility_status: "not_configured",
+    responsibility_evidence: null,
     entries: [
       {
         entry_point_id: entryId,
@@ -148,6 +150,43 @@ function overview() {
 
 test("project overview validator accepts bounded snapshot-linked data", () => {
   assert.equal(isProjectOverviewResponse(overview()), true);
+});
+
+test("project overview responsibility status matches declared groups", () => {
+  const group = {
+    group_id: "group-api-responsibility",
+    index_id: indexId,
+    group_kind: "responsibility",
+    group_key: "api",
+    label: "API",
+    module_ids: [moduleId],
+    entry_point_ids: [],
+  };
+  const invalidUnconfigured = structuredClone(overview());
+  invalidUnconfigured.groups.push(group);
+  invalidUnconfigured.coverage.total_groups = 2;
+  invalidUnconfigured.coverage.visible_groups = 2;
+  assert.equal(isProjectOverviewResponse(invalidUnconfigured), false);
+
+  const ready = structuredClone(invalidUnconfigured);
+  ready.responsibility_status = "ready";
+  assert.equal(isProjectOverviewResponse(ready), true);
+
+  const partial = structuredClone(ready);
+  partial.responsibility_status = "partial";
+  assert.equal(isProjectOverviewResponse(partial), true);
+
+  const invalidWithGroup = structuredClone(ready);
+  invalidWithGroup.responsibility_status = "invalid";
+  assert.equal(isProjectOverviewResponse(invalidWithGroup), false);
+
+  const missingReadyGroup = structuredClone(overview());
+  missingReadyGroup.responsibility_status = "ready";
+  assert.equal(isProjectOverviewResponse(missingReadyGroup), false);
+
+  const invalidWithoutGroup = structuredClone(overview());
+  invalidWithoutGroup.responsibility_status = "invalid";
+  assert.equal(isProjectOverviewResponse(invalidWithoutGroup), true);
 });
 
 test("project overview validator accepts aggregated module relations and rejects mismatched edge kinds", () => {
