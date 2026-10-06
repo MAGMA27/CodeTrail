@@ -16,6 +16,8 @@
 
 快照保存文本及 hash、规则版本和配置指纹；符号、导入、HTTP request facts 和后续 evidence 属于同一不可变 index_id。Python 命中缓存后按当前 index_id 重新生成 Symbol，跨文件关系仍由当前 DefinitionMaps 解析。TypeScript 解析计数不冒充 Python AST cache hit。HTTP 客户端只接受 AST 确认的透明 `requestJson`→`fetch(apiBaseUrl + path)` 封装与静态 method；默认 method 为 GET。路径 facts 分为字面量和安全参数化模板：参数段只接受完整段的未遮蔽 `encodeURIComponent(函数参数)`，query 只允许经过当前函数体顶层 `const URLSearchParams(...).toString()` 的末尾 query；动态 query、fragment、半段/未编码插值、遮蔽、赋值和不支持的形状保留 unknown。概览对客户端与 FastAPI 声明路径做段级 overlap 检查，只有完整同形且唯一的路由才关联；字面路由与模板部分重叠会使结果 ambiguous，只有部分覆盖则为 unknown，转换器或截断候选不会被当作唯一。HTTP association 独立于 `CodeEdge`，不证明 URL 实际指向本地服务。coverage 的 `path_analysis` 将当前 v2 参数化分析、旧 v1 `literal_only` 和未分析分开；旧数据库新列默认 literal，旧 snapshot 的静态字面量关联继续可读。显式刷新和 freshness 对 TS/TSX 与 Python 使用同一文件规则和预算。
 
+工作台的 HTTP 入口链路将同一快照 association 映射回它绑定的 FastAPI handler，并单独按 handler 查询 `calls`。概览 `paths` 默认最多返回 40 条，是所有入口共享的全局预算，不能用某个 handler 未出现在列表中推断没有调用；链路也不能把同名函数、源码文本或 HTTP 形状当作静态执行边。空邻接、未解析调用和索引覆盖字段分别保留为有限观察与未知边界。
+
 GitHub 来源是 freshness 的远端例外：由于成功导入后的归档目录会清理，检查只调用共享客户端解析已跟踪 ref 的当前 commit，不读取归档、不执行 AST/关系提取，也不改变 index。结果同时保留远端 URL、请求 ref、解析 ref、commit 与 `remote_status`；远端 commit 一致时仍需独立比较 index 的 rules/config 身份。显式 GitHub 更新再次解析并通过受限固定 commit 导入，兼容的同 commit snapshot 可复用，ref 移动以实际 attempt 的 commit 为准，失败保留旧 latest。
 
 ## 错误与限制

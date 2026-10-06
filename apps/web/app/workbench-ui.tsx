@@ -35,6 +35,7 @@ import type {
   IndexSnapshot,
   NeighborDirection,
   OverviewEntryPoint,
+  OverviewHttpAssociation,
   OverviewGroup,
   OverviewModule,
   OverviewModuleRelation,
@@ -196,6 +197,7 @@ type KnowledgeUi = {
   onSelectOverviewGroup: (group: OverviewGroup) => void;
   onClearOverviewGroup: () => void;
   onOpenOverviewGraph: (entry: OverviewEntryPoint) => void;
+  onOpenHttpChain: (association: OverviewHttpAssociation) => void;
   onOpenOverviewModule: (module: OverviewModule) => void;
   onOpenArchitectureSource: (location: { indexId: string; path: string; startLine: number; endLine: number; expectedContentHash?: string }) => void;
   onRetryOverview: Action;
@@ -233,9 +235,11 @@ type EvidenceUi = {
   sourceHasNext: boolean;
   connectedEdges: CodeEdge[];
   selectedUnresolved: UnresolvedReference[];
+  hasHttpChain: boolean;
   onLoadSource: (symbol: SymbolRecord, startLine?: number) => void | Promise<void>;
   onRetrySource: Action;
   onExpandRelation: Action;
+  onReturnHttpChain: Action;
   onClose: () => void;
 };
 
@@ -250,6 +254,12 @@ type GraphUi = {
   codeIndexTruncationReason: string | null;
   codeIndexUnresolvedTruncated: boolean | null;
   codeIndexUnresolvedTruncationReason: string | null;
+  codeUnresolved: UnresolvedReference[];
+  codeHasCycle: boolean;
+  httpChain: { association: OverviewHttpAssociation; handler: SymbolRecord } | null;
+  onSelectHttpChainEvidence: (evidence: Evidence) => void;
+  onRetryHttpChain: Action;
+  onExitHttpChain: Action;
   codeFocusNodeIds: string[];
   codeSymbolCount: number;
   codeEdgeCount: number;
@@ -1213,7 +1223,7 @@ function ArchitectureSection({ overview, knowledge }: { overview: ProjectOvervie
           <ul className="ct-http-association-list">
             {overview.http_associations.map((association) => (
               <li key={association.association_id}>
-                <div className="ct-http-association-shape"><strong>{association.method}</strong><code>{association.path}</code><span>{association.client_path_kind === "parameterized" ? "参数化形状匹配" : "字面量形状匹配"}</span></div>
+                <div className="ct-http-association-shape"><strong>{association.method}</strong><code>{association.path}</code><span>{association.client_path_kind === "parameterized" ? "参数化形状匹配" : "字面量形状匹配"}</span><button type="button" className="ct-link-button" onClick={() => knowledge.onOpenHttpChain(association)}>查看链路</button></div>
                 <div className="ct-http-association-endpoint"><small>客户端 · {association.client_name}</small>{association.client_path_template ? <code>{association.client_path_template}</code> : null}<code>{association.client_module.path}</code><button type="button" onClick={() => knowledge.onOpenArchitectureSource({ indexId: overview.index.index_id, path: association.client_evidence.path, startLine: association.client_evidence.start_line, endLine: association.client_evidence.end_line, expectedContentHash: association.client_evidence.content_hash })}>查看客户端证据</button></div>
                 <div className="ct-http-association-endpoint"><small>FastAPI 路由</small><code>{association.server_module.path}</code><button type="button" onClick={() => knowledge.onOpenArchitectureSource({ indexId: overview.index.index_id, path: association.route_evidence.path, startLine: association.route_evidence.start_line, endLine: association.route_evidence.end_line, expectedContentHash: association.route_evidence.content_hash })}>查看路由证据</button></div>
               </li>
@@ -1625,7 +1635,7 @@ function EvidencePanel({ evidence }: { evidence: EvidenceUi }) {
   return (
     <aside className="ct-side-panel ct-evidence-panel" aria-label="源码证据面板">
       <div className="ct-side-panel-header"><div><p className="ct-overline">EVIDENCE</p><h2>源码证据</h2></div><button type="button" className="ct-close-button" onClick={evidence.onClose}>关闭</button></div>
-      <div className="ct-panel-switch"><button type="button" className="is-active">源码证据</button><button type="button" onClick={() => void evidence.onExpandRelation()} disabled={!canExpandRelation}>代码关系</button></div>
+      <div className="ct-panel-switch"><button type="button" className="is-active">源码证据</button><button type="button" onClick={() => void evidence.onExpandRelation()} disabled={!canExpandRelation}>代码关系</button>{evidence.hasHttpChain ? <button type="button" onClick={evidence.onReturnHttpChain}>HTTP 链路</button> : null}</div>
       <div className="ct-evidence-context"><span><small>PROJECT</small><code>{evidence.projectId ?? "—"}</code></span><span><small>INDEX</small><code>{evidence.index?.index_id ?? selected?.index_id ?? "—"}</code></span>{evidence.generationId ? <span><small>GENERATION</small><code>{evidence.generationId}</code></span> : null}{evidence.sourceResponse ? <span><small>EVIDENCE</small><code>{evidence.sourceResponse.evidence.evidence_id}</code></span> : null}</div>
       <div className="ct-panel-scroll">
         {selected ? <>
@@ -1687,16 +1697,30 @@ function GraphPanel({ graph }: { graph: GraphUi }) {
   }, [graph.codeFocusNodeIds, graph.codeModel, graph.selectedId]);
   return (
     <aside className="ct-side-panel ct-graph-panel" aria-label={isFeature ? "功能图面板" : isImpact ? "候选影响面板" : "代码关系面板"}>
-      <div className="ct-side-panel-header"><div><p className="ct-overline">{isFeature ? "FEATURE TOPOLOGY" : isImpact ? "RUN IMPACT" : "STATIC TOPOLOGY"}</p><h2>{isFeature ? "功能图" : isImpact ? "候选影响" : "代码关系"}</h2></div><button type="button" className="ct-close-button" onClick={graph.onClose}>关闭</button></div>
+      <div className="ct-side-panel-header"><div><p className="ct-overline">{isFeature ? "FEATURE TOPOLOGY" : isImpact ? "RUN IMPACT" : "STATIC TOPOLOGY"}</p><h2>{isFeature ? "功能图" : isImpact ? "候选影响" : "代码关系"}</h2></div><button type="button" className="ct-close-button" onClick={graph.httpChain ? graph.onExitHttpChain : graph.onClose}>关闭</button></div>
       <div className="ct-panel-switch"><button type="button" className={!isFeature && !isImpact ? "is-active" : ""} onClick={() => graph.onPanelModeChange("graph")}>代码关系</button><button type="button" className={isFeature ? "is-active" : ""} onClick={() => graph.onPanelModeChange("feature_graph")} disabled={!graph.featureGeneration}>功能图</button><button type="button" className={isImpact ? "is-active" : ""} onClick={() => graph.onPanelModeChange("impact")} disabled={graph.impactStatus === "idle"}>影响范围</button><button type="button" onClick={() => graph.onPanelModeChange("source")} disabled={!graph.selectedId}>源码证据</button></div>
       {!isFeature && !isImpact ? <>
-        <div className="ct-graph-toolbar"><label>方向<select value={graph.direction} onChange={(event) => graph.onChangeDirection(event.target.value as NeighborDirection)} disabled={!graph.selectedId}><option value="both">双向</option><option value="callers">调用方</option><option value="callees">被调用方</option></select></label><label className="ct-check-field"><input type="checkbox" checked={graph.edgeKinds.includes("calls")} onChange={() => graph.onToggleEdgeKind("calls")} disabled={!graph.selectedId} /><span>calls</span></label><label className="ct-check-field"><input type="checkbox" checked={graph.edgeKinds.includes("imports")} onChange={() => graph.onToggleEdgeKind("imports")} disabled={!graph.selectedId} /><span>imports</span></label><button type="button" className="ct-link-button" onClick={() => { if (graph.flowInstance) { void graph.flowInstance.fitBounds(graph.flowInstance.getNodesBounds(codeFocusNodeIds), { padding: 0.18, duration: 240 }); } }} disabled={graph.codeModel.nodes.length === 0}>聚焦</button></div>
-        <div className="ct-panel-status"><span data-state={graph.codeStatus}>{graph.codeStatus === "loading" ? "载入关系中" : graph.codeStatus === "error" ? "关系请求失败" : graph.codeStatus === "empty" ? graph.codeIndexTruncated ? "当前结果为空（索引关系未完整分析）" : graph.codeIndexUnresolvedTruncated === true ? "当前结果为空（unresolved 详情不完整）" : "当前方向没有静态边" : graph.codeStatus === "success" ? `${graph.codeSymbolCount} 个节点 · ${graph.codeEdgeCount} 条边` : "选择搜索命中后载入关系"}</span>{graph.codeTruncated ? <small>查询已截断 · {graph.codeTruncationReason}</small> : null}</div>
+        {graph.httpChain ? <div className="ct-http-chain-context">
+          <div className="ct-http-chain-steps" aria-label="HTTP 入口到静态调用链">
+            <div className="ct-http-chain-step"><small>客户端锚点</small><strong>{graph.httpChain.association.client_name}</strong><code>{graph.httpChain.association.client_module.path}</code><button type="button" onClick={() => graph.onSelectHttpChainEvidence(graph.httpChain!.association.client_evidence)}>查看客户端证据</button></div>
+            <span className="ct-http-chain-arrow" aria-hidden="true">→</span>
+            <div className="ct-http-chain-step is-shape"><small>HTTP 形状关联</small><strong>{graph.httpChain.association.method}</strong><code>{graph.httpChain.association.path}</code><span>method/path shape · 非 CodeEdge</span></div>
+            <span className="ct-http-chain-arrow" aria-hidden="true">→</span>
+            <div className="ct-http-chain-step"><small>FastAPI handler</small><strong title={graph.httpChain.handler.qualified_name}>{graph.httpChain.handler.qualified_name}</strong><code>{graph.httpChain.handler.path}:L{graph.httpChain.handler.start_line}–L{graph.httpChain.handler.end_line}</code><button type="button" onClick={() => graph.onSelectHttpChainEvidence(graph.httpChain!.association.route_evidence)}>查看路由证据</button></div>
+          </div>
+          <p>客户端函数只作入口锚点；下图从该 handler 查询同一 index 的静态 calls，最多向下 2 层、40 个符号。深度之外、未解析或未提取的关系不会补猜。</p>
+          <button type="button" className="ct-link-button" onClick={graph.onExitHttpChain}>退出链路</button>
+        </div> : null}
+        {graph.httpChain ? <div className="ct-graph-toolbar ct-http-chain-toolbar"><span>向下 · calls only · 深度 2 · 最多 40 个节点</span><button type="button" className="ct-link-button" onClick={() => graph.flowInstance?.fitView({ padding: 0.18, duration: 240 })} disabled={graph.codeModel.nodes.length === 0}>聚焦</button></div> : <div className="ct-graph-toolbar"><label>方向<select value={graph.direction} onChange={(event) => graph.onChangeDirection(event.target.value as NeighborDirection)} disabled={!graph.selectedId}><option value="both">双向</option><option value="callers">调用方</option><option value="callees">被调用方</option></select></label><label className="ct-check-field"><input type="checkbox" checked={graph.edgeKinds.includes("calls")} onChange={() => graph.onToggleEdgeKind("calls")} disabled={!graph.selectedId} /><span>calls</span></label><label className="ct-check-field"><input type="checkbox" checked={graph.edgeKinds.includes("imports")} onChange={() => graph.onToggleEdgeKind("imports")} disabled={!graph.selectedId} /><span>imports</span></label><button type="button" className="ct-link-button" onClick={() => { if (graph.flowInstance) { void graph.flowInstance.fitBounds(graph.flowInstance.getNodesBounds(codeFocusNodeIds), { padding: 0.18, duration: 240 }); } }} disabled={graph.codeModel.nodes.length === 0}>聚焦</button></div>}
+        <div className="ct-panel-status"><span data-state={graph.codeStatus}>{graph.codeStatus === "loading" ? graph.httpChain ? "载入 handler 下游静态 calls" : "载入关系中" : graph.codeStatus === "error" ? "关系请求失败" : graph.codeStatus === "empty" ? graph.httpChain ? "当前有界查询没有返回静态 calls" : graph.codeIndexTruncated ? "当前结果为空（索引关系未完整分析）" : graph.codeIndexUnresolvedTruncated === true ? "当前结果为空（unresolved 详情不完整）" : "当前方向没有静态边" : graph.codeStatus === "success" ? `${graph.codeSymbolCount} 个节点 · ${graph.codeEdgeCount} 条边` : "选择搜索命中后载入关系"}</span>{graph.codeTruncated ? <small>查询已截断 · {graph.codeTruncationReason}</small> : null}</div>
         {graph.codeIndexTruncated ? <p className="ct-graph-coverage-warning" role="status">当前固定索引的关系提取未完成 · {graph.codeIndexTruncationReason}；空邻接不能证明没有关系。</p> : null}
         {graph.codeIndexUnresolvedTruncated === true ? <p className="ct-graph-coverage-warning" role="status">当前固定索引的 unresolved 详情已截断 · {graph.codeIndexUnresolvedTruncationReason}；未返回的 unresolved 不能被当作不存在。</p> : null}
         {graph.codeSymbolCount > 0 && graph.codeIndexUnresolvedTruncated === null ? <p className="ct-graph-coverage-warning" role="status">当前旧索引未记录 unresolved 覆盖状态；不把缺失的 unresolved 当作不存在。</p> : null}
-        {graph.codeError ? <p className="ct-inline-error" role="alert">{graph.codeError}</p> : null}
-        <div className="ct-graph-legend"><span><i className="is-calls" />calls</span><span><i className="is-imports" />imports</span><small>局部静态子图 · 视口聚焦 {graph.codeFocusNodeIds.length > 0 ? `${codeFocusNodeIds.length} 个节点` : "全部节点"}</small></div>
+        {graph.codeError ? <p className="ct-inline-error" role="alert">{graph.codeError}{graph.httpChain ? <button type="button" className="ct-link-button" onClick={graph.onRetryHttpChain}>重试</button> : null}</p> : null}
+        {graph.codeStatus === "empty" && graph.httpChain ? <p className="ct-graph-coverage-warning" role="status">空结果不能证明 handler 没有服务或存储调用；本查询只覆盖已提取的同快照静态 calls 和前 2 层。</p> : null}
+        {graph.httpChain && graph.codeHasCycle ? <p className="ct-graph-coverage-warning" role="status">当前返回的 calls 中检测到循环边；相同符号只展开一次，循环边保留显示。</p> : null}
+        {graph.httpChain && graph.codeUnresolved.length > 0 ? <div className="ct-http-chain-unresolved"><strong>未解析调用 · {graph.codeUnresolved.length}</strong>{graph.codeUnresolved.map((item) => <span key={item.unresolved_id}><code>{item.expression}</code> · {item.reason} · {item.path}:L{item.start_line}</span>)}</div> : null}
+        <div className="ct-graph-legend"><span><i className="is-calls" />calls</span>{graph.httpChain ? <small>handler 下游局部静态子图 · 每个符号至多展开一次</small> : <><span><i className="is-imports" />imports</span><small>局部静态子图 · 视口聚焦 {graph.codeFocusNodeIds.length > 0 ? `${codeFocusNodeIds.length} 个节点` : "全部节点"}</small></>}</div>
         <GraphCanvas model={codeViewModel} nodeTypes={graph.codeNodeTypes} onInit={graph.onCodeInit} onNodeClick={graph.onCodeNodeClick} focusNodeIds={graph.codeFocusNodeIds} emptyTitle="建立或打开索引后，这里会显示关系图。" />
       </> : isFeature ? <>
         <div className="ct-graph-toolbar"><span className="ct-graph-legend"><span><i className="is-semantic" />语义关联</span><span><i className="is-static" />静态 CodeEdge</span></span><button type="button" className="ct-link-button" onClick={() => graph.featureFlowInstance?.fitView({ padding: 0.18, duration: 240 })} disabled={graph.featureModel.nodes.length === 0}>聚焦</button></div>

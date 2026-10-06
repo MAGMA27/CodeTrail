@@ -2,7 +2,9 @@
 
 `python -m app.mcp_server` 启动 MCP SDK `2.2.0` 的本地 stdio 服务；stdout 只承载协议帧，日志写 stderr。服务复用 WorkspaceService，不直接访问 SQLite，不创建索引，不执行仓库代码。
 
-默认只读工具包括项目、索引、`check_index_freshness`、Session/消息、概览、功能历史/版本/图，以及 `list_session_runs`、`get_session_run`、`list_run_events`、`list_run_tool_results`、`get_run_report`、`get_run_impact`。新鲜度检查按当前本地源码内容 hash 做有界只读核对，不创建索引；Run 读取和影响查询只返回持久化报告及其固定快照上的静态结果，不重新执行分析。
+默认只读工具包括项目、索引、`check_index_freshness`、Session/消息、`get_overview`、`get_neighbors`、`read_source`、功能历史/版本/图，以及 `list_session_runs`、`get_session_run`、`list_run_events`、`list_run_tool_results`、`get_run_report`、`get_run_impact`。新鲜度检查按当前本地源码内容 hash 做有界只读核对，不创建索引；Run 读取和影响查询只返回持久化报告及其固定快照上的静态结果，不重新执行分析。
+
+HTTP 入口链路没有额外 MCP 工具：外部 Agent 从 `get_overview` 读取同一 `project_id/index_id` 的 HTTP association 与路由入口，再将入口的 handler symbol 传给 `get_neighbors(direction="callees", depth=2, limit=40, edge_kinds=["calls"])`，并可用 `read_source` 读取关联两端或返回静态边的同快照源码。`overview.paths` 默认 40 条是整个概览共享的上限，不是 handler 独立覆盖；因此要判断返回观察，必须直接查询 handler。MCP 和 HTTP 调用相同 WorkspaceService，保持相同节点、边、evidence 与截断字段。查询使用现有邻接默认预算：最多 200 条边、1 秒、64,000 输出字节；空邻接与 `unresolved`/索引覆盖字段均不代表静态执行链完整。
 
 设置 `CODETRAIL_MCP_INDEX_WRITE_ENABLED=1` 后，独立增加 `refresh_index`；它只允许对项目当前 latest 做有界复核，在完整安全扫描下对旧 metadata/源码/规则/配置变化执行显式当前复用、兼容历史快照复用或重建，失败保留旧 latest。GitHub 导入开关同时开启时，MCP 另注册 `refresh_github_source`；它只允许对当前 latest 的 GitHub 项目显式检查并通过受限官方归档更新，复用/重建和失败保留语义与 HTTP 相同。设置 `CODETRAIL_MCP_RUN_WRITE_ENABLED=1` 后，独立增加 `start_session_run` 和 `cancel_session_run`；它允许显式选择 fixture 或 real，但 real 还要求 `CODETRAIL_MCP_REAL_RUN_ENABLED=1`，不会因为 Run 写开关开放 `create_session` 或 `append_session_message`。Session 写入仍需 `CODETRAIL_MCP_SESSION_WRITE_ENABLED=1`。未设置时 MCP 保持只读工具，默认只读工具不会调用模型或 Run。
 

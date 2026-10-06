@@ -5,6 +5,8 @@ import type { CodeEdge, NeighborsResponse, SymbolRecord } from "./api.ts";
 import {
   emptyGraphState,
   groupSymbolsByDirectory,
+  hasDirectedCallCycle,
+  isHttpCallChainResponse,
   isLatestRequest,
   mergeNeighborGraph,
   unresolvedForSymbol,
@@ -100,4 +102,38 @@ test("stale request IDs and unresolved references stay explicit", () => {
   };
   assert.deepEqual(unresolvedForSymbol([unresolved], root.symbol_id), [unresolved]);
   assert.deepEqual(unresolvedForSymbol([unresolved], child.symbol_id), []);
+});
+
+test("HTTP chain results stay on the requested calls graph and expose bounded cycles", () => {
+  assert.equal(isHttpCallChainResponse(response, indexId, root.symbol_id), true);
+  assert.equal(isHttpCallChainResponse(response, "another-index", root.symbol_id), false);
+  assert.equal(isHttpCallChainResponse(response, indexId, child.symbol_id), false);
+  assert.equal(
+    isHttpCallChainResponse({
+      ...response,
+      neighbors: [{ symbol: child, edge: { ...edge("edge-import", root.symbol_id, child.symbol_id), kind: "imports" } }],
+    }, indexId, root.symbol_id),
+    false,
+  );
+  const unknownCall = {
+    unresolved_id: "unresolved-one",
+    index_id: indexId,
+    source_symbol_id: root.symbol_id,
+    path: root.path,
+    expression: "dynamic_call()",
+    reason: "dynamic_call_target",
+    possible_target_ids: [],
+    start_line: 20,
+    end_line: 20,
+  };
+  assert.equal(isHttpCallChainResponse({ ...response, unresolved: [unknownCall] }, indexId, root.symbol_id), true);
+  assert.equal(
+    isHttpCallChainResponse({ ...response, unresolved: [{ ...unknownCall, source_symbol_id: "missing" }] }, indexId, root.symbol_id),
+    false,
+  );
+  assert.equal(hasDirectedCallCycle(root.symbol_id, [edge("edge-out", root.symbol_id, child.symbol_id)]), false);
+  assert.equal(hasDirectedCallCycle(root.symbol_id, [
+    edge("edge-out", root.symbol_id, child.symbol_id),
+    edge("edge-back", child.symbol_id, root.symbol_id),
+  ]), true);
 });

@@ -78,6 +78,63 @@ export function mergeNeighborGraph(previous: GraphState, response: NeighborsResp
   };
 }
 
+export function isHttpCallChainResponse(
+  response: NeighborsResponse,
+  indexId: string,
+  rootSymbolId: string,
+): boolean {
+  const symbols = [response.root, ...response.nodes, ...response.neighbors.map((item) => item.symbol)];
+  const symbolIds = new Set(symbols.map((symbol) => symbol.symbol_id));
+  return (
+    response.index_id === indexId &&
+    response.root.index_id === indexId &&
+    response.root.symbol_id === rootSymbolId &&
+    symbols.every((symbol) => symbol.index_id === indexId) &&
+    response.neighbors.every(({ edge, symbol }) =>
+      edge.index_id === indexId &&
+      edge.kind === "calls" &&
+      edge.target_id === symbol.symbol_id &&
+      symbolIds.has(edge.source_id)
+    ) &&
+    response.unresolved.every((item) =>
+      item.index_id === indexId && symbolIds.has(item.source_symbol_id),
+    )
+  );
+}
+
+export function hasDirectedCallCycle(rootSymbolId: string, edges: CodeEdge[]): boolean {
+  const outgoing = new Map<string, string[]>();
+  for (const edge of edges) {
+    if (edge.kind !== "calls") {
+      continue;
+    }
+    const targets = outgoing.get(edge.source_id) ?? [];
+    targets.push(edge.target_id);
+    outgoing.set(edge.source_id, targets);
+  }
+
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const visit = (symbolId: string): boolean => {
+    if (visiting.has(symbolId)) {
+      return true;
+    }
+    if (visited.has(symbolId)) {
+      return false;
+    }
+    visiting.add(symbolId);
+    for (const targetId of outgoing.get(symbolId) ?? []) {
+      if (visit(targetId)) {
+        return true;
+      }
+    }
+    visiting.delete(symbolId);
+    visited.add(symbolId);
+    return false;
+  };
+  return visit(rootSymbolId);
+}
+
 export function groupSymbolsByDirectory(symbols: SymbolRecord[]): SymbolGroup[] {
   const groups = new Map<string, SymbolRecord[]>();
   for (const symbol of symbols) {

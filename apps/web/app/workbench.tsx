@@ -76,6 +76,7 @@ import {
   type LocalImportResponse,
   type NeighborDirection,
   type OverviewEntryPoint,
+  type OverviewHttpAssociation,
   type OverviewGroup,
   type OverviewModule,
   type ProjectOverview,
@@ -104,6 +105,8 @@ import {
   emptyGraphState,
   edgeKindLabel,
   groupSymbolsByDirectory,
+  hasDirectedCallCycle,
+  isHttpCallChainResponse,
   isLatestRequest,
   mergeNeighborGraph,
   unresolvedForSymbol,
@@ -126,11 +129,16 @@ type ImpactSelection = {
   findingId?: string;
 };
 
+type HttpEntryChain = {
+  association: OverviewHttpAssociation;
+  handler: SymbolRecord;
+};
+
 type SymbolNodeData = {
   symbol: SymbolRecord;
   selected: boolean;
   onSelect: (symbolId: string) => void;
-  onExpand: (symbolId: string) => void;
+  onExpand: ((symbolId: string) => void) | null;
 };
 
 type GroupNodeData = {
@@ -178,17 +186,17 @@ function SymbolFlowNodeView({ data, selected }: NodeProps<SymbolFlowNode>) {
       <span className="flow-symbol-line">
         {data.symbol.path}:{data.symbol.start_line}
       </span>
-      <button
-        type="button"
-        className="flow-expand-button nodrag"
-        aria-label={`展开 ${data.symbol.qualified_name} 的关系`}
-        onClick={(event) => {
-          event.stopPropagation();
-          data.onExpand(data.symbol.symbol_id);
-        }}
-      >
-        +
-      </button>
+      {data.onExpand ? <button
+          type="button"
+          className="flow-expand-button nodrag"
+          aria-label={`展开 ${data.symbol.qualified_name} 的关系`}
+          onClick={(event) => {
+            event.stopPropagation();
+            data.onExpand?.(data.symbol.symbol_id);
+          }}
+        >
+          +
+        </button> : null}
       <Handle type="source" position={Position.Right} id="source" />
     </div>
   );
@@ -519,6 +527,7 @@ export default function Workbench() {
   const [overviewError, setOverviewError] = useState<string | null>(null);
   const [selectedOverviewEntryId, setSelectedOverviewEntryId] = useState<string | null>(null);
   const [selectedOverviewGroupId, setSelectedOverviewGroupId] = useState<string | null>(null);
+  const [httpEntryChain, setHttpEntryChain] = useState<HttpEntryChain | null>(null);
   const [featureStatus, setFeatureStatus] = useState<AsyncStatus>("idle");
   const [featureGeneration, setFeatureGeneration] = useState<FeatureGeneration | null>(null);
   const [featureError, setFeatureError] = useState<string | null>(null);
@@ -831,6 +840,7 @@ export default function Workbench() {
     setOverviewError(null);
     setSelectedOverviewEntryId(null);
     setSelectedOverviewGroupId(null);
+    setHttpEntryChain(null);
     featureRequestId.current += 1;
     featureIdempotencyKey.current = null;
     setFeatureStatus("idle");
@@ -2811,10 +2821,12 @@ export default function Workbench() {
       replace: boolean,
       requestedDirection = direction,
       requestedEdgeKinds = edgeKinds,
+      requestedHttpChain: HttpEntryChain | null = null,
     ) => {
       if (!selectedProjectId) {
         return;
       }
+      setHttpEntryChain(requestedHttpChain);
       graphController.current?.abort();
       const controller = new AbortController();
       graphController.current = controller;
@@ -2838,6 +2850,9 @@ export default function Workbench() {
         );
         if (!isLatestRequest(requestId, graphRequestId.current)) {
           return;
+        }
+        if (requestedHttpChain && !isHttpCallChainResponse(response, indexId, requestedHttpChain.handler.symbol_id)) {
+          throw new Error("链路响应与选定 HTTP 关联、handler 或静态 calls 快照不一致。");
         }
         setGraph((previous) =>
           mergeNeighborGraph(replace ? emptyGraphState : previous, response),
@@ -2918,9 +2933,64 @@ export default function Workbench() {
     [indexResponse, loadNeighborhood, overview, selectSymbol],
   );
 
+  const openHttpEntryChain = useCallback(
+    (association: OverviewHttpAssociation) => {
+      if (!indexResponse || !overview || !selectedProjectId) {
+        return;
+      }
+      const indexId = indexResponse.index.index_id;
+      const route = overview.entries.find((entry) => entry.entry_point_id === association.route_entry_point_id);
+      const handler = route?.handler_symbol;
+      if (
+        overview.project_id !== selectedProjectId ||
+        overview.index.index_id !== indexId ||
+        association.index_id !== indexId ||
+        association.client_evidence.index_id !== indexId ||
+        association.route_evidence.index_id !== indexId ||
+        route?.kind !== "fastapi_route" ||
+        route.index_id !== indexId ||
+        route.http_method !== association.method ||
+        route.declared_path !== association.path ||
+        !handler ||
+        handler.index_id !== indexId
+      ) {
+        graphController.current?.abort();
+        graphRequestId.current += 1;
+        setHttpEntryChain(null);
+        setGraph(emptyGraphState);
+        setGraphStatus("error");
+        setGraphError("HTTP 关联没有匹配当前固定索引的 FastAPI handler。");
+        setViewMode("overview");
+        setPanelMode("graph");
+        return;
+      }
+      setSelectedOverviewEntryId(route.entry_point_id);
+      setViewMode("overview");
+      setPanelMode("graph");
+      void loadNeighborhood(indexId, handler.symbol_id, true, "callees", ["calls"], {
+        association,
+        handler,
+      });
+    },
+    [indexResponse, loadNeighborhood, overview, selectedProjectId],
+  );
+
+  const exitHttpEntryChain = useCallback(() => {
+    graphController.current?.abort();
+    graphRequestId.current += 1;
+    setHttpEntryChain(null);
+    setGraph(emptyGraphState);
+    setGraphStatus("idle");
+    setGraphError(null);
+    setPanelMode("none");
+  }, []);
+
   const selectOverviewGroup = useCallback((group: OverviewGroup) => {
+    graphController.current?.abort();
+    graphRequestId.current += 1;
     setSelectedOverviewGroupId(group.group_id);
     setSelectedOverviewEntryId(null);
+    setHttpEntryChain(null);
     setPanelMode("none");
   }, []);
 
@@ -3070,6 +3140,64 @@ export default function Workbench() {
   }, [groups]);
 
   const flowModel = useMemo(() => {
+    if (httpEntryChain) {
+      const depthById = new Map<string, number>([[httpEntryChain.handler.symbol_id, 0]]);
+      for (let depth = 0; depth < 2; depth += 1) {
+        for (const edge of graph.edges) {
+          if (edge.kind === "calls" && depthById.get(edge.source_id) === depth && !depthById.has(edge.target_id)) {
+            depthById.set(edge.target_id, depth + 1);
+          }
+        }
+      }
+      const rowsByDepth = new Map<number, number>();
+      const nodes: SymbolFlowNode[] = graph.symbols
+        .filter((symbol) => depthById.has(symbol.symbol_id))
+        .sort((left, right) =>
+          (depthById.get(left.symbol_id) ?? 0) - (depthById.get(right.symbol_id) ?? 0) ||
+          left.qualified_name.localeCompare(right.qualified_name),
+        )
+        .map((symbol) => {
+          const depth = depthById.get(symbol.symbol_id) ?? 0;
+          const row = rowsByDepth.get(depth) ?? 0;
+          rowsByDepth.set(depth, row + 1);
+          return {
+            id: symbol.symbol_id,
+            type: "symbol",
+            position: { x: 28 + depth * 226, y: 28 + row * 104 },
+            data: {
+              symbol,
+              selected: symbol.symbol_id === selectedId,
+              onSelect: (symbolId) => {
+                const next = graph.symbols.find((candidate) => candidate.symbol_id === symbolId);
+                if (next) selectSymbol(next);
+              },
+              onExpand: null,
+            },
+            style: { width: 196 },
+            draggable: false,
+          };
+        });
+      const nodeIds = new Set(nodes.map((node) => node.id));
+      const edges: FlowEdge[] = graph.edges
+        .filter((edge) => edge.kind === "calls" && nodeIds.has(edge.source_id) && nodeIds.has(edge.target_id))
+        .map((edge) => ({
+          id: edge.edge_id,
+          source: edge.source_id,
+          target: edge.target_id,
+          sourceHandle: "source",
+          targetHandle: "target",
+          type: "smoothstep",
+          label: "calls",
+          data: { kind: "calls" },
+          markerEnd: { type: MarkerType.ArrowClosed },
+          style: { stroke: "#f3a65b", strokeWidth: 2 },
+          labelStyle: { fill: "#e7ece8", fontSize: 10, fontWeight: 700 },
+          labelBgStyle: { fill: "#152421", fillOpacity: 0.92 },
+          labelBgPadding: [5, 3] as [number, number],
+        }));
+      return { nodes, edges };
+    }
+
     const nodes: FlowNode[] = [];
     const visibleSymbolIds = new Set<string>();
     groups.forEach((group, groupIndex) => {
@@ -3146,7 +3274,12 @@ export default function Workbench() {
         labelBgPadding: [5, 3] as [number, number],
       }));
     return { nodes, edges };
-  }, [expandedGroups, graph.edges, graph.symbols, groups, indexResponse, loadNeighborhood, selectedId, selectSymbol, toggleGroup]);
+  }, [expandedGroups, graph.edges, graph.symbols, groups, httpEntryChain, indexResponse, loadNeighborhood, selectedId, selectSymbol, toggleGroup]);
+
+  const httpChainHasCycle = useMemo(
+    () => Boolean(httpEntryChain && hasDirectedCallCycle(httpEntryChain.handler.symbol_id, graph.edges)),
+    [graph.edges, httpEntryChain],
+  );
 
   const codeFocusNodeIds = useMemo(() => {
     if (!selectedId || !flowModel.nodes.some((node) => node.id === selectedId)) {
@@ -3378,6 +3511,9 @@ export default function Workbench() {
         onRepositoryIdChange: setRepositoryId,
         onSelectProject: (projectId) => {
           if (projectId === selectedProjectId) return;
+          graphController.current?.abort();
+          graphRequestId.current += 1;
+          setHttpEntryChain(null);
           setProjectError(null);
           sessionLink.current = null;
           sessionLinkApplied.current = true;
@@ -3526,6 +3662,7 @@ export default function Workbench() {
         onSelectOverviewGroup: selectOverviewGroup,
         onClearOverviewGroup: () => setSelectedOverviewGroupId(null),
         onOpenOverviewGraph: openOverviewEntryGraph,
+        onOpenHttpChain: openHttpEntryChain,
         onOpenOverviewModule: openOverviewModule,
         onOpenArchitectureSource: openArchitectureSource,
         onRetryOverview: () => {
@@ -3579,6 +3716,7 @@ export default function Workbench() {
         sourceHasNext: Boolean(sourceHasNext),
         connectedEdges,
         selectedUnresolved,
+        hasHttpChain: httpEntryChain !== null,
         onLoadSource: loadSource,
         onRetrySource: () => {
           if (selectedSymbol) {
@@ -3592,7 +3730,14 @@ export default function Workbench() {
             void loadNeighborhood(selectedSymbol.index_id, selectedSymbol.symbol_id, false);
           }
         },
-        onClose: () => setPanelMode("none"),
+        onReturnHttpChain: () => setPanelMode("graph"),
+        onClose: () => {
+          if (httpEntryChain) {
+            exitHttpEntryChain();
+          } else {
+            setPanelMode("none");
+          }
+        },
       }}
       graph={{
         panelMode: panelMode === "feature_graph" ? "feature_graph" : panelMode === "impact" ? "impact" : "graph",
@@ -3605,6 +3750,16 @@ export default function Workbench() {
         codeIndexTruncationReason: graph.indexTruncationReason,
         codeIndexUnresolvedTruncated: graph.indexUnresolvedTruncated,
         codeIndexUnresolvedTruncationReason: graph.indexUnresolvedTruncationReason,
+        codeUnresolved: graph.unresolved,
+        codeHasCycle: httpChainHasCycle,
+        httpChain: httpEntryChain,
+        onSelectHttpChainEvidence: selectFeatureEvidence,
+        onRetryHttpChain: () => {
+          if (httpEntryChain) {
+            openHttpEntryChain(httpEntryChain.association);
+          }
+        },
+        onExitHttpChain: exitHttpEntryChain,
         codeFocusNodeIds,
         codeSymbolCount: graph.symbols.length,
         codeEdgeCount: graph.edges.length,
@@ -3651,7 +3806,13 @@ export default function Workbench() {
         featureFlowInstance,
         selectedId,
         onPanelModeChange: setPanelMode,
-        onClose: () => setPanelMode("none"),
+        onClose: () => {
+          if (httpEntryChain) {
+            exitHttpEntryChain();
+          } else {
+            setPanelMode("none");
+          }
+        },
       }}
       viewMode={viewMode}
       onViewModeChange={setViewMode}
