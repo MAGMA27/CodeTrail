@@ -2,11 +2,15 @@
 
 ## 状态
 
-已实现 Python 与 TypeScript/TSX 的有界不可变源码快照、定义、相对导入和保守 HTTP path facts，以及本地 freshness 检查和显式索引更新；Python 继续使用文件级定义/关系事实缓存，TypeScript 使用每次有界冷 AST 解析，不计入 Python AST/cache 统计。TypeScript 语法错误、锁定解析器不可用和快照扫描不完整都会显式令新索引 failed。源码捕获规则为 `source-v4`，TypeScript 编译器锁定 `5.9.3`，当前静态 facts 规则为 `typescript-facts-v2`，关系语义为 `relations-v6`，Python 关系事实缓存规则/格式为 `python-relation-facts-v4` / `relation-facts-v4`，索引身份为 `relations-v10`；定义/关系目标仍基于当前快照全量解析，不是完整增量索引。
+已实现 Python 与 TypeScript/TSX 的有界不可变源码快照、定义、相对导入和保守 HTTP path facts，以及本地 freshness 检查和显式索引更新；Python 继续使用文件级定义/关系事实缓存，TypeScript 使用每次有界冷 AST 解析，不计入 Python AST/cache 统计。TypeScript 语法错误、锁定解析器不可用和快照扫描不完整都会显式令新索引 failed。源码捕获规则为 `source-v4`，TypeScript 编译器锁定 `5.9.3`，当前静态 facts 规则为 `typescript-facts-v2`，关系语义为 `relations-v7`，Python 关系事实缓存规则/格式为 `python-relation-facts-v4` / `relation-facts-v4`，索引身份为 `relations-v11`；定义/关系目标仍基于当前快照全量解析，不是完整增量索引。
 
-Python calls 可将安全实例构造点绑定到构造器直接赋值的 `self.field`，再解析 `self.field.method()`。仅当当前快照中该类的所有可解析构造调用都把同一个安全类实例传给唯一参数、构造器与参数绑定没有动态展开/重赋值、类无继承/装饰器/`__new__` 或自定义属性协议，并且同名字段没有不兼容写入或可识别类引用逃逸时才生成静态边。裸类名作为普通调用实参、直接返回类名、字段/局部别名和绕过 `__init__` 的 `Class.__new__(Class)` 都使该类的实例来源不再可证明；仅有未知动态反射仍不构成运行时保证。类型注解不会单独证明实例类型；工厂、未知构造点、字段变更和未证明为同类实例的外部多段字段写继续 unresolved。该边只表示快照中的静态语法一致，不保证运行时一定采用该类型或执行调用。HTTP handlers 与 MCP 使用同一关系索引和解析结果。
+Python calls 可将安全实例构造点绑定到构造器直接赋值的 `self.field`，再解析 `self.field.method()`。仅当当前快照中该类的所有可解析构造调用都把同一个安全类实例传给唯一参数、构造器与参数绑定没有动态展开/重赋值、类无继承/装饰器/`__new__` 或自定义属性协议，并且同名字段没有不兼容写入或可识别类引用逃逸时才生成静态边。裸类名作为普通调用实参、直接返回类名、字段/局部别名和绕过 `__init__` 的 `Class.__new__(Class)` 都使该类的实例来源不再可证明；仅有未知动态反射仍不构成运行时保证。类型注解不会单独证明实例类型；工厂、未知构造点、字段变更和未证明为同类实例的外部多段字段写继续 unresolved。该边只表示快照中的静态语法一致，不保证运行时一定采用该类型或执行调用。
+
+对已证明的正常构造接收者，关系索引还可记录独立 `ContextualCall`，绑定同快照实际返回的 `calls` 激活边、字段方法调用、构造位置和字段赋值位置；它仅在激活边出现在 neighbors 或 Run 工具结果时返回，不进入 `static_edges`、静态影响或概览。对象写入普通属性容器后可能发生的重绑以 `binding_mutation_after_escape_unverified` 标记；未知别名、改写、闭包和同一行多构造仍保守拒绝，旧 index 读取为空。HTTP 与 MCP 使用同一关系索引和解析结果。
 
 ## 职责与范围
+
+Python 绝对导入可使用捕获快照中唯一嵌套 package 的短名：依据 `__init__.py` 包边界建立别名，canonical 名称优先，同名包根多义时拒绝。Symbol 的限定名与 ID 保持原值；不读取运行环境的 sys.path，也不加载或执行仓库。
 
 读取受限 `.py`、`.ts`、`.tsx` 源码并提取静态事实；不执行目标仓库，不把动态猜测当确定边。目录扫描和 freshness 使用一致的文件数、字节、单文件大小和时间预算；同时排除 `.next`、`.turbo`、`.vercel`、`.vite`、`.parcel-cache`、`coverage`、`out`、`storybook-static`、`target` 及既有依赖/运行数据目录。
 
@@ -30,8 +34,8 @@ GitHub 来源是 freshness 的远端例外：由于成功导入后的归档目�
 
 ## 验证
 
-apps/api/tests/test_indexing.py、test_relations.py、test_storage.py、test_freshness.py 和 test_definition_cache.py 覆盖稳定 ID、规则版本隔离、路径约束、资源预算、定义/关系事实缓存冷热等价、共享 AST、失效/损坏/容量/并发/失败降级、内容 hash 新鲜度、显式复用/重建、旧元数据和 latest 保留；其中 test_relations.py 还覆盖局部构造实例的正例及控制流/重赋值/继承/装饰器/属性覆盖反例，test_definition_cache.py 覆盖被调用类修改/恢复后的当前快照重绑定，test_freshness.py 覆盖关系语义升级时的 rules/config 变化、新 index 身份和重复复用；test_mcp.py 覆盖 HTTP/MCP 检查结果一致及独立 index 写开关。本项目的冷/热/单文件/目标重绑定/禁用缓存和跨进程实测见 [本项目索引更新与缓存效果联合验收](../../docs/decisions/2026-09-16-project-index-cache-acceptance.md)，[TypeScript 静态索引与 HTTP 形状关联](../../docs/decisions/2026-10-06-typescript-http-overview.md)，关系目标解析与两阶段实际计数均有独立证据。
+apps/api/tests/test_indexing.py、test_relations.py、test_storage.py、test_freshness.py 和 test_definition_cache.py 覆盖稳定 ID、规则版本隔离、路径约束、资源预算、定义/关系事实缓存冷热等价、共享 AST、失效/损坏/容量/并发/失败降级、内容 hash 新鲜度、显式复用/重建、旧元数据和 latest 保留；其中 test_relations.py 覆盖局部构造实例的静态/条件关系与保守拒绝边界，test_definition_cache.py 覆盖条件调用的冷热等价和跨文件重绑定，test_mcp.py 覆盖 HTTP 与冷 stdio neighbors 条件记录的一致性。本项目的缓存跨进程实测见 [索引更新与缓存效果联合验收](../../docs/decisions/2026-09-16-project-index-cache-acceptance.md)、[TypeScript 静态索引与 HTTP 形状关联](../../docs/decisions/2026-10-06-typescript-http-overview.md) 和 [Python 实例字段条件调用](../../docs/decisions/2026-10-07-python-contextual-instance-calls.md)。
 
 ## 相关决策
 
-当前依据为现有实现和根目录开发约束；取舍记录在 [关系扫描与 unresolved 覆盖语义](../../docs/decisions/2026-09-13-relation-coverage.md)、[本地项目索引新鲜度与显式更新](../../docs/decisions/2026-09-15-index-freshness.md)、[GitHub 远端 ref 新鲜度与显式更新](../../docs/decisions/2026-09-16-github-remote-freshness.md)、[文件级定义提取缓存](../../docs/decisions/2026-09-15-definition-extraction-cache.md)、[文件关系事实缓存与全快照目标解析](../../docs/decisions/2026-09-15-relation-facts-cache.md)、[保守解析 Python threadpool 包装调用](../../docs/decisions/2026-10-06-python-threadpool-calls.md) 和 [本项目索引更新与缓存效果联合验收](../../docs/decisions/2026-09-16-project-index-cache-acceptance.md)，其他重要取舍记录到 [决策目录](../../docs/decisions/README.md)。
+当前依据为现有实现和根目录开发约束；取舍记录在 [关系扫描与 unresolved 覆盖语义](../../docs/decisions/2026-09-13-relation-coverage.md)、[本地项目索引新鲜度与显式更新](../../docs/decisions/2026-09-15-index-freshness.md)、[GitHub 远端 ref 新鲜度与显式更新](../../docs/decisions/2026-09-16-github-remote-freshness.md)、[文件级定义提取缓存](../../docs/decisions/2026-09-15-definition-extraction-cache.md)、[文件关系事实缓存与全快照目标解析](../../docs/decisions/2026-09-15-relation-facts-cache.md)、[保守解析 Python threadpool 包装调用](../../docs/decisions/2026-10-06-python-threadpool-calls.md)、[Python 实例字段条件调用](../../docs/decisions/2026-10-07-python-contextual-instance-calls.md) 和 [本项目索引更新与缓存效果联合验收](../../docs/decisions/2026-09-16-project-index-cache-acceptance.md)，其他重要取舍记录到 [决策目录](../../docs/decisions/README.md)。

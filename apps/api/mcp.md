@@ -1,5 +1,7 @@
 # 本地 MCP 配置
 
+`get_neighbors` 与 `run_get_neighbors` 独立返回构造上下文 `contextual_calls`：绑定实际返回的激活 calls 边，条件目标不增加普通 nodes/static_edges。记录可能带逃逸后改写未知标记，不能视为确定调用或已确认影响；查询与静态边共用时间、最多 200 条关系及输出预算。旧快照返回空列表，精确语义见 [索引说明](indexing.md) 与 [条件调用决策](../../docs/decisions/2026-10-07-python-contextual-instance-calls.md)。
+
 `python -m app.mcp_server` 启动 MCP SDK `2.2.0` 的本地 stdio 服务；stdout 只承载协议帧，日志写 stderr。服务复用 WorkspaceService，不直接访问 SQLite，不创建索引，不执行仓库代码。
 
 默认只读工具包括项目、索引、`check_index_freshness`、Session/消息、`get_overview`、`list_module_symbols`、`get_neighbors`、`read_source`、功能历史/版本/图，以及 `list_session_runs`、`get_session_run`、`list_run_events`、`list_run_tool_results`、`get_run_report`、`get_run_impact`。新鲜度检查按当前本地源码内容 hash 做有界只读核对，不创建索引；模块列表只分页读取固定快照中指定 module path 的 class/function/test definitions；Run 读取和影响查询只返回持久化报告及其固定快照上的静态结果，不重新执行分析。

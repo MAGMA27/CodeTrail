@@ -11,17 +11,23 @@ import pytest
 from pydantic import ValidationError
 
 from app.contracts import (
+    CodeEdge,
     CodeExplanation,
     CodeUnderstandingFinal,
+    ContextualCall,
     EvidenceReference,
     ExplanationStep,
     FixtureResponseSet,
+    GetNeighborsSuccess,
     IndexFreshness,
     McpSourceResponse,
     ModuleSymbolsPageResponse,
+    Neighbor,
+    NeighborsIndexResponse,
     ReadSourceParams,
     ReadSourceSuccess,
     Project,
+    SourceLocation,
     SourceIndexResponse,
     Symbol,
     SseEventFrame,
@@ -69,6 +75,107 @@ def test_success_bundle_keeps_static_and_candidate_edges_separate() -> None:
         "sym-primary-handle",
         "sym-secondary-handle",
     ]
+
+
+def test_contextual_call_contract_binds_returned_activation_edge() -> None:
+    index_id = "index-context"
+    activation = Symbol(
+        symbol_id="symbol-activation",
+        index_id=index_id,
+        path="sample/factory.py",
+        qualified_name="sample.factory.create",
+        kind="function",
+        start_line=1,
+        end_line=20,
+    )
+    source = Symbol(
+        symbol_id="symbol-source",
+        index_id=index_id,
+        path="sample/workspace.py",
+        qualified_name="sample.workspace.Workspace.read",
+        kind="function",
+        start_line=1,
+        end_line=8,
+    )
+    target = Symbol(
+        symbol_id="symbol-target",
+        index_id=index_id,
+        path="sample/backend.py",
+        qualified_name="sample.backend.Backend.read_source",
+        kind="function",
+        start_line=1,
+        end_line=5,
+    )
+    activation_location = SourceLocation(
+        path="sample/factory.py", start_line=12, end_line=12
+    )
+    edge = CodeEdge(
+        edge_id="edge-activation",
+        index_id=index_id,
+        source_id=activation.symbol_id,
+        target_id=source.symbol_id,
+        kind="calls",
+        extraction_method="ast",
+        source_location=activation_location,
+    )
+    contextual = ContextualCall(
+        context_id="context-one",
+        index_id=index_id,
+        activation_edge_id=edge.edge_id,
+        activation_source=activation,
+        source=source,
+        target=target,
+        activation_location=activation_location,
+        source_location=SourceLocation(path=source.path, start_line=6, end_line=6),
+        receiver_constructor_location=SourceLocation(
+            path="sample/factory.py", start_line=10, end_line=10
+        ),
+        field_assignment_location=SourceLocation(
+            path=source.path, start_line=3, end_line=3
+        ),
+        field_name="backend",
+    )
+    neighbor = Neighbor(symbol=source, edge=edge)
+    response = NeighborsIndexResponse(
+        index_id=index_id,
+        root=activation,
+        nodes=[activation, source],
+        neighbors=[neighbor],
+        contextual_calls=[contextual],
+    )
+    assert response.contextual_calls == [contextual]
+
+    tool_result = GetNeighborsSuccess(
+        request_id="request-one",
+        run_id="run-one",
+        index_id=index_id,
+        completed_sequence=1,
+        root=activation,
+        nodes=[activation, source],
+        neighbors=[neighbor],
+        contextual_calls=[contextual],
+    )
+    assert tool_result.contextual_calls == [contextual]
+    assert GetNeighborsSuccess(
+        request_id="request-legacy",
+        run_id="run-legacy",
+        index_id=index_id,
+        completed_sequence=1,
+        neighbors=[],
+    ).contextual_calls == []
+
+    invalid_payload = tool_result.model_dump(mode="python")
+    invalid_payload["contextual_calls"][0]["activation_edge_id"] = "edge-missing"
+    with pytest.raises(ValidationError, match="returned activation edge"):
+        GetNeighborsSuccess.model_validate(invalid_payload)
+
+    mismatched_source = source.model_copy(update={"qualified_name": "sample.other.read"})
+    conflicting_payload = tool_result.model_dump(mode="python")
+    conflicting_payload["neighbors"][0]["symbol"] = mismatched_source.model_dump(
+        mode="python"
+    )
+    with pytest.raises(ValidationError, match="conflicting symbol metadata"):
+        GetNeighborsSuccess.model_validate(conflicting_payload)
 
 
 def test_insufficient_bundle_does_not_claim_a_root_cause() -> None:

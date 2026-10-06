@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from app import storage as storage_module
-from app.contracts import CodeEdge, SourceLocation
+from app.contracts import CodeEdge, ContextualCall, SourceLocation
 from app.indexing import build_source_snapshot, extract_definitions
 from app.relations import RelationIndex, extract_relations
 from app.storage import (
@@ -57,6 +57,55 @@ def relation_for_repository(
     return extract_relations(extract_definitions(snapshot))
 
 
+def with_contextual_call(
+    relation: RelationIndex,
+    *,
+    context_id: str = "context-storage-test",
+) -> tuple[RelationIndex, ContextualCall]:
+    symbols = {symbol.symbol_id: symbol for symbol in relation.symbols}
+    method_ids = {
+        symbol.symbol_id for symbol in relation.symbols if symbol.kind in {"function", "test"}
+    }
+    candidates = [
+        edge
+        for edge in relation.edges
+        if edge.kind == "calls" and edge.target_id in method_ids
+    ]
+    edge = min(candidates, key=lambda item: (item.source_id, item.target_id, item.edge_id))
+    activation_source = symbols[edge.source_id]
+    source = symbols[edge.target_id]
+    activation_neighbors = {
+        item.target_id
+        for item in relation.edges
+        if item.kind == "calls" and item.source_id == edge.source_id
+    }
+    target = next(
+        symbol
+        for symbol in relation.symbols
+        if symbol.symbol_id in method_ids
+        and symbol.symbol_id not in {activation_source.symbol_id, *activation_neighbors}
+    )
+    source_location = SourceLocation(
+        path=source.path,
+        start_line=source.start_line,
+        end_line=source.start_line,
+    )
+    call = ContextualCall(
+        context_id=context_id,
+        index_id=relation.snapshot.index.index_id,
+        activation_edge_id=edge.edge_id,
+        activation_source=activation_source,
+        source=source,
+        target=target,
+        activation_location=edge.source_location,
+        source_location=source_location,
+        receiver_constructor_location=source_location,
+        field_assignment_location=source_location,
+        field_name="dependency",
+    )
+    return replace(relation, contextual_calls=(call,)), call
+
+
 def test_fts5_roundtrip_and_reopen_preserve_the_complete_relation_index(tmp_path: Path) -> None:
     relation = fixture_relation()
     database = tmp_path / "index.sqlite3"
@@ -68,6 +117,214 @@ def test_fts5_roundtrip_and_reopen_preserve_the_complete_relation_index(tmp_path
 
     with IndexStore(database) as reopened:
         assert reopened.load_index(relation.snapshot.index.index_id) == relation
+
+
+def test_contextual_calls_roundtrip_and_attach_only_to_their_static_activation_edge(
+    tmp_path: Path,
+) -> None:
+    relation, context = with_contextual_call(fixture_relation(index_id="context-roundtrip"))
+    database = tmp_path / "context-roundtrip.sqlite3"
+
+    with IndexStore(database) as store:
+        store.write_index(relation)
+        assert store.load_index(relation.snapshot.index.index_id) == relation
+        result = store.get_neighbors(
+            relation.snapshot.index.index_id,
+            context.activation_source.symbol_id,
+            "callees",
+            depth=1,
+            edge_kinds=("calls",),
+        )
+        assert context.activation_edge_id in {item.edge.edge_id for item in result.neighbors}
+        assert result.contextual_calls == (context,)
+        assert context.target.symbol_id not in {node.symbol_id for node in result.nodes}
+        assert all(item.edge.kind in {"calls", "imports"} for item in result.neighbors)
+
+        callers = store.get_neighbors(
+            relation.snapshot.index.index_id,
+            context.source.symbol_id,
+            "callers",
+            depth=1,
+            edge_kinds=("calls",),
+        )
+        assert context.activation_edge_id in {item.edge.edge_id for item in callers.neighbors}
+        assert callers.contextual_calls == (context,)
+
+        unrelated = store.get_neighbors(
+            relation.snapshot.index.index_id,
+            context.activation_source.symbol_id,
+            "callers",
+            depth=1,
+            edge_kinds=("calls",),
+        )
+        assert unrelated.contextual_calls == ()
+        filtered = store.get_neighbors(
+            relation.snapshot.index.index_id,
+            context.activation_source.symbol_id,
+            "callees",
+            depth=1,
+            edge_kinds=("imports",),
+        )
+        assert filtered.contextual_calls == ()
+
+        impact = store.get_static_impact(
+            relation.snapshot.index.index_id,
+            context.activation_source.symbol_id,
+            "callees",
+            depth=1,
+        )
+        assert context.target.symbol_id not in {node.symbol_id for node in impact.nodes}
+        assert context.activation_edge_id in {edge.edge_id for edge in impact.edges}
+
+    with IndexStore(database) as reopened:
+        assert reopened.load_index(relation.snapshot.index.index_id).contextual_calls == (context,)
+
+
+def test_contextual_calls_reject_duplicate_ids_cross_index_symbols_bad_edges_and_locations(
+    tmp_path: Path,
+) -> None:
+    relation, context = with_contextual_call(fixture_relation(index_id="context-validation"))
+    edge = next(item for item in relation.edges if item.edge_id == context.activation_edge_id)
+    wrong_location = SourceLocation.model_construct(
+        path=edge.source_location.path,
+        start_line=edge.source_location.start_line + 1,
+        end_line=edge.source_location.end_line + 1,
+    )
+    unknown_source = context.source.model_copy(update={"symbol_id": "unknown-context-symbol"})
+    out_of_range = SourceLocation.model_construct(
+        path=context.source_location.path,
+        start_line=context.source_location.end_line + 10,
+        end_line=context.source_location.end_line + 10,
+    )
+    unsafe_path = SourceLocation.model_construct(
+        path="../escape.py",
+        start_line=1,
+        end_line=1,
+    )
+    invalid_calls = (
+        (context, context),
+        (context.model_copy(update={"activation_location": wrong_location}),),
+        (context.model_copy(update={"source": unknown_source}),),
+        (context.model_copy(update={"source_location": out_of_range}),),
+        (context.model_copy(update={"receiver_constructor_location": unsafe_path}),),
+        (context.model_copy(update={"field_name": "not valid"}),),
+    )
+
+    with IndexStore(tmp_path / "context-validation.sqlite3") as store:
+        for calls in invalid_calls:
+            with pytest.raises(StorageInputError):
+                store.write_index(replace(relation, contextual_calls=calls))
+
+
+def test_contextual_call_ids_cannot_be_reused_by_another_snapshot(tmp_path: Path) -> None:
+    first, context = with_contextual_call(fixture_relation(index_id="context-first"))
+    second, _ = with_contextual_call(
+        fixture_relation(index_id="context-second"),
+        context_id=context.context_id,
+    )
+
+    with IndexStore(tmp_path / "context-cross-index.sqlite3") as store:
+        store.write_index(first)
+        with pytest.raises(StorageInputError, match="cannot cross immutable indexes"):
+            store.write_index(second)
+
+
+def test_legacy_snapshot_without_context_table_loads_with_empty_context(tmp_path: Path) -> None:
+    relation = fixture_relation(index_id="legacy-context-snapshot")
+    database = tmp_path / "legacy-context.sqlite3"
+
+    with IndexStore(database) as store:
+        store.write_index(relation)
+        store.connection.execute("DROP TABLE contextual_calls")
+
+    with IndexStore(database) as reopened:
+        loaded = reopened.load_index(relation.snapshot.index.index_id)
+        assert loaded.contextual_calls == ()
+        assert loaded == relation
+        root = next(item for item in loaded.symbols if item.kind == "function")
+        assert reopened.get_neighbors(
+            relation.snapshot.index.index_id,
+            root.symbol_id,
+            "callees",
+            depth=1,
+        ).contextual_calls == ()
+
+
+def test_neighbor_edge_and_output_budgets_include_contextual_calls(tmp_path: Path) -> None:
+    base = fixture_relation(index_id="context-budget")
+    with_context, context = with_contextual_call(base)
+    root_id = context.activation_source.symbol_id
+
+    with IndexStore(tmp_path / "context-edge-budget.sqlite3") as store:
+        store.write_index(with_context)
+        limited = store.get_neighbors(
+            with_context.snapshot.index.index_id,
+            root_id,
+            "callees",
+            depth=1,
+            edge_kinds=("calls",),
+            max_edges=1,
+        )
+        assert context.activation_edge_id in {item.edge.edge_id for item in limited.neighbors}
+        assert limited.contextual_calls == ()
+        assert limited.truncated is True
+        assert limited.truncation_reason == "max_edges reached while collecting contextual calls"
+
+    with IndexStore(tmp_path / "context-static-size.sqlite3") as store:
+        store.write_index(base)
+        baseline = store.get_neighbors(
+            base.snapshot.index.index_id,
+            root_id,
+            "callees",
+            depth=1,
+            edge_kinds=("calls",),
+        )
+    assert baseline.truncated is False
+    static_bytes = storage_module._model_size(baseline.root)
+    seen_nodes = {baseline.root.symbol_id}
+    for item in baseline.neighbors:
+        static_bytes += storage_module._model_size(item)
+        if item.symbol.symbol_id not in seen_nodes:
+            static_bytes += storage_module._model_size(item.symbol)
+            seen_nodes.add(item.symbol.symbol_id)
+
+    with IndexStore(tmp_path / "context-output-budget.sqlite3") as store:
+        store.write_index(with_context)
+        bounded = store.get_neighbors(
+            with_context.snapshot.index.index_id,
+            root_id,
+            "callees",
+            depth=1,
+            edge_kinds=("calls",),
+            max_output_bytes=static_bytes,
+        )
+    assert bounded.truncated is True
+    assert bounded.truncation_reason == "max_output_bytes reached while collecting contextual calls"
+
+
+def test_neighbor_context_loop_observes_the_shared_deadline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    relation, context = with_contextual_call(fixture_relation(index_id="context-time-budget"))
+    ticks = iter((0.0, 0.0, 0.0, 2.0))
+    monkeypatch.setattr(storage_module.time, "monotonic", lambda: next(ticks, 2.0))
+
+    with IndexStore(tmp_path / "context-time-budget.sqlite3") as store:
+        store.write_index(relation)
+        result = store.get_neighbors(
+            relation.snapshot.index.index_id,
+            context.activation_source.symbol_id,
+            "callees",
+            depth=1,
+            edge_kinds=("calls",),
+            max_seconds=1.0,
+        )
+
+    assert context.activation_edge_id in {item.edge.edge_id for item in result.neighbors}
+    assert result.contextual_calls == ()
+    assert result.truncated is True
+    assert result.truncation_reason == "max_seconds exceeded while collecting contextual calls"
 
 
 def test_module_symbol_pages_are_scoped_stable_and_share_the_serialized_budget(

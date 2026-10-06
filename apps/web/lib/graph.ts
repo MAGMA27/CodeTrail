@@ -1,5 +1,6 @@
 import type {
   CodeEdge,
+  ContextualCall,
   NeighborsResponse,
   SymbolRecord,
   UnresolvedReference,
@@ -76,6 +77,22 @@ export function mergeNeighborGraph(previous: GraphState, response: NeighborsResp
       ? response.index_unresolved_truncation_reason ?? previous.indexUnresolvedTruncationReason
       : null,
   };
+}
+
+export function mergeContextualCalls(
+  previous: ContextualCall[],
+  response: NeighborsResponse,
+  replace: boolean,
+): ContextualCall[] {
+  const calls = new Map(
+    (replace ? [] : previous)
+      .filter((call) => call.index_id === response.index_id)
+      .map((call) => [call.context_id, call]),
+  );
+  for (const call of response.contextual_calls ?? []) {
+    calls.set(call.context_id, call);
+  }
+  return [...calls.values()];
 }
 
 export function isHttpCallChainResponse(

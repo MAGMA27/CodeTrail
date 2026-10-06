@@ -11,7 +11,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Literal
 
-from .contracts import CodeEdge, SourceLocation, Symbol, UnresolvedReference
+from .contracts import CodeEdge, ContextualCall, SourceLocation, Symbol, UnresolvedReference
 from .indexing import (
     DefinitionIndex,
     SnapshotIssue,
@@ -26,13 +26,13 @@ RelationKind = Literal["imports", "calls"]
 BindingKind = Literal["module", "symbol"]
 RelationScopeKind = Literal["module", "class", "function"]
 # The semantic version changes when the graph/unresolved meaning changes.
-RELATION_SEMANTICS_VERSION = "relations-v6"
+RELATION_SEMANTICS_VERSION = "relations-v7"
 # This version only governs the persisted, index-independent facts payload.
 RELATION_FACT_EXTRACTION_RULES_VERSION = "python-relation-facts-v4"
 _RELATION_FACTS_FORMAT_VERSION = "relation-facts-v4"
 # This namespace is part of generated immutable index IDs. Bump it when source
 # boundaries or build rules can change an index with the same content hash.
-INDEX_BUILD_IDENTITY_VERSION = "relations-v10"
+INDEX_BUILD_IDENTITY_VERSION = "relations-v11"
 
 
 def relation_coverage_limitations(
@@ -217,6 +217,7 @@ class RelationIndex:
         default=(), compare=False, repr=False
     )
     http_client_requests: tuple[HttpClientRequestFact, ...] = ()
+    contextual_calls: tuple[ContextualCall, ...] = ()
 
     @property
     def snapshot(self) -> SourceSnapshot:
@@ -267,6 +268,7 @@ class _Scope:
     dynamic_names: set[str]
     attribute_write_names: set[str]
     object_bindings: dict[str, Symbol]
+    object_instance_site_ids: dict[str, str]
     object_invalidated: set[str]
     verified_threadpool_wrappers: set[str]
     active_threadpool_wrappers: set[str]
@@ -284,10 +286,33 @@ class _ImportResolution:
 
 @dataclass(frozen=True)
 class _ConstructorCallSite:
+    site_id: str
     class_symbol: Symbol
+    caller_symbol: Symbol
+    location: SourceLocation
     positional_arguments: tuple[Symbol | None, ...]
     keyword_arguments: tuple[tuple[str, Symbol | None], ...]
     has_argument_expansion: bool
+
+
+@dataclass(frozen=True)
+class _ActivationCallSite:
+    caller_symbol: Symbol
+    target_symbol: Symbol
+    receiver_site_id: str
+    location: SourceLocation
+
+
+def _constructor_instance_site_id(
+    caller_symbol: Symbol,
+    path: str,
+    class_symbol: Symbol,
+    line: int,
+) -> str:
+    identity = "\0".join(
+        [caller_symbol.index_id, caller_symbol.symbol_id, path, class_symbol.symbol_id, str(line)]
+    )
+    return f"instance-{hashlib.sha256(identity.encode('utf-8')).hexdigest()[:32]}"
 
 
 class _RelationBudget:
@@ -340,7 +365,14 @@ def extract_relations(
         raise ValueError("relation budgets must be positive")
 
     snapshot = definitions.snapshot
-    maps = _DefinitionMaps(definitions.symbols)
+    maps = _DefinitionMaps(
+        definitions.symbols,
+        package_init_paths=tuple(
+            source_file.path
+            for source_file in definitions.snapshot.files
+            if source_file.path.endswith("/__init__.py") or source_file.path == "__init__.py"
+        ),
+    )
     budget = _RelationBudget(max_edges, max_unresolved, max_seconds)
     edges: list[CodeEdge] = []
     unresolved: list[UnresolvedReference] = []
@@ -398,7 +430,11 @@ def extract_relations(
             _collect_scope_facts(path, facts.scope, scope_facts_by_key)
 
     constructor_sites: list[_ConstructorCallSite] = []
+    activation_call_sites: list[_ActivationCallSite] = []
     unsafe_constructor_classes: set[str] = set()
+    bypassed_constructor_classes: set[str] = set()
+    escaped_instance_site_ids: set[str] = set()
+    binding_mutation_after_escape_unverified_site_ids: set[str] = set()
     multisegment_attribute_writes: dict[str, list[Symbol | None]] = {}
     if not budget.truncated:
         for source_file in snapshot.files:
@@ -417,18 +453,25 @@ def extract_relations(
                 edges=[],
                 unresolved=[],
                 constructor_sites=constructor_sites,
+                activation_call_sites=activation_call_sites,
                 unsafe_constructor_classes=unsafe_constructor_classes,
+                bypassed_constructor_classes=bypassed_constructor_classes,
+                escaped_instance_site_ids=escaped_instance_site_ids,
+                binding_mutation_after_escape_unverified_site_ids=(
+                    binding_mutation_after_escape_unverified_site_ids
+                ),
                 multisegment_attribute_writes=multisegment_attribute_writes,
                 collect_only=True,
             )
             resolver.visit_scope()
 
-    constructor_attribute_bindings = _resolve_constructor_attribute_bindings(
+    constructor_attribute_bindings, constructor_writes, indirect_constructor_writes = _resolve_constructor_attribute_bindings(
         facts_by_path,
         scope_facts_by_key,
         maps,
         constructor_sites,
         unsafe_constructor_classes,
+        bypassed_constructor_classes,
         multisegment_attribute_writes,
         budget,
     )
@@ -611,6 +654,22 @@ def extract_relations(
                 )
             )
 
+    contextual_calls = _resolve_contextual_calls(
+        snapshot.index.index_id,
+        constructor_sites,
+        activation_call_sites,
+        unsafe_constructor_classes,
+        escaped_instance_site_ids,
+        binding_mutation_after_escape_unverified_site_ids,
+        scope_facts_by_key,
+        maps,
+        constructor_writes,
+        indirect_constructor_writes,
+        multisegment_attribute_writes,
+        edges,
+        budget,
+    )
+
     edges.sort(key=lambda edge: (edge.source_location.path, edge.source_location.start_line, edge.kind, edge.edge_id))
     unresolved.sort(key=lambda item: (item.path, item.start_line, item.expression, item.unresolved_id))
     return RelationIndex(
@@ -627,6 +686,7 @@ def extract_relations(
         shared_ast_reuse_count=shared_ast_reuse_count,
         fact_cache_entries=tuple(fact_cache_entries),
         http_client_requests=tuple(http_client_requests),
+        contextual_calls=tuple(contextual_calls),
     )
 
 
@@ -650,12 +710,18 @@ def build_relation_index(
 
 
 class _DefinitionMaps:
-    def __init__(self, symbols: tuple[Symbol, ...]) -> None:
+    def __init__(
+        self,
+        symbols: tuple[Symbol, ...],
+        *,
+        package_init_paths: tuple[str, ...] = (),
+    ) -> None:
         self.by_key: dict[tuple[str, str, str, int], Symbol] = {}
         self.by_qualified_name: dict[str, list[Symbol]] = {}
         self.modules_by_path: dict[str, Symbol] = {}
         self.modules_by_name: dict[str, Symbol] = {}
         self.simple_candidates: dict[str, list[Symbol]] = {}
+        self.package_aliases: dict[str, str] = {}
         for symbol in symbols:
             self.by_key[(symbol.path, symbol.qualified_name, symbol.kind, symbol.start_line)] = symbol
             self.by_qualified_name.setdefault(symbol.qualified_name, []).append(symbol)
@@ -665,10 +731,52 @@ class _DefinitionMaps:
             elif symbol.kind in {"class", "function", "test"}:
                 simple_name = symbol.qualified_name.rsplit(".", 1)[-1]
                 self.simple_candidates.setdefault(simple_name, []).append(symbol)
+        init_paths = {
+            path.rsplit("/", 1)[0]
+            for path in package_init_paths
+            if path.endswith("/__init__.py")
+        }
+        package_roots: dict[str, set[str]] = {}
+        for package_path in init_paths:
+            if any(
+                "/".join(package_path.split("/")[:depth]) in init_paths
+                for depth in range(1, len(package_path.split("/")))
+            ):
+                continue
+            package_symbol = self.modules_by_path.get(f"{package_path}/__init__.py")
+            if package_symbol is None:
+                continue
+            short_name = package_path.rsplit("/", 1)[-1]
+            package_roots.setdefault(short_name, set()).add(package_symbol.qualified_name)
+        for short_name, canonical_roots in package_roots.items():
+            if len(canonical_roots) != 1:
+                continue
+            canonical_root = next(iter(canonical_roots))
+            if short_name == canonical_root or short_name in self.modules_by_name:
+                continue
+            self.package_aliases[short_name] = canonical_root
+        for short_name, canonical_root in self.package_aliases.items():
+            for module in self.modules_by_path.values():
+                if module.qualified_name == canonical_root:
+                    alias = short_name
+                elif module.qualified_name.startswith(f"{canonical_root}."):
+                    alias = f"{short_name}{module.qualified_name[len(canonical_root):]}"
+                else:
+                    continue
+                if alias not in self.modules_by_name:
+                    self.modules_by_name[alias] = module
 
     def one_by_name(self, qualified_name: str) -> Symbol | None:
         values = self.by_qualified_name.get(qualified_name, [])
-        return values[0] if len(values) == 1 else None
+        if values:
+            return values[0] if len(values) == 1 else None
+        root, separator, suffix = qualified_name.partition(".")
+        canonical_root = self.package_aliases.get(root)
+        if canonical_root is None:
+            return None
+        alias_name = f"{canonical_root}.{suffix}" if separator else canonical_root
+        canonical_values = self.by_qualified_name.get(alias_name, [])
+        return canonical_values[0] if len(canonical_values) == 1 else None
 
     def candidates(self, name: str) -> list[Symbol]:
         return sorted(self.simple_candidates.get(name, []), key=lambda symbol: symbol.symbol_id)
@@ -1320,7 +1428,11 @@ class _RelationFactResolver:
         edges: list[CodeEdge],
         unresolved: list[UnresolvedReference],
         constructor_sites: list[_ConstructorCallSite] | None = None,
+        activation_call_sites: list[_ActivationCallSite] | None = None,
         unsafe_constructor_classes: set[str] | None = None,
+        bypassed_constructor_classes: set[str] | None = None,
+        escaped_instance_site_ids: set[str] | None = None,
+        binding_mutation_after_escape_unverified_site_ids: set[str] | None = None,
         multisegment_attribute_writes: dict[str, list[Symbol | None]] | None = None,
         constructor_attribute_bindings: Mapping[tuple[str, str], Symbol] | None = None,
         collect_only: bool = False,
@@ -1334,7 +1446,13 @@ class _RelationFactResolver:
         self.edges = edges
         self.unresolved = unresolved
         self.constructor_sites = constructor_sites
+        self.activation_call_sites = activation_call_sites
         self.unsafe_constructor_classes = unsafe_constructor_classes
+        self.bypassed_constructor_classes = bypassed_constructor_classes
+        self.escaped_instance_site_ids = escaped_instance_site_ids
+        self.binding_mutation_after_escape_unverified_site_ids = (
+            binding_mutation_after_escape_unverified_site_ids
+        )
         self.multisegment_attribute_writes = multisegment_attribute_writes
         self.constructor_attribute_bindings = constructor_attribute_bindings or {}
         self.collect_only = collect_only
@@ -1364,6 +1482,20 @@ class _RelationFactResolver:
                 self._visit_nested_scope(event.scope)
 
     def _visit_assignment(self, fact: RelationAssignmentFact) -> None:
+        if fact.value_name is not None:
+            value_site_id = self._lookup_instance_site_id(fact.value_name)
+            if value_site_id is not None:
+                if fact.target_attributes:
+                    if self.binding_mutation_after_escape_unverified_site_ids is not None:
+                        self.binding_mutation_after_escape_unverified_site_ids.add(value_site_id)
+                elif self.escaped_instance_site_ids is not None:
+                    self.escaped_instance_site_ids.add(value_site_id)
+        if self.escaped_instance_site_ids is not None:
+            for target in fact.target_attributes:
+                if len(target.target_parts) == 2:
+                    escaped_site_id = self._lookup_instance_site_id(target.target_parts[0])
+                    if escaped_site_id is not None:
+                        self.escaped_instance_site_ids.add(escaped_site_id)
         if self.multisegment_attribute_writes is not None:
             source_class = None
             if fact.certainty == "definite":
@@ -1387,6 +1519,7 @@ class _RelationFactResolver:
                 self.unsafe_constructor_classes.add(binding.symbol.symbol_id)
         for name in fact.target_names:
             self.scope.object_bindings.pop(name, None)
+            self.scope.object_instance_site_ids.pop(name, None)
             self.scope.object_invalidated.add(name)
         if (
             fact.certainty == "definite"
@@ -1398,12 +1531,24 @@ class _RelationFactResolver:
             if target is not None:
                 name = fact.target_names[0]
                 self.scope.object_bindings[name] = target
+                self.scope.object_instance_site_ids[name] = _constructor_instance_site_id(
+                    self.scope.symbol,
+                    self.path,
+                    target,
+                    fact.start_line,
+                )
                 self.scope.object_invalidated.discard(name)
 
     def _visit_return(self, target: RelationCallTargetFact | None) -> None:
-        if self.unsafe_constructor_classes is None or target is None:
+        if target is None:
             return
         if target.target_kind == "name" and target.target_name is not None:
+            if self.escaped_instance_site_ids is not None:
+                escaped_site_id = self._lookup_instance_site_id(target.target_name)
+                if escaped_site_id is not None:
+                    self.escaped_instance_site_ids.add(escaped_site_id)
+            if self.unsafe_constructor_classes is None:
+                return
             binding, _reason = self._lookup(target.target_name)
             if (
                 binding is not None
@@ -1460,20 +1605,31 @@ class _RelationFactResolver:
                 self.scope.active_threadpool_wrappers.add(binding_name)
 
     def _visit_call(self, fact: RelationCallFact) -> None:
-        if self.unsafe_constructor_classes is not None:
+        target, reason, candidates = self._resolve_call_target(fact)
+        bypassed_class = self._constructor_new_bypass_class(fact)
+        if self.unsafe_constructor_classes is not None or self.escaped_instance_site_ids is not None:
             for argument in fact.arguments:
                 value = argument.target
                 if value is None or value.target_kind != "name" or value.target_name is None:
                     continue
+                if self.escaped_instance_site_ids is not None:
+                    escaped_site_id = self._lookup_instance_site_id(value.target_name)
+                    if escaped_site_id is not None and (target is None or target.kind != "class"):
+                        self.escaped_instance_site_ids.add(escaped_site_id)
                 binding, _reason = self._lookup(value.target_name)
                 if (
+                    self.unsafe_constructor_classes is not None
+                    and
                     binding is not None
                     and binding.kind == "symbol"
                     and binding.symbol is not None
                     and binding.symbol.kind == "class"
                 ):
-                    self.unsafe_constructor_classes.add(binding.symbol.symbol_id)
-        target, reason, candidates = self._resolve_call_target(fact)
+                    if bypassed_class is not None and binding.symbol.symbol_id == bypassed_class.symbol_id:
+                        if self.bypassed_constructor_classes is not None:
+                            self.bypassed_constructor_classes.add(binding.symbol.symbol_id)
+                    else:
+                        self.unsafe_constructor_classes.add(binding.symbol.symbol_id)
         if (
             self.constructor_sites is not None
             and target is not None
@@ -1481,7 +1637,19 @@ class _RelationFactResolver:
         ):
             self.constructor_sites.append(
                 _ConstructorCallSite(
+                    site_id=_constructor_instance_site_id(
+                        self.scope.symbol,
+                        self.path,
+                        target,
+                        fact.start_line,
+                    ),
                     class_symbol=target,
+                    caller_symbol=self.scope.symbol,
+                    location=SourceLocation(
+                        path=self.path,
+                        start_line=fact.start_line,
+                        end_line=fact.end_line,
+                    ),
                     positional_arguments=tuple(
                         self._resolve_constructor_argument(argument.target)
                         for argument in fact.arguments
@@ -1495,6 +1663,39 @@ class _RelationFactResolver:
                     has_argument_expansion=fact.has_argument_expansion,
                 )
             )
+        forwarded = (
+            fact.first_argument
+            if fact.target_kind == "name"
+            and fact.target_name is not None
+            and self._is_verified_threadpool_wrapper(fact.target_name)
+            else None
+        )
+        activation_target = (
+            forwarded
+            if forwarded is not None
+            else RelationCallTargetFact(fact.target_kind, fact.target_name, fact.target_parts)
+        )
+        if (
+            self.activation_call_sites is not None
+            and target is not None
+            and target.kind == "function"
+            and activation_target.target_kind == "attribute"
+            and len(activation_target.target_parts) == 2
+        ):
+            receiver_site_id = self._lookup_instance_site_id(activation_target.target_parts[0])
+            if receiver_site_id is not None:
+                self.activation_call_sites.append(
+                    _ActivationCallSite(
+                        caller_symbol=self.scope.symbol,
+                        target_symbol=target,
+                        receiver_site_id=receiver_site_id,
+                        location=SourceLocation(
+                            path=self.path,
+                            start_line=fact.start_line,
+                            end_line=fact.end_line,
+                        ),
+                    )
+                )
         if self.collect_only:
             return
         if target is not None:
@@ -1610,6 +1811,7 @@ class _RelationFactResolver:
             dynamic_names=set(binding_facts.dynamic_names),
             attribute_write_names=set(binding_facts.attribute_write_names),
             object_bindings={},
+            object_instance_site_ids={},
             object_invalidated={
                 *shadowed,
                 *binding_facts.parameter_names,
@@ -1855,6 +2057,34 @@ class _RelationFactResolver:
             scope = scope.parent
         return None, None
 
+    def _lookup_instance_site_id(self, name: str) -> str | None:
+        scope: _Scope | None = self.scope
+        while scope is not None:
+            if name in scope.object_invalidated:
+                return None
+            site_id = scope.object_instance_site_ids.get(name)
+            if site_id is not None:
+                return site_id
+            scope = scope.parent
+        return None
+
+    def _constructor_new_bypass_class(self, fact: RelationCallFact) -> Symbol | None:
+        if (
+            fact.target_kind != "attribute"
+            or len(fact.target_parts) != 2
+            or fact.target_parts[1] != "__new__"
+        ):
+            return None
+        owner = self._resolve_constructor(fact.target_parts[0])
+        first_argument = next(
+            (argument.target for argument in fact.arguments if argument.position == 0),
+            None,
+        )
+        if owner is None or first_argument is None or first_argument.target_kind != "name":
+            return None
+        argument_class = self._resolve_constructor(first_argument.target_name or "")
+        return owner if argument_class is not None and argument_class.symbol_id == owner.symbol_id else None
+
     def _lookup(self, name: str) -> tuple[_Binding | None, str | None]:
         scope: _Scope | None = self.scope
         while scope is not None:
@@ -2030,9 +2260,14 @@ def _resolve_constructor_attribute_bindings(
     maps: _DefinitionMaps,
     constructor_sites: list[_ConstructorCallSite],
     unsafe_constructor_classes: set[str],
+    bypassed_constructor_classes: set[str],
     multisegment_attribute_writes: Mapping[str, list[Symbol | None]],
     budget: _RelationBudget,
-) -> dict[tuple[str, str], Symbol]:
+) -> tuple[
+    dict[tuple[str, str], Symbol],
+    dict[str, list[RelationAssignmentFact]],
+    set[str],
+]:
     # ponytail: field-name-wide write guards can reject unrelated objects;
     # add receiver identity analysis only when those false negatives matter.
     writes: dict[str, list[RelationAssignmentFact]] = {}
@@ -2050,6 +2285,9 @@ def _resolve_constructor_attribute_bindings(
             return
         indirect_writes.update(scope.bindings.indirect_attribute_write_names)
         for event in scope.events:
+            if time.monotonic() >= budget.deadline:
+                budget._stop("max_seconds exceeded")
+                return
             if isinstance(event, RelationAssignmentEvent):
                 for target in event.fact.target_attributes:
                     if len(target.target_parts) == 2:
@@ -2062,17 +2300,17 @@ def _resolve_constructor_attribute_bindings(
     for facts in facts_by_path.values():
         if time.monotonic() >= budget.deadline:
             budget._stop("max_seconds exceeded")
-            return {}
+            return {}, {}, set()
         if facts.scope is not None:
             collect(facts.scope)
         if budget.truncated:
-            return {}
+            return {}, {}, set()
 
     sites_by_class: dict[str, list[_ConstructorCallSite]] = {}
     for site in constructor_sites:
         if time.monotonic() >= budget.deadline:
             budget._stop("max_seconds exceeded")
-            return {}
+            return {}, {}, set()
         sites_by_class.setdefault(site.class_symbol.symbol_id, []).append(site)
 
     result: dict[tuple[str, str], Symbol] = {}
@@ -2080,13 +2318,16 @@ def _resolve_constructor_attribute_bindings(
     for symbols in maps.by_qualified_name.values():
         if time.monotonic() >= budget.deadline:
             budget._stop("max_seconds exceeded")
-            return {}
+            return {}, {}, set()
         class_symbols.extend(symbol for symbol in symbols if symbol.kind == "class")
     for class_symbol in class_symbols:
         if time.monotonic() >= budget.deadline:
             budget._stop("max_seconds exceeded")
-            return {}
-        if class_symbol.symbol_id in unsafe_constructor_classes:
+            return {}, {}, set()
+        if (
+            class_symbol.symbol_id in unsafe_constructor_classes
+            or class_symbol.symbol_id in bypassed_constructor_classes
+        ):
             continue
         class_scope = scope_facts_by_key.get(
             (class_symbol.path, class_symbol.qualified_name, "class", class_symbol.start_line)
@@ -2138,7 +2379,7 @@ def _resolve_constructor_attribute_bindings(
         for assignment in field_assignments:
             if time.monotonic() >= budget.deadline:
                 budget._stop("max_seconds exceeded")
-                return {}
+                return {}, {}, set()
             field = assignment.target_attributes[0].target_parts[-1]
             source_parameter = assignment.value_name
             if source_parameter is None:
@@ -2167,7 +2408,7 @@ def _resolve_constructor_attribute_bindings(
             for site in sites:
                 if time.monotonic() >= budget.deadline:
                     budget._stop("max_seconds exceeded")
-                    return {}
+                    return {}, {}, set()
                 if site.has_argument_expansion:
                     actual_classes = []
                     break
@@ -2218,7 +2459,412 @@ def _resolve_constructor_attribute_bindings(
                 ):
                     continue
                 result[(class_symbol.symbol_id, field)] = actual_class
-    return result
+    return result, writes, indirect_writes
+
+
+def _resolve_contextual_calls(
+    index_id: str,
+    constructor_sites: list[_ConstructorCallSite],
+    activation_sites: list[_ActivationCallSite],
+    unsafe_constructor_classes: set[str],
+    escaped_instance_site_ids: set[str],
+    binding_mutation_after_escape_unverified_site_ids: set[str],
+    scope_facts_by_key: Mapping[
+        tuple[str, str, RelationScopeKind, int], RelationScopeFacts
+    ],
+    maps: _DefinitionMaps,
+    writes: Mapping[str, list[RelationAssignmentFact]],
+    indirect_writes: set[str],
+    multisegment_attribute_writes: Mapping[str, list[Symbol | None]],
+    edges: list[CodeEdge],
+    budget: _RelationBudget,
+) -> list[ContextualCall]:
+    sites_by_id: dict[str, list[_ConstructorCallSite]] = {}
+    for site in constructor_sites:
+        if time.monotonic() >= budget.deadline:
+            budget._stop("max_seconds exceeded")
+            return []
+        sites_by_id.setdefault(site.site_id, []).append(site)
+
+    activation_counts: dict[tuple[str, str, str, int, int], int] = {}
+    for activation in activation_sites:
+        if time.monotonic() >= budget.deadline:
+            budget._stop("max_seconds exceeded while resolving contextual calls")
+            return []
+        key = (
+            activation.caller_symbol.symbol_id,
+            activation.target_symbol.symbol_id,
+            activation.location.path,
+            activation.location.start_line,
+            activation.location.end_line,
+        )
+        activation_counts[key] = activation_counts.get(key, 0) + 1
+    edges_by_activation: dict[tuple[str, str, str, int, int], list[CodeEdge]] = {}
+    for edge in edges:
+        if time.monotonic() >= budget.deadline:
+            budget._stop("max_seconds exceeded while resolving contextual calls")
+            return []
+        if edge.kind != "calls":
+            continue
+        key = (
+            edge.source_id,
+            edge.target_id,
+            edge.source_location.path,
+            edge.source_location.start_line,
+            edge.source_location.end_line,
+        )
+        edges_by_activation.setdefault(key, []).append(edge)
+
+    protocols = {"__getattribute__", "__getattr__", "__setattr__", "__delattr__"}
+    contextual: list[ContextualCall] = []
+    emitted: set[tuple[str, str, str, str, int, int]] = set()
+
+    def method_transfers_instance(scope: RelationScopeFacts, receiver: str, field: str) -> bool | None:
+        possible_aliases: set[str] = set()
+        for item in scope.events:
+            if time.monotonic() >= budget.deadline:
+                return None
+            if isinstance(item, RelationAssignmentEvent):
+                possible_aliases.update(item.fact.target_names)
+        object_names = possible_aliases | {receiver}
+        for item in scope.events:
+            if time.monotonic() >= budget.deadline:
+                return None
+            if isinstance(item, RelationAssignmentEvent):
+                if any(
+                    target.target_parts
+                    and target.target_parts[0] in object_names
+                    for target in item.fact.target_attributes
+                ):
+                    return True
+            elif isinstance(item, RelationScopeEvent):
+                # A nested function may close over either object and run later;
+                # this one-hop proof does not follow closure mutation.
+                return True
+            elif isinstance(item, RelationReturnEvent):
+                target = item.target
+                if target is not None and (
+                    (target.target_kind == "name" and target.target_name in object_names)
+                    or (
+                        target.target_kind == "attribute"
+                        and target.target_parts[:2] == (receiver, field)
+                    )
+                ):
+                    return True
+            elif isinstance(item, RelationCallEvent):
+                call = item.fact
+                if any(
+                    argument.target is not None
+                    and (
+                        (argument.target.target_kind == "name" and argument.target.target_name in object_names)
+                        or (
+                            argument.target.target_kind == "attribute"
+                            and argument.target.target_parts[:2] == (receiver, field)
+                        )
+                    )
+                    for argument in call.arguments
+                ):
+                    return True
+                if (
+                    call.target_kind == "attribute"
+                    and len(call.target_parts) >= 2
+                    and call.target_parts[0] in possible_aliases
+                ):
+                    return True
+        return False
+
+    for activation in activation_sites:
+        if time.monotonic() >= budget.deadline:
+            budget._stop("max_seconds exceeded")
+            break
+        site_candidates = sites_by_id.get(activation.receiver_site_id, [])
+        if (
+            len(site_candidates) != 1
+            or activation.receiver_site_id in escaped_instance_site_ids
+        ):
+            continue
+        constructor = site_candidates[0]
+        owner_name = activation.target_symbol.qualified_name.rsplit(".", 1)[0]
+        owner = maps.one_by_name(owner_name)
+        if (
+            owner is None
+            or owner.kind != "class"
+            or owner.path != activation.target_symbol.path
+            or owner.symbol_id != constructor.class_symbol.symbol_id
+            or owner.symbol_id in unsafe_constructor_classes
+        ):
+            continue
+        activation_key = (
+            activation.caller_symbol.symbol_id,
+            activation.target_symbol.symbol_id,
+            activation.location.path,
+            activation.location.start_line,
+            activation.location.end_line,
+        )
+        activation_edges = edges_by_activation.get(activation_key, [])
+        if activation_counts.get(activation_key) != 1 or len(activation_edges) != 1:
+            continue
+        class_scope = scope_facts_by_key.get(
+            (owner.path, owner.qualified_name, "class", owner.start_line)
+        )
+        init_symbols: list[Symbol] = []
+        for symbol in maps.by_qualified_name.get(f"{owner.qualified_name}.__init__", []):
+            if time.monotonic() >= budget.deadline:
+                budget._stop("max_seconds exceeded while resolving contextual calls")
+                return contextual
+            if symbol.path == owner.path and symbol.kind == "function":
+                init_symbols.append(symbol)
+        method_scope = scope_facts_by_key.get(
+            (
+                activation.target_symbol.path,
+                activation.target_symbol.qualified_name,
+                "function",
+                activation.target_symbol.start_line,
+            )
+        )
+        if (
+            class_scope is None
+            or class_scope.has_bases
+            or class_scope.has_decorators
+            or "__new__" in class_scope.bindings.definition_names
+            or "__new__" in class_scope.bindings.assigned
+            or protocols.intersection(
+                (*class_scope.bindings.definition_names, *class_scope.bindings.assigned)
+            )
+            or len(init_symbols) != 1
+            or method_scope is None
+            or method_scope.has_decorators
+        ):
+            continue
+        init_symbol = init_symbols[0]
+        method_parameters = method_scope.bindings.positional_parameter_names
+        if (
+            method_scope.kind != "function"
+            or not method_parameters
+            or method_scope.bindings.has_variadic_parameters
+        ):
+            continue
+        receiver = method_parameters[0]
+        if (
+            receiver in method_scope.bindings.assigned
+            or receiver in method_scope.bindings.dynamic_names
+            or receiver in method_scope.bindings.global_names
+            or receiver in method_scope.bindings.nonlocal_names
+            or _nested_scope_reassigns(method_scope, receiver)
+            or method_scope.bindings.indirect_attribute_write_names
+        ):
+            continue
+        init_scope = scope_facts_by_key.get(
+            (init_symbols[0].path, init_symbols[0].qualified_name, "function", init_symbols[0].start_line)
+        )
+        if (
+            init_scope is None
+            or init_scope.has_decorators
+            or not init_scope.bindings.positional_parameter_names
+            or init_scope.bindings.has_variadic_parameters
+        ):
+            continue
+        init_receiver = init_scope.bindings.positional_parameter_names[0]
+        if init_receiver in init_scope.bindings.assigned:
+            continue
+        field_assignments: list[RelationAssignmentFact] = []
+        for event in init_scope.events:
+            if time.monotonic() >= budget.deadline:
+                budget._stop("max_seconds exceeded while resolving contextual calls")
+                return contextual
+            if not isinstance(event, RelationAssignmentEvent):
+                continue
+            assignment = event.fact
+            if (
+                assignment.certainty == "definite"
+                and not assignment.target_names
+                and len(assignment.target_attributes) == 1
+                and len(assignment.target_attributes[0].target_parts) == 2
+                and assignment.target_attributes[0].target_parts[0] == init_receiver
+                and assignment.value_name in init_scope.bindings.parameter_names
+                and assignment.value_name != init_receiver
+            ):
+                field_assignments.append(assignment)
+        for assignment in field_assignments:
+            if time.monotonic() >= budget.deadline:
+                budget._stop("max_seconds exceeded")
+                return contextual
+            field_name = assignment.target_attributes[0].target_parts[-1]
+            source_parameter = assignment.value_name
+            assert source_parameter is not None
+            if (
+                field_name in class_scope.bindings.assigned
+                or field_name in class_scope.bindings.definition_names
+                or field_name in indirect_writes
+                or "*" in indirect_writes
+                or source_parameter in init_scope.bindings.assigned
+                or _nested_scope_reassigns(init_scope, source_parameter)
+                or writes.get(field_name) != [assignment]
+            ):
+                continue
+            parameter_position = (
+                init_scope.bindings.positional_parameter_names.index(source_parameter) - 1
+                if source_parameter in init_scope.bindings.positional_parameter_names
+                else None
+            )
+            positional_present = (
+                parameter_position is not None
+                and parameter_position < len(constructor.positional_arguments)
+            )
+            positional_value = (
+                constructor.positional_arguments[parameter_position]
+                if positional_present and parameter_position is not None
+                else None
+            )
+            keyword_values = [
+                value
+                for name, value in constructor.keyword_arguments
+                if name == source_parameter
+            ]
+            if (
+                constructor.has_argument_expansion
+                or len(keyword_values) > 1
+                or (positional_present and keyword_values)
+            ):
+                continue
+            dependency = keyword_values[0] if keyword_values else positional_value
+            if dependency is None or dependency.kind != "class":
+                continue
+            dependency_scope = scope_facts_by_key.get(
+                (
+                    dependency.path,
+                    dependency.qualified_name,
+                    "class",
+                    dependency.start_line,
+                )
+            )
+            if (
+                dependency_scope is None
+                or dependency_scope.has_bases
+                or dependency_scope.has_decorators
+                or "__new__" in dependency_scope.bindings.definition_names
+                or "__new__" in dependency_scope.bindings.assigned
+                or protocols.intersection(
+                    (*dependency_scope.bindings.definition_names, *dependency_scope.bindings.assigned)
+                )
+            ):
+                continue
+            dependency_has_escaped_instance = False
+            for dependency_site in constructor_sites:
+                if time.monotonic() >= budget.deadline:
+                    budget._stop("max_seconds exceeded while resolving contextual calls")
+                    return contextual
+                if (
+                    dependency_site.class_symbol.symbol_id == dependency.symbol_id
+                    and dependency_site.site_id in escaped_instance_site_ids
+                ):
+                    dependency_has_escaped_instance = True
+                    break
+            external_writes = multisegment_attribute_writes.get(field_name, [])
+            if dependency_has_escaped_instance or any(
+                written_class is None or written_class.symbol_id != dependency.symbol_id
+                for written_class in external_writes
+            ):
+                continue
+            transfers = method_transfers_instance(method_scope, receiver, field_name)
+            if transfers is None:
+                budget._stop("max_seconds exceeded while resolving contextual calls")
+                return contextual
+            if transfers:
+                continue
+            for event in method_scope.events:
+                if time.monotonic() >= budget.deadline:
+                    budget._stop("max_seconds exceeded")
+                    return contextual
+                if not isinstance(event, RelationCallEvent):
+                    continue
+                call = event.fact
+                if (
+                    call.target_kind != "attribute"
+                    or len(call.target_parts) != 3
+                    or call.target_parts[:2] != (receiver, field_name)
+                ):
+                    continue
+                method_name = call.target_parts[-1]
+                target_candidates: list[Symbol] = []
+                for symbol in maps.by_qualified_name.get(
+                    f"{dependency.qualified_name}.{method_name}", []
+                ):
+                    if time.monotonic() >= budget.deadline:
+                        budget._stop("max_seconds exceeded while resolving contextual calls")
+                        return contextual
+                    if symbol.path == dependency.path and symbol.kind == "function":
+                        target_candidates.append(symbol)
+                target_scope = (
+                    scope_facts_by_key.get(
+                        (
+                            target_candidates[0].path,
+                            target_candidates[0].qualified_name,
+                            "function",
+                            target_candidates[0].start_line,
+                        )
+                    )
+                    if len(target_candidates) == 1
+                    else None
+                )
+                if (
+                    len(target_candidates) != 1
+                    or target_scope is None
+                    or dependency_scope.has_decorators
+                    or method_name in dependency_scope.bindings.assigned
+                    or _scope_has_attribute_write(dependency_scope, method_name)
+                    or _scope_has_attribute_write(method_scope, method_name)
+                    or bool(writes.get(method_name))
+                    or bool(multisegment_attribute_writes.get(method_name))
+                    or target_scope.has_decorators
+                ):
+                    continue
+                key = (
+                    activation_edges[0].edge_id,
+                    activation.target_symbol.symbol_id,
+                    target_candidates[0].symbol_id,
+                    field_name,
+                    call.start_line,
+                    call.end_line,
+                )
+                if key in emitted:
+                    continue
+                if budget.edge_count >= budget.max_edges:
+                    budget._stop("max_edges reached while collecting contextual calls")
+                    return contextual
+                if not budget.reserve("edges"):
+                    return contextual
+                emitted.add(key)
+                identity = "\0".join(
+                    [index_id, *key[:4], constructor.site_id, str(call.start_line), str(call.end_line)]
+                )
+                contextual.append(
+                    ContextualCall(
+                        context_id=f"context-{hashlib.sha256(identity.encode('utf-8')).hexdigest()[:32]}",
+                        index_id=index_id,
+                        activation_edge_id=activation_edges[0].edge_id,
+                        activation_source=activation.caller_symbol,
+                        source=activation.target_symbol,
+                        target=target_candidates[0],
+                        activation_location=activation.location,
+                        source_location=SourceLocation(
+                            path=activation.target_symbol.path,
+                            start_line=call.start_line,
+                            end_line=call.end_line,
+                        ),
+                        receiver_constructor_location=constructor.location,
+                        field_assignment_location=SourceLocation(
+                            path=init_symbol.path,
+                            start_line=assignment.start_line,
+                            end_line=assignment.end_line,
+                        ),
+                        field_name=field_name,
+                        binding_mutation_after_escape_unverified=(
+                            constructor.site_id in binding_mutation_after_escape_unverified_site_ids
+                        ),
+                    )
+                )
+    return contextual
 
 
 def serialize_relation_file_facts(facts: RelationFileFacts) -> str:

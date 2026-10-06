@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { CodeEdge, NeighborsResponse, SymbolRecord } from "./api.ts";
+import type { CodeEdge, ContextualCall, NeighborsResponse, SymbolRecord } from "./api.ts";
 import {
   emptyGraphState,
   groupSymbolsByDirectory,
   hasDirectedCallCycle,
   isHttpCallChainResponse,
   isLatestRequest,
+  mergeContextualCalls,
   mergeNeighborGraph,
   unresolvedForSymbol,
 } from "./graph.ts";
@@ -72,6 +73,41 @@ test("mergeNeighborGraph deduplicates symbols and edges while preserving truncat
   assert.equal(twice.indexTruncationReason, null);
   assert.equal(twice.indexUnresolvedTruncated, true);
   assert.equal(twice.indexUnresolvedTruncationReason, "max_unresolved reached");
+});
+
+test("conditional calls remain visible separately when a static graph is empty", () => {
+  const conditional: ContextualCall = {
+    context_id: "context-one",
+    index_id: indexId,
+    activation_edge_id: "edge-one",
+    activation_source: root,
+    activation_location: edge("edge-one", root.symbol_id, child.symbol_id).source_location,
+    source: child,
+    target: symbol("symbol-target", "timeout_demo/service.py", "timeout_demo.service.Service.read", 30),
+    source_location: { path: child.path, start_line: child.start_line, end_line: child.start_line },
+    receiver_constructor_location: { path: "timeout_demo/app.py", start_line: 20, end_line: 22 },
+    field_assignment_location: { path: child.path, start_line: 8, end_line: 8 },
+    field_name: "service",
+    binding_mutation_after_escape_unverified: false,
+  };
+  const conditionalOnly: NeighborsResponse = {
+    ...response,
+    nodes: [root],
+    neighbors: [],
+    contextual_calls: [conditional],
+    truncated: true,
+    truncation_reason: "contextual calls max_edges reached",
+  };
+  const staticGraph = mergeNeighborGraph(emptyGraphState, conditionalOnly);
+  const displayedConditions = mergeContextualCalls([], conditionalOnly, true);
+
+  assert.equal(staticGraph.edges.length, 0);
+  assert.equal(staticGraph.symbols.length, 1);
+  assert.deepEqual(displayedConditions, [conditional]);
+  assert.deepEqual(
+    mergeContextualCalls([{ ...conditional, context_id: "stale-context", index_id: "old-index" }], conditionalOnly, false),
+    [conditional],
+  );
 });
 
 test("groupSymbolsByDirectory keeps a deterministic directory/file hierarchy", () => {

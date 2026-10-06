@@ -56,6 +56,7 @@ import {
   refreshProjectIndex,
   searchProjectIndex,
   type CodeEdge,
+  type ContextualCall,
   type EdgeKind,
   type Evidence,
   type FeatureGeneration,
@@ -96,6 +97,7 @@ import {
   type SessionMessage,
   type SessionMessageSource,
   type SourceResponse,
+  type SourceLocation,
   type SymbolRecord,
 } from "../lib/api";
 import {
@@ -110,6 +112,7 @@ import {
   hasDirectedCallCycle,
   isHttpCallChainResponse,
   isLatestRequest,
+  mergeContextualCalls,
   mergeNeighborGraph,
   unresolvedForSymbol,
   type GraphState,
@@ -522,6 +525,8 @@ export default function Workbench() {
   const [graphStatus, setGraphStatus] = useState<AsyncStatus>("idle");
   const [graphError, setGraphError] = useState<string | null>(null);
   const [graph, setGraph] = useState<GraphState>(emptyGraphState);
+  const [graphIndexId, setGraphIndexId] = useState<string | null>(null);
+  const [contextualCalls, setContextualCalls] = useState<ContextualCall[]>([]);
   const [viewMode, setViewMode] = useState<WorkbenchView>("overview");
   const [panelMode, setPanelMode] = useState<WorkbenchPanel>("none");
   const [overviewStatus, setOverviewStatus] = useState<AsyncStatus>("idle");
@@ -867,6 +872,8 @@ export default function Workbench() {
     setGraphStatus("idle");
     setGraphError(null);
     setGraph(emptyGraphState);
+    setGraphIndexId(null);
+    setContextualCalls([]);
     setViewMode("overview");
     setPanelMode("none");
     setOverviewStatus("idle");
@@ -2887,7 +2894,7 @@ export default function Workbench() {
 
   const openArchitectureSource = useCallback(
     async ({ indexId, path, startLine, endLine, expectedContentHash }: { indexId: string; path: string; startLine: number; endLine: number; expectedContentHash?: string }) => {
-      if (!selectedProjectId || indexResponse?.index.index_id !== indexId) {
+      if (!selectedProjectId) {
         return;
       }
       sourceController.current?.abort();
@@ -2944,7 +2951,7 @@ export default function Workbench() {
         setSourceError(errorMessage(error));
       }
     },
-    [indexResponse?.index.index_id, selectedProjectId],
+    [selectedProjectId],
   );
 
   const loadNeighborhood = useCallback(
@@ -2964,11 +2971,14 @@ export default function Workbench() {
       const controller = new AbortController();
       graphController.current = controller;
       const requestId = ++graphRequestId.current;
+      const graphIndexChanged = graphIndexId !== indexId;
+      setGraphIndexId(indexId);
       setSelectedId(symbolId);
       setGraphStatus("loading");
       setGraphError(null);
-      if (replace) {
+      if (replace || graphIndexChanged) {
         setGraph(emptyGraphState);
+        setContextualCalls([]);
         setExpandedGroups(new Set());
         knownGroupKeys.current.clear();
       }
@@ -2988,8 +2998,9 @@ export default function Workbench() {
           throw new Error("链路响应与选定 HTTP 关联、handler 或静态 calls 快照不一致。");
         }
         setGraph((previous) =>
-          mergeNeighborGraph(replace ? emptyGraphState : previous, response),
+          mergeNeighborGraph(replace || graphIndexChanged ? emptyGraphState : previous, response),
         );
+        setContextualCalls((previous) => mergeContextualCalls(previous, response, replace || graphIndexChanged));
         setGraphStatus(
           response.truncated ? "success" : response.neighbors.length === 0 ? "empty" : "success",
         );
@@ -3001,7 +3012,7 @@ export default function Workbench() {
         setGraphError(errorMessage(error));
       }
     },
-    [direction, edgeKinds, selectedProjectId],
+    [direction, edgeKinds, graphIndexId, selectedProjectId],
   );
 
   const selectRunSymbol = useCallback(
@@ -3092,6 +3103,8 @@ export default function Workbench() {
         graphRequestId.current += 1;
         setHttpEntryChain(null);
         setGraph(emptyGraphState);
+        setGraphIndexId(null);
+        setContextualCalls([]);
         setGraphStatus("error");
         setGraphError("HTTP 关联没有匹配当前固定索引的 FastAPI handler。");
         setViewMode("overview");
@@ -3114,10 +3127,30 @@ export default function Workbench() {
     graphRequestId.current += 1;
     setHttpEntryChain(null);
     setGraph(emptyGraphState);
+    setGraphIndexId(null);
+    setContextualCalls([]);
     setGraphStatus("idle");
     setGraphError(null);
     setPanelMode("none");
   }, []);
+
+  const openContextualCallEvidence = useCallback(
+    (call: ContextualCall, location: SourceLocation) => {
+      if (
+        call.index_id !== graphIndexId ||
+        httpEntryChain !== null && call.index_id !== httpEntryChain.association.index_id
+      ) {
+        return;
+      }
+      void openArchitectureSource({
+        indexId: call.index_id,
+        path: location.path,
+        startLine: location.start_line,
+        endLine: location.end_line,
+      });
+    },
+    [graphIndexId, httpEntryChain, openArchitectureSource],
+  );
 
   const selectOverviewGroup = useCallback((group: OverviewGroup) => {
     graphController.current?.abort();
@@ -3126,6 +3159,8 @@ export default function Workbench() {
     setSelectedOverviewGroupId(group.group_id);
     setSelectedOverviewEntryId(null);
     setHttpEntryChain(null);
+    setGraphIndexId(null);
+    setContextualCalls([]);
     setPanelMode("none");
   }, [resetModuleSymbols]);
 
@@ -3172,6 +3207,8 @@ export default function Workbench() {
       setSourceResponse(null);
       setSourceStatus("idle");
       setGraph(emptyGraphState);
+      setGraphIndexId(null);
+      setContextualCalls([]);
       setGraphStatus("idle");
       setGraphError(null);
       setExpandedGroups(new Set());
@@ -3899,6 +3936,8 @@ export default function Workbench() {
         codeIndexUnresolvedTruncated: graph.indexUnresolvedTruncated,
         codeIndexUnresolvedTruncationReason: graph.indexUnresolvedTruncationReason,
         codeUnresolved: graph.unresolved,
+        contextualCalls,
+        onSelectContextualCallEvidence: openContextualCallEvidence,
         codeHasCycle: httpChainHasCycle,
         httpChain: httpEntryChain,
         onSelectHttpChainEvidence: selectFeatureEvidence,

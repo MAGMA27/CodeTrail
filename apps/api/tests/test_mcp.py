@@ -390,8 +390,9 @@ def test_constructor_attribute_calls_match_http_and_cold_stdio(tmp_path: Path) -
         "from .backend import Backend\n"
         "from .observer import Observer\n"
         "from .workspace import Workspace\n\n"
-        "def create() -> Workspace:\n"
-        "    return Workspace(Backend(), Observer())\n",
+        "def create() -> None:\n"
+        "    workspace = Workspace(Backend(), Observer())\n"
+        "    workspace.read_source()\n",
         encoding="utf-8",
     )
     data_root = tmp_path / "service-data"
@@ -415,13 +416,13 @@ def test_constructor_attribute_calls_match_http_and_cold_stdio(tmp_path: Path) -
     status, search = request(
         application,
         "GET",
-        f"/api/projects/{project_id}/indexes/{index_id}/search?query=read_source&limit=20",
+        f"/api/projects/{project_id}/indexes/{index_id}/search?query=create&limit=20",
     )
     assert status == 200
     workspace_method = next(
         match["symbol"]
         for match in search["matches"]
-        if match["symbol"]["qualified_name"] == "sample.workspace.Workspace.read_source"
+        if match["symbol"]["qualified_name"] == "sample.factory.create"
     )
     status, http_neighbors = request(
         application,
@@ -431,9 +432,18 @@ def test_constructor_attribute_calls_match_http_and_cold_stdio(tmp_path: Path) -
     )
     assert status == 200
     assert any(
+        neighbor["symbol"]["qualified_name"] == "sample.workspace.Workspace.read_source"
+        for neighbor in http_neighbors["neighbors"]
+    )
+    assert not any(
         neighbor["symbol"]["qualified_name"] == "sample.backend.Backend.read_source"
         for neighbor in http_neighbors["neighbors"]
     )
+    assert [
+        item["target"]["qualified_name"] for item in http_neighbors["contextual_calls"]
+    ] == ["sample.backend.Backend.read_source"]
+    assert http_neighbors["contextual_calls"][0]["binding_mutation_after_escape_unverified"] is False
+    assert all(item["index_id"] == index_id for item in http_neighbors["contextual_calls"])
 
     parameters = StdioServerParameters(
         command=sys.executable,

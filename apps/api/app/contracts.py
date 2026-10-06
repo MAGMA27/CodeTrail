@@ -1101,6 +1101,45 @@ class Neighbor(ContractModel):
     edge: CodeEdge
 
 
+class ContextualCall(ContractModel):
+    """One self-field call proven only for a specific constructed receiver."""
+
+    context_id: Identifier
+    index_id: Identifier
+    activation_edge_id: Identifier
+    activation_source: Symbol
+    source: Symbol
+    target: Symbol
+    activation_location: SourceLocation
+    source_location: SourceLocation
+    receiver_constructor_location: SourceLocation
+    field_assignment_location: SourceLocation
+    field_name: str = Field(min_length=1, max_length=200)
+    binding_mutation_after_escape_unverified: bool = False
+
+    @model_validator(mode="after")
+    def validate_context_scope(self) -> ContextualCall:
+        if any(
+            symbol.index_id != self.index_id
+            for symbol in (self.activation_source, self.source, self.target)
+        ):
+            raise ValueError("contextual calls must use one index_id")
+        if self.source.kind not in {"function", "test"} or self.target.kind not in {"function", "test"}:
+            raise ValueError("contextual calls must reference method symbols")
+        if not self.field_name.isidentifier():
+            raise ValueError("contextual call field names must be identifiers")
+        if (
+            self.activation_location.path != self.activation_source.path
+            or self.source_location.path != self.source.path
+            or not self.activation_source.start_line <= self.activation_location.start_line
+            or self.activation_location.end_line > self.activation_source.end_line
+            or not self.source.start_line <= self.source_location.start_line
+            or self.source_location.end_line > self.source.end_line
+        ):
+            raise ValueError("contextual call locations must belong to their source symbols")
+        return self
+
+
 class ToolResultBase(ContractModel):
     request_id: Identifier
     run_id: Identifier
@@ -1148,6 +1187,7 @@ class GetNeighborsSuccess(ToolResultBase):
     root: Symbol | None = None
     nodes: list[Symbol] = Field(default_factory=list, max_length=40)
     neighbors: list[Neighbor]
+    contextual_calls: list[ContextualCall] = Field(default_factory=list, max_length=200)
     unresolved: list[UnresolvedReference] = Field(default_factory=list, max_length=40)
     truncated: bool = False
     truncation_reason: str | None = Field(default=None, max_length=1_000)
@@ -1158,6 +1198,44 @@ class GetNeighborsSuccess(ToolResultBase):
 
     @model_validator(mode="after")
     def validate_truncation(self) -> GetNeighborsSuccess:
+        neighbor_edges = {neighbor.edge.edge_id: neighbor.edge for neighbor in self.neighbors}
+        returned_symbols: dict[str, Symbol] = {}
+
+        def include_returned_symbol(symbol: Symbol) -> None:
+            existing = returned_symbols.get(symbol.symbol_id)
+            if existing is not None and existing != symbol:
+                raise ValueError("neighbor results contain conflicting symbol metadata")
+            returned_symbols.setdefault(symbol.symbol_id, symbol)
+
+        for symbol in self.nodes:
+            if symbol.index_id != self.index_id:
+                raise ValueError("neighbor node belongs to a different index_id")
+            include_returned_symbol(symbol)
+        if self.root is not None:
+            if self.root.index_id != self.index_id:
+                raise ValueError("neighbor root belongs to a different index_id")
+            include_returned_symbol(self.root)
+        for neighbor in self.neighbors:
+            if neighbor.symbol.index_id != self.index_id or neighbor.edge.index_id != self.index_id:
+                raise ValueError("neighbor result belongs to a different index_id")
+            include_returned_symbol(neighbor.symbol)
+        context_ids: set[str] = set()
+        for contextual_call in self.contextual_calls:
+            context_ids.add(contextual_call.context_id)
+            edge = neighbor_edges.get(contextual_call.activation_edge_id)
+            if (
+                contextual_call.index_id != self.index_id
+                or edge is None
+                or edge.kind != "calls"
+                or edge.source_id != contextual_call.activation_source.symbol_id
+                or edge.target_id != contextual_call.source.symbol_id
+                or edge.source_location != contextual_call.activation_location
+                or returned_symbols.get(edge.source_id) != contextual_call.activation_source
+                or returned_symbols.get(edge.target_id) != contextual_call.source
+            ):
+                raise ValueError("contextual calls must bind to a returned activation edge")
+        if len(context_ids) != len(self.contextual_calls):
+            raise ValueError("contextual call IDs must be unique")
         if self.truncated and not self.truncation_reason:
             raise ValueError("truncated neighbor results must explain the truncation")
         if not self.truncated and self.truncation_reason:
@@ -1244,6 +1322,7 @@ class NeighborsIndexResponse(VersionedModel):
     root: Symbol
     nodes: list[Symbol] = Field(default_factory=list)
     neighbors: list[Neighbor] = Field(default_factory=list)
+    contextual_calls: list[ContextualCall] = Field(default_factory=list, max_length=200)
     unresolved: list[UnresolvedReference] = Field(default_factory=list)
     truncated: bool = False
     truncation_reason: str | None = Field(default=None, max_length=1_000)
@@ -1271,6 +1350,25 @@ class NeighborsIndexResponse(VersionedModel):
                 raise ValueError("neighbor result must reference a returned node")
             if neighbor.edge.source_id not in node_ids or neighbor.edge.target_id not in node_ids:
                 raise ValueError("neighbor edge must reference returned nodes")
+        neighbor_edges = {neighbor.edge.edge_id: neighbor.edge for neighbor in self.neighbors}
+        nodes_by_id = {node.symbol_id: node for node in self.nodes}
+        context_ids: set[str] = set()
+        for contextual_call in self.contextual_calls:
+            context_ids.add(contextual_call.context_id)
+            edge = neighbor_edges.get(contextual_call.activation_edge_id)
+            if (
+                contextual_call.index_id != self.index_id
+                or edge is None
+                or edge.kind != "calls"
+                or edge.source_id != contextual_call.activation_source.symbol_id
+                or edge.target_id != contextual_call.source.symbol_id
+                or edge.source_location != contextual_call.activation_location
+                or nodes_by_id.get(edge.source_id) != contextual_call.activation_source
+                or nodes_by_id.get(edge.target_id) != contextual_call.source
+            ):
+                raise ValueError("contextual calls must bind to a returned activation edge")
+        if len(context_ids) != len(self.contextual_calls):
+            raise ValueError("contextual call IDs must be unique")
         for unresolved in self.unresolved:
             if unresolved.index_id != self.index_id or unresolved.source_symbol_id not in node_ids:
                 raise ValueError("unresolved reference must use returned nodes")

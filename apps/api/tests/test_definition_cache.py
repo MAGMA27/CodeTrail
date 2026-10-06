@@ -201,8 +201,11 @@ def test_constructor_attribute_binding_rebinds_cached_facts_across_files(tmp_pat
     factory_path.write_text(
         "from .backend import Backend\n"
         "from .workspace import Workspace\n\n"
-        "def create() -> Workspace:\n"
-        "    return Workspace(Backend())\n",
+        "def create() -> None:\n"
+        "    workspace = Workspace(Backend())\n"
+        "    workspace.read()\n\n"
+        "def bypass() -> Workspace:\n"
+        "    return Workspace.__new__(Workspace)\n",
         encoding="utf-8",
     )
     database = tmp_path / "index.sqlite3"
@@ -217,7 +220,15 @@ def test_constructor_attribute_binding_rebinds_cached_facts_across_files(tmp_pat
         for edge in first_relations.edges
         if edge.kind == "calls"
     }
-    assert ("sample.workspace.Workspace.read", "sample.backend.Backend.read_source") in first_edges
+    first_contexts = first_relations.contextual_calls
+    assert ("sample.factory.create", "sample.workspace.Workspace.read") in first_edges
+    assert [(item.source.qualified_name, item.target.qualified_name) for item in first_contexts] == [
+        ("sample.workspace.Workspace.read", "sample.backend.Backend.read_source")
+    ]
+    assert not any(
+        source == "sample.workspace.Workspace.read" and target == "sample.backend.Backend.read_source"
+        for source, target in first_edges
+    )
 
     with IndexStore(database) as store:
         _write_cache(store, first_snapshot, first_definitions)
@@ -225,13 +236,17 @@ def test_constructor_attribute_binding_rebinds_cached_facts_across_files(tmp_pat
         cached_facts = store.load_relation_cache(**_relation_cache_kwargs(first_snapshot))
         hot_relations = extract_relations(first_definitions, cached=cached_facts)
         assert hot_relations.edges == first_relations.edges
+        assert hot_relations.contextual_calls == first_relations.contextual_calls
         assert hot_relations.fact_cache_hits == len(first_snapshot.files)
 
         factory_path.write_text(
             "from .replacement import Replacement\n"
             "from .workspace import Workspace\n\n"
-            "def create() -> Workspace:\n"
-            "    return Workspace(Replacement())\n",
+            "def create() -> None:\n"
+            "    workspace = Workspace(Replacement())\n"
+            "    workspace.read()\n\n"
+            "def bypass() -> Workspace:\n"
+            "    return Workspace.__new__(Workspace)\n",
             encoding="utf-8",
         )
         second_snapshot = build_source_snapshot(
@@ -254,12 +269,20 @@ def test_constructor_attribute_binding_rebinds_cached_facts_across_files(tmp_pat
         for edge in second_relations.edges
         if edge.kind == "calls"
     }
-    assert ("sample.workspace.Workspace.read", "sample.replacement.Replacement.read_source") in second_edges
+    second_contexts = second_relations.contextual_calls
+    assert ("sample.factory.create", "sample.workspace.Workspace.read") in second_edges
+    assert [(item.source.qualified_name, item.target.qualified_name) for item in second_contexts] == [
+        ("sample.workspace.Workspace.read", "sample.replacement.Replacement.read_source")
+    ]
     assert not any(target == "sample.backend.Backend.read_source" for _, target in second_edges)
     assert second_relations.fact_cache_hits == len(second_snapshot.files) - 1
     assert all(edge.index_id == "index-second" for edge in second_relations.edges)
+    assert all(item.index_id == "index-second" for item in second_contexts)
     assert all(edge.index_id == "index-first" for edge in first_relations.edges)
-    assert ("sample.workspace.Workspace.read", "sample.backend.Backend.read_source") in first_edges
+    assert all(item.index_id == "index-first" for item in first_contexts)
+    assert [(item.source.qualified_name, item.target.qualified_name) for item in first_contexts] == [
+        ("sample.workspace.Workspace.read", "sample.backend.Backend.read_source")
+    ]
 
 
 def test_cache_keys_invalidate_changes_additions_deletions_renames_and_settings(tmp_path: Path) -> None:

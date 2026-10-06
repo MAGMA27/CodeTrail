@@ -4,10 +4,18 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import app.relations as relations_module
 from app.contracts import GraphSnapshot
 from app.indexing import build_source_snapshot, extract_definitions
 from app.relations import (
+    RelationBindings,
+    RelationFileFacts,
     RelationIndex,
+    RelationReturnEvent,
+    RelationScopeFacts,
+    _DefinitionMaps,
+    _RelationBudget,
+    _resolve_constructor_attribute_bindings,
     deserialize_relation_file_facts,
     extract_relations,
     serialize_relation_file_facts,
@@ -123,6 +131,65 @@ def test_relation_time_budget_is_observable() -> None:
 
     assert result.truncated is True
     assert result.truncation_reason == "max_seconds exceeded"
+
+
+def test_constructor_binding_collection_checks_deadline_per_event(monkeypatch) -> None:
+    class Clock:
+        now = 0.0
+
+    clock = Clock()
+
+    class Events(tuple):
+        yielded = 0
+
+        def __iter__(self):
+            for event in super().__iter__():
+                self.yielded += 1
+                yield event
+                if self.yielded == 1:
+                    clock.now = 10.0
+
+    events = Events(RelationReturnEvent(None) for _ in range(100))
+    bindings = RelationBindings(
+        imports=(),
+        assigned=(),
+        definition_names=(),
+        global_names=(),
+        dynamic_names=(),
+        parameter_names=(),
+        positional_parameter_names=(),
+        has_variadic_parameters=False,
+        nonlocal_names=(),
+        attribute_write_names=(),
+        indirect_attribute_write_names=(),
+    )
+    scope = RelationScopeFacts(
+        qualified_name="sample",
+        kind="module",
+        start_line=1,
+        bindings=bindings,
+        events=events,
+        has_decorators=False,
+        has_bases=False,
+    )
+    facts = RelationFileFacts("sample.py", "sample", False, scope)
+    monkeypatch.setattr(relations_module.time, "monotonic", lambda: clock.now)
+    budget = _RelationBudget(10, 10, 10.0)
+
+    _resolve_constructor_attribute_bindings(
+        {"sample.py": facts},
+        {},
+        _DefinitionMaps(()),
+        [],
+        set(),
+        set(),
+        {},
+        budget,
+    )
+
+    assert budget.truncated is True
+    assert budget.reason == "max_seconds exceeded"
+    assert events.yielded == 2
 
 
 def test_unresolved_budget_does_not_stop_later_static_relation_extraction(tmp_path: Path) -> None:
@@ -596,16 +663,15 @@ def test_constructor_parameter_attribute_resolves_only_proven_instance_type(tmp_
 
 
 def test_code_trail_workspace_service_reader_stays_unresolved_after_new_bypass() -> None:
-    api_root = ROOT / "apps" / "api"
     definitions = extract_definitions(
         build_source_snapshot(
-            api_root,
-            repository_id="codetrail-api-probe",
+            ROOT,
+            repository_id="codetrail-root-probe",
             revision="working-tree",
             dirty=True,
         )
     )
-    result = extract_relations(definitions)
+    result = extract_relations(definitions, max_seconds=30)
     names = {symbol.symbol_id: symbol.qualified_name for symbol in result.symbols}
     calls = {
         (names[edge.source_id], names[edge.target_id])
@@ -615,17 +681,158 @@ def test_code_trail_workspace_service_reader_stays_unresolved_after_new_bypass()
 
     assert result.truncated is False
     assert (
-        "app.service.WorkspaceService.read_source",
-        "app.service.IndexService.read_source",
+        "apps.api.app.service.WorkspaceService.read_source",
+        "apps.api.app.service.IndexService.read_source",
     ) not in calls
     unresolved = [
         item
         for item in result.unresolved
-        if names[item.source_symbol_id] == "app.service.WorkspaceService.read_source"
+        if names[item.source_symbol_id] == "apps.api.app.service.WorkspaceService.read_source"
         and item.expression.startswith("self.index_service.read_source(")
     ]
     assert len(unresolved) == 1
     assert unresolved[0].reason == "object_method_not_resolved"
+    handler_contexts = [
+        context
+        for context in result.contextual_calls
+        if context.source.qualified_name == "apps.api.app.service.WorkspaceService.read_source"
+        and context.target.qualified_name == "apps.api.app.service.IndexService.read_source"
+        and context.activation_location.path == "apps/api/app/main.py"
+    ]
+    assert len(handler_contexts) == 1
+    assert handler_contexts[0].field_name == "index_service"
+    assert handler_contexts[0].binding_mutation_after_escape_unverified is True
+    assert handler_contexts[0].activation_source.qualified_name == (
+        "apps.api.app.main.create_app.read_project_source"
+    )
+    assert handler_contexts[0].receiver_constructor_location.start_line == 166
+    service_lines = (ROOT / "apps" / "api" / "app" / "service.py").read_text(
+        encoding="utf-8"
+    ).splitlines()
+    expected_assignment_line = next(
+        line_number
+        for line_number, line in enumerate(service_lines, start=1)
+        if line.strip() == "self.index_service = index_service"
+    )
+    assert handler_contexts[0].field_assignment_location.path == "apps/api/app/service.py"
+    assert handler_contexts[0].field_assignment_location.start_line == expected_assignment_line
+
+
+def test_contextual_calls_bind_each_constructor_site_and_reject_unproven_transfers(
+    tmp_path: Path,
+) -> None:
+    package = tmp_path / "sample"
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "dependencies.py").write_text(
+        "class First:\n"
+        "    def work(self) -> None:\n"
+        "        pass\n\n"
+        "class Second:\n"
+        "    def work(self) -> None:\n"
+        "        pass\n",
+        encoding="utf-8",
+    )
+    (package / "wrappers.py").write_text(
+        "from .dependencies import First, Second\n\n"
+        "class Wrapper:\n"
+        "    def __init__(self, dependency) -> None:\n"
+        "        self.backend = dependency\n"
+        "    def read(self) -> None:\n"
+        "        self.backend.work()\n\n"
+        "class PassingWrapper:\n"
+        "    def __init__(self, dependency) -> None:\n"
+        "        self.client = dependency\n"
+        "    def read(self) -> None:\n"
+        "        alias = self.client\n"
+        "        mutate(alias)\n"
+        "        self.client.work()\n\n"
+        "class ClosureWrapper:\n"
+        "    def __init__(self, dependency) -> None:\n"
+        "        self.connection = dependency\n"
+        "    def read(self) -> None:\n"
+        "        def mutate_later() -> None:\n"
+        "            mutate(self.connection)\n"
+        "        mutate_later()\n"
+        "        self.connection.work()\n\n"
+        "class ReceiverPassingWrapper:\n"
+        "    def __init__(self, dependency) -> None:\n"
+        "        self.transport = dependency\n"
+        "    def read(self) -> None:\n"
+        "        mutate(self)\n"
+        "        self.transport.work()\n\n"
+        "def separate_sites() -> None:\n"
+        "    first = Wrapper(First())\n"
+        "    second = Wrapper(Second())\n"
+        "    first.read()\n"
+        "    second.read()\n"
+        "    Wrapper.__new__(Wrapper)\n\n"
+        "def same_line_sites() -> None:\n"
+        "    first = Wrapper(First()); second = Wrapper(Second())\n"
+        "    first.read()\n"
+        "    second.read()\n\n"
+        "def escaped_receiver() -> None:\n"
+        "    receiver = Wrapper(First())\n"
+        "    consume(receiver)\n"
+        "    receiver.read()\n\n"
+        "def aliased_receiver() -> None:\n"
+        "    receiver = Wrapper(First())\n"
+        "    alias = receiver\n"
+        "    receiver.read()\n\n"
+        "def reassigned_receiver() -> None:\n"
+        "    receiver = Wrapper(First())\n"
+        "    receiver = Wrapper(Second())\n"
+        "    receiver.read()\n\n"
+        "def transferred_dependency() -> None:\n"
+        "    receiver = PassingWrapper(First())\n"
+        "    receiver.read()\n\n"
+        "def closure_transfer() -> None:\n"
+        "    receiver = ClosureWrapper(First())\n"
+        "    receiver.read()\n\n"
+        "def receiver_transfer() -> None:\n"
+        "    receiver = ReceiverPassingWrapper(First())\n"
+        "    receiver.read()\n\n"
+        "def shadowed_outer_receiver() -> None:\n"
+        "    receiver = Wrapper(First())\n"
+        "    def nested() -> None:\n"
+        "        receiver = Wrapper(Second())\n"
+        "        receiver.read()\n",
+        encoding="utf-8",
+    )
+
+    definitions = extract_definitions(
+        build_source_snapshot(package.parent, repository_id="contextual-calls", revision="v1", dirty=True)
+    )
+    result = extract_relations(definitions)
+    separate_contexts = sorted(
+        (
+            item
+            for item in result.contextual_calls
+            if item.activation_source.qualified_name == "sample.wrappers.separate_sites"
+        ),
+        key=lambda item: item.activation_location.start_line,
+    )
+    assert len(separate_contexts) == 2
+    assert [item.target.qualified_name for item in separate_contexts] == [
+        "sample.dependencies.First.work",
+        "sample.dependencies.Second.work",
+    ]
+    assert all(item.source.qualified_name == "sample.wrappers.Wrapper.read" for item in separate_contexts)
+    assert all(not item.binding_mutation_after_escape_unverified for item in separate_contexts)
+    assert len(result.contextual_calls) == 3
+    nested_context = next(
+        item
+        for item in result.contextual_calls
+        if item.activation_source.qualified_name == "sample.wrappers.shadowed_outer_receiver.nested"
+    )
+    assert nested_context.target.qualified_name == "sample.dependencies.Second.work"
+    names = {symbol.symbol_id: symbol.qualified_name for symbol in result.symbols}
+    assert not any(
+        names[edge.source_id] == "sample.wrappers.Wrapper.read"
+        and names[edge.target_id] in {"sample.dependencies.First.work", "sample.dependencies.Second.work"}
+        for edge in result.edges
+        if edge.kind == "calls"
+    )
 
 
 def test_constructor_attribute_binding_rejects_ambiguous_or_custom_attribute_behavior(

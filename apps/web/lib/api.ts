@@ -574,12 +574,28 @@ export type Neighbor = {
   edge: CodeEdge;
 };
 
+export type ContextualCall = {
+  context_id: string;
+  index_id: string;
+  activation_edge_id: string;
+  activation_source: SymbolRecord;
+  activation_location: SourceLocation;
+  source: SymbolRecord;
+  target: SymbolRecord;
+  source_location: SourceLocation;
+  receiver_constructor_location: SourceLocation;
+  field_assignment_location: SourceLocation;
+  field_name: string;
+  binding_mutation_after_escape_unverified: boolean;
+};
+
 export type NeighborsResponse = {
   schema_version: typeof SCHEMA_VERSION;
   index_id: string;
   root: SymbolRecord;
   nodes: SymbolRecord[];
   neighbors: Neighbor[];
+  contextual_calls?: ContextualCall[];
   unresolved: UnresolvedReference[];
   truncated: boolean;
   truncation_reason: string | null;
@@ -1869,8 +1885,125 @@ function isNeighbor(value: unknown): value is Neighbor {
   return isRecord(value) && isSymbolRecord(value.symbol) && isCodeEdge(value.edge);
 }
 
-export function isNeighborsResponse(value: unknown): value is NeighborsResponse {
+function isValidSymbolRange(symbol: SymbolRecord): boolean {
   return (
+    Number.isInteger(symbol.start_line) && symbol.start_line > 0 &&
+    Number.isInteger(symbol.end_line) && symbol.start_line <= symbol.end_line
+  );
+}
+
+function isValidLocationForSymbol(location: SourceLocation, symbol: SymbolRecord): boolean {
+  return (
+    isValidSymbolRange(symbol) &&
+    location.path === symbol.path &&
+    Number.isInteger(location.start_line) && location.start_line > 0 &&
+    Number.isInteger(location.end_line) &&
+    location.start_line <= location.end_line &&
+    location.start_line >= symbol.start_line &&
+    location.end_line <= symbol.end_line
+  );
+}
+
+function isSafeRelativePath(value: string): boolean {
+  return (
+    value.length > 0 &&
+    value.length <= 2048 &&
+    !value.startsWith("/") &&
+    !/^[a-zA-Z]:/.test(value) &&
+    !value.includes("\\") &&
+    value.split("/").every((part) => part !== "" && part !== "." && part !== "..")
+  );
+}
+
+function isValidSourceLocation(location: SourceLocation): boolean {
+  return (
+    isSafeRelativePath(location.path) &&
+    Number.isInteger(location.start_line) && location.start_line > 0 &&
+    Number.isInteger(location.end_line) &&
+    location.start_line <= location.end_line
+  );
+}
+
+function isPythonFieldName(value: unknown): value is string {
+  return typeof value === "string" && [...value].length <= 200 && /^[_\p{ID_Start}][\p{ID_Continue}_]*$/u.test(value);
+}
+
+function sameSymbol(left: SymbolRecord, right: SymbolRecord): boolean {
+  return (
+    left.symbol_id === right.symbol_id &&
+    left.index_id === right.index_id &&
+    left.path === right.path &&
+    left.qualified_name === right.qualified_name &&
+    left.kind === right.kind &&
+    left.start_line === right.start_line &&
+    left.end_line === right.end_line
+  );
+}
+
+function isContextualCall(
+  value: unknown,
+  indexId: string,
+  nodes: SymbolRecord[],
+  neighbors: Neighbor[],
+  root: SymbolRecord,
+): value is ContextualCall {
+  if (
+    !isRecord(value) ||
+    !isString(value.context_id) || value.context_id.length === 0 || value.context_id.length > 500 ||
+    !isString(value.index_id) || value.index_id !== indexId ||
+    !isString(value.activation_edge_id) ||
+    !isSymbolRecord(value.activation_source) ||
+    !isSourceLocation(value.activation_location) ||
+    !isSymbolRecord(value.source) ||
+    !isSymbolRecord(value.target) ||
+    !isSourceLocation(value.source_location) ||
+    !isSourceLocation(value.receiver_constructor_location) ||
+    !isSourceLocation(value.field_assignment_location) ||
+    !isPythonFieldName(value.field_name) ||
+    typeof value.binding_mutation_after_escape_unverified !== "boolean"
+  ) {
+    return false;
+  }
+
+  const call = value as ContextualCall;
+  const activations = neighbors.filter(({ edge }) => edge.edge_id === call.activation_edge_id);
+  if (activations.length !== 1) {
+    return false;
+  }
+  const activation = activations[0];
+  const returnedSymbols = [root, ...nodes, ...neighbors.map(({ symbol }) => symbol)];
+  const matchesReturnedSymbol = (candidate: SymbolRecord) => {
+    const matches = returnedSymbols.filter((symbol) => symbol.symbol_id === candidate.symbol_id);
+    return matches.length > 0 && matches.every((symbol) => sameSymbol(symbol, candidate));
+  };
+  return (
+    call.activation_source.index_id === indexId &&
+    call.source.index_id === indexId &&
+    call.target.index_id === indexId &&
+    isValidSymbolRange(call.target) &&
+    isSafeRelativePath(call.target.path) &&
+    matchesReturnedSymbol(call.activation_source) &&
+    matchesReturnedSymbol(call.source) &&
+    isValidSourceLocation(call.activation_location) &&
+    isValidLocationForSymbol(call.activation_location, call.activation_source) &&
+    isValidSourceLocation(call.source_location) &&
+    isValidLocationForSymbol(call.source_location, call.source) &&
+    isValidSourceLocation(call.receiver_constructor_location) &&
+    isValidSourceLocation(call.field_assignment_location) &&
+    call.field_assignment_location.path === call.source.path &&
+    activation !== undefined &&
+    activation.edge.index_id === indexId &&
+    activation.edge.kind === "calls" &&
+    activation.edge.source_id === call.activation_source.symbol_id &&
+    activation.edge.target_id === call.source.symbol_id &&
+    activation.edge.source_location.path === call.activation_location.path &&
+    activation.edge.source_location.start_line === call.activation_location.start_line &&
+    activation.edge.source_location.end_line === call.activation_location.end_line
+  );
+}
+
+export function isNeighborsResponse(value: unknown): value is NeighborsResponse {
+  if (!(
     isRecord(value) &&
     value.schema_version === SCHEMA_VERSION &&
     isString(value.index_id) &&
@@ -1888,7 +2021,33 @@ export function isNeighborsResponse(value: unknown): value is NeighborsResponse 
       "index_unresolved_truncation_reason",
     ) &&
     isTruncation(value)
-  );
+  )) {
+    return false;
+  }
+
+  if (value.contextual_calls === undefined) {
+    return true;
+  }
+  if (!Array.isArray(value.contextual_calls)) {
+    return false;
+  }
+  const contextIds = new Set<string>();
+  return value.contextual_calls.every((call) => {
+    if (
+      !isContextualCall(
+        call,
+        value.index_id as string,
+        value.nodes as SymbolRecord[],
+        value.neighbors as Neighbor[],
+        value.root as SymbolRecord,
+      ) ||
+      contextIds.has(call.context_id)
+    ) {
+      return false;
+    }
+    contextIds.add(call.context_id);
+    return true;
+  });
 }
 
 function isOverviewEntryPoint(value: unknown): value is OverviewEntryPoint {

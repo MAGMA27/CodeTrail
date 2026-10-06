@@ -1094,6 +1094,77 @@
           "title": "CodeEdge",
           "type": "object"
         },
+        "ContextualCall": {
+          "additionalProperties": false,
+          "description": "One self-field call proven only for a specific constructed receiver.",
+          "properties": {
+            "activation_edge_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Activation Edge Id",
+              "type": "string"
+            },
+            "activation_location": {
+              "$ref": "#/$defs/SourceLocation"
+            },
+            "activation_source": {
+              "$ref": "#/$defs/Symbol"
+            },
+            "binding_mutation_after_escape_unverified": {
+              "default": false,
+              "title": "Binding Mutation After Escape Unverified",
+              "type": "boolean"
+            },
+            "context_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Context Id",
+              "type": "string"
+            },
+            "field_assignment_location": {
+              "$ref": "#/$defs/SourceLocation"
+            },
+            "field_name": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Field Name",
+              "type": "string"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "receiver_constructor_location": {
+              "$ref": "#/$defs/SourceLocation"
+            },
+            "source": {
+              "$ref": "#/$defs/Symbol"
+            },
+            "source_location": {
+              "$ref": "#/$defs/SourceLocation"
+            },
+            "target": {
+              "$ref": "#/$defs/Symbol"
+            }
+          },
+          "required": [
+            "context_id",
+            "index_id",
+            "activation_edge_id",
+            "activation_source",
+            "source",
+            "target",
+            "activation_location",
+            "source_location",
+            "receiver_constructor_location",
+            "field_assignment_location",
+            "field_name"
+          ],
+          "title": "ContextualCall",
+          "type": "object"
+        },
         "Evidence": {
           "additionalProperties": false,
           "properties": {
@@ -1366,6 +1437,14 @@
               "exclusiveMinimum": 0,
               "title": "Completed Sequence",
               "type": "integer"
+            },
+            "contextual_calls": {
+              "items": {
+                "$ref": "#/$defs/ContextualCall"
+              },
+              "maxItems": 200,
+              "title": "Contextual Calls",
+              "type": "array"
             },
             "index_id": {
               "maxLength": 200,
@@ -3216,6 +3295,77 @@
           "title": "CodeEdge",
           "type": "object"
         },
+        "ContextualCall": {
+          "additionalProperties": false,
+          "description": "One self-field call proven only for a specific constructed receiver.",
+          "properties": {
+            "activation_edge_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Activation Edge Id",
+              "type": "string"
+            },
+            "activation_location": {
+              "$ref": "#/$defs/SourceLocation"
+            },
+            "activation_source": {
+              "$ref": "#/$defs/Symbol"
+            },
+            "binding_mutation_after_escape_unverified": {
+              "default": false,
+              "title": "Binding Mutation After Escape Unverified",
+              "type": "boolean"
+            },
+            "context_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Context Id",
+              "type": "string"
+            },
+            "field_assignment_location": {
+              "$ref": "#/$defs/SourceLocation"
+            },
+            "field_name": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Field Name",
+              "type": "string"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "receiver_constructor_location": {
+              "$ref": "#/$defs/SourceLocation"
+            },
+            "source": {
+              "$ref": "#/$defs/Symbol"
+            },
+            "source_location": {
+              "$ref": "#/$defs/SourceLocation"
+            },
+            "target": {
+              "$ref": "#/$defs/Symbol"
+            }
+          },
+          "required": [
+            "context_id",
+            "index_id",
+            "activation_edge_id",
+            "activation_source",
+            "source",
+            "target",
+            "activation_location",
+            "source_location",
+            "receiver_constructor_location",
+            "field_assignment_location",
+            "field_name"
+          ],
+          "title": "ContextualCall",
+          "type": "object"
+        },
         "Evidence": {
           "additionalProperties": false,
           "properties": {
@@ -3488,6 +3638,14 @@
               "exclusiveMinimum": 0,
               "title": "Completed Sequence",
               "type": "integer"
+            },
+            "contextual_calls": {
+              "items": {
+                "$ref": "#/$defs/ContextualCall"
+              },
+              "maxItems": 200,
+              "title": "Contextual Calls",
+              "type": "array"
             },
             "index_id": {
               "maxLength": 200,
@@ -9867,6 +10025,77 @@
           "title": "CodeExplanation",
           "type": "object"
         },
+        "ContextualCall": {
+          "additionalProperties": false,
+          "description": "One self-field call proven only for a specific constructed receiver.",
+          "properties": {
+            "activation_edge_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Activation Edge Id",
+              "type": "string"
+            },
+            "activation_location": {
+              "$ref": "#/$defs/SourceLocation"
+            },
+            "activation_source": {
+              "$ref": "#/$defs/Symbol"
+            },
+            "binding_mutation_after_escape_unverified": {
+              "default": false,
+              "title": "Binding Mutation After Escape Unverified",
+              "type": "boolean"
+            },
+            "context_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Context Id",
+              "type": "string"
+            },
+            "field_assignment_location": {
+              "$ref": "#/$defs/SourceLocation"
+            },
+            "field_name": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Field Name",
+              "type": "string"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "receiver_constructor_location": {
+              "$ref": "#/$defs/SourceLocation"
+            },
+            "source": {
+              "$ref": "#/$defs/Symbol"
+            },
+            "source_location": {
+              "$ref": "#/$defs/SourceLocation"
+            },
+            "target": {
+              "$ref": "#/$defs/Symbol"
+            }
+          },
+          "required": [
+            "context_id",
+            "index_id",
+            "activation_edge_id",
+            "activation_source",
+            "source",
+            "target",
+            "activation_location",
+            "source_location",
+            "receiver_constructor_location",
+            "field_assignment_location",
+            "field_name"
+          ],
+          "title": "ContextualCall",
+          "type": "object"
+        },
         "EventSequence": {
           "additionalProperties": false,
           "properties": {
@@ -10282,6 +10511,14 @@
               "exclusiveMinimum": 0,
               "title": "Completed Sequence",
               "type": "integer"
+            },
+            "contextual_calls": {
+              "items": {
+                "$ref": "#/$defs/ContextualCall"
+              },
+              "maxItems": 200,
+              "title": "Contextual Calls",
+              "type": "array"
             },
             "index_id": {
               "maxLength": 200,
@@ -22167,6 +22404,77 @@
           "title": "CodeEdge",
           "type": "object"
         },
+        "ContextualCall": {
+          "additionalProperties": false,
+          "description": "One self-field call proven only for a specific constructed receiver.",
+          "properties": {
+            "activation_edge_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Activation Edge Id",
+              "type": "string"
+            },
+            "activation_location": {
+              "$ref": "#/$defs/SourceLocation"
+            },
+            "activation_source": {
+              "$ref": "#/$defs/Symbol"
+            },
+            "binding_mutation_after_escape_unverified": {
+              "default": false,
+              "title": "Binding Mutation After Escape Unverified",
+              "type": "boolean"
+            },
+            "context_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Context Id",
+              "type": "string"
+            },
+            "field_assignment_location": {
+              "$ref": "#/$defs/SourceLocation"
+            },
+            "field_name": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Field Name",
+              "type": "string"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "receiver_constructor_location": {
+              "$ref": "#/$defs/SourceLocation"
+            },
+            "source": {
+              "$ref": "#/$defs/Symbol"
+            },
+            "source_location": {
+              "$ref": "#/$defs/SourceLocation"
+            },
+            "target": {
+              "$ref": "#/$defs/Symbol"
+            }
+          },
+          "required": [
+            "context_id",
+            "index_id",
+            "activation_edge_id",
+            "activation_source",
+            "source",
+            "target",
+            "activation_location",
+            "source_location",
+            "receiver_constructor_location",
+            "field_assignment_location",
+            "field_name"
+          ],
+          "title": "ContextualCall",
+          "type": "object"
+        },
         "McpError": {
           "additionalProperties": false,
           "description": "Domain failure returned inside a read-only MCP tool result.",
@@ -22228,6 +22536,14 @@
         "NeighborsIndexResponse": {
           "additionalProperties": false,
           "properties": {
+            "contextual_calls": {
+              "items": {
+                "$ref": "#/$defs/ContextualCall"
+              },
+              "maxItems": 200,
+              "title": "Contextual Calls",
+              "type": "array"
+            },
             "index_id": {
               "maxLength": 200,
               "minLength": 1,
@@ -24705,6 +25021,77 @@
           "title": "CodeEdge",
           "type": "object"
         },
+        "ContextualCall": {
+          "additionalProperties": false,
+          "description": "One self-field call proven only for a specific constructed receiver.",
+          "properties": {
+            "activation_edge_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Activation Edge Id",
+              "type": "string"
+            },
+            "activation_location": {
+              "$ref": "#/$defs/SourceLocation"
+            },
+            "activation_source": {
+              "$ref": "#/$defs/Symbol"
+            },
+            "binding_mutation_after_escape_unverified": {
+              "default": false,
+              "title": "Binding Mutation After Escape Unverified",
+              "type": "boolean"
+            },
+            "context_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Context Id",
+              "type": "string"
+            },
+            "field_assignment_location": {
+              "$ref": "#/$defs/SourceLocation"
+            },
+            "field_name": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Field Name",
+              "type": "string"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "receiver_constructor_location": {
+              "$ref": "#/$defs/SourceLocation"
+            },
+            "source": {
+              "$ref": "#/$defs/Symbol"
+            },
+            "source_location": {
+              "$ref": "#/$defs/SourceLocation"
+            },
+            "target": {
+              "$ref": "#/$defs/Symbol"
+            }
+          },
+          "required": [
+            "context_id",
+            "index_id",
+            "activation_edge_id",
+            "activation_source",
+            "source",
+            "target",
+            "activation_location",
+            "source_location",
+            "receiver_constructor_location",
+            "field_assignment_location",
+            "field_name"
+          ],
+          "title": "ContextualCall",
+          "type": "object"
+        },
         "Evidence": {
           "additionalProperties": false,
           "properties": {
@@ -24977,6 +25364,14 @@
               "exclusiveMinimum": 0,
               "title": "Completed Sequence",
               "type": "integer"
+            },
+            "contextual_calls": {
+              "items": {
+                "$ref": "#/$defs/ContextualCall"
+              },
+              "maxItems": 200,
+              "title": "Contextual Calls",
+              "type": "array"
             },
             "index_id": {
               "maxLength": 200,
@@ -29721,6 +30116,77 @@
           "title": "CodeEdge",
           "type": "object"
         },
+        "ContextualCall": {
+          "additionalProperties": false,
+          "description": "One self-field call proven only for a specific constructed receiver.",
+          "properties": {
+            "activation_edge_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Activation Edge Id",
+              "type": "string"
+            },
+            "activation_location": {
+              "$ref": "#/$defs/SourceLocation"
+            },
+            "activation_source": {
+              "$ref": "#/$defs/Symbol"
+            },
+            "binding_mutation_after_escape_unverified": {
+              "default": false,
+              "title": "Binding Mutation After Escape Unverified",
+              "type": "boolean"
+            },
+            "context_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Context Id",
+              "type": "string"
+            },
+            "field_assignment_location": {
+              "$ref": "#/$defs/SourceLocation"
+            },
+            "field_name": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Field Name",
+              "type": "string"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "receiver_constructor_location": {
+              "$ref": "#/$defs/SourceLocation"
+            },
+            "source": {
+              "$ref": "#/$defs/Symbol"
+            },
+            "source_location": {
+              "$ref": "#/$defs/SourceLocation"
+            },
+            "target": {
+              "$ref": "#/$defs/Symbol"
+            }
+          },
+          "required": [
+            "context_id",
+            "index_id",
+            "activation_edge_id",
+            "activation_source",
+            "source",
+            "target",
+            "activation_location",
+            "source_location",
+            "receiver_constructor_location",
+            "field_assignment_location",
+            "field_name"
+          ],
+          "title": "ContextualCall",
+          "type": "object"
+        },
         "Evidence": {
           "additionalProperties": false,
           "properties": {
@@ -29845,6 +30311,14 @@
               "exclusiveMinimum": 0,
               "title": "Completed Sequence",
               "type": "integer"
+            },
+            "contextual_calls": {
+              "items": {
+                "$ref": "#/$defs/ContextualCall"
+              },
+              "maxItems": 200,
+              "title": "Contextual Calls",
+              "type": "array"
             },
             "index_id": {
               "maxLength": 200,
@@ -36304,6 +36778,77 @@
           "title": "CodeEdge",
           "type": "object"
         },
+        "ContextualCall": {
+          "additionalProperties": false,
+          "description": "One self-field call proven only for a specific constructed receiver.",
+          "properties": {
+            "activation_edge_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Activation Edge Id",
+              "type": "string"
+            },
+            "activation_location": {
+              "$ref": "#/$defs/SourceLocation"
+            },
+            "activation_source": {
+              "$ref": "#/$defs/Symbol"
+            },
+            "binding_mutation_after_escape_unverified": {
+              "default": false,
+              "title": "Binding Mutation After Escape Unverified",
+              "type": "boolean"
+            },
+            "context_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Context Id",
+              "type": "string"
+            },
+            "field_assignment_location": {
+              "$ref": "#/$defs/SourceLocation"
+            },
+            "field_name": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Field Name",
+              "type": "string"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "receiver_constructor_location": {
+              "$ref": "#/$defs/SourceLocation"
+            },
+            "source": {
+              "$ref": "#/$defs/Symbol"
+            },
+            "source_location": {
+              "$ref": "#/$defs/SourceLocation"
+            },
+            "target": {
+              "$ref": "#/$defs/Symbol"
+            }
+          },
+          "required": [
+            "context_id",
+            "index_id",
+            "activation_edge_id",
+            "activation_source",
+            "source",
+            "target",
+            "activation_location",
+            "source_location",
+            "receiver_constructor_location",
+            "field_assignment_location",
+            "field_name"
+          ],
+          "title": "ContextualCall",
+          "type": "object"
+        },
         "Evidence": {
           "additionalProperties": false,
           "properties": {
@@ -36576,6 +37121,14 @@
               "exclusiveMinimum": 0,
               "title": "Completed Sequence",
               "type": "integer"
+            },
+            "contextual_calls": {
+              "items": {
+                "$ref": "#/$defs/ContextualCall"
+              },
+              "maxItems": 200,
+              "title": "Contextual Calls",
+              "type": "array"
             },
             "index_id": {
               "maxLength": 200,
@@ -40220,6 +40773,77 @@
           "title": "CodeEdge",
           "type": "object"
         },
+        "ContextualCall": {
+          "additionalProperties": false,
+          "description": "One self-field call proven only for a specific constructed receiver.",
+          "properties": {
+            "activation_edge_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Activation Edge Id",
+              "type": "string"
+            },
+            "activation_location": {
+              "$ref": "#/$defs/SourceLocation"
+            },
+            "activation_source": {
+              "$ref": "#/$defs/Symbol"
+            },
+            "binding_mutation_after_escape_unverified": {
+              "default": false,
+              "title": "Binding Mutation After Escape Unverified",
+              "type": "boolean"
+            },
+            "context_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Context Id",
+              "type": "string"
+            },
+            "field_assignment_location": {
+              "$ref": "#/$defs/SourceLocation"
+            },
+            "field_name": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Field Name",
+              "type": "string"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "receiver_constructor_location": {
+              "$ref": "#/$defs/SourceLocation"
+            },
+            "source": {
+              "$ref": "#/$defs/Symbol"
+            },
+            "source_location": {
+              "$ref": "#/$defs/SourceLocation"
+            },
+            "target": {
+              "$ref": "#/$defs/Symbol"
+            }
+          },
+          "required": [
+            "context_id",
+            "index_id",
+            "activation_edge_id",
+            "activation_source",
+            "source",
+            "target",
+            "activation_location",
+            "source_location",
+            "receiver_constructor_location",
+            "field_assignment_location",
+            "field_name"
+          ],
+          "title": "ContextualCall",
+          "type": "object"
+        },
         "Evidence": {
           "additionalProperties": false,
           "properties": {
@@ -40344,6 +40968,14 @@
               "exclusiveMinimum": 0,
               "title": "Completed Sequence",
               "type": "integer"
+            },
+            "contextual_calls": {
+              "items": {
+                "$ref": "#/$defs/ContextualCall"
+              },
+              "maxItems": 200,
+              "title": "Contextual Calls",
+              "type": "array"
             },
             "index_id": {
               "maxLength": 200,
@@ -42003,6 +42635,77 @@
           "title": "CodeEdge",
           "type": "object"
         },
+        "ContextualCall": {
+          "additionalProperties": false,
+          "description": "One self-field call proven only for a specific constructed receiver.",
+          "properties": {
+            "activation_edge_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Activation Edge Id",
+              "type": "string"
+            },
+            "activation_location": {
+              "$ref": "#/$defs/SourceLocation"
+            },
+            "activation_source": {
+              "$ref": "#/$defs/Symbol"
+            },
+            "binding_mutation_after_escape_unverified": {
+              "default": false,
+              "title": "Binding Mutation After Escape Unverified",
+              "type": "boolean"
+            },
+            "context_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Context Id",
+              "type": "string"
+            },
+            "field_assignment_location": {
+              "$ref": "#/$defs/SourceLocation"
+            },
+            "field_name": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Field Name",
+              "type": "string"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "receiver_constructor_location": {
+              "$ref": "#/$defs/SourceLocation"
+            },
+            "source": {
+              "$ref": "#/$defs/Symbol"
+            },
+            "source_location": {
+              "$ref": "#/$defs/SourceLocation"
+            },
+            "target": {
+              "$ref": "#/$defs/Symbol"
+            }
+          },
+          "required": [
+            "context_id",
+            "index_id",
+            "activation_edge_id",
+            "activation_source",
+            "source",
+            "target",
+            "activation_location",
+            "source_location",
+            "receiver_constructor_location",
+            "field_assignment_location",
+            "field_name"
+          ],
+          "title": "ContextualCall",
+          "type": "object"
+        },
         "Evidence": {
           "additionalProperties": false,
           "properties": {
@@ -42275,6 +42978,14 @@
               "exclusiveMinimum": 0,
               "title": "Completed Sequence",
               "type": "integer"
+            },
+            "contextual_calls": {
+              "items": {
+                "$ref": "#/$defs/ContextualCall"
+              },
+              "maxItems": 200,
+              "title": "Contextual Calls",
+              "type": "array"
             },
             "index_id": {
               "maxLength": 200,
@@ -44458,6 +45169,77 @@
           "title": "CodeEdge",
           "type": "object"
         },
+        "ContextualCall": {
+          "additionalProperties": false,
+          "description": "One self-field call proven only for a specific constructed receiver.",
+          "properties": {
+            "activation_edge_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Activation Edge Id",
+              "type": "string"
+            },
+            "activation_location": {
+              "$ref": "#/$defs/SourceLocation"
+            },
+            "activation_source": {
+              "$ref": "#/$defs/Symbol"
+            },
+            "binding_mutation_after_escape_unverified": {
+              "default": false,
+              "title": "Binding Mutation After Escape Unverified",
+              "type": "boolean"
+            },
+            "context_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Context Id",
+              "type": "string"
+            },
+            "field_assignment_location": {
+              "$ref": "#/$defs/SourceLocation"
+            },
+            "field_name": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Field Name",
+              "type": "string"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "receiver_constructor_location": {
+              "$ref": "#/$defs/SourceLocation"
+            },
+            "source": {
+              "$ref": "#/$defs/Symbol"
+            },
+            "source_location": {
+              "$ref": "#/$defs/SourceLocation"
+            },
+            "target": {
+              "$ref": "#/$defs/Symbol"
+            }
+          },
+          "required": [
+            "context_id",
+            "index_id",
+            "activation_edge_id",
+            "activation_source",
+            "source",
+            "target",
+            "activation_location",
+            "source_location",
+            "receiver_constructor_location",
+            "field_assignment_location",
+            "field_name"
+          ],
+          "title": "ContextualCall",
+          "type": "object"
+        },
         "Evidence": {
           "additionalProperties": false,
           "properties": {
@@ -44582,6 +45364,14 @@
               "exclusiveMinimum": 0,
               "title": "Completed Sequence",
               "type": "integer"
+            },
+            "contextual_calls": {
+              "items": {
+                "$ref": "#/$defs/ContextualCall"
+              },
+              "maxItems": 200,
+              "title": "Contextual Calls",
+              "type": "array"
             },
             "index_id": {
               "maxLength": 200,

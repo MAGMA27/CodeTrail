@@ -381,7 +381,7 @@ def test_relation_semantics_upgrade_rebuilds_same_source_with_new_identity(tmp_p
     assert freshness.status == "changed"
     assert freshness.reasons == ["rules_changed", "configuration_changed"]
     assert freshness.current_rules_version.endswith(f"+{RELATION_SEMANTICS_VERSION}")
-    assert INDEX_BUILD_IDENTITY_VERSION == "relations-v10"
+    assert INDEX_BUILD_IDENTITY_VERSION == "relations-v11"
 
     refreshed = application.state.workspace_service.refresh_project_index(
         project.project_id,
@@ -390,7 +390,7 @@ def test_relation_semantics_upgrade_rebuilds_same_source_with_new_identity(tmp_p
     )
     assert refreshed.mode == "created"
     assert refreshed.index.index.index_id != index.index.index_id
-    assert "relations-v10-rebuild" in refreshed.index.index.index_id
+    assert "relations-v11-rebuild" in refreshed.index.index.index_id
     assert refreshed.index.index.rules_version == freshness.current_rules_version
     assert refreshed.index.index.configuration_hash == index_service.configuration_hash
 

@@ -21,6 +21,7 @@ from pydantic import TypeAdapter, ValidationError
 
 from .contracts import (
     CodeEdge,
+    ContextualCall,
     Event,
     Evidence,
     FeatureGeneration,
@@ -87,6 +88,7 @@ _SEARCH_BODY_BATCH_SIZE = 32
 _SEARCH_MAX_SOURCE_FILES = 32
 _SEARCH_MAX_SOURCE_BYTES = 256 * 1024
 _SEARCH_PROGRESS_OPS = 1_000
+_NEIGHBOR_PROGRESS_OPS = 1_000
 _MODULE_SYMBOL_PAGE_LIMIT = 40
 _MODULE_SYMBOLS_MAX_OUTPUT_BYTES = 40_000
 
@@ -269,6 +271,7 @@ class NeighborQueryResult:
     index_truncation_reason: str | None
     index_unresolved_truncated: bool | None
     index_unresolved_truncation_reason: str | None
+    contextual_calls: tuple[ContextualCall, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -616,6 +619,20 @@ CREATE TABLE IF NOT EXISTS static_edges (
     FOREIGN KEY (index_id, source_id) REFERENCES symbols(index_id, symbol_id) ON DELETE CASCADE,
     FOREIGN KEY (index_id, target_id) REFERENCES symbols(index_id, symbol_id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS contextual_calls (
+    context_id TEXT PRIMARY KEY,
+    index_id TEXT NOT NULL,
+    ordinal INTEGER NOT NULL,
+    activation_edge_id TEXT NOT NULL,
+    call_json TEXT NOT NULL,
+    UNIQUE (index_id, ordinal),
+    FOREIGN KEY (index_id) REFERENCES index_snapshots(index_id) ON DELETE CASCADE,
+    FOREIGN KEY (index_id, activation_edge_id) REFERENCES static_edges(index_id, edge_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS contextual_calls_activation
+    ON contextual_calls(index_id, activation_edge_id, ordinal);
 
 CREATE TABLE IF NOT EXISTS http_client_requests (
     index_id TEXT NOT NULL,
@@ -2032,6 +2049,17 @@ class IndexStore:
             )
             for row in request_rows
         )
+        contextual_rows = self._connection.execute(
+            "SELECT call_json FROM contextual_calls WHERE index_id = ? ORDER BY ordinal",
+            (index_id,),
+        ).fetchall()
+        try:
+            contextual_calls = tuple(
+                ContextualCall.model_validate_json(row["call_json"])
+                for row in contextual_rows
+            )
+        except ValidationError as exc:
+            raise StorageError("stored contextual calls are invalid") from exc
         snapshot = SourceSnapshot(index=index, files=files, issues=snapshot_issues)
         definitions = DefinitionIndex(snapshot=snapshot, symbols=symbols, issues=all_issues)
         return RelationIndex(
@@ -2043,6 +2071,7 @@ class IndexStore:
             unresolved_truncated=_nullable_bool(index_row["unresolved_truncated"]),
             unresolved_truncation_reason=index_row["unresolved_truncation_reason"],
             http_client_requests=http_client_requests,
+            contextual_calls=contextual_calls,
         )
 
     def load_index_snapshot(self, index_id: str) -> IndexSnapshot:
@@ -4299,6 +4328,7 @@ class IndexStore:
             raise StorageInputError("edge_kinds must contain only imports or calls")
         if (
             max_edges < 1
+            or max_edges > 200
             or not math.isfinite(max_seconds)
             or max_seconds <= 0
             or max_output_bytes < 1
@@ -4310,77 +4340,139 @@ class IndexStore:
         nodes: dict[str, Symbol] = {root.symbol_id: root}
         queue: deque[tuple[str, int]] = deque([(root.symbol_id, 0)])
         neighbors: list[Neighbor] = []
+        contextual_calls: list[ContextualCall] = []
         seen_edge_ids: set[str] = set()
+        seen_context_ids: set[str] = set()
         deadline = time.monotonic() + max_seconds
         truncated = False
         truncation_reason: str | None = None
-        edge_placeholders = ",".join("?" for _ in edge_kinds)
         output_bytes = _model_size(root)
         if output_bytes > max_output_bytes:
             truncated, truncation_reason = True, "max_output_bytes reached"
 
-        while queue and not truncated:
-            if time.monotonic() >= deadline:
-                truncated, truncation_reason = True, "max_seconds exceeded"
-                break
-            current_id, current_depth = queue.popleft()
-            if current_depth >= params.depth:
-                continue
-            if direction == "callers":
-                relation_clause = "target_id = ?"
-                relation_parameters: tuple[object, ...] = (current_id,)
-            elif direction == "callees":
-                relation_clause = "source_id = ?"
-                relation_parameters = (current_id,)
-            else:
-                relation_clause = "(source_id = ? OR target_id = ?)"
-                relation_parameters = (current_id, current_id)
-            rows = self._connection.execute(
-                "SELECT edge_id, source_id, target_id, kind, extraction_method, source_path, "
-                "start_line, end_line FROM static_edges WHERE index_id = ? "
-                f"AND kind IN ({edge_placeholders}) AND {relation_clause} "
-                "ORDER BY source_id COLLATE BINARY, target_id COLLATE BINARY, kind, edge_id",
-                (index_id, *edge_kinds, *relation_parameters),
-            ).fetchall()
-            for row in rows:
+        def check_deadline() -> int:
+            return int(time.monotonic() >= deadline)
+
+        def stop(reason: str) -> None:
+            nonlocal truncated, truncation_reason
+            truncated = True
+            truncation_reason = reason
+
+        self._connection.set_progress_handler(check_deadline, _NEIGHBOR_PROGRESS_OPS)
+        try:
+            while queue and not truncated:
                 if time.monotonic() >= deadline:
-                    truncated, truncation_reason = True, "max_seconds exceeded"
+                    stop("max_seconds exceeded")
                     break
-                if row["edge_id"] in seen_edge_ids:
+                current_id, current_depth = queue.popleft()
+                if current_depth >= params.depth:
                     continue
-                if len(neighbors) >= max_edges:
-                    truncated, truncation_reason = True, "max_edges reached"
-                    break
-                seen_edge_ids.add(row["edge_id"])
-                edge = _edge_from_row(index_id, row)
                 if direction == "callers":
-                    neighbor_id = row["source_id"]
+                    relation_clause = "target_id = ?"
+                    relation_parameters: tuple[object, ...] = (current_id,)
                 elif direction == "callees":
-                    neighbor_id = row["target_id"]
-                elif row["source_id"] == current_id:
-                    neighbor_id = row["target_id"]
+                    relation_clause = "source_id = ?"
+                    relation_parameters = (current_id,)
                 else:
-                    neighbor_id = row["source_id"]
-                neighbor = nodes.get(neighbor_id)
-                loaded_neighbor = neighbor
-                if neighbor is None:
-                    if len(nodes) >= params.limit:
-                        truncated, truncation_reason = True, "max_nodes reached"
+                    relation_clause = "(source_id = ? OR target_id = ?)"
+                    relation_parameters = (current_id, current_id)
+                edge_placeholders = ",".join("?" for _ in edge_kinds)
+                seen_clause = ""
+                seen_parameters: tuple[str, ...] = ()
+                if seen_edge_ids:
+                    seen_clause = f" AND edge_id NOT IN ({','.join('?' for _ in seen_edge_ids)})"
+                    seen_parameters = tuple(sorted(seen_edge_ids))
+                remaining_edges = max_edges - len(neighbors) - len(contextual_calls)
+                try:
+                    rows = self._connection.execute(
+                        "SELECT edge_id, source_id, target_id, kind, extraction_method, source_path, "
+                        "start_line, end_line FROM static_edges WHERE index_id = ? "
+                        f"AND kind IN ({edge_placeholders}) AND {relation_clause}{seen_clause} "
+                        "ORDER BY source_id COLLATE BINARY, target_id COLLATE BINARY, kind, edge_id LIMIT ?",
+                        (
+                            index_id,
+                            *edge_kinds,
+                            *relation_parameters,
+                            *seen_parameters,
+                            remaining_edges + 1,
+                        ),
+                    )
+                    for row in rows:
+                        if time.monotonic() >= deadline:
+                            stop("max_seconds exceeded")
+                            break
+                        if len(neighbors) + len(contextual_calls) >= max_edges:
+                            stop("max_edges reached")
+                            break
+                        edge = _edge_from_row(index_id, row)
+                        if direction == "callers":
+                            neighbor_id = row["source_id"]
+                        elif direction == "callees":
+                            neighbor_id = row["target_id"]
+                        elif row["source_id"] == current_id:
+                            neighbor_id = row["target_id"]
+                        else:
+                            neighbor_id = row["source_id"]
+                        neighbor = nodes.get(neighbor_id)
+                        loaded_neighbor = neighbor
+                        if neighbor is None:
+                            if len(nodes) >= params.limit:
+                                stop("max_nodes reached")
+                                break
+                            loaded_neighbor = self._load_symbol(index_id, neighbor_id)
+                        candidate = Neighbor(symbol=loaded_neighbor, edge=edge)
+                        candidate_size = _model_size(candidate)
+                        if neighbor is None:
+                            candidate_size += _model_size(loaded_neighbor)
+                        if output_bytes + candidate_size > max_output_bytes:
+                            stop("max_output_bytes reached")
+                            break
+                        seen_edge_ids.add(row["edge_id"])
+                        if neighbor is None:
+                            nodes[neighbor_id] = loaded_neighbor
+                            if current_depth + 1 < params.depth:
+                                queue.append((neighbor_id, current_depth + 1))
+                        neighbors.append(candidate)
+                        output_bytes += candidate_size
+
+                        remaining_contexts = max_edges - len(neighbors) - len(contextual_calls)
+                        context_rows = self._connection.execute(
+                            "SELECT call_json FROM contextual_calls "
+                            "WHERE index_id = ? AND activation_edge_id = ? "
+                            "ORDER BY ordinal LIMIT ?",
+                            (index_id, edge.edge_id, remaining_contexts + 1),
+                        )
+                        for context_row in context_rows:
+                            if time.monotonic() >= deadline:
+                                stop("max_seconds exceeded while collecting contextual calls")
+                                break
+                            if len(neighbors) + len(contextual_calls) >= max_edges:
+                                stop("max_edges reached while collecting contextual calls")
+                                break
+                            try:
+                                contextual_call = ContextualCall.model_validate_json(
+                                    context_row["call_json"]
+                                )
+                            except ValidationError as exc:
+                                raise StorageError("stored contextual calls are invalid") from exc
+                            if contextual_call.context_id in seen_context_ids:
+                                continue
+                            context_size = _model_size(contextual_call)
+                            if output_bytes + context_size > max_output_bytes:
+                                stop("max_output_bytes reached while collecting contextual calls")
+                                break
+                            seen_context_ids.add(contextual_call.context_id)
+                            contextual_calls.append(contextual_call)
+                            output_bytes += context_size
+                        if truncated:
+                            break
+                except sqlite3.OperationalError as exc:
+                    if time.monotonic() >= deadline:
+                        stop("max_seconds exceeded")
                         break
-                    loaded_neighbor = self._load_symbol(index_id, neighbor_id)
-                candidate = Neighbor(symbol=loaded_neighbor, edge=edge)
-                candidate_size = _model_size(candidate)
-                if neighbor is None:
-                    candidate_size += _model_size(loaded_neighbor)
-                if output_bytes + candidate_size > max_output_bytes:
-                    truncated, truncation_reason = True, "max_output_bytes reached"
-                    break
-                if neighbor is None:
-                    nodes[neighbor_id] = loaded_neighbor
-                    if current_depth + 1 < params.depth:
-                        queue.append((neighbor_id, current_depth + 1))
-                neighbors.append(candidate)
-                output_bytes += candidate_size
+                    raise StorageError(f"neighbor query failed: {exc}") from exc
+        finally:
+            self._connection.set_progress_handler(None, 0)
 
         return NeighborQueryResult(
             index_id=index_id,
@@ -4394,6 +4486,7 @@ class IndexStore:
             index_truncation_reason=index_truncation_reason,
             index_unresolved_truncated=index_unresolved_truncated,
             index_unresolved_truncation_reason=index_unresolved_truncation_reason,
+            contextual_calls=tuple(contextual_calls),
         )
 
     def get_static_impact(
@@ -4705,6 +4798,24 @@ class IndexStore:
                     edge.source_location.end_line,
                 ),
             )
+        for ordinal, call in enumerate(relation.contextual_calls):
+            prior = self._connection.execute(
+                "SELECT index_id FROM contextual_calls WHERE context_id = ?",
+                (call.context_id,),
+            ).fetchone()
+            if prior is not None and prior["index_id"] != index.index_id:
+                raise StorageInputError("contextual call ID cannot cross immutable indexes")
+            self._connection.execute(
+                "INSERT INTO contextual_calls (context_id, index_id, ordinal, activation_edge_id, call_json) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (
+                    call.context_id,
+                    index.index_id,
+                    ordinal,
+                    call.activation_edge_id,
+                    _json_text(call),
+                ),
+            )
         for request in relation.http_client_requests:
             self._connection.execute(
                 "INSERT INTO http_client_requests (index_id, request_id, source_module_id, source_path, "
@@ -4871,6 +4982,48 @@ class IndexStore:
             ):
                 raise StorageInputError("HTTP client request fact is outside the source snapshot or invalid")
             request_ids.add(request.request_id)
+        contextual_ids: set[str] = set()
+        edges_by_id = {edge.edge_id: edge for edge in relation.edges}
+        for raw_call in relation.contextual_calls:
+            if not isinstance(raw_call, ContextualCall):
+                raise StorageInputError("contextual calls must use the declared contract")
+            try:
+                call = ContextualCall.model_validate_json(raw_call.model_dump_json())
+            except (TypeError, ValueError, ValidationError) as exc:
+                raise StorageInputError("contextual call is invalid") from exc
+            if call != raw_call:
+                raise StorageInputError("contextual call is invalid")
+            if call.context_id in contextual_ids:
+                raise StorageInputError("contextual call IDs must be unique")
+            contextual_ids.add(call.context_id)
+            if call.index_id != index.index_id or any(
+                symbol_by_id.get(symbol.symbol_id) != symbol
+                for symbol in (call.activation_source, call.source, call.target)
+            ):
+                raise StorageInputError("contextual call symbols must belong to this stored index")
+            activation_edge = edges_by_id.get(call.activation_edge_id)
+            if (
+                activation_edge is None
+                or activation_edge.kind != "calls"
+                or activation_edge.source_id != call.activation_source.symbol_id
+                or activation_edge.target_id != call.source.symbol_id
+                or activation_edge.source_location != call.activation_location
+            ):
+                raise StorageInputError("contextual call activation must match a static calls edge")
+            for location in (
+                call.activation_location,
+                call.source_location,
+                call.receiver_constructor_location,
+                call.field_assignment_location,
+            ):
+                source_file = files.get(location.path)
+                if (
+                    source_file is None
+                    or location.start_line < 1
+                    or location.end_line < location.start_line
+                    or location.end_line > len(source_file.text.splitlines())
+                ):
+                    raise StorageInputError("contextual call location is outside the source snapshot")
 
 
 def _nullable_bool(value: object) -> bool | None:
@@ -5033,6 +5186,10 @@ def _payload_hash(relation: RelationIndex) -> str:
         "unresolved_truncated": relation.unresolved_truncated,
         "unresolved_truncation_reason": relation.unresolved_truncation_reason,
     }
+    if relation.contextual_calls:
+        payload["contextual_calls"] = [
+            item.model_dump(mode="json") for item in relation.contextual_calls
+        ]
     serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 

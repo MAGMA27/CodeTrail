@@ -360,6 +360,103 @@ test("neighbor validator keeps query and index truncation states separate", () =
   assert.equal(isNeighborsResponse(missingUnresolvedReason), false);
 });
 
+test("neighbor contextual calls require same-snapshot symbols and matching call evidence", () => {
+  const activationSource = {
+    symbol_id: "symbol-activation",
+    index_id: indexId,
+    path: "pkg/main.py",
+    qualified_name: "pkg.main.create_app",
+    kind: "function",
+    start_line: 10,
+    end_line: 20,
+  };
+  const source = {
+    symbol_id: "symbol-source",
+    index_id: indexId,
+    path: "pkg/services.py",
+    qualified_name: "pkg.services.WorkspaceService.read_source",
+    kind: "function",
+    start_line: 30,
+    end_line: 40,
+  };
+  const target = {
+    symbol_id: "symbol-target",
+    index_id: indexId,
+    path: "pkg/index.py",
+    qualified_name: "pkg.index.IndexService.read_source",
+    kind: "function",
+    start_line: 60,
+    end_line: 80,
+  };
+  const activationEdge = {
+    edge_id: "edge-activation",
+    index_id: indexId,
+    source_id: activationSource.symbol_id,
+    target_id: source.symbol_id,
+    kind: "calls",
+    extraction_method: "ast",
+    source_location: { path: activationSource.path, start_line: 12, end_line: 12 },
+  };
+  const call = {
+    context_id: "context-main-to-service",
+    index_id: indexId,
+    activation_edge_id: activationEdge.edge_id,
+    activation_source: activationSource,
+    activation_location: activationEdge.source_location,
+    source,
+    target,
+    source_location: { path: source.path, start_line: 35, end_line: 35 },
+    receiver_constructor_location: { path: "pkg/main.py", start_line: 71, end_line: 74 },
+    field_assignment_location: { path: source.path, start_line: 25, end_line: 25 },
+    field_name: "依赖",
+    binding_mutation_after_escape_unverified: false,
+  };
+  const value: Record<string, unknown> = {
+    schema_version: SCHEMA_VERSION,
+    index_id: indexId,
+    root: activationSource,
+    nodes: [activationSource, source],
+    neighbors: [{ symbol: source, edge: activationEdge }],
+    contextual_calls: [call],
+    unresolved: [],
+    truncated: false,
+    truncation_reason: null,
+    index_truncated: false,
+    index_truncation_reason: null,
+    index_unresolved_truncated: false,
+    index_unresolved_truncation_reason: null,
+  };
+
+  assert.equal(isNeighborsResponse(value), true);
+  assert.equal(isNeighborsResponse({
+    ...value,
+    root: source,
+    nodes: [source, activationSource],
+    neighbors: [{ symbol: activationSource, edge: activationEdge }],
+  }), true);
+  const legacy = structuredClone(value);
+  delete legacy.contextual_calls;
+  assert.equal(isNeighborsResponse(legacy), true);
+
+  assert.equal(isNeighborsResponse({ ...value, contextual_calls: [{ ...call, target: { ...target, index_id: "another-index" } }] }), false);
+  assert.equal(isNeighborsResponse({ ...value, contextual_calls: [{ ...call, activation_location: { path: activationSource.path, start_line: 13, end_line: 13 } }] }), false);
+  assert.equal(isNeighborsResponse({ ...value, contextual_calls: [{ ...call, source_location: { path: source.path, start_line: 41, end_line: 41 } }] }), false);
+  assert.equal(isNeighborsResponse({ ...value, contextual_calls: [{ ...call, receiver_constructor_location: { path: "../private.py", start_line: 1, end_line: 1 } }] }), false);
+  assert.equal(isNeighborsResponse({ ...value, contextual_calls: [{ ...call, receiver_constructor_location: { path: "C:/private.py", start_line: 1, end_line: 1 } }] }), false);
+  assert.equal(isNeighborsResponse({ ...value, contextual_calls: [{ ...call, field_name: "<script>alert(1)</script>" }] }), false);
+  assert.equal(isNeighborsResponse({ ...value, contextual_calls: [{ ...call, activation_edge_id: "missing-edge" }] }), false);
+  assert.equal(isNeighborsResponse({
+    ...value,
+    neighbors: [{ symbol: source, edge: { ...activationEdge, kind: "imports" } }],
+  }), false);
+  assert.equal(isNeighborsResponse({ ...value, nodes: [{ ...source, qualified_name: "forged.symbol" }] }), false);
+  assert.equal(isNeighborsResponse({ ...value, contextual_calls: [call, call] }), false);
+  assert.equal(isNeighborsResponse({ ...value, contextual_calls: [{ ...call, binding_mutation_after_escape_unverified: true }] }), true);
+  const missingMutationState = { ...call } as Record<string, unknown>;
+  delete missingMutationState.binding_mutation_after_escape_unverified;
+  assert.equal(isNeighborsResponse({ ...value, contextual_calls: [missingMutationState] }), false);
+});
+
 function runImpact() {
   const root = {
     symbol_id: "symbol-root",

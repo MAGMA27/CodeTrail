@@ -18,6 +18,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEven
 import type {
   CodeEdge,
   CodeExplanation,
+  ContextualCall,
   EdgeKind,
   Evidence,
   FeatureGeneration,
@@ -53,6 +54,7 @@ import type {
   SearchMatch,
   Session,
   SessionMessage,
+  SourceLocation,
   SourceResponse,
   SymbolRecord,
   UnresolvedReference,
@@ -264,6 +266,8 @@ type GraphUi = {
   codeIndexUnresolvedTruncated: boolean | null;
   codeIndexUnresolvedTruncationReason: string | null;
   codeUnresolved: UnresolvedReference[];
+  contextualCalls: ContextualCall[];
+  onSelectContextualCallEvidence: (call: ContextualCall, location: SourceLocation) => void;
   codeHasCycle: boolean;
   httpChain: { association: OverviewHttpAssociation; handler: SymbolRecord } | null;
   onSelectHttpChainEvidence: (evidence: Evidence) => void;
@@ -1819,6 +1823,26 @@ function GraphPanel({ graph }: { graph: GraphUi }) {
           <p>客户端函数只作入口锚点；下图从该 handler 查询同一 index 的静态 calls，最多向下 2 层、40 个符号。深度之外、未解析或未提取的关系不会补猜。</p>
           <button type="button" className="ct-link-button" onClick={graph.onExitHttpChain}>退出链路</button>
         </div> : null}
+        {graph.httpChain || graph.contextualCalls.length > 0 ? <section className="ct-contextual-calls" aria-label="指定构造上下文调用">
+          <div className="ct-section-heading"><div><p className="ct-overline">CONTEXTUAL CALLS</p><h3>指定构造上下文</h3></div><span className="ct-count-label">{graph.contextualCalls.length}</span></div>
+          <p>这些记录只表示指定构造上下文下的静态语法关系，不保证运行时一定执行。它们不计入普通 calls 图；未解析调用仍保留在未知边界中。</p>
+          {graph.codeTruncated ? <small className="ct-contextual-budget">邻接查询已截断，条件记录可能不完整 · {graph.codeTruncationReason ?? "未提供原因"}</small> : null}
+          {graph.contextualCalls.length === 0 ? <small>当前查询没有返回可展示的证明记录；这不表示运行时不存在其他路径。</small> : graph.contextualCalls.map((call) => <article className="ct-contextual-call" key={call.context_id}>
+            <strong>{call.activation_source.qualified_name} → {call.source.qualified_name} → {call.target.qualified_name}</strong>
+            <code>字段 self.{call.field_name}</code>
+            {call.binding_mutation_after_escape_unverified ? <small className="ct-contextual-escape-warning">初始构造绑定，逃逸后是否改写未知；目标和调用仍未确认。</small> : null}
+            <div className="ct-contextual-evidence">
+              {([
+                ["调用源码", call.source_location],
+                ["触发调用", call.activation_location],
+                ["接收方构造器", call.receiver_constructor_location],
+                ["字段赋值", call.field_assignment_location],
+              ] as const).map(([label, location]) => <button type="button" key={label} onClick={() => graph.onSelectContextualCallEvidence(call, location)}>
+                {label} · {location.path}:L{location.start_line}{location.end_line > location.start_line ? `–L${location.end_line}` : ""}
+              </button>)}
+            </div>
+          </article>)}
+        </section> : null}
         {graph.httpChain ? <div className="ct-graph-toolbar ct-http-chain-toolbar"><span>向下 · calls only · 深度 2 · 最多 40 个节点</span><button type="button" className="ct-link-button" onClick={() => graph.flowInstance?.fitView({ padding: 0.18, duration: 240 })} disabled={graph.codeModel.nodes.length === 0}>聚焦</button></div> : <div className="ct-graph-toolbar"><label>方向<select value={graph.direction} onChange={(event) => graph.onChangeDirection(event.target.value as NeighborDirection)} disabled={!graph.selectedId}><option value="both">双向</option><option value="callers">调用方</option><option value="callees">被调用方</option></select></label><label className="ct-check-field"><input type="checkbox" checked={graph.edgeKinds.includes("calls")} onChange={() => graph.onToggleEdgeKind("calls")} disabled={!graph.selectedId} /><span>calls</span></label><label className="ct-check-field"><input type="checkbox" checked={graph.edgeKinds.includes("imports")} onChange={() => graph.onToggleEdgeKind("imports")} disabled={!graph.selectedId} /><span>imports</span></label><button type="button" className="ct-link-button" onClick={() => { if (graph.flowInstance) { void graph.flowInstance.fitBounds(graph.flowInstance.getNodesBounds(codeFocusNodeIds), { padding: 0.18, duration: 240 }); } }} disabled={graph.codeModel.nodes.length === 0}>聚焦</button></div>}
         <div className="ct-panel-status"><span data-state={graph.codeStatus}>{graph.codeStatus === "loading" ? graph.httpChain ? "载入 handler 下游静态 calls" : "载入关系中" : graph.codeStatus === "error" ? "关系请求失败" : graph.codeStatus === "empty" ? graph.httpChain ? "当前有界查询没有返回静态 calls" : graph.codeIndexTruncated ? "当前结果为空（索引关系未完整分析）" : graph.codeIndexUnresolvedTruncated === true ? "当前结果为空（unresolved 详情不完整）" : "当前方向没有静态边" : graph.codeStatus === "success" ? `${graph.codeSymbolCount} 个节点 · ${graph.codeEdgeCount} 条边` : "选择搜索命中后载入关系"}</span>{graph.codeTruncated ? <small>查询已截断 · {graph.codeTruncationReason}</small> : null}</div>
         {graph.codeIndexTruncated ? <p className="ct-graph-coverage-warning" role="status">当前固定索引的关系提取未完成 · {graph.codeIndexTruncationReason}；空邻接不能证明没有关系。</p> : null}

@@ -480,10 +480,13 @@ def create_mcp_server(
 
     @server.tool(
         name="get_neighbors",
-        title="Get static code neighbors",
+        title="Get code neighbors and conditional contexts",
         description=(
             "Traverse bounded static imports/calls around one symbol in an explicitly selected project/index pair. "
-            "Dynamic or unresolved references remain marked and are not promoted to confirmed edges."
+            "The result may separately include contextual_calls for one explicitly constructed receiver and its direct "
+            "field binding. These are conditional records, not static call edges or confirmed impact; "
+            "binding_mutation_after_escape_unverified marks a receiver stored through an attribute whose later "
+            "mutation is unknown. Dynamic or unresolved references remain marked and are not promoted to confirmed edges."
         ),
         structured_output=True,
     )
@@ -1113,7 +1116,9 @@ def create_mcp_server(
             title="Read neighbors inside an external Run",
             description=(
                 "Traverse bounded static callers/callees and persist the actual result on one active Codex external Run. "
-                "Unresolved references remain explicit and are never promoted to confirmed impact."
+                "The result may separately include constructor-bound contextual_calls; these are conditional records, "
+                "not static call edges or confirmed impact. binding_mutation_after_escape_unverified marks an object "
+                "stored through an attribute whose later mutation is unknown. Unresolved references remain explicit."
             ),
             structured_output=True,
         )
