@@ -16,7 +16,7 @@ Status: implemented
 4. 工作台提供“检查更新”和“更新索引”。更新接口以路径中的基准索引为准，在服务端重新核对：内容和当前规则均一致时返回 `reused`；完整且安全扫描确认源码恢复到同项目中规则、配置、schema 和完整 manifest 均兼容的历史快照时返回 `historical_reused`，推进 `latest` 到该 immutable index，并保留其原 revision/dirty 等来源 metadata；其他源码/规则/配置变化，或旧元数据缺失（可与这些可重建原因同时出现）时，从一次新的源码捕获生成新不可变快照；检查不完整或来源无法安全读取时失败并保留旧 `latest`。旧 metadata 场景仍报告 `unknown`，不冒充 `consistent`。
 5. 更新只允许推进调用时仍为项目 `latest_index_id` 的基准，完成写入时再次校验，避免并发请求以较晚完成的旧结果覆盖较新的 latest。旧 Session/Run/source evidence 继续绑定原 index/hash/行号。HTTP 更新沿用 loopback 写约束；MCP 更新工具单独受显式写开关控制，默认不注册。
 6. 本地来源的索引构建使用新的身份版本，使旧索引即使与源码内容相同也不会被错误地当作已经写入了当前规则元数据。不会迁移、复制或删除旧存储；GitHub 来源不使用本地 manifest 规则，远端 ref freshness/update 由 [GitHub 远端 ref 新鲜度与显式更新](2026-09-16-github-remote-freshness.md) 定义。
-7. 版本职责明确分离：当前关系语义为 `relations-v3`，参与 `rules_version` 和 freshness；当前关系事实缓存规则/格式为 `python-relation-facts-v2` / `relation-facts-v2`，只决定事实缓存是否命中；当前索引构建身份为 `relations-v4`，决定相同源码 hash 下生成的 immutable index ID 命名空间。语义变化必须同时导致 freshness 不兼容和新 index 身份；缓存格式变化只使对应派生缓存安全 miss，不单独改变图身份。
+7. 版本职责明确分离：当前关系语义为 `relations-v3`，参与 `rules_version` 和 freshness；当前关系事实缓存规则/格式为 `python-relation-facts-v2` / `relation-facts-v2`，只决定事实缓存是否命中；当前索引构建身份为 `relations-v5`，决定相同源码 hash 下生成的 immutable index ID 命名空间。源码捕获规则单独版本化；扫描范围或边界变化必须同时使 freshness 不兼容并生成新 index，缓存格式变化只使对应派生缓存安全 miss，不单独改变图身份。
 
 ## 替代方案
 
@@ -50,3 +50,9 @@ Status: implemented
 - 当前代码读取该旧 index 时 freshness 为 `changed`，原因为 `rules_changed`、`configuration_changed`，当前规则为 `python-source-v1+python-3.13+relations-v3`。显式更新生成不同的 `relations-v4-rebuild` index；旧 index 仍保留，新 index 出现 `sample.models.Widget.run` calls 边；再次 freshness 为 `consistent`，再次更新为 `reused`。
 - 同一过程通过 HTTP 和 stdio MCP 对照验证；MCP 工具数为 21。工作台对旧固定快照显示“解析或关系规则版本变化 · 索引配置指纹变化”，对新快照的关系图和源码 evidence 显示 `Widget.run`。
 - 本轮新增升级回归测试与现有 freshness/indexing 定向测试通过；真实供应商语义质量、共享运行目录的实际迁移未在本步验证。旧 index、历史 evidence 和用户未提交修改均未删除或改写。
+
+## 实际证据（2026-10-06 源码扫描边界升级）
+
+- 完整快照扫描与 freshness manifest 都使用同一排除目录规则，现跳过 `.runtime` 和 `.codetrail-runtime`，避免采集评测和服务运行生成的 Python 源文件。
+- 捕获规则从 `python-source-v1` 升至 `python-source-v2`，索引身份从 `relations-v4` 升至 `relations-v5`；因此 freshness 同时报告 `rules_changed` / `configuration_changed`，而相同内容 hash 也不会复用旧身份快照。
+- `test_indexing.py` 验证两种扫描入口一致排除这两个目录；`test_freshness.py` 模拟旧污染快照，验证显式刷新创建干净的新 index，旧快照仍可读并保留在项目可用索引中。

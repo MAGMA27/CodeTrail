@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+import app.indexing as indexing_module
 import app.service as service_module
 from app.contracts import (
     CreateProjectIndexRequest,
@@ -144,6 +145,86 @@ def test_changed_refresh_creates_new_snapshot_and_keeps_old_index(tmp_path: Path
     assert index.index.index_id in current.available_index_ids
 
 
+def test_runtime_source_boundary_upgrade_builds_new_index_and_keeps_legacy_snapshot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = _copy_fixture(tmp_path)
+    runtime_paths = [
+        repository / "evals" / ".runtime" / "generated.py",
+        repository / "evals" / ".codetrail-runtime" / "generated.py",
+    ]
+    for path in runtime_paths:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("GENERATED = True\n", encoding="utf-8")
+
+    new_exclusions = indexing_module._EXCLUDED_DIRECTORIES
+    monkeypatch.setattr(
+        indexing_module,
+        "_EXCLUDED_DIRECTORIES",
+        new_exclusions - {".runtime", ".codetrail-runtime"},
+    )
+    application = create_app({"timeout-demo": repository})
+    workspace = application.state.workspace_service
+    index_service = application.state.index_service
+    current_rules_version = index_service.rules_version
+    current_configuration_hash = index_service.configuration_hash
+    legacy_rules_version = current_rules_version.replace("python-source-v2", "python-source-v1")
+    index_service.rules_version = legacy_rules_version
+    index_service.configuration_hash = index_configuration_hash(
+        max_file_bytes=index_service.max_file_bytes,
+        identity_version="relations-v4",
+        rules_version=legacy_rules_version,
+    )
+    project = workspace.create_project(
+        CreateProjectRequest(name="Legacy runtime source", repository_id="timeout-demo")
+    )
+    legacy_index = workspace._create_project_index(
+        project.project_id,
+        CreateProjectIndexRequest(revision="legacy-runtime-v1", dirty=True),
+        expected_latest_index_id=None,
+        identity_version="relations-v4",
+    )
+
+    with application.state.registry.store_for_repository("timeout-demo") as store:
+        legacy_files, _legacy_issues = store.load_snapshot_manifest(legacy_index.index.index_id)
+    assert {item.path for item in legacy_files} >= {
+        "evals/.runtime/generated.py",
+        "evals/.codetrail-runtime/generated.py",
+    }
+
+    monkeypatch.setattr(indexing_module, "_EXCLUDED_DIRECTORIES", new_exclusions)
+    index_service.rules_version = current_rules_version
+    index_service.configuration_hash = current_configuration_hash
+    freshness = workspace.check_index_freshness(project.project_id, legacy_index.index.index_id)
+    assert freshness.status == "changed"
+    assert {"source_changed", "rules_changed", "configuration_changed"} <= set(freshness.reasons)
+
+    refreshed = workspace.refresh_project_index(
+        project.project_id,
+        legacy_index.index.index_id,
+        RefreshProjectIndexRequest(revision="runtime-boundary-v2", dirty=True),
+    )
+
+    assert refreshed.mode == "created"
+    assert refreshed.index.index.index_id != legacy_index.index.index_id
+    with application.state.registry.store_for_repository("timeout-demo") as store:
+        current_files, _current_issues = store.load_snapshot_manifest(refreshed.index.index.index_id)
+    assert not ({item.path for item in current_files} & {
+        "evals/.runtime/generated.py",
+        "evals/.codetrail-runtime/generated.py",
+    })
+    assert index_service.read_source(
+        legacy_index.index.index_id,
+        "evals/.runtime/generated.py",
+        1,
+        1,
+    ).evidence.index_id == legacy_index.index.index_id
+    current_project = workspace.get_project(project.project_id)
+    assert current_project.latest_index_id == refreshed.index.index.index_id
+    assert legacy_index.index.index_id in current_project.available_index_ids
+
+
 def test_refresh_reuses_compatible_historical_index_after_source_restore(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -258,7 +339,7 @@ def test_relation_semantics_upgrade_rebuilds_same_source_with_new_identity(tmp_p
     assert freshness.status == "changed"
     assert freshness.reasons == ["rules_changed", "configuration_changed"]
     assert freshness.current_rules_version.endswith(f"+{RELATION_SEMANTICS_VERSION}")
-    assert INDEX_BUILD_IDENTITY_VERSION == "relations-v4"
+    assert INDEX_BUILD_IDENTITY_VERSION == "relations-v5"
 
     refreshed = application.state.workspace_service.refresh_project_index(
         project.project_id,
@@ -267,7 +348,7 @@ def test_relation_semantics_upgrade_rebuilds_same_source_with_new_identity(tmp_p
     )
     assert refreshed.mode == "created"
     assert refreshed.index.index.index_id != index.index.index_id
-    assert "relations-v4-rebuild" in refreshed.index.index.index_id
+    assert "relations-v5-rebuild" in refreshed.index.index.index_id
     assert refreshed.index.index.rules_version == freshness.current_rules_version
     assert refreshed.index.index.configuration_hash == index_service.configuration_hash
 

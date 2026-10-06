@@ -27,12 +27,14 @@ IssueKind = Literal[
 
 _EXCLUDED_DIRECTORIES = {
     ".codetrail",
+    ".codetrail-runtime",
     ".git",
     ".hg",
     ".mypy_cache",
     ".pytest_cache",
     ".ruff_cache",
     ".tox",
+    ".runtime",
     ".venv",
     "__pycache__",
     "build",
@@ -307,7 +309,7 @@ def build_source_snapshot(
     return SourceSnapshot(index, tuple(snapshot_files), tuple(issues))
 
 
-SOURCE_CAPTURE_RULES_VERSION = "python-source-v1"
+SOURCE_CAPTURE_RULES_VERSION = "python-source-v2"
 DEFINITION_EXTRACTION_RULES_VERSION = "python-definitions-v1"
 PYTHON_AST_VERSION = (
     f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"

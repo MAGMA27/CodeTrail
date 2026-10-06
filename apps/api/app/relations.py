@@ -22,10 +22,9 @@ RELATION_SEMANTICS_VERSION = "relations-v3"
 # This version only governs the persisted, index-independent facts payload.
 RELATION_FACT_EXTRACTION_RULES_VERSION = "python-relation-facts-v2"
 _RELATION_FACTS_FORMAT_VERSION = "relation-facts-v2"
-# This namespace is part of generated immutable index IDs. Keep it separate
-# from both semantic and facts-serialization versions, and bump it when an
-# index with the same source hash could contain different graph semantics.
-INDEX_BUILD_IDENTITY_VERSION = "relations-v4"
+# This namespace is part of generated immutable index IDs. Bump it when source
+# boundaries or build rules can change an index with the same content hash.
+INDEX_BUILD_IDENTITY_VERSION = "relations-v5"
 
 
 def relation_coverage_limitations(

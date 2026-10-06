@@ -11,6 +11,7 @@ from app.indexing import (
     SnapshotBoundaryError,
     build_source_snapshot,
     extract_definitions,
+    scan_source_manifest,
 )
 
 
@@ -170,9 +171,16 @@ def test_snapshot_excludes_dependency_and_secret_paths(tmp_path: Path) -> None:
     (tmp_path / "main.py").write_text("value = 1\n", encoding="utf-8")
     (tmp_path / ".venv").mkdir()
     (tmp_path / ".venv" / "ignored.py").write_text("value = 2\n", encoding="utf-8")
+    (tmp_path / "evals" / ".runtime").mkdir(parents=True)
+    (tmp_path / "evals" / ".runtime" / "generated.py").write_text("value = 3\n", encoding="utf-8")
+    (tmp_path / "evals" / ".codetrail-runtime").mkdir()
+    (tmp_path / "evals" / ".codetrail-runtime" / "generated.py").write_text("value = 4\n", encoding="utf-8")
     (tmp_path / "secret.py").write_text("token = 'do-not-read'\n", encoding="utf-8")
 
     snapshot = build_source_snapshot(tmp_path, repository_id="excluded", revision="fixture-v1", dirty=True)
 
     assert [item.path for item in snapshot.files] == ["main.py"]
     assert not snapshot.issues
+    manifest = scan_source_manifest(tmp_path)
+    assert [item.path for item in manifest.files] == ["main.py"]
+    assert manifest.scan_complete
