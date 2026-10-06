@@ -44,7 +44,7 @@ API 离线、项目/Session/index 不属于当前范围、索引不在 latest、
 
 ## 验证
 
-从仓库根目录执行 `pnpm --dir apps/web test`、`pnpm web:typecheck` 和 `pnpm web:build`。项目架构画布的浏览器交互验收及未完成项见本地 memory-bank 阶段记录；布局约束见 [工作区 UI 规范](../../docs/design/workspace-ui-spec.md)。2026-10-06 已在真实浏览器验证概览 503 失败后通过重试恢复；390×844 点检未发现页面横向溢出，但完整窄屏矩阵未验收。当前架构验收画面可用官方浏览器截图接口查看，未保存截图文件；不能由构建或单测推定 UI 全部通过。其他浏览器流程与已知案例限制见 [影响链验收](../../evals/results/p4-e2b-codex-host-20261001/impact-chain-acceptance.md)，其既有边界状态仍有效。
+从仓库根目录执行 `pnpm --dir apps/web test`、`pnpm web:typecheck` 和 `pnpm web:build`。项目架构画布的浏览器交互验收及未完成项见本地 memory-bank 阶段记录；布局约束见 [工作区 UI 规范](../../docs/design/workspace-ui-spec.md)。2026-10-06 已在真实浏览器验证概览 503 失败后通过重试恢复；产品按用户确认面向 PC 端，窄屏矩阵不属于验收范围；已有 390×844 点检仅作为历史证据。当前架构验收画面可用官方浏览器截图接口查看，未保存截图文件；不能由构建或单测推定 UI 全部通过。其他浏览器流程与已知案例限制见 [影响链验收](../../evals/results/p4-e2b-codex-host-20261001/impact-chain-acceptance.md)，其既有边界状态仍有效。
 
 ## 相关决策
 
