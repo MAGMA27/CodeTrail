@@ -26,13 +26,13 @@ RelationKind = Literal["imports", "calls"]
 BindingKind = Literal["module", "symbol"]
 RelationScopeKind = Literal["module", "class", "function"]
 # The semantic version changes when the graph/unresolved meaning changes.
-RELATION_SEMANTICS_VERSION = "relations-v4"
+RELATION_SEMANTICS_VERSION = "relations-v5"
 # This version only governs the persisted, index-independent facts payload.
-RELATION_FACT_EXTRACTION_RULES_VERSION = "python-relation-facts-v2"
-_RELATION_FACTS_FORMAT_VERSION = "relation-facts-v2"
+RELATION_FACT_EXTRACTION_RULES_VERSION = "python-relation-facts-v3"
+_RELATION_FACTS_FORMAT_VERSION = "relation-facts-v3"
 # This namespace is part of generated immutable index IDs. Bump it when source
 # boundaries or build rules can change an index with the same content hash.
-INDEX_BUILD_IDENTITY_VERSION = "relations-v7"
+INDEX_BUILD_IDENTITY_VERSION = "relations-v8"
 
 
 def relation_coverage_limitations(
@@ -88,7 +88,17 @@ class RelationBindings:
     global_names: tuple[str, ...]
     dynamic_names: tuple[str, ...]
     parameter_names: tuple[str, ...]
+    nonlocal_names: tuple[str, ...]
     attribute_write_names: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class RelationCallTargetFact:
+    """A simple callable reference passed as a wrapper's first argument."""
+
+    target_kind: Literal["name", "attribute"]
+    target_name: str | None
+    target_parts: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -99,6 +109,7 @@ class RelationCallFact:
     target_kind: Literal["name", "attribute", "dynamic"]
     target_name: str | None
     target_parts: tuple[str, ...]
+    first_argument: RelationCallTargetFact | None
     start_line: int
     end_line: int
 
@@ -225,6 +236,7 @@ class _Binding:
 
 @dataclass
 class _Scope:
+    facts: RelationScopeFacts
     kind: RelationScopeKind
     symbol: Symbol
     parent: _Scope | None
@@ -234,6 +246,9 @@ class _Scope:
     attribute_write_names: set[str]
     object_bindings: dict[str, Symbol]
     object_invalidated: set[str]
+    verified_threadpool_wrappers: set[str]
+    active_threadpool_wrappers: set[str]
+    blocked_threadpool_names: set[str]
 
 
 @dataclass(frozen=True)
@@ -599,6 +614,7 @@ class _BindingCollector(ast.NodeVisitor):
         self.definition_names: set[str] = set()
         self.global_names: set[str] = set()
         self.dynamic_names: set[str] = set()
+        self.nonlocal_names: set[str] = set()
         self.attribute_write_names: set[str] = set()
 
     def visit_Import(self, node: ast.Import) -> None:
@@ -621,6 +637,9 @@ class _BindingCollector(ast.NodeVisitor):
 
     def visit_Global(self, node: ast.Global) -> None:
         self.global_names.update(node.names)
+
+    def visit_Nonlocal(self, node: ast.Nonlocal) -> None:
+        self.nonlocal_names.update(node.names)
 
     def visit_Assign(self, node: ast.Assign) -> None:
         self._collect_attribute_write_names(node.targets)
@@ -752,6 +771,7 @@ def _extract_scope_facts(
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
             else ()
         ),
+        nonlocal_names=tuple(sorted(collector.nonlocal_names)),
         attribute_write_names=tuple(sorted(collector.attribute_write_names)),
     )
     events: list[RelationEvent] = []
@@ -1085,14 +1105,25 @@ def _call_fact_from_node(node: ast.Call) -> RelationCallFact:
             target_parts = tuple(parts)
         else:
             target_kind = "dynamic"
+    first_argument = _call_target_from_node(node.args[0]) if node.args else None
     return RelationCallFact(
         expression=_expression(node)[:500],
         target_kind=target_kind,
         target_name=target_name,
         target_parts=target_parts,
+        first_argument=first_argument,
         start_line=node.lineno,
         end_line=getattr(node, "end_lineno", node.lineno) or node.lineno,
     )
+
+
+def _call_target_from_node(node: ast.expr) -> RelationCallTargetFact | None:
+    if isinstance(node, ast.Name):
+        return RelationCallTargetFact("name", node.id, ())
+    parts = _attribute_parts(node)
+    if parts:
+        return RelationCallTargetFact("attribute", None, tuple(parts))
+    return None
 
 
 class _RelationFactResolver:
@@ -1147,12 +1178,29 @@ class _RelationFactResolver:
             fact.certainty == "definite"
             and fact.constructor_name is not None
             and len(fact.target_names) == 1
+            and self._is_unique_constructor_assignment(fact)
         ):
             target = self._resolve_constructor(fact.constructor_name)
             if target is not None:
                 name = fact.target_names[0]
                 self.scope.object_bindings[name] = target
                 self.scope.object_invalidated.discard(name)
+
+    def _is_unique_constructor_assignment(self, fact: RelationAssignmentFact) -> bool:
+        name = fact.target_names[0]
+        facts = self.scope.facts
+        assignments = [
+            event.fact
+            for event in facts.events
+            if isinstance(event, RelationAssignmentEvent) and name in event.fact.target_names
+        ]
+        return (
+            len(assignments) == 1
+            and assignments[0] == fact
+            and name not in facts.bindings.definition_names
+            and not any(name in _import_binding_names(item) for item in facts.bindings.imports)
+            and not _nested_scope_reassigns(facts, name)
+        )
 
     def _visit_import(self, fact: RelationImportFact) -> None:
         for alias in fact.aliases:
@@ -1174,6 +1222,13 @@ class _RelationFactResolver:
                     fact.start_line,
                     fact.end_line,
                 )
+            binding_name = _import_binding_name(fact, alias)
+            if (
+                binding_name is not None
+                and binding_name in self.scope.verified_threadpool_wrappers
+                and _is_threadpool_wrapper_import(fact, alias)
+            ):
+                self.scope.active_threadpool_wrappers.add(binding_name)
 
     def _visit_call(self, fact: RelationCallFact) -> None:
         target, reason, candidates = self._resolve_call_target(fact)
@@ -1229,7 +1284,34 @@ class _RelationFactResolver:
             local_symbol = self.maps.one_by_name(f"{symbol.qualified_name}.{name}")
             if local_symbol is not None:
                 bindings[name] = _Binding(kind="symbol", symbol=local_symbol)
+        verified_threadpool_wrappers: set[str] = set()
+        blocked_threadpool_names = {
+            *binding_facts.assigned,
+            *binding_facts.definition_names,
+            *binding_facts.global_names,
+            *binding_facts.dynamic_names,
+            *binding_facts.parameter_names,
+        }
+        imports_by_name: dict[str, list[tuple[RelationImportFact, RelationImportAlias]]] = {}
+        for import_fact in binding_facts.imports:
+            for alias in import_fact.aliases:
+                name = _import_binding_name(import_fact, alias)
+                if name is not None:
+                    imports_by_name.setdefault(name, []).append((import_fact, alias))
+        for name, imports in imports_by_name.items():
+            if name in blocked_threadpool_names:
+                continue
+            if (
+                len(imports) == 1
+                and _is_threadpool_wrapper_import(*imports[0])
+                and imports[0][0].module not in self.maps.modules_by_name
+                and not _nested_scope_reassigns(scope_facts, name)
+            ):
+                verified_threadpool_wrappers.add(name)
+            else:
+                blocked_threadpool_names.add(name)
         return _Scope(
+            facts=scope_facts,
             kind=scope_facts.kind,
             symbol=symbol,
             parent=parent,
@@ -1244,6 +1326,9 @@ class _RelationFactResolver:
                 *binding_facts.definition_names,
                 *bindings,
             },
+            verified_threadpool_wrappers=verified_threadpool_wrappers,
+            active_threadpool_wrappers=set(),
+            blocked_threadpool_names=blocked_threadpool_names,
         )
 
     def _symbol_for_scope(self, scope_facts: RelationScopeFacts) -> Symbol | None:
@@ -1295,18 +1380,48 @@ class _RelationFactResolver:
         self,
         fact: RelationCallFact,
     ) -> tuple[Symbol | None, str, list[str]]:
-        if fact.target_kind == "name" and fact.target_name is not None:
-            binding, lookup_reason = self._lookup(fact.target_name)
+        if (
+            fact.target_kind == "name"
+            and fact.target_name is not None
+            and self._is_verified_threadpool_wrapper(fact.target_name)
+        ):
+            forwarded = fact.first_argument
+            if forwarded is None:
+                return None, "dynamic_call_target", []
+            target, reason, candidates = self._resolve_call_target_parts(
+                forwarded.target_kind,
+                forwarded.target_name,
+                forwarded.target_parts,
+            )
+            if target is None:
+                return None, reason, candidates
+            if target.kind not in {"function", "test"}:
+                return None, "unsupported_wrapper_callable_target", [target.symbol_id]
+            return target, "", []
+        return self._resolve_call_target_parts(
+            fact.target_kind,
+            fact.target_name,
+            fact.target_parts,
+        )
+
+    def _resolve_call_target_parts(
+        self,
+        target_kind: Literal["name", "attribute", "dynamic"],
+        target_name: str | None,
+        target_parts: tuple[str, ...],
+    ) -> tuple[Symbol | None, str, list[str]]:
+        if target_kind == "name" and target_name is not None:
+            binding, lookup_reason = self._lookup(target_name)
             if binding is not None and binding.symbol is not None and binding.kind == "symbol":
                 return binding.symbol, "", []
             if lookup_reason:
                 return None, lookup_reason, []
-            candidates = self._candidate_ids(fact.target_name)
+            candidates = self._candidate_ids(target_name)
             if len(candidates) > 1:
                 return None, "ambiguous_name", candidates
             return None, "call_target_not_in_snapshot", candidates
-        if fact.target_kind == "attribute" and fact.target_parts:
-            parts = fact.target_parts
+        if target_kind == "attribute" and target_parts:
+            parts = target_parts
             if len(parts) == 2:
                 object_target, object_reason = self._lookup_object(parts[0])
                 if object_target is not None:
@@ -1325,6 +1440,16 @@ class _RelationFactResolver:
                 return None, "module_attribute_not_in_snapshot", self._candidate_ids(parts[-1])
             return None, lookup_reason or "object_method_not_resolved", []
         return None, "dynamic_call_target", []
+
+    def _is_verified_threadpool_wrapper(self, name: str) -> bool:
+        scope: _Scope | None = self.scope
+        while scope is not None:
+            if name in scope.blocked_threadpool_names:
+                return False
+            if name in scope.active_threadpool_wrappers:
+                return True
+            scope = scope.parent
+        return False
 
     def _resolve_constructor(self, name: str) -> Symbol | None:
         binding, _reason = self._lookup(name)
@@ -1487,6 +1612,59 @@ class _RelationFactResolver:
         )
 
 
+def _import_binding_name(
+    fact: RelationImportFact,
+    alias: RelationImportAlias,
+) -> str | None:
+    if fact.kind == "import":
+        return alias.asname or alias.name.split(".", 1)[0]
+    if alias.name == "*":
+        return None
+    return alias.asname or alias.name
+
+
+def _import_binding_names(fact: RelationImportFact) -> set[str]:
+    return {
+        name
+        for alias in fact.aliases
+        if (name := _import_binding_name(fact, alias)) is not None
+    }
+
+
+def _is_threadpool_wrapper_import(
+    fact: RelationImportFact,
+    alias: RelationImportAlias,
+) -> bool:
+    return (
+        fact.kind == "from"
+        and fact.level == 0
+        and fact.module in {"fastapi.concurrency", "starlette.concurrency"}
+        and alias.name == "run_in_threadpool"
+    )
+
+
+def _nested_scope_reassigns(scope: RelationScopeFacts, name: str) -> bool:
+    for event in scope.events:
+        if not isinstance(event, RelationScopeEvent):
+            continue
+        nested = event.scope
+        written_names = {
+            *nested.bindings.assigned,
+            *nested.bindings.definition_names,
+            *(
+                imported
+                for import_fact in nested.bindings.imports
+                for imported in _import_binding_names(import_fact)
+            ),
+        }
+        if (
+            name in written_names
+            and name in (*nested.bindings.global_names, *nested.bindings.nonlocal_names)
+        ) or _nested_scope_reassigns(nested, name):
+            return True
+    return False
+
+
 def _scope_has_attribute_write(scope: RelationScopeFacts, attribute_name: str) -> bool:
     if attribute_name in scope.bindings.attribute_write_names:
         return True
@@ -1564,6 +1742,7 @@ def _relation_scope_to_json(scope: RelationScopeFacts) -> dict[str, object]:
             "global_names": list(scope.bindings.global_names),
             "dynamic_names": list(scope.bindings.dynamic_names),
             "parameter_names": list(scope.bindings.parameter_names),
+            "nonlocal_names": list(scope.bindings.nonlocal_names),
             "attribute_write_names": list(scope.bindings.attribute_write_names),
         },
         "events": [_relation_event_to_json(event) for event in scope.events],
@@ -1599,6 +1778,15 @@ def _relation_call_to_json(fact: RelationCallFact) -> dict[str, object]:
         "target_kind": fact.target_kind,
         "target_name": fact.target_name,
         "target_parts": list(fact.target_parts),
+        "first_argument": (
+            {
+                "target_kind": fact.first_argument.target_kind,
+                "target_name": fact.first_argument.target_name,
+                "target_parts": list(fact.first_argument.target_parts),
+            }
+            if fact.first_argument is not None
+            else None
+        ),
         "start_line": fact.start_line,
         "end_line": fact.end_line,
     }
@@ -1643,6 +1831,7 @@ def _relation_scope_from_json(raw_scope: object) -> RelationScopeFacts:
             "global_names",
             "dynamic_names",
             "parameter_names",
+            "nonlocal_names",
             "attribute_write_names",
         },
         "relation bindings",
@@ -1662,6 +1851,9 @@ def _relation_scope_from_json(raw_scope: object) -> RelationScopeFacts:
         ),
         parameter_names=_relation_names_from_json(
             raw_bindings["parameter_names"], "parameter names"
+        ),
+        nonlocal_names=_relation_names_from_json(
+            raw_bindings["nonlocal_names"], "nonlocal names"
         ),
         attribute_write_names=_relation_names_from_json(
             raw_bindings["attribute_write_names"], "attribute write names"
@@ -1732,7 +1924,15 @@ def _relation_import_from_json(raw_fact: object) -> RelationImportFact:
 def _relation_call_from_json(raw_fact: object) -> RelationCallFact:
     _require_dict(
         raw_fact,
-        {"expression", "target_kind", "target_name", "target_parts", "start_line", "end_line"},
+        {
+            "expression",
+            "target_kind",
+            "target_name",
+            "target_parts",
+            "first_argument",
+            "start_line",
+            "end_line",
+        },
         "relation call fact",
     )
     expression = _require_text(raw_fact["expression"], "relation call expression", 500)
@@ -1748,6 +1948,11 @@ def _relation_call_from_json(raw_fact: object) -> RelationCallFact:
     target_parts = tuple(
         _require_text(part, "relation call target part", 500) for part in raw_parts
     )
+    first_argument = (
+        None
+        if raw_fact["first_argument"] is None
+        else _relation_call_target_from_json(raw_fact["first_argument"])
+    )
     start_line = _require_positive_int(raw_fact["start_line"], "relation call start line")
     end_line = _require_positive_int(raw_fact["end_line"], "relation call end line")
     return RelationCallFact(
@@ -1755,9 +1960,33 @@ def _relation_call_from_json(raw_fact: object) -> RelationCallFact:
         target_kind,
         target_name,
         target_parts,
+        first_argument,
         start_line,
         end_line,
     )
+
+
+def _relation_call_target_from_json(raw_target: object) -> RelationCallTargetFact:
+    _require_dict(
+        raw_target,
+        {"target_kind", "target_name", "target_parts"},
+        "relation call first argument",
+    )
+    target_kind = raw_target["target_kind"]
+    if target_kind not in {"name", "attribute"}:
+        raise ValueError("relation call first argument kind is invalid")
+    target_name = raw_target["target_name"]
+    if target_name is not None:
+        target_name = _require_text(target_name, "relation first argument name", 500)
+    raw_parts = raw_target["target_parts"]
+    if not isinstance(raw_parts, list) or len(raw_parts) > 100:
+        raise ValueError("relation call first argument parts are invalid")
+    target_parts = tuple(
+        _require_text(part, "relation first argument part", 500) for part in raw_parts
+    )
+    target = RelationCallTargetFact(target_kind, target_name, target_parts)
+    _validate_relation_call_target(target)
+    return target
 
 
 def _relation_assignment_from_json(raw_fact: object) -> RelationAssignmentFact:
@@ -1874,6 +2103,7 @@ def _validate_relation_scope(
         ("global names", bindings.global_names),
         ("dynamic names", bindings.dynamic_names),
         ("parameter names", bindings.parameter_names),
+        ("nonlocal names", bindings.nonlocal_names),
         ("attribute write names", bindings.attribute_write_names),
     ):
         if not isinstance(names, tuple) or len(names) > 20_000:
@@ -1939,7 +2169,26 @@ def _validate_relation_call(fact: RelationCallFact) -> None:
         raise ValueError("attribute call target metadata is invalid")
     if fact.target_kind == "dynamic" and (fact.target_name is not None or fact.target_parts):
         raise ValueError("dynamic call target metadata is invalid")
+    if fact.first_argument is not None:
+        _validate_relation_call_target(fact.first_argument)
     _validate_line_range(fact.start_line, fact.end_line, "relation call")
+
+
+def _validate_relation_call_target(target: RelationCallTargetFact) -> None:
+    if target.target_kind not in {"name", "attribute"}:
+        raise ValueError("relation call first argument kind is invalid")
+    if target.target_name is not None:
+        _require_text(target.target_name, "relation first argument name", 500)
+    if not isinstance(target.target_parts, tuple) or len(target.target_parts) > 100:
+        raise ValueError("relation call first argument parts are invalid")
+    for part in target.target_parts:
+        _require_text(part, "relation first argument part", 500)
+    if target.target_kind == "name" and (target.target_name is None or target.target_parts):
+        raise ValueError("relation call first argument name metadata is invalid")
+    if target.target_kind == "attribute" and (
+        target.target_name is not None or len(target.target_parts) < 2
+    ):
+        raise ValueError("relation call first argument attribute metadata is invalid")
 
 
 def _validate_relation_assignment(fact: RelationAssignmentFact) -> None:

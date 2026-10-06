@@ -6,7 +6,12 @@ from pathlib import Path
 
 from app.contracts import GraphSnapshot
 from app.indexing import build_source_snapshot, extract_definitions
-from app.relations import RelationIndex, extract_relations
+from app.relations import (
+    RelationIndex,
+    deserialize_relation_file_facts,
+    extract_relations,
+    serialize_relation_file_facts,
+)
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -267,6 +272,164 @@ def test_local_constructed_objects_resolve_only_direct_unique_methods(tmp_path: 
         ("sample.caller.positive", "sample.right.Widget.run"),
     } <= calls
     assert len([item for item in result.unresolved if item.expression.endswith(".run()")]) == 0
+
+
+def test_verified_threadpool_wrappers_forward_only_proven_callables(tmp_path: Path) -> None:
+    repository = tmp_path / "repository"
+    package = repository / "sample"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "target.py").write_text(
+        "def work() -> None:\n    pass\n\n"
+        "def run_in_threadpool(value) -> None:\n    pass\n",
+        encoding="utf-8",
+    )
+    source = (
+        "from fastapi.concurrency import run_in_threadpool as dispatch\n"
+        "from starlette.concurrency import run_in_threadpool as dispatch_again\n"
+        "from third_party import run_in_threadpool as other_dispatch\n"
+        "from .target import work\n\n"
+        "class Service:\n"
+        "    def run(self) -> None:\n"
+        "        pass\n\n"
+        "class Duplicate:\n"
+        "    def run(self) -> None:\n"
+        "        pass\n"
+        "    def run(self) -> None:\n"
+        "        pass\n\n"
+        "service = Service()\n\n"
+        "async def forwarded_function() -> None:\n"
+        "    await dispatch(work)\n\n"
+        "async def forwarded_method() -> None:\n"
+        "    await dispatch_again(service.run)\n\n"
+        "async def shadowed_wrapper(dispatch) -> None:\n"
+        "    await dispatch(work)\n\n"
+        "async def aliased_wrapper() -> None:\n"
+        "    local_dispatch = dispatch\n"
+        "    await local_dispatch(work)\n\n"
+        "async def ambiguous_method() -> None:\n"
+        "    duplicate = Duplicate()\n"
+        "    await dispatch(duplicate.run)\n\n"
+        "async def unsupported_class_target() -> None:\n"
+        "    await dispatch(Service)\n\n"
+        "async def untrusted_wrapper() -> None:\n"
+        "    await other_dispatch(work)\n\n"
+        "async def dynamic_callable(value) -> None:\n"
+        "    await dispatch(getattr(value, 'run'))\n\n"
+        "async def local_call_before_wrapper_import() -> None:\n"
+        "    await local_dispatch(work)\n"
+        "    from fastapi.concurrency import run_in_threadpool as local_dispatch\n\n"
+        "async def local_call_after_wrapper_import() -> None:\n"
+        "    from fastapi.concurrency import run_in_threadpool as local_dispatch\n"
+        "    await local_dispatch(work)\n\n"
+        "async def outer_wrapper_import_after_handler() -> None:\n"
+        "    await late_dispatch(work)\n\n"
+        "def reassigned_capture():\n"
+        "    local_service = Service()\n"
+        "    async def child() -> None:\n"
+        "        await dispatch(local_service.run)\n"
+        "    local_service = Service()\n"
+        "    return child\n\n"
+        "def nested_reassignment():\n"
+        "    local_service = Service()\n"
+        "    def rebind():\n"
+        "        nonlocal local_service\n"
+        "        local_service = Service()\n"
+        "    async def child() -> None:\n"
+        "        await dispatch(local_service.run)\n"
+        "    return child\n\n"
+        "def nested_wrapper_reassignment():\n"
+        "    from fastapi.concurrency import run_in_threadpool as local_dispatch\n"
+        "    def rebind():\n"
+        "        nonlocal local_dispatch\n"
+        "        local_dispatch = lambda func: func\n"
+        "    async def child() -> None:\n"
+        "        await local_dispatch(work)\n"
+        "    return child\n\n"
+        "class Container:\n"
+        "    from starlette.concurrency import run_in_threadpool as class_dispatch\n"
+        "    async def class_attribute_is_not_a_closure(self) -> None:\n"
+        "        await class_dispatch(work)\n"
+        "\nfrom fastapi.concurrency import run_in_threadpool as late_dispatch\n"
+    )
+    (package / "app.py").write_text(source, encoding="utf-8")
+
+    definitions = extract_definitions(
+        build_source_snapshot(repository, repository_id="wrappers", revision="fixture-v1", dirty=True)
+    )
+    result = extract_relations(definitions)
+    facts = dict(result.fact_cache_entries)["sample/app.py"]
+    assert deserialize_relation_file_facts(
+        serialize_relation_file_facts(facts), expected_path="sample/app.py"
+    ) == facts
+    names = {symbol.symbol_id: symbol.qualified_name for symbol in result.symbols}
+    calls = {
+        (names[edge.source_id], names[edge.target_id]): edge
+        for edge in result.edges
+        if edge.kind == "calls"
+    }
+
+    assert ("sample.app.forwarded_function", "sample.target.work") in calls
+    assert ("sample.app.local_call_after_wrapper_import", "sample.target.work") in calls
+    method_edge = calls[("sample.app.forwarded_method", "sample.app.Service.run")]
+    assert method_edge.extraction_method == "ast"
+    assert method_edge.source_location.start_line == 22
+    assert ("sample.app.ambiguous_method", "sample.app.Duplicate.run") not in calls
+    assert not any(source_name in {"sample.app.unsupported_class_target", "sample.app.untrusted_wrapper", "sample.app.dynamic_callable", "sample.app.local_call_before_wrapper_import", "sample.app.outer_wrapper_import_after_handler", "sample.app.reassigned_capture.child", "sample.app.nested_reassignment.child", "sample.app.nested_wrapper_reassignment.child", "sample.app.Container.class_attribute_is_not_a_closure"}
+                   and target_name == "sample.target.work"
+                   for source_name, target_name in calls)
+
+    unresolved_sources = {
+        names[item.source_symbol_id]
+        for item in result.unresolved
+        if item.expression.startswith(("dispatch(", "dispatch_again(", "other_dispatch(", "local_dispatch(", "class_dispatch(", "late_dispatch("))
+    }
+    assert {
+        "sample.app.shadowed_wrapper",
+        "sample.app.aliased_wrapper",
+        "sample.app.ambiguous_method",
+        "sample.app.unsupported_class_target",
+        "sample.app.untrusted_wrapper",
+        "sample.app.dynamic_callable",
+        "sample.app.local_call_before_wrapper_import",
+        "sample.app.outer_wrapper_import_after_handler",
+        "sample.app.reassigned_capture.child",
+        "sample.app.nested_reassignment.child",
+        "sample.app.nested_wrapper_reassignment.child",
+        "sample.app.Container.class_attribute_is_not_a_closure",
+    } <= unresolved_sources
+
+
+def test_local_wrapper_shaped_module_is_not_treated_as_threadpool_wrapper(tmp_path: Path) -> None:
+    repository = tmp_path / "repository"
+    package = repository / "sample"
+    package.mkdir(parents=True)
+    local_framework = repository / "fastapi"
+    local_framework.mkdir()
+    (local_framework / "concurrency.py").write_text(
+        "def run_in_threadpool(func) -> None:\n    pass\n",
+        encoding="utf-8",
+    )
+    (package / "app.py").write_text(
+        "from fastapi.concurrency import run_in_threadpool as dispatch\n\n"
+        "def work() -> None:\n    pass\n\n"
+        "async def caller() -> None:\n    await dispatch(work)\n",
+        encoding="utf-8",
+    )
+
+    definitions = extract_definitions(
+        build_source_snapshot(repository, repository_id="local-wrapper", revision="fixture-v1", dirty=True)
+    )
+    result = extract_relations(definitions)
+    names = {symbol.symbol_id: symbol.qualified_name for symbol in result.symbols}
+    calls = {
+        (names[edge.source_id], names[edge.target_id])
+        for edge in result.edges
+        if edge.kind == "calls"
+    }
+
+    assert ("sample.app.caller", "fastapi.concurrency.run_in_threadpool") in calls
+    assert ("sample.app.caller", "sample.app.work") not in calls
 
 
 def test_constructed_object_method_resolution_rejects_unsafe_patterns(tmp_path: Path) -> None:

@@ -249,6 +249,13 @@ def test_cache_keys_invalidate_changes_additions_deletions_renames_and_settings(
             )
             == {}
         )
+        assert (
+            store.load_relation_cache(
+                **_relation_cache_kwargs(renamed_snapshot)
+                | {"relation_rules_version": "python-relation-facts-v2"}
+            )
+            == {}
+        )
 
 
 def test_relation_facts_rebind_unchanged_callers_to_current_targets(tmp_path: Path) -> None:
@@ -601,7 +608,7 @@ def test_relation_cache_corruption_and_shared_capacity_are_bounded(tmp_path: Pat
         )
         assert store.load_relation_cache(**_relation_cache_kwargs(snapshot)) == {}
         unsupported = original["result_json"].replace(
-            '"format_version":"relation-facts-v2"',
+            '"format_version":"relation-facts-v3"',
             '"format_version":"relation-facts-v0"',
         )
         store.connection.execute(

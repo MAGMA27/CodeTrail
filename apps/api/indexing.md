@@ -2,7 +2,7 @@
 
 ## 状态
 
-已实现 Python 与 TypeScript/TSX 的有界不可变源码快照、定义、相对导入和保守 HTTP path facts，以及本地 freshness 检查和显式索引更新；Python 继续使用文件级定义/关系事实缓存，TypeScript 使用每次有界冷 AST 解析，不计入 Python AST/cache 统计。TypeScript 语法错误、锁定解析器不可用和快照扫描不完整都会显式令新索引 failed。源码捕获规则为 `source-v3`，TypeScript 编译器锁定 `5.9.3`，当前静态 facts 规则为 `typescript-facts-v2`，关系语义为 `relations-v4`，Python 关系事实缓存规则/格式为 `python-relation-facts-v2` / `relation-facts-v2`，索引身份为 `relations-v7`；定义/关系目标仍基于当前快照全量解析，不是完整增量索引。
+已实现 Python 与 TypeScript/TSX 的有界不可变源码快照、定义、相对导入和保守 HTTP path facts，以及本地 freshness 检查和显式索引更新；Python 继续使用文件级定义/关系事实缓存，TypeScript 使用每次有界冷 AST 解析，不计入 Python AST/cache 统计。TypeScript 语法错误、锁定解析器不可用和快照扫描不完整都会显式令新索引 failed。源码捕获规则为 `source-v3`，TypeScript 编译器锁定 `5.9.3`，当前静态 facts 规则为 `typescript-facts-v2`，关系语义为 `relations-v5`，Python 关系事实缓存规则/格式为 `python-relation-facts-v3` / `relation-facts-v3`，索引身份为 `relations-v8`；定义/关系目标仍基于当前快照全量解析，不是完整增量索引。
 
 ## 职责与范围
 
@@ -10,7 +10,7 @@
 
 ## 接口与依赖
 
-[indexing.py](app/indexing.py) 生成快照和只读 manifest；[typescript_parser.cjs](app/typescript_parser.cjs) 通过仓库锁定的 TypeScript 5.9.3 编译器 AST 解析 captured TS/TSX 源码文本，只读语法结构，不加载目标仓库模块、配置或依赖，也不执行仓库代码；缺少 Node.js 或锁定 `apps/web/node_modules/typescript` 时，含 TypeScript 的新索引会失败并报告 `parser_unavailable`。`relations.py` 将 Python 文件事实、TypeScript 相对导入与当前快照目标解析分开；相对导入只在可唯一解析到 captured `.ts`、`.tsx` 或 `.d.ts` 文件时形成 imports 边，其余保留 unresolved；两种语言的静态导入关系均使用既有 `CodeEdge.extraction_method="ast"`。`storage.py` 将 HTTP 客户端请求事实和静态关系都写入同一个 index_id。Python 缓存键包含路径、内容 hash、规则、Python AST 版本和配置 hash；TypeScript 暂不持久缓存，计数单独报告。
+[indexing.py](app/indexing.py) 生成快照和只读 manifest；[typescript_parser.cjs](app/typescript_parser.cjs) 通过仓库锁定的 TypeScript 5.9.3 编译器 AST 解析 captured TS/TSX 源码文本，只读语法结构，不加载目标仓库模块、配置或依赖，也不执行仓库代码；缺少 Node.js 或锁定 `apps/web/node_modules/typescript` 时，含 TypeScript 的新索引会失败并报告 `parser_unavailable`。`relations.py` 将 Python 文件事实、TypeScript 相对导入与当前快照目标解析分开；相对导入只在可唯一解析到 captured `.ts`、`.tsx` 或 `.d.ts` 文件时形成 imports 边，其余保留 unresolved；Python 只将精确导入的 FastAPI/Starlette `run_in_threadpool` 首个简单 callable 参数按静态 calls 解析，目标须唯一落到快照函数或安全直接实例方法；该边使用 `ast` 来源和外层调用位置，不证明运行时一定执行。两种语言的静态导入关系均使用既有 `CodeEdge.extraction_method="ast"`。`storage.py` 将 HTTP 客户端请求事实和静态关系都写入同一个 index_id。Python 缓存键包含路径、内容 hash、规则、Python AST 版本和配置 hash；TypeScript 暂不持久缓存，计数单独报告。
 
 ## 数据与生命周期
 
@@ -22,7 +22,7 @@ GitHub 来源是 freshness 的远端例外：由于成功导入后的归档目�
 
 ## 错误与限制
 
-路径、文件、解析器输出/时间和关系预算受限。Python 缓存损坏、版本不兼容、行号不匹配或读写失败安全降级为未命中；清理不触碰历史 index/evidence。TypeScript 不持久缓存。相对路径别名、包别名和含编码/查询/片段的导入目标不解析。HTTP 仅为通过 AST 验证的透明 `requestJson` wrapper 提取直接顶层函数调用；未验证 wrapper 不产生请求 fact，已识别 wrapper 中的不支持模板、动态 query/method/options、路由挂载前缀、路径转换器或不唯一候选不伪造匹配，动态值保留 unknown。文件扫描不完整、读后增长越过总字节预算、读取失败、符号链接、边界逃逸、TOCTOU 或 GitHub metadata 检查异常均不能判定 freshness 一致；旧索引不会回写新的 TypeScript facts。静态目标解析可因时间/边预算不完整，unresolved 详情也可独立截断；空邻接不能证明没有关系。
+路径、文件、解析器输出/时间和关系预算受限。Python 缓存损坏、版本不兼容、行号不匹配或读写失败安全降级为未命中；清理不触碰历史 index/evidence。TypeScript 不持久缓存。相对路径别名、包别名和含编码/查询/片段的导入目标不解析。Threadpool 转发只接受白名单模块的绝对 `from` import，且导入事件须先于调用（捕获作用域中的导入须先于嵌套函数定义）；同名本地模块、遮蔽、赋值别名、动态目标、类目标、多义方法、继承/装饰/覆盖以及捕获作用域内其他赋值均保留 unresolved。HTTP 仅为通过 AST 验证的透明 `requestJson` wrapper 提取直接顶层函数调用；未验证 wrapper 不产生请求 fact，已识别 wrapper 中的不支持模板、动态 query/method/options、路由挂载前缀、路径转换器或不唯一候选不伪造匹配，动态值保留 unknown。文件扫描不完整、读后增长越过总字节预算、读取失败、符号链接、边界逃逸、TOCTOU 或 GitHub metadata 检查异常均不能判定 freshness 一致；旧索引不会回写新的 TypeScript facts。静态目标解析可因时间/边预算不完整，unresolved 详情也可独立截断；空邻接不能证明没有关系。
 
 ## 验证
 
@@ -30,4 +30,4 @@ apps/api/tests/test_indexing.py、test_relations.py、test_storage.py、test_fre
 
 ## 相关决策
 
-当前依据为现有实现和根目录开发约束；取舍记录在 [关系扫描与 unresolved 覆盖语义](../../docs/decisions/2026-09-13-relation-coverage.md)、[本地项目索引新鲜度与显式更新](../../docs/decisions/2026-09-15-index-freshness.md)、[GitHub 远端 ref 新鲜度与显式更新](../../docs/decisions/2026-09-16-github-remote-freshness.md)、[文件级定义提取缓存](../../docs/decisions/2026-09-15-definition-extraction-cache.md)、[文件关系事实缓存与全快照目标解析](../../docs/decisions/2026-09-15-relation-facts-cache.md) 和 [本项目索引更新与缓存效果联合验收](../../docs/decisions/2026-09-16-project-index-cache-acceptance.md)，其他重要取舍记录到 [决策目录](../../docs/decisions/README.md)。
+当前依据为现有实现和根目录开发约束；取舍记录在 [关系扫描与 unresolved 覆盖语义](../../docs/decisions/2026-09-13-relation-coverage.md)、[本地项目索引新鲜度与显式更新](../../docs/decisions/2026-09-15-index-freshness.md)、[GitHub 远端 ref 新鲜度与显式更新](../../docs/decisions/2026-09-16-github-remote-freshness.md)、[文件级定义提取缓存](../../docs/decisions/2026-09-15-definition-extraction-cache.md)、[文件关系事实缓存与全快照目标解析](../../docs/decisions/2026-09-15-relation-facts-cache.md)、[保守解析 Python threadpool 包装调用](../../docs/decisions/2026-10-06-python-threadpool-calls.md) 和 [本项目索引更新与缓存效果联合验收](../../docs/decisions/2026-09-16-project-index-cache-acceptance.md)，其他重要取舍记录到 [决策目录](../../docs/decisions/README.md)。
