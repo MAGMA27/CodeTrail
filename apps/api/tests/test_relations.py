@@ -547,6 +547,296 @@ def test_constructed_object_method_resolution_rejects_unsafe_patterns(tmp_path: 
     assert unresolved_by_source["sample.caller.dynamic"] == "dynamic_call_target"
 
 
+def test_constructor_parameter_attribute_resolves_only_proven_instance_type(tmp_path: Path) -> None:
+    package = tmp_path / "sample"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "backend.py").write_text(
+        "class Backend:\n"
+        "    def read_source(self) -> None:\n"
+        "        pass\n",
+        encoding="utf-8",
+    )
+    (package / "workspace.py").write_text(
+        "class Workspace:\n"
+        "    def __init__(self, backend, diagnostics) -> None:\n"
+        "        self.backend = backend\n"
+        "        self.diagnostics = diagnostics\n"
+        "    def read(self) -> None:\n"
+        "        self.backend.read_source()\n",
+        encoding="utf-8",
+    )
+    (package / "diagnostics.py").write_text(
+        "class Diagnostics:\n"
+        "    pass\n",
+        encoding="utf-8",
+    )
+    (package / "factory.py").write_text(
+        "from .backend import Backend\n"
+        "from .diagnostics import Diagnostics\n"
+        "from .workspace import Workspace\n\n"
+        "def create() -> Workspace:\n"
+        "    backend = Backend()\n"
+        "    return Workspace(backend, Diagnostics())\n",
+        encoding="utf-8",
+    )
+
+    definitions = extract_definitions(
+        build_source_snapshot(tmp_path, repository_id="constructor", revision="fixture-v1", dirty=True)
+    )
+    result = extract_relations(definitions)
+    names = {symbol.symbol_id: symbol.qualified_name for symbol in result.symbols}
+    calls = {
+        (names[edge.source_id], names[edge.target_id])
+        for edge in result.edges
+        if edge.kind == "calls"
+    }
+
+    assert ("sample.workspace.Workspace.read", "sample.backend.Backend.read_source") in calls
+
+
+def test_code_trail_workspace_service_reader_stays_unresolved_after_new_bypass() -> None:
+    api_root = ROOT / "apps" / "api"
+    definitions = extract_definitions(
+        build_source_snapshot(
+            api_root,
+            repository_id="codetrail-api-probe",
+            revision="working-tree",
+            dirty=True,
+        )
+    )
+    result = extract_relations(definitions)
+    names = {symbol.symbol_id: symbol.qualified_name for symbol in result.symbols}
+    calls = {
+        (names[edge.source_id], names[edge.target_id])
+        for edge in result.edges
+        if edge.kind == "calls"
+    }
+
+    assert result.truncated is False
+    assert (
+        "app.service.WorkspaceService.read_source",
+        "app.service.IndexService.read_source",
+    ) not in calls
+    unresolved = [
+        item
+        for item in result.unresolved
+        if names[item.source_symbol_id] == "app.service.WorkspaceService.read_source"
+        and item.expression.startswith("self.index_service.read_source(")
+    ]
+    assert len(unresolved) == 1
+    assert unresolved[0].reason == "object_method_not_resolved"
+
+
+def test_constructor_attribute_binding_rejects_ambiguous_or_custom_attribute_behavior(
+    tmp_path: Path,
+) -> None:
+    package = tmp_path / "sample"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "dependencies.py").write_text(
+        "class First:\n"
+        "    def work(self) -> None:\n"
+        "        pass\n\n"
+        "class Second:\n"
+        "    def work(self) -> None:\n"
+        "        pass\n",
+        encoding="utf-8",
+    )
+    (package / "wrappers.py").write_text(
+        "from .dependencies import First, Second\n\n"
+        "Alias = First\n\n"
+        "class Ambiguous:\n"
+        "    def __init__(self, dependency) -> None:\n"
+        "        self.ambiguous_dependency = dependency\n"
+        "    def read(self) -> None:\n"
+        "        self.ambiguous_dependency.work()\n\n"
+        "class Aliased:\n"
+        "    def __init__(self, dependency) -> None:\n"
+        "        self.aliased_dependency = dependency\n"
+        "    def read(self) -> None:\n"
+        "        self.aliased_dependency.work()\n\n"
+        "class Escaped:\n"
+        "    def __init__(self, dependency) -> None:\n"
+        "        self.escaped_dependency = dependency\n"
+        "    def read(self) -> None:\n"
+        "        self.escaped_dependency.work()\n\n"
+        "class ReassignedParameter:\n"
+        "    def __init__(self, dependency) -> None:\n"
+        "        self.reassigned_dependency = dependency\n"
+        "        dependency = Second()\n"
+        "    def read(self) -> None:\n"
+        "        self.reassigned_dependency.work()\n\n"
+        "class NestedWrite:\n"
+        "    def __init__(self, dependency) -> None:\n"
+        "        self.nested_dependency = dependency\n"
+        "    def read(self) -> None:\n"
+        "        self.nested_dependency.work()\n\n"
+        "class PassedToFactory:\n"
+        "    def __init__(self, dependency) -> None:\n"
+        "        self.factory_dependency = dependency\n"
+        "    def read(self) -> None:\n"
+        "        self.factory_dependency.work()\n\n"
+        "class CustomAttributeProtocol:\n"
+        "    def __init__(self, dependency) -> None:\n"
+        "        self.protocol_dependency = dependency\n"
+        "    def __getattribute__(self, name):\n"
+        "        return super().__getattribute__(name)\n"
+        "    def read(self) -> None:\n"
+        "        self.protocol_dependency.work()\n\n"
+        "def return_escaped_class():\n"
+        "    return Escaped\n\n"
+        "def make_ambiguous():\n"
+        "    Ambiguous(First())\n"
+        "    Ambiguous(Second())\n\n"
+        "def make_alias():\n"
+        "    Aliased(Alias())\n\n"
+        "def make_escaped():\n"
+        "    Escaped(First())\n\n"
+        "def make_reassigned():\n"
+        "    ReassignedParameter(First())\n\n"
+        "def make_nested_write(external):\n"
+        "    external.child.nested_dependency = Second()\n"
+        "    NestedWrite(First())\n\n"
+        "def make_custom_protocol():\n"
+        "    CustomAttributeProtocol(First())\n\n"
+        "def pass_class_to_factory():\n"
+        "    register_wrapper(PassedToFactory, Second())\n"
+        "    PassedToFactory(First())\n",
+        encoding="utf-8",
+    )
+
+    definitions = extract_definitions(
+        build_source_snapshot(package.parent, repository_id="constructor-safety", revision="v1", dirty=True)
+    )
+    result = extract_relations(definitions)
+    names = {symbol.symbol_id: symbol.qualified_name for symbol in result.symbols}
+    resolved_calls = {
+        (names[edge.source_id], names[edge.target_id])
+        for edge in result.edges
+        if edge.kind == "calls"
+    }
+
+    for method, field in (
+        ("Ambiguous.read", "ambiguous_dependency"),
+        ("Aliased.read", "aliased_dependency"),
+        ("Escaped.read", "escaped_dependency"),
+        ("ReassignedParameter.read", "reassigned_dependency"),
+        ("NestedWrite.read", "nested_dependency"),
+        ("PassedToFactory.read", "factory_dependency"),
+        ("CustomAttributeProtocol.read", "protocol_dependency"),
+    ):
+        assert not any(
+            source.endswith(method) and target.endswith(".work")
+            for source, target in resolved_calls
+        ), field
+
+
+def test_constructor_attribute_binding_rejects_mutating_fields(tmp_path: Path) -> None:
+    package = tmp_path / "sample"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "dependency.py").write_text(
+        "class Dependency:\n"
+        "    def work(self) -> None:\n"
+        "        pass\n",
+        encoding="utf-8",
+    )
+    (package / "wrappers.py").write_text(
+        "from .dependency import Dependency\n\n"
+        "class ConditionalWrite:\n"
+        "    def __init__(self, dependency) -> None:\n"
+        "        self.conditional = dependency\n"
+        "    def mutate(self, dependency, enabled):\n"
+        "        if enabled:\n"
+        "            self.conditional = dependency\n"
+        "    def read(self) -> None:\n"
+        "        self.conditional.work()\n\n"
+        "class AugmentedWrite:\n"
+        "    def __init__(self, dependency) -> None:\n"
+        "        self.augmented = dependency\n"
+        "    def mutate(self, dependency):\n"
+        "        self.augmented += dependency\n"
+        "    def read(self) -> None:\n"
+        "        self.augmented.work()\n\n"
+        "class DeletedWrite:\n"
+        "    def __init__(self, dependency) -> None:\n"
+        "        self.deleted = dependency\n"
+        "    def mutate(self):\n"
+        "        del self.deleted\n"
+        "    def read(self) -> None:\n"
+        "        self.deleted.work()\n\n"
+        "class AnnotatedWrite:\n"
+        "    def __init__(self, dependency) -> None:\n"
+        "        self.annotated: Dependency = dependency\n"
+        "    def read(self) -> None:\n"
+        "        self.annotated.work()\n\n"
+        "class SetattrWrite:\n"
+        "    def __init__(self, dependency) -> None:\n"
+        "        self.setattr_field = dependency\n"
+        "    def mutate(self, other, dependency):\n"
+        "        setattr(other, 'setattr_field', dependency)\n"
+        "    def read(self) -> None:\n"
+        "        self.setattr_field.work()\n\n"
+        "class DelattrWrite:\n"
+        "    def __init__(self, dependency) -> None:\n"
+        "        self.delattr_field = dependency\n"
+        "    def mutate(self, other):\n"
+        "        delattr(other, 'delattr_field')\n"
+        "    def read(self) -> None:\n"
+        "        self.delattr_field.work()\n\n"
+        "class DynamicSetattrWrite:\n"
+        "    def __init__(self, dependency) -> None:\n"
+        "        self.dynamic = dependency\n"
+        "    def mutate(self, other, field, dependency):\n"
+        "        setattr(other, field, dependency)\n"
+        "    def read(self) -> None:\n"
+        "        self.dynamic.work()\n\n"
+        "class BypassedInit:\n"
+        "    def __init__(self, dependency) -> None:\n"
+        "        self.bypassed = dependency\n"
+        "    def read(self) -> None:\n"
+        "        self.bypassed.work()\n\n"
+        "def construct():\n"
+        "    ConditionalWrite(Dependency())\n"
+        "    AugmentedWrite(Dependency())\n"
+        "    DeletedWrite(Dependency())\n"
+        "    AnnotatedWrite(Dependency())\n"
+        "    SetattrWrite(Dependency())\n"
+        "    DelattrWrite(Dependency())\n"
+        "    DynamicSetattrWrite(Dependency())\n"
+        "    BypassedInit.__new__(BypassedInit)\n"
+        "    BypassedInit(Dependency())\n",
+        encoding="utf-8",
+    )
+
+    definitions = extract_definitions(
+        build_source_snapshot(package.parent, repository_id="constructor-writes", revision="v1", dirty=True)
+    )
+    result = extract_relations(definitions)
+    names = {symbol.symbol_id: symbol.qualified_name for symbol in result.symbols}
+    resolved_calls = {
+        (names[edge.source_id], names[edge.target_id])
+        for edge in result.edges
+        if edge.kind == "calls"
+    }
+
+    for method in (
+        "ConditionalWrite.read",
+        "AugmentedWrite.read",
+        "DeletedWrite.read",
+        "AnnotatedWrite.read",
+        "SetattrWrite.read",
+        "DelattrWrite.read",
+        "DynamicSetattrWrite.read",
+        "BypassedInit.read",
+    ):
+        assert not any(
+            source.endswith(method) and target == "sample.dependency.Dependency.work"
+            for source, target in resolved_calls
+        ), method
+
+
 def test_old_snapshot_is_unchanged_when_worktree_changes(tmp_path: Path) -> None:
     source_path = tmp_path / "module.py"
     source_path.write_text("def first() -> None:\n    first()\n", encoding="utf-8")

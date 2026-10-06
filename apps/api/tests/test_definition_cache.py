@@ -172,6 +172,96 @@ def test_cold_and_hot_definition_results_match_and_relation_parse_stays_full(tmp
     ]
 
 
+def test_constructor_attribute_binding_rebinds_cached_facts_across_files(tmp_path: Path) -> None:
+    repository = tmp_path / "repository"
+    package = repository / "sample"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "backend.py").write_text(
+        "class Backend:\n"
+        "    def read_source(self) -> None:\n"
+        "        pass\n",
+        encoding="utf-8",
+    )
+    (package / "replacement.py").write_text(
+        "class Replacement:\n"
+        "    def read_source(self) -> None:\n"
+        "        pass\n",
+        encoding="utf-8",
+    )
+    (package / "workspace.py").write_text(
+        "class Workspace:\n"
+        "    def __init__(self, backend) -> None:\n"
+        "        self.backend = backend\n"
+        "    def read(self) -> None:\n"
+        "        self.backend.read_source()\n",
+        encoding="utf-8",
+    )
+    factory_path = package / "factory.py"
+    factory_path.write_text(
+        "from .backend import Backend\n"
+        "from .workspace import Workspace\n\n"
+        "def create() -> Workspace:\n"
+        "    return Workspace(Backend())\n",
+        encoding="utf-8",
+    )
+    database = tmp_path / "index.sqlite3"
+    first_snapshot = build_source_snapshot(
+        repository, repository_id="constructor-cache", index_id="index-first"
+    )
+    first_definitions = extract_definitions(first_snapshot)
+    first_relations = extract_relations(first_definitions)
+    first_names = {symbol.symbol_id: symbol.qualified_name for symbol in first_relations.symbols}
+    first_edges = {
+        (first_names[edge.source_id], first_names[edge.target_id])
+        for edge in first_relations.edges
+        if edge.kind == "calls"
+    }
+    assert ("sample.workspace.Workspace.read", "sample.backend.Backend.read_source") in first_edges
+
+    with IndexStore(database) as store:
+        _write_cache(store, first_snapshot, first_definitions)
+        _write_relation_cache(store, first_snapshot, first_relations)
+        cached_facts = store.load_relation_cache(**_relation_cache_kwargs(first_snapshot))
+        hot_relations = extract_relations(first_definitions, cached=cached_facts)
+        assert hot_relations.edges == first_relations.edges
+        assert hot_relations.fact_cache_hits == len(first_snapshot.files)
+
+        factory_path.write_text(
+            "from .replacement import Replacement\n"
+            "from .workspace import Workspace\n\n"
+            "def create() -> Workspace:\n"
+            "    return Workspace(Replacement())\n",
+            encoding="utf-8",
+        )
+        second_snapshot = build_source_snapshot(
+            repository, repository_id="constructor-cache", index_id="index-second"
+        )
+        second_definitions = extract_definitions(
+            second_snapshot,
+            cached=store.load_definition_cache(
+                **_cache_kwargs(second_snapshot), max_bytes=100_000
+            ),
+        )
+        second_relations = extract_relations(
+            second_definitions,
+            cached=store.load_relation_cache(**_relation_cache_kwargs(second_snapshot)),
+        )
+
+    second_names = {symbol.symbol_id: symbol.qualified_name for symbol in second_relations.symbols}
+    second_edges = {
+        (second_names[edge.source_id], second_names[edge.target_id])
+        for edge in second_relations.edges
+        if edge.kind == "calls"
+    }
+    assert ("sample.workspace.Workspace.read", "sample.replacement.Replacement.read_source") in second_edges
+    assert not any(target == "sample.backend.Backend.read_source" for _, target in second_edges)
+    assert second_relations.fact_cache_hits == len(second_snapshot.files) - 1
+    assert all(edge.index_id == "index-second" for edge in second_relations.edges)
+    assert all(edge.index_id == "index-first" for edge in first_relations.edges)
+    assert ("sample.workspace.Workspace.read", "sample.backend.Backend.read_source") in first_edges
+
+
 def test_cache_keys_invalidate_changes_additions_deletions_renames_and_settings(tmp_path: Path) -> None:
     repository = tmp_path / "repository"
     repository.mkdir()
@@ -608,8 +698,8 @@ def test_relation_cache_corruption_and_shared_capacity_are_bounded(tmp_path: Pat
         )
         assert store.load_relation_cache(**_relation_cache_kwargs(snapshot)) == {}
         unsupported = original["result_json"].replace(
+            '"format_version":"relation-facts-v4"',
             '"format_version":"relation-facts-v3"',
-            '"format_version":"relation-facts-v0"',
         )
         store.connection.execute(
             "UPDATE relation_cache SET result_json = ?, result_bytes = ? WHERE scope_id = ?",

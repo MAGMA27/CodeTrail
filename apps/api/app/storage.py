@@ -64,6 +64,7 @@ from .relations import (
     RelationFileFacts,
     RelationImportEvent,
     RelationIndex,
+    RelationReturnEvent,
     RelationScopeFacts,
     RelationScopeEvent,
     deserialize_relation_file_facts,
@@ -4970,6 +4971,8 @@ def _validate_relation_cache_lines(
             elif isinstance(event, RelationAssignmentEvent):
                 fact = event.fact
                 check_range(fact.start_line, fact.end_line, "assignment")
+            elif isinstance(event, RelationReturnEvent):
+                continue
             elif isinstance(event, RelationScopeEvent):
                 check_scope(event.scope)
             else:

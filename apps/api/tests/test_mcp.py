@@ -365,6 +365,107 @@ def test_real_stdio_client_matches_http_and_returns_evidence_link(tmp_path: Path
     )
 
 
+def test_constructor_attribute_calls_match_http_and_cold_stdio(tmp_path: Path) -> None:
+    repository = tmp_path / "constructor-mcp"
+    package = repository / "sample"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "backend.py").write_text(
+        "class Backend:\n"
+        "    def read_source(self) -> None:\n"
+        "        pass\n",
+        encoding="utf-8",
+    )
+    (package / "observer.py").write_text("class Observer:\n    pass\n", encoding="utf-8")
+    (package / "workspace.py").write_text(
+        "class Workspace:\n"
+        "    def __init__(self, backend, observer) -> None:\n"
+        "        self.backend = backend\n"
+        "        self.observer = observer\n"
+        "    def read_source(self) -> None:\n"
+        "        self.backend.read_source()\n",
+        encoding="utf-8",
+    )
+    (package / "factory.py").write_text(
+        "from .backend import Backend\n"
+        "from .observer import Observer\n"
+        "from .workspace import Workspace\n\n"
+        "def create() -> Workspace:\n"
+        "    return Workspace(Backend(), Observer())\n",
+        encoding="utf-8",
+    )
+    data_root = tmp_path / "service-data"
+    application = create_app({"constructor-mcp": repository}, data_root=data_root)
+    status, project = request(
+        application,
+        "POST",
+        "/api/projects",
+        {"name": "Constructor attribute MCP", "repository_id": "constructor-mcp"},
+    )
+    assert status == 200
+    project_id = project["project_id"]
+    status, created = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/indexes",
+        {"revision": "constructor-mcp-v1", "dirty": True},
+    )
+    assert status == 200, created
+    index_id = created["index"]["index_id"]
+    status, search = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/indexes/{index_id}/search?query=read_source&limit=20",
+    )
+    assert status == 200
+    workspace_method = next(
+        match["symbol"]
+        for match in search["matches"]
+        if match["symbol"]["qualified_name"] == "sample.workspace.Workspace.read_source"
+    )
+    status, http_neighbors = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/indexes/{index_id}/neighbors"
+        f"?symbol_id={workspace_method['symbol_id']}&direction=callees&depth=1&limit=40&edge_kinds=calls",
+    )
+    assert status == 200
+    assert any(
+        neighbor["symbol"]["qualified_name"] == "sample.backend.Backend.read_source"
+        for neighbor in http_neighbors["neighbors"]
+    )
+
+    parameters = StdioServerParameters(
+        command=sys.executable,
+        args=["-m", "app.mcp_server"],
+        env={
+            "CODETRAIL_REPOSITORIES": json.dumps({"constructor-mcp": str(repository)}),
+            "CODETRAIL_DATA_DIR": str(data_root),
+            "CODETRAIL_WORKBENCH_URL": "http://localhost:3000",
+        },
+        cwd=API_ROOT,
+    )
+
+    async def compare_cold_stdio() -> None:
+        async with Client(parameters, read_timeout_seconds=15) as client:
+            result = await client.call_tool(
+                "get_neighbors",
+                {
+                    "project_id": project_id,
+                    "index_id": index_id,
+                    "symbol_id": workspace_method["symbol_id"],
+                    "direction": "callees",
+                    "depth": 1,
+                    "limit": 40,
+                    "edge_kinds": ["calls"],
+                },
+            )
+            assert result.structured_content["ok"] is True
+            assert result.structured_content["result"] == http_neighbors
+
+    asyncio.run(compare_cold_stdio())
+
+
 def test_real_stdio_client_scopes_two_projects_with_same_named_symbols(tmp_path: Path) -> None:
     repository_one = copy_fixture(tmp_path, name="repo-one", default_timeout=30)
     repository_two = copy_fixture(tmp_path, name="repo-two", default_timeout=99)

@@ -4,6 +4,8 @@
 
 本次 Python 关系事实升级对应的实施决策见[保守解析 Python threadpool 包装调用](2026-10-06-python-threadpool-calls.md)。
 
+构造器注入实例属性调用的范围与保守边界见[保守解析 Python 构造器实例属性调用](2026-10-06-python-constructor-attribute-calls.md)。
+
 职责 manifest 与架构容器方案见[固定快照中的职责分组](2026-10-06-subsystem-responsibility-manifest.md)。
 
 职责容器下的固定快照定义分页见[模块定义分页](2026-10-06-module-symbol-pagination.md)。
