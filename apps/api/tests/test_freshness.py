@@ -169,7 +169,7 @@ def test_runtime_source_boundary_upgrade_builds_new_index_and_keeps_legacy_snaps
     index_service = application.state.index_service
     current_rules_version = index_service.rules_version
     current_configuration_hash = index_service.configuration_hash
-    legacy_rules_version = current_rules_version.replace("python-source-v2", "python-source-v1")
+    legacy_rules_version = current_rules_version.replace("source-v3", "source-v2")
     index_service.rules_version = legacy_rules_version
     index_service.configuration_hash = index_configuration_hash(
         max_file_bytes=index_service.max_file_bytes,
@@ -339,7 +339,7 @@ def test_relation_semantics_upgrade_rebuilds_same_source_with_new_identity(tmp_p
     assert freshness.status == "changed"
     assert freshness.reasons == ["rules_changed", "configuration_changed"]
     assert freshness.current_rules_version.endswith(f"+{RELATION_SEMANTICS_VERSION}")
-    assert INDEX_BUILD_IDENTITY_VERSION == "relations-v5"
+    assert INDEX_BUILD_IDENTITY_VERSION == "relations-v6"
 
     refreshed = application.state.workspace_service.refresh_project_index(
         project.project_id,
@@ -348,7 +348,7 @@ def test_relation_semantics_upgrade_rebuilds_same_source_with_new_identity(tmp_p
     )
     assert refreshed.mode == "created"
     assert refreshed.index.index.index_id != index.index.index_id
-    assert "relations-v5-rebuild" in refreshed.index.index.index_id
+    assert "relations-v6-rebuild" in refreshed.index.index.index_id
     assert refreshed.index.index.rules_version == freshness.current_rules_version
     assert refreshed.index.index.configuration_hash == index_service.configuration_hash
 

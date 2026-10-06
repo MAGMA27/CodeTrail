@@ -737,6 +737,9 @@ class IndexService:
             max_file_bytes=max_file_bytes,
             identity_version=INDEX_BUILD_IDENTITY_VERSION,
             rules_version=self.rules_version,
+            max_files=freshness_max_files,
+            max_total_bytes=freshness_max_total_bytes,
+            max_seconds=freshness_max_seconds,
         )
         self._index_slots = threading.BoundedSemaphore(max_concurrent_indexes)
 
@@ -765,6 +768,9 @@ class IndexService:
                     dirty=request.dirty,
                     identity_version=build_identity_version,
                     max_file_bytes=self.max_file_bytes,
+                    max_files=self.freshness_max_files,
+                    max_total_bytes=self.freshness_max_total_bytes,
+                    max_seconds=self.freshness_max_seconds,
                     rules_version=self.rules_version,
                     configuration_hash=build_configuration_hash,
                 )
@@ -853,6 +859,7 @@ class IndexService:
                                 definition_cache_hits=definitions.cache_hits,
                                 definition_cache_misses=definitions.cache_misses,
                                 definition_ast_parse_count=definitions.ast_parse_count,
+                                typescript_parse_file_count=definitions.typescript_parse_file_count,
                                 relation_ast_parse_count=relation.ast_parse_count,
                                 relation_fact_cache_hits=relation.fact_cache_hits,
                                 relation_fact_cache_misses=relation.fact_cache_misses,

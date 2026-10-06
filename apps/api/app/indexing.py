@@ -5,11 +5,14 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import os
 import re
+import shutil
+import subprocess
 import sys
 import time
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Literal
 
@@ -23,6 +26,10 @@ IssueKind = Literal[
     "symlink",
     "syntax_error",
     "outside_root",
+    "capture_incomplete",
+    "parser_unavailable",
+    "parser_error",
+    "typescript_syntax_error",
 ]
 
 _EXCLUDED_DIRECTORIES = {
@@ -34,13 +41,22 @@ _EXCLUDED_DIRECTORIES = {
     ".pytest_cache",
     ".ruff_cache",
     ".tox",
+    ".next",
+    ".turbo",
+    ".vercel",
+    ".vite",
+    ".parcel-cache",
     ".runtime",
     ".venv",
     "__pycache__",
     "build",
+    "coverage",
     "dist",
     "env",
     "node_modules",
+    "out",
+    "storybook-static",
+    "target",
     "venv",
 }
 _BLOCKING_ISSUES = {
@@ -49,6 +65,10 @@ _BLOCKING_ISSUES = {
     "outside_root",
     "read_error",
     "symlink",
+    "capture_incomplete",
+    "parser_unavailable",
+    "parser_error",
+    "typescript_syntax_error",
 }
 
 
@@ -165,6 +185,28 @@ class DefinitionDescription:
 
 
 @dataclass(frozen=True)
+class TypeScriptImportDescription:
+    """One static or dynamic TypeScript module reference and its source range."""
+
+    specifier: str
+    kind: Literal["static", "dynamic"]
+    start_line: int
+    end_line: int
+
+
+@dataclass(frozen=True)
+class TypeScriptHttpRequestDescription:
+    """A method/path pair forwarded by a structurally verified fetch wrapper."""
+
+    method: str | None
+    path: str | None
+    client_name: str
+    unknown_reason: str | None
+    start_line: int
+    end_line: int
+
+
+@dataclass(frozen=True)
 class DefinitionCacheEntry:
     """Validated per-file definitions and the diagnostic from parsing it."""
 
@@ -186,6 +228,9 @@ class DefinitionIndex:
     parsed_trees: tuple[tuple[str, ast.Module], ...] = field(
         default=(), compare=False, repr=False
     )
+    typescript_imports: tuple[tuple[str, TypeScriptImportDescription], ...] = ()
+    typescript_http_requests: tuple[tuple[str, TypeScriptHttpRequestDescription], ...] = ()
+    typescript_parse_file_count: int = field(default=0, compare=False)
 
 
 @dataclass(frozen=True)
@@ -196,6 +241,7 @@ class IndexBuildStats:
     definition_cache_hits: int
     definition_cache_misses: int
     definition_ast_parse_count: int
+    typescript_parse_file_count: int
     relation_ast_parse_count: int
     relation_fact_cache_hits: int
     relation_fact_cache_misses: int
@@ -213,14 +259,17 @@ def build_source_snapshot(
     index_id: str | None = None,
     identity_version: str = "source-v1",
     max_file_bytes: int = 1_000_000,
+    max_files: int = 2_000,
+    max_total_bytes: int = 20 * 1024 * 1024,
+    max_seconds: float = 2.0,
     rules_version: str | None = None,
     configuration_hash: str | None = None,
 ) -> SourceSnapshot:
-    """Read a bounded Python source tree and build a reproducible snapshot.
+    """Read a bounded Python/TypeScript source tree into a reproducible snapshot.
 
     The caller supplies revision metadata because inspecting a repository must not
     execute arbitrary commands. The default explicitly describes an uncommitted
-    working tree. Only regular ``.py`` files are read; excluded directories,
+    working tree. Only regular ``.py``, ``.ts`` and ``.tsx`` files are read; excluded directories,
     secrets, symlinks, undecodable files, and oversized files are not parsed.
     """
 
@@ -229,68 +278,18 @@ def build_source_snapshot(
     if not re.fullmatch(r"[A-Za-z0-9._-]{1,80}", identity_version):
         raise ValueError("identity_version must be a short stable identifier")
 
-    root = _resolve_repository_root(repository_root)
-    paths, issues = _discover_python_files(root)
-    snapshot_files: list[SnapshotFile] = []
-
-    for path in paths:
-        relative_path = path.relative_to(root).as_posix()
-        try:
-            size = path.stat().st_size
-        except OSError as exc:
-            issues.append(
-                SnapshotIssue(relative_path, "read_error", f"could not stat source: {exc}")
-            )
-            continue
-
-        if size > max_file_bytes:
-            issues.append(
-                SnapshotIssue(
-                    relative_path,
-                    "file_too_large",
-                    f"source file is {size} bytes; limit is {max_file_bytes}",
-                    size=size,
-                )
-            )
-            continue
-
-        try:
-            raw = path.read_bytes()
-        except OSError as exc:
-            issues.append(
-                SnapshotIssue(relative_path, "read_error", f"could not read source: {exc}")
-            )
-            continue
-
-        if len(raw) > max_file_bytes:
-            issues.append(
-                SnapshotIssue(
-                    relative_path,
-                    "file_too_large",
-                    f"source file exceeds the {max_file_bytes}-byte limit",
-                    size=len(raw),
-                )
-            )
-            continue
-
-        try:
-            text = raw.decode("utf-8-sig")
-        except UnicodeDecodeError as exc:
-            issues.append(
-                SnapshotIssue(relative_path, "decode_error", f"source is not UTF-8: {exc}")
-            )
-            continue
-
-        snapshot_files.append(
-            SnapshotFile(
-                path=relative_path,
-                size=len(raw),
-                content_hash=_sha256(raw),
-                text=text,
-            )
-        )
-
-    snapshot_files.sort(key=lambda source_file: source_file.path)
+    scan = scan_source_manifest(
+        repository_root,
+        max_file_bytes=max_file_bytes,
+        max_files=max_files,
+        max_total_bytes=max_total_bytes,
+        max_seconds=max_seconds,
+    )
+    snapshot_files = list(scan.files)
+    issues = list(scan.issues)
+    if scan.scan_truncated or not scan.scan_complete:
+        detail = scan.scan_truncation_reason or "source changed or could not be fully inspected"
+        issues.append(SnapshotIssue("__snapshot__", "capture_incomplete", detail))
     issues.sort(key=lambda issue: (issue.path, issue.kind))
     snapshot_hash = _snapshot_hash(snapshot_files, issues)
     generated_index_id = index_id or _make_index_id(repository_id, snapshot_hash, identity_version)
@@ -309,8 +308,13 @@ def build_source_snapshot(
     return SourceSnapshot(index, tuple(snapshot_files), tuple(issues))
 
 
-SOURCE_CAPTURE_RULES_VERSION = "python-source-v2"
+SOURCE_CAPTURE_RULES_VERSION = "source-v3"
 DEFINITION_EXTRACTION_RULES_VERSION = "python-definitions-v1"
+TYPESCRIPT_COMPILER_VERSION = "5.9.3"
+TYPESCRIPT_FACT_RULES_VERSION = "typescript-facts-v1"
+_TYPESCRIPT_PARSER_TIMEOUT_SECONDS = 15
+_TYPESCRIPT_PARSER_MAX_INPUT_BYTES = 20 * 1024 * 1024
+_TYPESCRIPT_PARSER_MAX_OUTPUT_BYTES = 8 * 1024 * 1024
 PYTHON_AST_VERSION = (
     f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
 )
@@ -324,7 +328,7 @@ def current_source_rules_version(identity_version: str) -> str:
         raise ValueError("identity_version must be a short stable identifier")
     return (
         f"{SOURCE_CAPTURE_RULES_VERSION}+python-{sys.version_info.major}.{sys.version_info.minor}"
-        f"+{identity_version}"
+        f"+typescript-{TYPESCRIPT_COMPILER_VERSION}+{TYPESCRIPT_FACT_RULES_VERSION}+{identity_version}"
     )
 
 
@@ -333,14 +337,20 @@ def index_configuration_hash(
     max_file_bytes: int,
     identity_version: str,
     rules_version: str,
+    max_files: int = 2_000,
+    max_total_bytes: int = 20 * 1024 * 1024,
+    max_seconds: float = 2.0,
 ) -> str:
     """Fingerprint the source/index settings that can change index contents."""
 
-    if max_file_bytes < 1:
-        raise ValueError("max_file_bytes must be positive")
+    if max_file_bytes < 1 or max_files < 1 or max_total_bytes < 1 or max_seconds <= 0:
+        raise ValueError("source capture budgets must be positive")
     payload = {
         "identity_version": identity_version,
         "max_file_bytes": max_file_bytes,
+        "max_files": max_files,
+        "max_seconds": max_seconds,
+        "max_total_bytes": max_total_bytes,
         "rules_version": rules_version,
     }
     return _sha256(
@@ -432,7 +442,7 @@ def scan_source_manifest(
                 issues.append(SnapshotIssue(relative, "read_error", f"could not inspect source: {exc}"))
                 scan_complete = False
                 continue
-            if entry.suffix.lower() != ".py" or not is_file:
+            if entry.suffix.lower() not in {".py", ".ts", ".tsx"} or not is_file:
                 continue
             if scanned_files >= max_files:
                 truncate("max_files")
@@ -470,6 +480,9 @@ def scan_source_manifest(
                 scan_complete = False
                 continue
             scanned_bytes += len(raw)
+            if scanned_bytes > max_total_bytes:
+                truncate("max_total_bytes_after_read")
+                return
             try:
                 after = entry.stat()
             except OSError as exc:
@@ -533,7 +546,17 @@ def extract_definitions(
     ast_parse_count = 0
     cache_hits = 0
     cache_misses = 0
+    typescript_files = tuple(
+        source_file
+        for source_file in snapshot.files
+        if source_file.path.lower().endswith((".ts", ".tsx"))
+    )
+    typescript_imports: list[tuple[str, TypeScriptImportDescription]] = []
+    typescript_http_requests: list[tuple[str, TypeScriptHttpRequestDescription]] = []
+    typescript_parse_file_count = 0
     for source_file in snapshot.files:
+        if source_file.path.lower().endswith((".ts", ".tsx")):
+            continue
         entry = cached.get(source_file.path) if cached is not None else None
         if entry is None:
             ast_parse_count += 1
@@ -558,6 +581,71 @@ def extract_definitions(
         if entry.issue is not None:
             issues.append(entry.issue)
 
+    if typescript_files:
+        facts, typescript_issues = _extract_typescript_facts(typescript_files)
+        issues.extend(typescript_issues)
+        if not any(issue.kind in {"parser_unavailable", "parser_error"} for issue in typescript_issues):
+            typescript_parse_file_count = len(typescript_files)
+        for source_file in typescript_files:
+            module_name = _module_name(source_file.path)
+            end_line = max(1, len(source_file.text.splitlines()))
+            symbols.append(
+                _build_symbol(
+                    index_id=snapshot.index.index_id,
+                    path=source_file.path,
+                    qualified_name=module_name,
+                    kind="module",
+                    start_line=1,
+                    end_line=end_line,
+                )
+            )
+            file_facts = facts.get(source_file.path)
+            if file_facts is None:
+                continue
+            for definition in file_facts.get("definitions", []):
+                symbols.append(
+                    _build_symbol(
+                        index_id=snapshot.index.index_id,
+                        path=source_file.path,
+                        qualified_name=str(definition["qualified_name"]),
+                        kind=definition["kind"],  # type: ignore[arg-type]
+                        start_line=int(definition["start_line"]),
+                        end_line=int(definition["end_line"]),
+                    )
+                )
+            for item in file_facts.get("imports", []):
+                typescript_imports.append(
+                    (
+                        source_file.path,
+                        TypeScriptImportDescription(
+                            specifier=str(item["specifier"]),
+                            kind=item["kind"],
+                            start_line=int(item["start_line"]),
+                            end_line=int(item["end_line"]),
+                        ),
+                    )
+                )
+            for item in file_facts.get("http_requests", []):
+                typescript_http_requests.append(
+                    (
+                        source_file.path,
+                        TypeScriptHttpRequestDescription(
+                            method=item["method"],
+                            path=item["path"],
+                            client_name=str(item["client_name"]),
+                            unknown_reason=item["unknown_reason"],
+                            start_line=int(item["start_line"]),
+                            end_line=int(item["end_line"]),
+                        ),
+                    )
+                )
+
+        if typescript_issues:
+            snapshot = replace(
+                snapshot,
+                index=snapshot.index.model_copy(update={"status": "failed"}),
+            )
+
     symbols.sort(key=lambda symbol: (symbol.path, symbol.start_line, symbol.end_line, symbol.kind, symbol.qualified_name))
     issues.sort(key=lambda issue: (issue.path, issue.kind))
     return DefinitionIndex(
@@ -569,6 +657,135 @@ def extract_definitions(
         cache_misses=cache_misses,
         cache_entries=tuple(cache_entries),
         parsed_trees=tuple(parsed_trees),
+        typescript_imports=tuple(typescript_imports),
+        typescript_http_requests=tuple(typescript_http_requests),
+        typescript_parse_file_count=typescript_parse_file_count,
+    )
+
+
+def _extract_typescript_facts(
+    source_files: tuple[SnapshotFile, ...],
+) -> tuple[dict[str, dict[str, list[dict[str, object]]]], list[SnapshotIssue]]:
+    """Parse captured TS/TSX text with the repository's locked TypeScript compiler."""
+
+    if not source_files:
+        return {}, []
+    parser = Path(__file__).with_name("typescript_parser.cjs")
+    node = shutil.which("node")
+    if node is None or not parser.is_file():
+        return {}, [
+            SnapshotIssue(
+                "__snapshot__",
+                "parser_unavailable",
+                "TypeScript indexing requires Node.js and apps/web's locked TypeScript 5.9.3 package",
+            )
+        ]
+
+    payload = json.dumps(
+        {"files": [{"path": item.path, "text": item.text} for item in source_files]},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    if len(payload.encode("utf-8")) > _TYPESCRIPT_PARSER_MAX_INPUT_BYTES:
+        return {}, [SnapshotIssue("__snapshot__", "parser_error", "TypeScript parser input exceeded its byte budget")]
+    environment = {"PATH": os.environ.get("PATH", "")}
+    for key in ("SystemRoot", "WINDIR", "TEMP", "TMP"):
+        if value := os.environ.get(key):
+            environment[key] = value
+    environment["NODE_OPTIONS"] = "--max-old-space-size=128"
+    try:
+        result = subprocess.run(
+            [node, str(parser)],
+            input=payload,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=_TYPESCRIPT_PARSER_TIMEOUT_SECONDS,
+            check=False,
+            cwd=parser.parent,
+            env=environment,
+        )
+    except subprocess.TimeoutExpired:
+        return {}, [SnapshotIssue("__snapshot__", "parser_error", "TypeScript parser exceeded its 15 second budget")]
+    except OSError:
+        return {}, [SnapshotIssue("__snapshot__", "parser_unavailable", "TypeScript parser process could not be started")]
+    if result.returncode != 0 or len(result.stdout.encode("utf-8")) > _TYPESCRIPT_PARSER_MAX_OUTPUT_BYTES:
+        return {}, [SnapshotIssue("__snapshot__", "parser_error", "TypeScript parser failed or exceeded its output budget")]
+    try:
+        decoded = json.loads(result.stdout)
+    except (TypeError, json.JSONDecodeError):
+        return {}, [SnapshotIssue("__snapshot__", "parser_error", "TypeScript parser returned invalid output")]
+    if (
+        not isinstance(decoded, dict)
+        or decoded.get("compiler_version") != TYPESCRIPT_COMPILER_VERSION
+        or not isinstance(decoded.get("files"), list)
+        or len(decoded["files"]) != len(source_files)
+    ):
+        return {}, [SnapshotIssue("__snapshot__", "parser_error", "TypeScript parser output did not match the locked compiler contract")]
+
+    expected_paths = {item.path for item in source_files}
+    facts: dict[str, dict[str, list[dict[str, object]]]] = {}
+    issues: list[SnapshotIssue] = []
+    for item in decoded["files"]:
+        if not isinstance(item, dict) or item.get("path") not in expected_paths:
+            return {}, [SnapshotIssue("__snapshot__", "parser_error", "TypeScript parser returned an unknown source path")]
+        path = str(item["path"])
+        syntax_error = item.get("syntax_error")
+        if syntax_error is not None:
+            if not isinstance(syntax_error, dict) or not isinstance(syntax_error.get("line"), int):
+                return {}, [SnapshotIssue("__snapshot__", "parser_error", "TypeScript parser returned an invalid syntax diagnostic")]
+            message = str(syntax_error.get("message", "invalid TypeScript syntax"))[:1_500]
+            issues.append(SnapshotIssue(path, "typescript_syntax_error", f"TypeScript syntax error at line {syntax_error['line']}: {message}"))
+            continue
+        line_count = max(1, len(next(source.text for source in source_files if source.path == path).splitlines()))
+        definitions = item.get("definitions")
+        imports = item.get("imports")
+        requests = item.get("http_requests")
+        if not isinstance(definitions, list) or not isinstance(imports, list) or not isinstance(requests, list):
+            return {}, [SnapshotIssue("__snapshot__", "parser_error", "TypeScript parser returned an invalid fact list")]
+        for definition in definitions:
+            if (
+                not isinstance(definition, dict)
+                or not isinstance(definition.get("qualified_name"), str)
+                or len(definition["qualified_name"]) > 500
+                or definition.get("kind") not in {"class", "function"}
+                or not _valid_parser_range(definition, line_count)
+            ):
+                return {}, [SnapshotIssue("__snapshot__", "parser_error", "TypeScript parser returned an invalid definition")]
+        for item_fact in imports:
+            if (
+                not isinstance(item_fact, dict)
+                or not isinstance(item_fact.get("specifier"), str)
+                or item_fact.get("kind") not in {"static", "dynamic"}
+                or not _valid_parser_range(item_fact, line_count)
+            ):
+                return {}, [SnapshotIssue("__snapshot__", "parser_error", "TypeScript parser returned an invalid import fact")]
+        for request in requests:
+            if (
+                not isinstance(request, dict)
+                or request.get("method") is not None and not isinstance(request.get("method"), str)
+                or request.get("path") is not None and not isinstance(request.get("path"), str)
+                or not isinstance(request.get("client_name"), str)
+                or request.get("unknown_reason") is not None and not isinstance(request.get("unknown_reason"), str)
+                or not _valid_parser_range(request, line_count)
+            ):
+                return {}, [SnapshotIssue("__snapshot__", "parser_error", "TypeScript parser returned an invalid HTTP request fact")]
+        facts[path] = item
+    if len(facts) + len(issues) != len(expected_paths):
+        return {}, [SnapshotIssue("__snapshot__", "parser_error", "TypeScript parser omitted one or more captured files")]
+    return facts, issues
+
+
+def _valid_parser_range(value: dict[str, object], line_count: int) -> bool:
+    start = value.get("start_line")
+    end = value.get("end_line")
+    return (
+        isinstance(start, int)
+        and not isinstance(start, bool)
+        and isinstance(end, int)
+        and not isinstance(end, bool)
+        and 1 <= start <= end <= line_count
     )
 
 
@@ -896,7 +1113,8 @@ def _is_secret_name(name: str) -> bool:
 
 
 def _module_name(relative_path: str) -> str:
-    parts = relative_path.removesuffix(".py").split("/")
+    suffix = Path(relative_path).suffix
+    parts = relative_path.removesuffix(suffix).split("/")
     if parts[-1] == "__init__" and len(parts) > 1:
         parts.pop()
     return ".".join(parts) or "__init__"

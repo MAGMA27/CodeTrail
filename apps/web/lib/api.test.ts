@@ -92,6 +92,16 @@ function overview() {
       },
     ],
     module_relations: [],
+    http_associations: [],
+    http_association_coverage: {
+      analysis_status: "complete",
+      client_request_count: 0,
+      matched_count: 0,
+      visible_match_count: 0,
+      unmatched_count: 0,
+      ambiguous_count: 0,
+      unknown_count: 0,
+    },
     paths: [
       {
         path_id: "path-main",

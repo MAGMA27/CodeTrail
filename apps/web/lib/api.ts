@@ -628,6 +628,30 @@ export type OverviewModuleRelation = {
   edges: CodeEdge[];
 };
 
+export type OverviewHttpAssociationCoverage = {
+  analysis_status: "complete" | "incomplete" | "not_analyzed";
+  client_request_count: number;
+  matched_count: number;
+  visible_match_count: number;
+  unmatched_count: number;
+  ambiguous_count: number;
+  unknown_count: number;
+};
+
+export type OverviewHttpAssociation = {
+  association_id: string;
+  index_id: string;
+  match_kind: "method_path_shape";
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | "HEAD" | "TRACE";
+  path: string;
+  client_name: string;
+  client_module: SymbolRecord;
+  server_module: SymbolRecord;
+  route_entry_point_id: string;
+  client_evidence: Evidence;
+  route_evidence: Evidence;
+};
+
 export type OverviewPath = {
   path_id: string;
   index_id: string;
@@ -660,6 +684,8 @@ export type ProjectOverview = {
   groups: OverviewGroup[];
   modules: OverviewModule[];
   module_relations: OverviewModuleRelation[];
+  http_associations: OverviewHttpAssociation[];
+  http_association_coverage: OverviewHttpAssociationCoverage;
   paths: OverviewPath[];
   unresolved: UnresolvedReference[];
   coverage: OverviewCoverage;
@@ -1946,6 +1972,42 @@ function isOverviewCoverage(value: unknown): value is OverviewCoverage {
   );
 }
 
+function isOverviewHttpAssociationCoverage(value: unknown): value is OverviewHttpAssociationCoverage {
+  if (!isRecord(value) || !["complete", "incomplete", "not_analyzed"].includes(String(value.analysis_status))) {
+    return false;
+  }
+  if (
+    !isNonNegativeInteger(value.client_request_count) ||
+    !isNonNegativeInteger(value.matched_count) ||
+    !isNonNegativeInteger(value.visible_match_count) ||
+    !isNonNegativeInteger(value.unmatched_count) ||
+    !isNonNegativeInteger(value.ambiguous_count) ||
+    !isNonNegativeInteger(value.unknown_count)
+  ) return false;
+  return (
+    value.visible_match_count <= value.matched_count &&
+    value.matched_count + value.unmatched_count + value.ambiguous_count + value.unknown_count === value.client_request_count
+  );
+}
+
+function isOverviewHttpAssociation(value: unknown, indexId: string): value is OverviewHttpAssociation {
+  if (!isRecord(value)) return false;
+  const methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD", "TRACE"];
+  return (
+    isString(value.association_id) &&
+    value.index_id === indexId &&
+    value.match_kind === "method_path_shape" &&
+    methods.includes(String(value.method)) &&
+    isString(value.path) && value.path.startsWith("/api/") && !/[?#]/.test(value.path) &&
+    isString(value.client_name) &&
+    isSymbolRecord(value.client_module) && value.client_module.kind === "module" && value.client_module.index_id === indexId &&
+    isSymbolRecord(value.server_module) && value.server_module.kind === "module" && value.server_module.index_id === indexId &&
+    isString(value.route_entry_point_id) &&
+    isEvidence(value.client_evidence) && value.client_evidence.index_id === indexId && value.client_evidence.kind === "source" && value.client_evidence.path === value.client_module.path &&
+    isEvidence(value.route_evidence) && value.route_evidence.index_id === indexId && value.route_evidence.kind === "source" && value.route_evidence.path === value.server_module.path
+  );
+}
+
 export function isProjectOverviewResponse(value: unknown): value is ProjectOverview {
   return (
     isRecord(value) &&
@@ -1962,6 +2024,10 @@ export function isProjectOverviewResponse(value: unknown): value is ProjectOverv
     value.modules.every(isOverviewModule) &&
     Array.isArray(value.module_relations) &&
     value.module_relations.every(isOverviewModuleRelation) &&
+    Array.isArray(value.http_associations) &&
+    value.http_associations.every((item) => isOverviewHttpAssociation(item, (value.index as IndexSnapshot).index_id)) &&
+    isOverviewHttpAssociationCoverage(value.http_association_coverage) &&
+    value.http_association_coverage.visible_match_count === value.http_associations.length &&
     Array.isArray(value.paths) &&
     value.paths.every(isOverviewPath) &&
     Array.isArray(value.unresolved) &&

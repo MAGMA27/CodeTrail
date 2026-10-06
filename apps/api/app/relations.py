@@ -5,26 +5,34 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import posixpath
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Literal
 
 from .contracts import CodeEdge, SourceLocation, Symbol, UnresolvedReference
-from .indexing import DefinitionIndex, SnapshotIssue, SourceSnapshot, SnapshotFile, _module_name
+from .indexing import (
+    DefinitionIndex,
+    SnapshotIssue,
+    SourceSnapshot,
+    SnapshotFile,
+    TypeScriptImportDescription,
+    _module_name,
+)
 
 
 RelationKind = Literal["imports", "calls"]
 BindingKind = Literal["module", "symbol"]
 RelationScopeKind = Literal["module", "class", "function"]
 # The semantic version changes when the graph/unresolved meaning changes.
-RELATION_SEMANTICS_VERSION = "relations-v3"
+RELATION_SEMANTICS_VERSION = "relations-v4"
 # This version only governs the persisted, index-independent facts payload.
 RELATION_FACT_EXTRACTION_RULES_VERSION = "python-relation-facts-v2"
 _RELATION_FACTS_FORMAT_VERSION = "relation-facts-v2"
 # This namespace is part of generated immutable index IDs. Bump it when source
 # boundaries or build rules can change an index with the same content hash.
-INDEX_BUILD_IDENTITY_VERSION = "relations-v5"
+INDEX_BUILD_IDENTITY_VERSION = "relations-v6"
 
 
 def relation_coverage_limitations(
@@ -175,6 +183,7 @@ class RelationIndex:
     fact_cache_entries: tuple[tuple[str, RelationFileFacts], ...] = field(
         default=(), compare=False, repr=False
     )
+    http_client_requests: tuple[HttpClientRequestFact, ...] = ()
 
     @property
     def snapshot(self) -> SourceSnapshot:
@@ -187,6 +196,22 @@ class RelationIndex:
     @property
     def issues(self) -> tuple[SnapshotIssue, ...]:
         return self.definitions.issues
+
+
+@dataclass(frozen=True)
+class HttpClientRequestFact:
+    """A frozen call through a verified HTTP client wrapper, without route certainty."""
+
+    request_id: str
+    index_id: str
+    source_module_id: str
+    source_path: str
+    method: str | None
+    request_path: str | None
+    unknown_reason: str | None
+    client_name: str
+    start_line: int
+    end_line: int
 
 
 @dataclass(frozen=True)
@@ -286,6 +311,8 @@ def extract_relations(
     for source_file in snapshot.files:
         if budget.truncated:
             break
+        if not source_file.path.lower().endswith(".py"):
+            continue
         facts = cached.get(source_file.path) if cached is not None else None
         if facts is None:
             fact_cache_misses += 1
@@ -344,6 +371,159 @@ def extract_relations(
             )
             resolver.visit_scope()
 
+    modules_by_path = maps.modules_by_path
+    target_files = set(modules_by_path)
+    edge_occurrences: dict[tuple[str, str, int, int], int] = {}
+    unresolved_occurrences: dict[tuple[str, str, int, int], int] = {}
+    for path, fact in definitions.typescript_imports:
+        if budget.truncated:
+            break
+        source_module = modules_by_path.get(path)
+        if source_module is None:
+            continue
+        target_path: str | None = None
+        reason: str | None = None
+        candidates: list[str] = []
+        if fact.kind == "dynamic":
+            reason = "dynamic_import"
+        elif not fact.specifier.startswith("."):
+            reason = "external_import_or_path_alias"
+        elif any(mark in fact.specifier for mark in ("\\", "?", "#", "%")):
+            reason = "unsupported_relative_import_shape"
+        else:
+            normalized = posixpath.normpath(posixpath.join(posixpath.dirname(path), fact.specifier))
+            if normalized in {".", ".."} or normalized.startswith("../") or normalized.startswith("/"):
+                reason = "relative_import_outside_snapshot"
+            else:
+                suffix = posixpath.splitext(normalized)[1].lower()
+                if suffix in {".ts", ".tsx"}:
+                    candidates = [normalized]
+                elif suffix in {".js", ".jsx", ".mjs", ".cjs"}:
+                    stem = normalized[: -len(suffix)]
+                    candidates = [f"{stem}.ts", f"{stem}.tsx", f"{stem}.d.ts"]
+                elif not suffix:
+                    candidates = [
+                        f"{normalized}.ts",
+                        f"{normalized}.tsx",
+                        f"{normalized}.d.ts",
+                        f"{normalized}/index.ts",
+                        f"{normalized}/index.tsx",
+                        f"{normalized}/index.d.ts",
+                    ]
+                candidates = sorted(set(candidate for candidate in candidates if candidate in target_files))
+                if len(candidates) == 1:
+                    target_path = candidates[0]
+                elif len(candidates) > 1:
+                    reason = "ambiguous_relative_import"
+                else:
+                    reason = "missing_relative_import_target"
+        if target_path is not None:
+            if not budget.reserve("edges"):
+                break
+            target_module = modules_by_path[target_path]
+            occurrence_key = (path, target_path, fact.start_line, fact.end_line)
+            occurrence = edge_occurrences.get(occurrence_key, 0)
+            edge_occurrences[occurrence_key] = occurrence + 1
+            identity = "\0".join(
+                [snapshot.index.index_id, "imports", source_module.symbol_id, target_module.symbol_id,
+                 path, str(fact.start_line), str(fact.end_line), str(occurrence), "typescript"]
+            )
+            edges.append(
+                CodeEdge(
+                    edge_id=f"edge-{hashlib.sha256(identity.encode('utf-8')).hexdigest()[:32]}",
+                    index_id=snapshot.index.index_id,
+                    source_id=source_module.symbol_id,
+                    target_id=target_module.symbol_id,
+                    kind="imports",
+                    extraction_method="ast",
+                    source_location=SourceLocation(
+                        path=path,
+                        start_line=fact.start_line,
+                        end_line=fact.end_line,
+                    ),
+                )
+            )
+        elif reason is not None:
+            if not budget.reserve("unresolved"):
+                # Losing one diagnostic must not hide later definite imports.
+                continue
+            expression = fact.specifier[:500] or "<dynamic>"
+            unresolved_key = (source_module.symbol_id, expression, reason, fact.start_line)
+            occurrence = unresolved_occurrences.get(unresolved_key, 0)
+            unresolved_occurrences[unresolved_key] = occurrence + 1
+            identity = "\0".join(
+                [snapshot.index.index_id, source_module.symbol_id, path, expression, reason,
+                 str(fact.start_line), str(fact.end_line), str(occurrence)]
+            )
+            unresolved.append(
+                UnresolvedReference(
+                    unresolved_id=f"unresolved-{hashlib.sha256(identity.encode('utf-8')).hexdigest()[:32]}",
+                    index_id=snapshot.index.index_id,
+                    source_symbol_id=source_module.symbol_id,
+                    path=path,
+                    expression=expression,
+                    reason=reason,
+                    possible_target_ids=[modules_by_path[candidate].symbol_id for candidate in candidates],
+                    start_line=fact.start_line,
+                    end_line=fact.end_line,
+                )
+            )
+
+    http_client_requests: list[HttpClientRequestFact] = []
+    request_occurrences: dict[tuple[str, str, int, int], int] = {}
+    for path, fact in definitions.typescript_http_requests:
+        if budget.truncated:
+            break
+        if time.monotonic() >= budget.deadline:
+            budget._stop("max_seconds exceeded")
+            break
+        source_module = modules_by_path.get(path)
+        if source_module is None:
+            continue
+        key = (path, fact.client_name, fact.start_line, fact.end_line)
+        occurrence = request_occurrences.get(key, 0)
+        request_occurrences[key] = occurrence + 1
+        identity = "\0".join(
+            [snapshot.index.index_id, source_module.symbol_id, fact.method or "", fact.path or "",
+             fact.client_name, path, str(fact.start_line), str(fact.end_line), str(occurrence)]
+        )
+        http_client_requests.append(
+            HttpClientRequestFact(
+                request_id=f"http-request-{hashlib.sha256(identity.encode('utf-8')).hexdigest()[:32]}",
+                index_id=snapshot.index.index_id,
+                source_module_id=source_module.symbol_id,
+                source_path=path,
+                method=fact.method,
+                request_path=fact.path,
+                unknown_reason=fact.unknown_reason,
+                client_name=fact.client_name,
+                start_line=fact.start_line,
+                end_line=fact.end_line,
+            )
+        )
+        if fact.unknown_reason is not None and budget.reserve("unresolved"):
+            unresolved_key = (source_module.symbol_id, fact.client_name, fact.unknown_reason, fact.start_line)
+            occurrence = unresolved_occurrences.get(unresolved_key, 0)
+            unresolved_occurrences[unresolved_key] = occurrence + 1
+            reference = "<dynamic>" if fact.path is None else fact.path
+            unresolved_id = hashlib.sha256(
+                "\0".join([snapshot.index.index_id, source_module.symbol_id, path, reference,
+                             fact.unknown_reason, str(fact.start_line), str(fact.end_line), str(occurrence)]).encode("utf-8")
+            ).hexdigest()[:32]
+            unresolved.append(
+                UnresolvedReference(
+                    unresolved_id=f"unresolved-{unresolved_id}",
+                    index_id=snapshot.index.index_id,
+                    source_symbol_id=source_module.symbol_id,
+                    path=path,
+                    expression=f"{fact.client_name}({reference})"[:500],
+                    reason=fact.unknown_reason,
+                    possible_target_ids=[],
+                    start_line=fact.start_line,
+                    end_line=fact.end_line,
+                )
+            )
+
     edges.sort(key=lambda edge: (edge.source_location.path, edge.source_location.start_line, edge.kind, edge.edge_id))
     unresolved.sort(key=lambda item: (item.path, item.start_line, item.expression, item.unresolved_id))
     return RelationIndex(
@@ -359,6 +539,7 @@ def extract_relations(
         fact_cache_misses=fact_cache_misses,
         shared_ast_reuse_count=shared_ast_reuse_count,
         fact_cache_entries=tuple(fact_cache_entries),
+        http_client_requests=tuple(http_client_requests),
     )
 
 

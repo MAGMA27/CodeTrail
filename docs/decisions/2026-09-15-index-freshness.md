@@ -56,3 +56,7 @@ Status: implemented
 - 完整快照扫描与 freshness manifest 都使用同一排除目录规则，现跳过 `.runtime` 和 `.codetrail-runtime`，避免采集评测和服务运行生成的 Python 源文件。
 - 捕获规则从 `python-source-v1` 升至 `python-source-v2`，索引身份从 `relations-v4` 升至 `relations-v5`；因此 freshness 同时报告 `rules_changed` / `configuration_changed`，而相同内容 hash 也不会复用旧身份快照。
 - `test_indexing.py` 验证两种扫描入口一致排除这两个目录；`test_freshness.py` 模拟旧污染快照，验证显式刷新创建干净的新 index，旧快照仍可读并保留在项目可用索引中。
+
+## 后续实现更新（2026-10-06）
+
+当前快照规则已扩展到 `.py`、`.ts`、`.tsx`，并把 TypeScript 5.9.3 与 `typescript-facts-v1` 纳入 freshness 身份；当前关系语义为 `relations-v4`、索引构建身份为 `relations-v6`。本决策中的旧 Python-only 版本号和验收快照保留其历史语境；当前行为与 TS parser/runtime 前提见 [TypeScript 静态索引与 HTTP 形状关联](2026-10-06-typescript-http-overview.md)。

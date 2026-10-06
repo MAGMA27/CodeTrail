@@ -2,17 +2,17 @@
 
 ## 状态
 
-已实现多项目真实工作台、Project/Index/Session/消息、索引新鲜度检查/显式更新、O1/O2/O3 浏览和 P2-R1/P2-R2 Session 内显式 fixture/real Run 面板。项目知识页默认展示当前固定快照的项目架构画布，再展示入口、功能和结构详情；源码目录组可展开为模块，imports/calls 聚合关系可筛选，HTTP 路由作为入口视角高亮而非另一套互斥分组。点击模块进入既有符号关系图，点击代表边打开同一 index 的源码证据。概览仍提供 `python-entry-v4` 的 HTTP 路径组、源码目录组、计数和静态模块关系；选择组后可查看真实路由/模块，再从入口 evidence 进入源码或从处理函数/模块进入既有关系图。Run 面板支持模式选择、真实模式警告、启动、状态同步、持久化 SSE 事件流、有限重连/轮询回退、工具结果、Issue/代码理解报告 evidence、候选位置与有界静态影响、取消、历史选择和刷新/切换恢复；Codex external Run 会从 Session history 自动发现、选择并订阅，代码理解结果按顺序步骤和覆盖级别展示。
+已实现多项目真实工作台、Project/Index/Session/消息、索引新鲜度检查/显式更新、O1/O2/O3 浏览和 P2-R1/P2-R2 Session 内显式 fixture/real Run 面板。项目知识页默认展示当前固定快照的项目架构画布，再展示入口、功能和结构详情；Python/TypeScript 静态 imports/calls 可筛选，HTTP 客户端到 FastAPI 路由的 method/path shape association 以单独虚线边聚合显示，也可独立过滤；关联列表的客户端与路由证据均可打开到同一 index。点击模块进入既有符号关系图，点击代表静态边打开同一 index 的源码证据。概览版本为 `python-entry-v5+http-shape-v1`；旧索引缺少 TypeScript 解析标识时显示 `not_analyzed`，不把零关联解释为无调用。Run 面板支持模式选择、真实模式警告、启动、状态同步、持久化 SSE 事件流、有限重连/轮询回退、工具结果、Issue/代码理解报告 evidence、候选位置与有界静态影响、取消、历史选择和刷新/切换恢复；Codex external Run 会从 Session history 自动发现、选择并订阅，代码理解结果按顺序步骤和覆盖级别展示。
 
 ## 职责与范围
 
-通过公开 HTTP API 创建/列出/切换项目、建立索引、读取概览/功能/图/源码证据，管理 Session 消息并显式启动 fixture 或 real Run；概览结构组按固定快照的声明路径/handler 模块和源码目录生成，模块关系只显示可追溯的静态 imports/calls 样本，不与语义功能混合。项目架构画布直接投影既有 `ProjectOverview`，没有第二套架构 API 或持久化编辑状态：源码目录组是规则生成的容器，模块关系来自当前 project/index 的聚合 imports/calls；HTTP 路由筛选高亮相关目录，不另画一套互斥子系统。展开、聚焦、缩放、平移和过滤均为本地视图状态。可从结构组中的 FastAPI 路由查看声明路径及处理函数的同快照证据，并从处理函数/模块打开既有关系图；也可从画布模块进入符号关系图、从代表边读取同一 index 的源码 evidence。已保存 Run 报告的 candidate/finding 可进入固定快照影响画布，Codex external Run 由工作台自动发现。影响画布在桌面占据工作区主区域并与 Run 报告并列；源码/普通关系仍使用可调侧栏。代码关系面板把查询截断与固定关系索引未完成分开显示；大目录分组默认收起，展开后可按目录边界聚焦，仍可通过平移/缩放查看已加载内容。前端负责当前视图、请求取消/过期响应、草稿和 Run 展示，不负责冻结消息、执行工具、鉴权、预算或组装报告；这些由 API 应用服务拥有。
+通过公开 HTTP API 创建/列出/切换项目、建立索引、读取概览/功能/图/源码证据，管理 Session 消息并显式启动 fixture 或 real Run；概览结构组按固定快照的声明路径/handler 模块和源码目录生成，imports/calls 样本与 HTTP 形状关联分别展示，不与语义功能混合。项目架构画布直接投影既有 `ProjectOverview`，没有第二套架构 API 或持久化编辑状态：源码目录组是规则生成的容器，静态 module relations 聚合 imports/calls；HTTP associations 保持独立数据结构和筛选，不转换为 CodeEdge。客户端模块到服务端模块按可见模块或折叠目录投影，点击关联边打开客户端证据，下方列表分别提供客户端与路由 evidence。关联 endpoint 未映射、40 模块画布上限摘要、服务端候选截断和旧索引未分析状态均显式提示；列表保留同一概览返回的关联与双端证据。展开、聚焦、缩放、平移和过滤均为本地视图状态。可从结构组中的 FastAPI 路由查看声明路径及处理函数的同快照证据，并从处理函数/模块打开既有关系图；也可从画布模块进入符号关系图、从代表静态边读取同一 index 的源码 evidence。已保存 Run 报告的 candidate/finding 可进入固定快照影响画布，Codex external Run 由工作台自动发现。影响画布在桌面占据工作区主区域并与 Run 报告并列；源码/普通关系仍使用可调侧栏。代码关系面板把查询截断与固定关系索引未完成分开显示；大目录分组默认收起，展开后可按目录边界聚焦，仍可通过平移/缩放查看已加载内容。前端负责当前视图、请求取消/过期响应、草稿和 Run 展示，不负责冻结消息、执行工具、鉴权、预算或组装报告；这些由 API 应用服务拥有。
 
 ## 接口与依赖
 
 项目、索引、新鲜度、概览、Session/消息和 Run 均通过 `/api/projects/*` 调用；索引管理提供检查更新和显式更新，前端展示 `consistent`、`changed`、`unknown`、变化计数、扫描预算及有界路径，更新返回复用或新快照结果。GitHub freshness 额外展示 `remote_status`、来源 URL、请求/解析 ref、远端 commit 和基线索引 commit；检查只解析远端 metadata，不下载归档，显式 GitHub 更新调用独立的 `github-refresh` 入口。概览先展示固定索引中的结构组：HTTP 路径按静态声明前缀与 handler 模块分组，源码按相对目录分组；选择分组后查看真实入口或可见模块。FastAPI 路由入口显示 HTTP 方法、声明路径和处理函数，点击入口先打开装饰器到函数结束的同快照 evidence，关系图按钮则以处理函数作为既有静态图根节点；模块关系区域展示聚合的静态 imports/calls、总边数和最多 8 条源码位置样本。结构组与模块关系是静态组织事实，不是语义功能，前端对组、模块和关系的可见/总量分别显示预算边界。Run 使用同一 Session 的 list/detail/events、`events/stream`、tool-results/report/impact/cancel 端点。启动按钮只发送 Issue/模式/fixture 场景/固定 index_id，服务端独立冻结已保存消息；前端不把已加载的消息页当作 Run 输入。Codex external Run 不由网页创建，工作台在 Session history 成功后有界轮询 `execution_source=codex` 的活动 Run，再复用 detail/events/SSE 读取链。代码关系面板区分邻接查询 `truncated`、固定关系扫描 `index_truncated` 和 unresolved 详情 `index_unresolved_truncated`，并对旧索引的未知状态单独提示；大目录分组默认收起，展开后按选中节点及有限相邻节点聚焦。影响面板从报告候选或唯一 finding symbol 发起，重新查询 Run 固定 index 的静态 `calls`，方向/深度由用户控制且不修改 Run。HTTP 响应在 [lib/api.ts](lib/api.ts) 经过形状和 project/session/index/hash 边界校验，SSE 事件按 schema、Run 和连续 sequence 校验；`run.stream.end` 只接受 `succeeded`、`failed`、`cancelled`、`interrupted` 四类 Run 终态。
 
-架构画布只消费 `ProjectOverview` 中 `project_id/index_id` 一致的源码目录、模块和模块关系；折叠目录汇总内部关系，展开后最多显示 40 个模块。概览截断、模块超限、未映射端点和 unresolved 均显示为覆盖提示，不把未返回数据解释成“无依赖”。模块打开现有固定索引符号图；代表边读取其同一 index/path/line 的源码 evidence，不回退到 latest。
+架构画布只消费 `ProjectOverview` 中 `project_id/index_id` 一致的源码目录、模块和关系；折叠目录汇总内部静态关系，展开后最多显示 40 个模块。HTTP method/path shape associations 以独立虚线有向边从客户端指向服务路由，不进入静态 imports/calls 聚合；关联边点击打开客户端 evidence，关联列表可分别打开客户端和路由 evidence。概览截断、模块超限、关联端点映射失败、画布限额摘要和 unresolved 均显示为覆盖提示，不把未返回数据解释成“无依赖”。模块打开现有固定索引符号图；代表静态边读取其同一 index/path/line 的源码 evidence，不回退到 latest。TypeScript 快照使用 API 主机可用的 Node.js 和工作区锁定 TypeScript 5.9.3 解析器；无运行依赖或有语法错误时索引显式 failed。
 
 工作台只保留一个稳定的“源代码与索引”项目操作入口。入口页内分为“源代码来源”和“固定索引”两个页签：前者承载本地/GitHub 导入及 ImportAttempt 状态，后者承载固定版本、检查更新和显式更新。两者共享项目上下文，但仍分别调用导入和项目索引接口；前端不直接访问来源路径或 SQLite。
 
@@ -30,7 +30,7 @@
 
 当 Run 报告的 `outcome=explanation` 时，工作台在结果区域显示覆盖级别和最多 12 个有序步骤；每步显示 confirmed/inferred/unknown 状态、说明、同一报告的源码 evidence 按钮。partial/unknown 会明确显示未确认范围；只有一个有效 symbol 时可进入现有局部关系图，多符号或无符号步骤保留源码证据，不显示候选影响按钮。旧 Issue 报告继续使用候选/影响展示。
 
-项目架构视图随当前明确选定的项目和固定 index 重建；切换项目会清理旧 Session/证据深链及 URL 参数，避免刷新跳回原项目。刷新后从恢复的项目概览重建图；展开目录、入口/类型过滤及焦点不持久化。当前画布只表示该索引实际返回的 Python 源码结构，不覆盖 TypeScript、跨 HTTP 客户端边界或部署/运行时拓扑。
+项目架构视图随当前明确选定的项目和固定 index 重建；切换项目会清理旧 Session/证据深链及 URL 参数，避免刷新跳回原项目。刷新后从恢复的项目概览重建图；展开目录、imports/calls 和 HTTP 形状过滤及焦点不持久化。画布表示该索引实际返回的 Python/TypeScript 静态源码关系和规则确认的 HTTP 方法/路径形状关联；后者不证明实际网络目标、本地部署拓扑或运行时请求行为。
 
 Session 内的 fixture/real 分析必须由用户显式点击对应启动按钮；Codex external 分析由 MCP Agent 启动，网页只发现和展示。真实模式启动前显示会发送冻结 Issue、已保存消息和有界源码证据、可能产生费用且失败不回退的提示；启动前若有草稿也会显示提示，但草稿不进入 Run。服务端返回 queued 的 run_id 后，工作台先读取已持久化事件建立历史，再以 `after_sequence` 订阅 SSE 逐项接收新增公开事件；连接失败经过有限退避后回退到有界轮询。`onopen` 只表示握手成功，不清零无进展重连计数；只有连续 sequence 的新事件重置重连预算，达到上限后只保留一个轮询定时器。面板展示模式、execution source、固定消息范围、input hash、index、execution version、事件时间线、工具结果、报告 evidence 和限制，并可从报告 evidence 打开既有源码证据侧栏。
 
@@ -59,6 +59,7 @@ API 离线、项目/Session/index 不属于当前范围、索引不在 latest、
 - [关系扫描与 unresolved 覆盖语义](../../docs/decisions/2026-09-13-relation-coverage.md)
 - [FastAPI 路由入口概览](../../docs/decisions/2026-09-14-fastapi-route-overview.md)
 - [项目结构总览](../../docs/decisions/2026-09-14-project-structure-overview.md)
+- [TypeScript 静态索引与 HTTP 形状关联](../../docs/decisions/2026-10-06-typescript-http-overview.md)
 - [本地项目索引新鲜度与显式更新](../../docs/decisions/2026-09-15-index-freshness.md)
 - [GitHub 远端 ref 新鲜度与显式更新](../../docs/decisions/2026-09-16-github-remote-freshness.md)
 - [本项目索引更新与缓存效果联合验收](../../docs/decisions/2026-09-16-project-index-cache-acceptance.md)

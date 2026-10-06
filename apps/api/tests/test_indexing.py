@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+import pytest
+
 from app.indexing import (
     SnapshotBoundaryError,
     build_source_snapshot,
@@ -184,3 +186,21 @@ def test_snapshot_excludes_dependency_and_secret_paths(tmp_path: Path) -> None:
     manifest = scan_source_manifest(tmp_path)
     assert [item.path for item in manifest.files] == ["main.py"]
     assert manifest.scan_complete
+
+
+def test_manifest_catches_growth_past_total_byte_budget_during_read(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    source = tmp_path / "main.ts"
+    source.write_text("x", encoding="utf-8")
+    original_read_bytes = Path.read_bytes
+
+    def read_grown_file(path: Path) -> bytes:
+        if path == source:
+            return b"12345"
+        return original_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", read_grown_file)
+    manifest = scan_source_manifest(tmp_path, max_file_bytes=10, max_files=10, max_total_bytes=4)
+    assert manifest.scan_truncated is True
+    assert manifest.scan_truncation_reason == "max_total_bytes_after_read"
+    assert manifest.scan_complete is False
+    assert manifest.files == ()

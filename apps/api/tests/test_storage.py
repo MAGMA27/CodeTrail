@@ -502,6 +502,24 @@ def test_failed_transaction_leaves_no_partial_index_or_fts_rows(tmp_path: Path) 
             assert store.connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
 
 
+def test_storage_rejects_http_facts_outside_their_snapshot_range(tmp_path: Path) -> None:
+    repository = tmp_path / "http-fact-repository"
+    repository.mkdir()
+    (repository / "client.ts").write_text(
+        'const apiBaseUrl = "https://remote.example";\n'
+        "function requestJson(path: string, validator: unknown, init: RequestInit = {}) { return fetch(`${apiBaseUrl}${path}`, { ...init, headers: {}, cache: 'no-store' }); }\n"
+        'function health() { return requestJson("/api/health", undefined); }\n',
+        encoding="utf-8",
+    )
+    relation = extract_relations(extract_definitions(build_source_snapshot(repository, repository_id="http", revision="test")))
+    assert len(relation.http_client_requests) == 1
+    invalid_fact = replace(relation.http_client_requests[0], start_line=0)
+    invalid_relation = replace(relation, http_client_requests=(invalid_fact,))
+    with IndexStore(tmp_path / "index.sqlite3") as store:
+        with pytest.raises(StorageInputError, match="HTTP client request fact"):
+            store.write_index(invalid_relation)
+
+
 def test_two_snapshots_are_isolated_in_search_evidence_and_neighbors(tmp_path: Path) -> None:
     repo_one = tmp_path / "repo-one"
     repo_two = tmp_path / "repo-two"

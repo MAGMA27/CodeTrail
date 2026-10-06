@@ -13079,7 +13079,11 @@
                 "read_error",
                 "symlink",
                 "syntax_error",
-                "outside_root"
+                "outside_root",
+                "capture_incomplete",
+                "parser_unavailable",
+                "parser_error",
+                "typescript_syntax_error"
               ],
               "title": "Kind",
               "type": "string"
@@ -14783,7 +14787,11 @@
                 "read_error",
                 "symlink",
                 "syntax_error",
-                "outside_root"
+                "outside_root",
+                "capture_incomplete",
+                "parser_unavailable",
+                "parser_error",
+                "typescript_syntax_error"
               ],
               "title": "Kind",
               "type": "string"
@@ -15582,7 +15590,11 @@
                 "read_error",
                 "symlink",
                 "syntax_error",
-                "outside_root"
+                "outside_root",
+                "capture_incomplete",
+                "parser_unavailable",
+                "parser_error",
+                "typescript_syntax_error"
               ],
               "title": "Kind",
               "type": "string"
@@ -16969,7 +16981,11 @@
                 "read_error",
                 "symlink",
                 "syntax_error",
-                "outside_root"
+                "outside_root",
+                "capture_incomplete",
+                "parser_unavailable",
+                "parser_error",
+                "typescript_syntax_error"
               ],
               "title": "Kind",
               "type": "string"
@@ -19563,7 +19579,11 @@
                 "read_error",
                 "symlink",
                 "syntax_error",
-                "outside_root"
+                "outside_root",
+                "capture_incomplete",
+                "parser_unavailable",
+                "parser_error",
+                "typescript_syntax_error"
               ],
               "title": "Kind",
               "type": "string"
@@ -20283,7 +20303,11 @@
                 "read_error",
                 "symlink",
                 "syntax_error",
-                "outside_root"
+                "outside_root",
+                "capture_incomplete",
+                "parser_unavailable",
+                "parser_error",
+                "typescript_syntax_error"
               ],
               "title": "Kind",
               "type": "string"
@@ -21244,7 +21268,11 @@
                 "read_error",
                 "symlink",
                 "syntax_error",
-                "outside_root"
+                "outside_root",
+                "capture_incomplete",
+                "parser_unavailable",
+                "parser_error",
+                "typescript_syntax_error"
               ],
               "title": "Kind",
               "type": "string"
@@ -21579,7 +21607,11 @@
                 "read_error",
                 "symlink",
                 "syntax_error",
-                "outside_root"
+                "outside_root",
+                "capture_incomplete",
+                "parser_unavailable",
+                "parser_error",
+                "typescript_syntax_error"
               ],
               "title": "Kind",
               "type": "string"
@@ -22913,6 +22945,144 @@
           "title": "OverviewGroup",
           "type": "object"
         },
+        "OverviewHttpAssociation": {
+          "additionalProperties": false,
+          "description": "A method/path shape match with evidence at both client and route declarations.",
+          "properties": {
+            "association_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Association Id",
+              "type": "string"
+            },
+            "client_evidence": {
+              "$ref": "#/$defs/Evidence"
+            },
+            "client_module": {
+              "$ref": "#/$defs/Symbol"
+            },
+            "client_name": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Client Name",
+              "type": "string"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "match_kind": {
+              "const": "method_path_shape",
+              "default": "method_path_shape",
+              "title": "Match Kind",
+              "type": "string"
+            },
+            "method": {
+              "enum": [
+                "GET",
+                "POST",
+                "PUT",
+                "PATCH",
+                "DELETE",
+                "OPTIONS",
+                "HEAD",
+                "TRACE"
+              ],
+              "title": "Method",
+              "type": "string"
+            },
+            "path": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "route_entry_point_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Route Entry Point Id",
+              "type": "string"
+            },
+            "route_evidence": {
+              "$ref": "#/$defs/Evidence"
+            },
+            "server_module": {
+              "$ref": "#/$defs/Symbol"
+            }
+          },
+          "required": [
+            "association_id",
+            "index_id",
+            "method",
+            "path",
+            "client_name",
+            "client_module",
+            "server_module",
+            "route_entry_point_id",
+            "client_evidence",
+            "route_evidence"
+          ],
+          "title": "OverviewHttpAssociation",
+          "type": "object"
+        },
+        "OverviewHttpAssociationCoverage": {
+          "additionalProperties": false,
+          "description": "Coverage for verified static client requests matched to same-index routes.",
+          "properties": {
+            "ambiguous_count": {
+              "minimum": 0,
+              "title": "Ambiguous Count",
+              "type": "integer"
+            },
+            "analysis_status": {
+              "default": "not_analyzed",
+              "enum": [
+                "complete",
+                "incomplete",
+                "not_analyzed"
+              ],
+              "title": "Analysis Status",
+              "type": "string"
+            },
+            "client_request_count": {
+              "minimum": 0,
+              "title": "Client Request Count",
+              "type": "integer"
+            },
+            "matched_count": {
+              "minimum": 0,
+              "title": "Matched Count",
+              "type": "integer"
+            },
+            "unknown_count": {
+              "minimum": 0,
+              "title": "Unknown Count",
+              "type": "integer"
+            },
+            "unmatched_count": {
+              "minimum": 0,
+              "title": "Unmatched Count",
+              "type": "integer"
+            },
+            "visible_match_count": {
+              "minimum": 0,
+              "title": "Visible Match Count",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "client_request_count",
+            "matched_count",
+            "visible_match_count",
+            "unmatched_count",
+            "ambiguous_count",
+            "unknown_count"
+          ],
+          "title": "OverviewHttpAssociationCoverage",
+          "type": "object"
+        },
         "OverviewModule": {
           "additionalProperties": false,
           "description": "A Python module classified by entry reachability, not by business meaning.",
@@ -23114,6 +23284,16 @@
                 "$ref": "#/$defs/OverviewGroup"
               },
               "title": "Groups",
+              "type": "array"
+            },
+            "http_association_coverage": {
+              "$ref": "#/$defs/OverviewHttpAssociationCoverage"
+            },
+            "http_associations": {
+              "items": {
+                "$ref": "#/$defs/OverviewHttpAssociation"
+              },
+              "title": "Http Associations",
               "type": "array"
             },
             "index": {
@@ -33059,6 +33239,144 @@
           "title": "OverviewGroup",
           "type": "object"
         },
+        "OverviewHttpAssociation": {
+          "additionalProperties": false,
+          "description": "A method/path shape match with evidence at both client and route declarations.",
+          "properties": {
+            "association_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Association Id",
+              "type": "string"
+            },
+            "client_evidence": {
+              "$ref": "#/$defs/Evidence"
+            },
+            "client_module": {
+              "$ref": "#/$defs/Symbol"
+            },
+            "client_name": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Client Name",
+              "type": "string"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "match_kind": {
+              "const": "method_path_shape",
+              "default": "method_path_shape",
+              "title": "Match Kind",
+              "type": "string"
+            },
+            "method": {
+              "enum": [
+                "GET",
+                "POST",
+                "PUT",
+                "PATCH",
+                "DELETE",
+                "OPTIONS",
+                "HEAD",
+                "TRACE"
+              ],
+              "title": "Method",
+              "type": "string"
+            },
+            "path": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "route_entry_point_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Route Entry Point Id",
+              "type": "string"
+            },
+            "route_evidence": {
+              "$ref": "#/$defs/Evidence"
+            },
+            "server_module": {
+              "$ref": "#/$defs/Symbol"
+            }
+          },
+          "required": [
+            "association_id",
+            "index_id",
+            "method",
+            "path",
+            "client_name",
+            "client_module",
+            "server_module",
+            "route_entry_point_id",
+            "client_evidence",
+            "route_evidence"
+          ],
+          "title": "OverviewHttpAssociation",
+          "type": "object"
+        },
+        "OverviewHttpAssociationCoverage": {
+          "additionalProperties": false,
+          "description": "Coverage for verified static client requests matched to same-index routes.",
+          "properties": {
+            "ambiguous_count": {
+              "minimum": 0,
+              "title": "Ambiguous Count",
+              "type": "integer"
+            },
+            "analysis_status": {
+              "default": "not_analyzed",
+              "enum": [
+                "complete",
+                "incomplete",
+                "not_analyzed"
+              ],
+              "title": "Analysis Status",
+              "type": "string"
+            },
+            "client_request_count": {
+              "minimum": 0,
+              "title": "Client Request Count",
+              "type": "integer"
+            },
+            "matched_count": {
+              "minimum": 0,
+              "title": "Matched Count",
+              "type": "integer"
+            },
+            "unknown_count": {
+              "minimum": 0,
+              "title": "Unknown Count",
+              "type": "integer"
+            },
+            "unmatched_count": {
+              "minimum": 0,
+              "title": "Unmatched Count",
+              "type": "integer"
+            },
+            "visible_match_count": {
+              "minimum": 0,
+              "title": "Visible Match Count",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "client_request_count",
+            "matched_count",
+            "visible_match_count",
+            "unmatched_count",
+            "ambiguous_count",
+            "unknown_count"
+          ],
+          "title": "OverviewHttpAssociationCoverage",
+          "type": "object"
+        },
         "OverviewModule": {
           "additionalProperties": false,
           "description": "A Python module classified by entry reachability, not by business meaning.",
@@ -33421,6 +33739,16 @@
             "$ref": "#/$defs/OverviewGroup"
           },
           "title": "Groups",
+          "type": "array"
+        },
+        "http_association_coverage": {
+          "$ref": "#/$defs/OverviewHttpAssociationCoverage"
+        },
+        "http_associations": {
+          "items": {
+            "$ref": "#/$defs/OverviewHttpAssociation"
+          },
+          "title": "Http Associations",
           "type": "array"
         },
         "index": {

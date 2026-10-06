@@ -181,6 +181,10 @@ IndexIssueKind: TypeAlias = Literal[
     "symlink",
     "syntax_error",
     "outside_root",
+    "capture_incomplete",
+    "parser_unavailable",
+    "parser_error",
+    "typescript_syntax_error",
 ]
 
 
@@ -1537,6 +1541,69 @@ class OverviewModuleRelation(ContractModel):
         return self
 
 
+class OverviewHttpAssociationCoverage(ContractModel):
+    """Coverage for verified static client requests matched to same-index routes."""
+
+    analysis_status: Literal["complete", "incomplete", "not_analyzed"] = "not_analyzed"
+    client_request_count: NonNegativeInt
+    matched_count: NonNegativeInt
+    visible_match_count: NonNegativeInt
+    unmatched_count: NonNegativeInt
+    ambiguous_count: NonNegativeInt
+    unknown_count: NonNegativeInt
+
+    @model_validator(mode="after")
+    def validate_counts(self) -> OverviewHttpAssociationCoverage:
+        if self.visible_match_count > self.matched_count:
+            raise ValueError("visible HTTP associations cannot exceed matched requests")
+        if self.matched_count + self.unmatched_count + self.ambiguous_count + self.unknown_count != self.client_request_count:
+            raise ValueError("HTTP association coverage must account for each verified client request")
+        if self.analysis_status == "not_analyzed" and any(
+            (self.client_request_count, self.matched_count, self.visible_match_count,
+             self.unmatched_count, self.ambiguous_count, self.unknown_count)
+        ):
+            raise ValueError("unanalysed HTTP coverage cannot claim observed request counts")
+        return self
+
+
+class OverviewHttpAssociation(ContractModel):
+    """A method/path shape match with evidence at both client and route declarations."""
+
+    association_id: Identifier
+    index_id: Identifier
+    match_kind: Literal["method_path_shape"] = "method_path_shape"
+    method: OverviewHttpMethod
+    path: str = Field(min_length=1, max_length=2_000)
+    client_name: str = Field(min_length=1, max_length=500)
+    client_module: Symbol
+    server_module: Symbol
+    route_entry_point_id: Identifier
+    client_evidence: Evidence
+    route_evidence: Evidence
+
+    @model_validator(mode="after")
+    def validate_association(self) -> OverviewHttpAssociation:
+        if not self.path.startswith("/api/") or any(marker in self.path for marker in "?#"):
+            raise ValueError("HTTP association paths must be static API paths without query or fragment")
+        if (
+            self.client_module.index_id != self.index_id
+            or self.server_module.index_id != self.index_id
+            or self.client_module.kind != "module"
+            or self.server_module.kind != "module"
+        ):
+            raise ValueError("HTTP association modules must belong to the same index")
+        if (
+            self.client_evidence.index_id != self.index_id
+            or self.route_evidence.index_id != self.index_id
+            or self.client_evidence.kind != "source"
+            or self.route_evidence.kind != "source"
+        ):
+            raise ValueError("HTTP association evidence must belong to the same source snapshot")
+        if self.client_evidence.path != self.client_module.path or self.route_evidence.path != self.server_module.path:
+            raise ValueError("HTTP association evidence paths must match their endpoint modules")
+        return self
+
+
 class OverviewPath(ContractModel):
     """One bounded static path from an entry symbol to a reached symbol."""
 
@@ -1597,6 +1664,18 @@ class ProjectOverview(VersionedModel):
     groups: list[OverviewGroup] = Field(default_factory=list)
     modules: list[OverviewModule] = Field(default_factory=list)
     module_relations: list[OverviewModuleRelation] = Field(default_factory=list)
+    http_associations: list[OverviewHttpAssociation] = Field(default_factory=list)
+    http_association_coverage: OverviewHttpAssociationCoverage = Field(
+        default_factory=lambda: OverviewHttpAssociationCoverage(
+            analysis_status="not_analyzed",
+            client_request_count=0,
+            matched_count=0,
+            visible_match_count=0,
+            unmatched_count=0,
+            ambiguous_count=0,
+            unknown_count=0,
+        )
+    )
     paths: list[OverviewPath] = Field(default_factory=list)
     unresolved: list[UnresolvedReference] = Field(default_factory=list)
     coverage: OverviewCoverage
@@ -1637,6 +1716,16 @@ class ProjectOverview(VersionedModel):
         for relation in self.module_relations:
             if relation.index_id != self.index.index_id:
                 raise ValueError("overview module relation belongs to a different index_id")
+        for association in self.http_associations:
+            if association.index_id != self.index.index_id:
+                raise ValueError("HTTP association belongs to a different index_id")
+            if association.route_entry_point_id not in entry_ids:
+                raise ValueError("HTTP association references an unknown FastAPI route")
+            route = next(entry for entry in self.entries if entry.entry_point_id == association.route_entry_point_id)
+            if route.kind != "fastapi_route" or route.http_method != association.method or route.declared_path != association.path:
+                raise ValueError("HTTP association must match its route declaration")
+        if self.http_association_coverage.visible_match_count != len(self.http_associations):
+            raise ValueError("visible HTTP association count must match returned associations")
         for path in self.paths:
             if path.index_id != self.index.index_id or path.entry_point_id not in entry_ids:
                 raise ValueError("overview path has an invalid snapshot or entry reference")

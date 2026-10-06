@@ -2,7 +2,7 @@
 
 ## 职责与边界
 
-`apps/api` 提供本地 FastAPI 服务、静态仓库 allow-list、受限本地/GitHub 来源导入、Project/Index/Session 管理、索引新鲜度检查与显式更新、规则概览、功能生成，以及显式 fixture/real/external Run 的冻结、执行、事件、SSE、Issue/代码理解报告读取和报告候选的有界静态影响查询。它不执行被分析仓库代码、shell 或测试；real Run 只通过有界模型适配器请求服务端配置的兼容供应商，external Run 只接收 Codex 通过本地 MCP 发起的白名单工具调用和结构化结论。
+`apps/api` 提供本地 FastAPI 服务、静态仓库 allow-list、受限本地/GitHub 来源导入、Project/Index/Session 管理、索引新鲜度检查与显式更新、规则概览、功能生成，以及显式 fixture/real/external Run 的冻结、执行、事件、SSE、Issue/代码理解报告读取和报告候选的有界静态影响查询。源码索引覆盖 `.py`、`.ts`、`.tsx`；纯 Python 仓库可只用 `uv` 运行 API，仓库含 TypeScript 时，API 主机还必须可运行 Node.js，并在工作区安装锁定的 `apps/web/node_modules/typescript` 5.9.3（从仓库根运行 `pnpm install --frozen-lockfile`）。解析器缺失或语法错误会显式令新索引失败。API 不执行被分析仓库代码、shell 或测试；real Run 只通过有界模型适配器请求服务端配置的兼容供应商，external Run 只接收 Codex 通过本地 MCP 发起的白名单工具调用和结构化结论。
 
 ## 入口与目录导航
 
@@ -18,8 +18,8 @@
 - [run_execution.py](app/run_execution.py)：有界 daemon 线程中的 fixture/real Run 执行器，只调用白名单查询工具；external Run 不经过该内部 worker。
 - [run_sse.py](app/run_sse.py)：复用持久化事件表的有界 SSE 回放、断线游标和订阅容量管理。
 - [issue_analysis.py](app/issue_analysis.py)：real Run 的结构化模型输出、有限工具循环、预算和引用校验。
-- [indexing.py](app/indexing.py) 与 [relations.py](app/relations.py)：Python 快照、只读源码 manifest、可复用的文件级定义/关系事实提取、符号和保守静态关系目标解析；支持直接构造的局部实例方法边，无法唯一确认时保留 unresolved。
-- [overview.py](app/overview.py)、[feature_generation.py](app/feature_generation.py) 与 [feature_graph.py](app/feature_graph.py)：概览、功能生成和同快照功能图。
+- [indexing.py](app/indexing.py)、[typescript_parser.cjs](app/typescript_parser.cjs) 与 [relations.py](app/relations.py)：Python/TypeScript 快照、TypeScript AST 定义/相对导入、Python 文件级缓存、静态关系目标解析；TypeScript 每次有界冷解析，不伪装成 Python cache hit。
+- [overview.py](app/overview.py)、[feature_generation.py](app/feature_generation.py) 与 [feature_graph.py](app/feature_graph.py)：同快照入口概览、唯一静态 HTTP method/path shape association、功能生成和功能图；HTTP 形状匹配不证明运行时请求目的地。
 - [mcp_server.py](app/mcp_server.py)：本地 MCP stdio 适配器，包含可选 Codex external Run 工具。
 - [config.py](app/config.py)：服务数据目录中的持久化模型供应商配置。
 
@@ -65,4 +65,5 @@ API 健康检查为 `GET /api/health`。前端或测试先创建 Project、建�
 - [关系扫描与 unresolved 覆盖语义](../../docs/decisions/2026-09-13-relation-coverage.md)
 - [FastAPI 路由入口概览](../../docs/decisions/2026-09-14-fastapi-route-overview.md)
 - [项目结构总览](../../docs/decisions/2026-09-14-project-structure-overview.md)
+- [TypeScript 静态索引与 HTTP 形状关联](../../docs/decisions/2026-10-06-typescript-http-overview.md)
 - [共享本地运行环境与 Codex 联合演示](../../docs/decisions/2026-09-14-shared-runtime-codex-demo.md)

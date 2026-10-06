@@ -197,7 +197,7 @@ type KnowledgeUi = {
   onClearOverviewGroup: () => void;
   onOpenOverviewGraph: (entry: OverviewEntryPoint) => void;
   onOpenOverviewModule: (module: OverviewModule) => void;
-  onOpenArchitectureSource: (location: { indexId: string; path: string; startLine: number; endLine: number }) => void;
+  onOpenArchitectureSource: (location: { indexId: string; path: string; startLine: number; endLine: number; expectedContentHash?: string }) => void;
   onRetryOverview: Action;
   featureStatus: UiAsyncStatus;
   featureGeneration: FeatureGeneration | null;
@@ -704,7 +704,7 @@ function OperationPanel({
                   <input id="operation-github-url" value={githubImport.url} onChange={(event) => githubImport.onUrlChange(event.target.value)} placeholder="https://github.com/owner/repository" spellCheck={false} inputMode="url" />
                 </div>
               </div>
-              <p className="ct-form-help">仅获取 GitHub 官方 archive，先固定到解析出的 commit；仅索引 Python 文件。当前环境公网限流时会显示失败原因。</p>
+              <p className="ct-form-help">仅获取 GitHub 官方 archive，先固定到解析出的 commit；索引 Python、TypeScript 和 TSX 文件。当前环境公网限流时会显示失败原因。</p>
               {githubImport.error ? <p className="ct-inline-error" role="alert">{githubImport.error}</p> : null}
               <div className="ct-form-actions">
                 <button type="submit" className="ct-button ct-button-primary" disabled={importBusy(githubImport.status)}>{githubImport.status === "acquiring" ? "获取中…" : githubImport.status === "indexing" ? "建立中…" : "导入 GitHub 仓库"}</button>
@@ -755,7 +755,7 @@ function OperationPanel({
                   <strong>源码新鲜度</strong>
                   <span>{index.freshness ? freshnessStatusLabel(index.freshness.status) : "尚未检查"}{!index.isLatest ? " · 仅 latest 可更新" : ""}</span>
                 </div>
-                <p className="ct-form-help">{index.freshness?.remote_status && index.freshness.remote_status !== "not_applicable" ? "GitHub 检查只解析跟踪 ref 的远端 commit，不下载 archive；发现变化后需显式更新。" : "检查会读取当前纳入索引范围的 Python 文件并计算 hash，不会自动重建；更新时服务端会再次核对。"}</p>
+                <p className="ct-form-help">{index.freshness?.remote_status && index.freshness.remote_status !== "not_applicable" ? "GitHub 检查只解析跟踪 ref 的远端 commit，不下载 archive；发现变化后需显式更新。" : "检查会读取当前纳入索引范围的 Python、TypeScript 和 TSX 文件并计算 hash，不会自动重建；更新时服务端会再次核对。"}</p>
                 <div className="ct-form-actions">
                   <button
                     type="button"
@@ -983,6 +983,7 @@ function ArchitectureDirectoryNode({ data }: NodeProps<Node<ArchitectureDirector
       <div className="ct-architecture-directory-meta">
         <span>{directory.loadedModuleCount} modules</span>
         {directory.internalRelationCount > 0 ? <span>{directory.internalRelationCount} 内部关系 · {directory.internalEdgeCount} 边</span> : null}
+        {directory.internalHttpAssociationCount > 0 ? <span>{directory.internalHttpAssociationCount} 内部 HTTP 关联</span> : null}
         {directory.omittedIndexModuleCount > 0 ? <span>索引未返回 {directory.omittedIndexModuleCount}</span> : null}
         {directory.omittedByCanvasLimit > 0 ? <span>画布限额省略 {directory.omittedByCanvasLimit}</span> : null}
       </div>
@@ -1011,6 +1012,7 @@ function ArchitectureSection({ overview, knowledge }: { overview: ProjectOvervie
   const [expandedGroupIds, setExpandedGroupIds] = useState<string[]>([]);
   const [selectedHttpGroupId, setSelectedHttpGroupId] = useState<string | null>(null);
   const [relationKinds, setRelationKinds] = useState<Array<"imports" | "calls">>(["imports", "calls"]);
+  const [showHttpAssociations, setShowHttpAssociations] = useState(true);
   const [flow, setFlow] = useState<ReactFlowInstance<Node, Edge> | null>(null);
   const httpGroups = overview.groups.filter((group) => group.group_kind === "http_path" && group.index_id === overview.index.index_id);
   const model = useMemo(() => buildArchitectureGraph(overview, {
@@ -1018,7 +1020,8 @@ function ArchitectureSection({ overview, knowledge }: { overview: ProjectOvervie
     selectedHttpGroupId,
     selectedGroupId: knowledge.selectedOverviewGroupId,
     relationKinds,
-  }), [expandedGroupIds, knowledge.selectedOverviewGroupId, overview, relationKinds, selectedHttpGroupId]);
+    showHttpAssociations,
+  }), [expandedGroupIds, knowledge.selectedOverviewGroupId, overview, relationKinds, selectedHttpGroupId, showHttpAssociations]);
   const focusedDirectoryNodeIds = useMemo(() => {
     const focused = new Set(model.focusNodeIds);
     return model.directories.filter((directory) => focused.has(directory.group.group_id)).map((directory) => directory.group.group_id);
@@ -1076,7 +1079,7 @@ function ArchitectureSection({ overview, knowledge }: { overview: ProjectOvervie
         });
       }
     }
-    const edges: Edge[] = model.relations.map((relation) => ({
+    const staticEdges: Edge[] = model.relations.map((relation) => ({
       id: relation.id,
       source: relation.source,
       target: relation.target,
@@ -1089,7 +1092,20 @@ function ArchitectureSection({ overview, knowledge }: { overview: ProjectOvervie
       interactionWidth: 18,
       data: { relation },
     }));
-    return { nodes, edges };
+    const httpEdges: Edge[] = model.httpRelations.map((relation) => ({
+      id: relation.id,
+      source: relation.source,
+      target: relation.target,
+      type: "smoothstep",
+      label: `HTTP ${relation.labels.join(" · ")}${relation.associationCount > relation.labels.length ? ` · +${relation.associationCount - relation.labels.length}` : ""}`,
+      markerEnd: { type: MarkerType.ArrowClosed, color: relation.highlighted ? "#087f75" : "#9ba7a9" },
+      style: { stroke: relation.highlighted ? "#087f75" : "#9ba7a9", strokeWidth: 2, strokeDasharray: "6 4", opacity: relation.highlighted ? 0.95 : 0.35 },
+      labelStyle: { fill: relation.highlighted ? "#075e57" : "#778487", fontSize: 10 },
+      labelBgStyle: { fill: "#f5fbfa", fillOpacity: 0.96 },
+      interactionWidth: 20,
+      data: { httpRelation: relation },
+    }));
+    return { nodes, edges: [...staticEdges, ...httpEdges] };
   }, [knowledge, model, overview.index.index_id]);
   const coverageWarnings = [
     overview.truncated ? `概览已截断：${overview.truncation_reason ?? "服务端预算"}` : null,
@@ -1099,6 +1115,11 @@ function ArchitectureSection({ overview, knowledge }: { overview: ProjectOvervie
     overview.unresolved.length > 0 ? `${overview.unresolved.length} 条 unresolved 保留为未知，不绘制成确定依赖` : null,
     model.omittedRelationCount > 0 ? `${model.omittedRelationCount} 条关系（${model.omittedRelationEdgeCount} 边）因端点不在可见源码目录中未绘制` : null,
     model.unmatchedHttpModuleCount > 0 ? `所选 HTTP 路由有 ${model.unmatchedHttpModuleCount} 个模块未映射到可见源码目录` : null,
+    model.omittedHttpAssociationCount > 0 ? `${model.omittedHttpAssociationCount} 条 HTTP 形状关联未绘制，因为端点目录不在可见分组中；下方双端证据列表仍保留` : null,
+    model.summarizedHttpAssociationCount > 0 ? `${model.summarizedHttpAssociationCount} 条 HTTP 形状关联因 40 模块画布上限折叠到目录节点` : null,
+    overview.http_association_coverage.analysis_status === "not_analyzed" ? "此旧索引没有 TypeScript HTTP 分析记录，不能将 0 条关联解释为无调用" : null,
+    overview.http_association_coverage.analysis_status === "incomplete" ? "TypeScript HTTP 形状关联分析不完整，部分客户端或路由仍为 unknown" : null,
+    overview.http_association_coverage.visible_match_count < overview.http_association_coverage.matched_count ? `HTTP 形状关联仅显示 ${overview.http_association_coverage.visible_match_count}/${overview.http_association_coverage.matched_count} 条` : null,
   ].filter((item): item is string => item !== null);
   const selectHttpGroup = (groupId: string) => {
     const group = httpGroups.find((item) => item.group_id === groupId) ?? null;
@@ -1128,22 +1149,24 @@ function ArchitectureSection({ overview, knowledge }: { overview: ProjectOvervie
   return (
     <section className="ct-architecture-section" aria-label="项目架构画布">
       <div className="ct-architecture-heading">
-        <div><p className="ct-overline">ARCHITECTURE / FIXED INDEX</p><h3>项目架构</h3><p>先看源码目录间依赖；展开目录查看模块，点模块进入关系图，点边读取同一快照的代表源码证据。</p></div>
+        <div><p className="ct-overline">ARCHITECTURE / FIXED INDEX</p><h3>项目架构</h3><p>先看源码目录间 imports/calls；HTTP 客户端到服务路由以独立方法与路径形状关联展示。两端证据均来自同一固定快照。</p></div>
         <div className="ct-architecture-count"><strong>{model.directories.length}</strong><span>源码目录 · {overview.coverage.visible_modules}/{overview.coverage.total_modules} 模块可见</span></div>
       </div>
       <div className="ct-architecture-toolbar">
         <label>HTTP 入口<select aria-label="筛选 HTTP 入口" value={selectedHttpGroupId ?? ""} onChange={(event) => selectHttpGroup(event.target.value)}><option value="">全部源码依赖</option>{httpGroups.map((group) => <option value={group.group_id} key={group.group_id}>{group.label} · {group.module_ids.length} modules</option>)}</select></label>
         <label className="ct-architecture-kind"><input type="checkbox" checked={relationKinds.includes("imports")} onChange={() => toggleRelationKind("imports")} /><span>imports</span></label>
         <label className="ct-architecture-kind"><input type="checkbox" checked={relationKinds.includes("calls")} onChange={() => toggleRelationKind("calls")} /><span>calls</span></label>
+        <label className="ct-architecture-kind ct-architecture-http-kind"><input type="checkbox" checked={showHttpAssociations} onChange={() => setShowHttpAssociations((current) => !current)} /><span>HTTP 形状</span></label>
         <button type="button" className="ct-button ct-button-secondary" onClick={focusGraph} disabled={reactFlowModel.nodes.length === 0}>聚焦画布</button>
         <button type="button" className="ct-link-button" onClick={() => {
           setExpandedGroupIds([]);
           setSelectedHttpGroupId(null);
           setRelationKinds(["imports", "calls"]);
+          setShowHttpAssociations(true);
           knowledge.onClearOverviewGroup();
         }}>重置画布</button>
       </div>
-      <p className="ct-architecture-filter-note">类型筛选只选择包含该类型的模块关系；同一模块对若同时有 imports/calls，边数仍按完整聚合值显示。</p>
+      <p className="ct-architecture-filter-note">类型筛选只影响静态 imports/calls 画布。HTTP method/path shape 关联单独列示，不混入静态调用边，也不证明请求实际发送到本地服务。</p>
       {coverageWarnings.length > 0 ? <div className="ct-architecture-warnings" role="status">{coverageWarnings.map((warning) => <span key={warning}>{warning}</span>)}</div> : null}
       {model.directories.length === 0 ? (
         <div className="ct-architecture-empty"><strong>当前索引没有可绘制的源码目录</strong><span>概览可能未返回源码分组；不以 HTTP 路由组替代源码架构。</span></div>
@@ -1155,6 +1178,12 @@ function ArchitectureSection({ overview, knowledge }: { overview: ProjectOvervie
             nodeTypes={architectureNodeTypes}
             onInit={setFlow}
             onEdgeClick={(_event, edge) => {
+              const httpRelation = model.httpRelations.find((item) => item.id === edge.id);
+              if (httpRelation?.representative) {
+                const evidence = httpRelation.representative.client_evidence;
+                knowledge.onOpenArchitectureSource({ indexId: overview.index.index_id, path: evidence.path, startLine: evidence.start_line, endLine: evidence.end_line, expectedContentHash: evidence.content_hash });
+                return;
+              }
               const relation = model.relations.find((item) => item.id === edge.id);
               if (relation?.representative) knowledge.onOpenArchitectureSource({ indexId: overview.index.index_id, ...relation.representative });
             }}
@@ -1172,7 +1201,27 @@ function ArchitectureSection({ overview, knowledge }: { overview: ProjectOvervie
           </ReactFlow>
         </div>
       )}
-      <div className="ct-architecture-legend"><span><i className="is-directory" />源码目录（可展开）</span><span><i className="is-architecture-edge" />静态 imports / calls</span><span>内部折叠关系显示为目录摘要 · 边上的“对”是模块对数量</span><small>当前是 Python 索引视图，不代表 TypeScript、部署拓扑或全部运行时架构。</small></div>
+      <section className="ct-http-associations" aria-label="HTTP 客户端与服务路由形状关联">
+        <div className="ct-http-associations-heading">
+          <div><strong>HTTP 方法与路径形状关联</strong><span>静态 requestJson 调用与 FastAPI 声明路由相同，不确认运行时网络目标。</span></div>
+          <small>{overview.http_association_coverage.visible_match_count}/{overview.http_association_coverage.matched_count} matched · {overview.http_association_coverage.unknown_count} unknown</small>
+        </div>
+        {overview.http_associations.length === 0 ? (
+          <p className="ct-http-associations-empty">{overview.http_association_coverage.analysis_status === "not_analyzed" ? "此索引创建早于 TypeScript HTTP 分析，关联状态未知。" : "当前快照没有可显示的唯一静态 HTTP 形状关联。"}</p>
+        ) : (
+          <ul className="ct-http-association-list">
+            {overview.http_associations.map((association) => (
+              <li key={association.association_id}>
+                <div className="ct-http-association-shape"><strong>{association.method}</strong><code>{association.path}</code><span>形状匹配</span></div>
+                <div className="ct-http-association-endpoint"><small>客户端 · {association.client_name}</small><code>{association.client_module.path}</code><button type="button" onClick={() => knowledge.onOpenArchitectureSource({ indexId: overview.index.index_id, path: association.client_evidence.path, startLine: association.client_evidence.start_line, endLine: association.client_evidence.end_line, expectedContentHash: association.client_evidence.content_hash })}>查看客户端证据</button></div>
+                <div className="ct-http-association-endpoint"><small>FastAPI 路由</small><code>{association.server_module.path}</code><button type="button" onClick={() => knowledge.onOpenArchitectureSource({ indexId: overview.index.index_id, path: association.route_evidence.path, startLine: association.route_evidence.start_line, endLine: association.route_evidence.end_line, expectedContentHash: association.route_evidence.content_hash })}>查看路由证据</button></div>
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="ct-http-associations-coverage">覆盖 {overview.http_association_coverage.client_request_count} 个已识别 requestJson 调用：{overview.http_association_coverage.unmatched_count} unmatched、{overview.http_association_coverage.ambiguous_count} ambiguous、{overview.http_association_coverage.unknown_count} unknown。</p>
+      </section>
+      <div className="ct-architecture-legend"><span><i className="is-directory" />源码目录（可展开）</span><span><i className="is-architecture-edge" />静态 Python/TypeScript imports / calls</span><span><i className="is-http-architecture-edge" />HTTP method/path 形状关联</span><span>HTTP 关联单独筛选与聚合，不写入 CodeEdge</span><small>TypeScript 静态事实使用锁定语法解析器；HTTP 匹配不等同于实际运行调用或本地部署拓扑。</small></div>
     </section>
   );
 }

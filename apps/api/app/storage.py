@@ -57,6 +57,7 @@ from .indexing import (
     serialize_definition_cache_entry,
 )
 from .relations import (
+    HttpClientRequestFact,
     RelationCallEvent,
     RelationAssignmentEvent,
     RelationFileFacts,
@@ -593,6 +594,21 @@ CREATE TABLE IF NOT EXISTS static_edges (
     PRIMARY KEY (index_id, edge_id),
     FOREIGN KEY (index_id, source_id) REFERENCES symbols(index_id, symbol_id) ON DELETE CASCADE,
     FOREIGN KEY (index_id, target_id) REFERENCES symbols(index_id, symbol_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS http_client_requests (
+    index_id TEXT NOT NULL,
+    request_id TEXT NOT NULL,
+    source_module_id TEXT NOT NULL,
+    source_path TEXT NOT NULL,
+    method TEXT CHECK (method IS NULL OR method IN ('GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD', 'TRACE')),
+    request_path TEXT,
+    unknown_reason TEXT,
+    client_name TEXT NOT NULL,
+    start_line INTEGER NOT NULL CHECK (start_line > 0),
+    end_line INTEGER NOT NULL CHECK (end_line >= start_line),
+    PRIMARY KEY (index_id, request_id),
+    FOREIGN KEY (index_id, source_module_id) REFERENCES symbols(index_id, symbol_id) ON DELETE CASCADE
 );
 
 CREATE TABLE IF NOT EXISTS unresolved_references (
@@ -1961,6 +1977,27 @@ class IndexStore:
             )
             for row in unresolved_rows
         )
+        request_rows = self._connection.execute(
+            "SELECT request_id, source_module_id, source_path, method, request_path, unknown_reason, "
+            "client_name, start_line, end_line FROM http_client_requests WHERE index_id = ? "
+            "ORDER BY source_path COLLATE BINARY, start_line, request_id",
+            (index_id,),
+        ).fetchall()
+        http_client_requests = tuple(
+            HttpClientRequestFact(
+                request_id=row["request_id"],
+                index_id=index_id,
+                source_module_id=row["source_module_id"],
+                source_path=row["source_path"],
+                method=row["method"],
+                request_path=row["request_path"],
+                unknown_reason=row["unknown_reason"],
+                client_name=row["client_name"],
+                start_line=row["start_line"],
+                end_line=row["end_line"],
+            )
+            for row in request_rows
+        )
         snapshot = SourceSnapshot(index=index, files=files, issues=snapshot_issues)
         definitions = DefinitionIndex(snapshot=snapshot, symbols=symbols, issues=all_issues)
         return RelationIndex(
@@ -1971,6 +2008,7 @@ class IndexStore:
             truncation_reason=index_row["truncation_reason"],
             unresolved_truncated=_nullable_bool(index_row["unresolved_truncated"]),
             unresolved_truncation_reason=index_row["unresolved_truncation_reason"],
+            http_client_requests=http_client_requests,
         )
 
     def load_index_snapshot(self, index_id: str) -> IndexSnapshot:
@@ -4542,6 +4580,24 @@ class IndexStore:
                     edge.source_location.end_line,
                 ),
             )
+        for request in relation.http_client_requests:
+            self._connection.execute(
+                "INSERT INTO http_client_requests (index_id, request_id, source_module_id, source_path, "
+                "method, request_path, unknown_reason, client_name, start_line, end_line) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    request.index_id,
+                    request.request_id,
+                    request.source_module_id,
+                    request.source_path,
+                    request.method,
+                    request.request_path,
+                    request.unknown_reason,
+                    request.client_name,
+                    request.start_line,
+                    request.end_line,
+                ),
+            )
         for unresolved in relation.unresolved:
             self._connection.execute(
                 "INSERT INTO unresolved_references (index_id, unresolved_id, source_symbol_id, path, expression, "
@@ -4637,6 +4693,34 @@ class IndexStore:
                 raise StorageInputError("unresolved location is outside the snapshot")
             if not set(unresolved.possible_target_ids).issubset(symbol_by_id):
                 raise StorageInputError("unresolved candidate crosses the snapshot boundary")
+        request_ids: set[str] = set()
+        for request in relation.http_client_requests:
+            source_file = files.get(request.source_path)
+            source_module = symbol_by_id.get(request.source_module_id)
+            if (
+                request.index_id != index.index_id
+                or source_file is None
+                or source_module is None
+                or source_module.kind != "module"
+                or source_module.path != request.source_path
+                or request.request_id in request_ids
+                or request.start_line < 1
+                or request.end_line < request.start_line
+                or request.end_line > len(_source_lines(source_file.text))
+                or not request.client_name
+                or len(request.client_name) > 500
+                or request.method not in {None, "GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD", "TRACE"}
+                or request.request_path is not None and len(request.request_path) > 2_000
+                or request.unknown_reason is not None and len(request.unknown_reason) > 200
+                or request.unknown_reason is None and (
+                    request.method is None
+                    or request.request_path is None
+                    or not request.request_path.startswith("/api/")
+                    or any(marker in request.request_path for marker in "?#")
+                )
+            ):
+                raise StorageInputError("HTTP client request fact is outside the source snapshot or invalid")
+            request_ids.add(request.request_id)
 
 
 def _nullable_bool(value: object) -> bool | None:
@@ -4791,6 +4875,7 @@ def _payload_hash(relation: RelationIndex) -> str:
         "symbols": [symbol.model_dump(mode="json") for symbol in relation.symbols],
         "edges": [edge.model_dump(mode="json") for edge in relation.edges],
         "unresolved": [item.model_dump(mode="json") for item in relation.unresolved],
+        "http_client_requests": [item.__dict__ for item in relation.http_client_requests],
         "truncated": relation.truncated,
         "truncation_reason": relation.truncation_reason,
         "unresolved_truncated": relation.unresolved_truncated,

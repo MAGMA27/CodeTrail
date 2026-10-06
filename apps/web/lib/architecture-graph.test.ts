@@ -4,6 +4,7 @@ import test from "node:test";
 import type {
   CodeEdge,
   OverviewGroup,
+  OverviewHttpAssociation,
   OverviewModule,
   OverviewModuleRelation,
   ProjectOverview,
@@ -70,10 +71,37 @@ function relation(
   };
 }
 
+function httpAssociation(id: string, client: OverviewModule, server: OverviewModule): OverviewHttpAssociation {
+  const evidence = (module: OverviewModule, side: string) => ({
+    evidence_id: `evidence-${id}-${side}`,
+    index_id: indexId,
+    kind: "source" as const,
+    path: module.symbol.path,
+    start_line: 3,
+    end_line: 5,
+    excerpt: "request or route",
+    content_hash: "hash",
+  });
+  return {
+    association_id: id,
+    index_id: indexId,
+    match_kind: "method_path_shape",
+    method: "GET",
+    path: "/api/health",
+    client_name: "getHealth",
+    client_module: client.symbol,
+    server_module: server.symbol,
+    route_entry_point_id: "route-health",
+    client_evidence: evidence(client, "client"),
+    route_evidence: evidence(server, "route"),
+  };
+}
+
 function overview(
   modules: OverviewModule[],
   groups: OverviewGroup[],
   moduleRelations: OverviewModuleRelation[],
+  httpAssociations: OverviewHttpAssociation[] = [],
 ): ProjectOverview {
   return {
     schema_version: "0.1.0",
@@ -86,14 +114,24 @@ function overview(
       status: "ready",
       dirty: false,
       configuration_hash: null,
-      rules_version: "python-entry-v4",
+      rules_version: "python-entry-v5+http-shape-v1",
     },
-    rules_version: "python-entry-v4",
+    rules_version: "python-entry-v5+http-shape-v1",
     entry_status: "identified",
     entries: [],
     groups,
     modules,
     module_relations: moduleRelations,
+    http_associations: httpAssociations,
+    http_association_coverage: {
+      analysis_status: "complete",
+      client_request_count: httpAssociations.length,
+      matched_count: httpAssociations.length,
+      visible_match_count: httpAssociations.length,
+      unmatched_count: 0,
+      ambiguous_count: 0,
+      unknown_count: 0,
+    },
     paths: [],
     unresolved: [],
     coverage: {
@@ -201,4 +239,43 @@ test("HTTP entry focus highlights its source module without changing static rela
   assert.equal(mixed?.edgeCount, 2);
   assert.equal(mixed?.highlighted, true);
   assert.equal(model.relations.some((item) => item.source === "a2" && item.target === "group-web"), false);
+});
+
+test("HTTP shape edges stay separate from imports/calls and map through folded or expanded groups", () => {
+  const value = overview(
+    [a1, a2, b1],
+    [directory("group-api", "apps/api", [a1.module_id, a2.module_id]), directory("group-web", "apps/web", [b1.module_id])],
+    [relation("relation-api-web-one", a1, b1, ["imports"], [codeEdge("edge-api-web", a1.module_id, b1.module_id, "imports", a1.symbol.path)])],
+    [httpAssociation("http-api-web", b1, a1)],
+  );
+  const folded = buildArchitectureGraph(value);
+  assert.equal(folded.relations.length, 1);
+  assert.equal(folded.httpRelations.length, 1);
+  assert.equal(folded.httpRelations[0].source, "group-web");
+  assert.equal(folded.httpRelations[0].target, "group-api");
+  assert.equal(folded.httpRelations[0].labels[0], "GET /api/health");
+  assert.equal(buildArchitectureGraph(value, { showHttpAssociations: false }).httpRelations.length, 0);
+
+  const expanded = buildArchitectureGraph(value, { expandedGroupIds: ["group-web"] });
+  assert.equal(expanded.httpRelations[0].source, b1.module_id);
+  assert.equal(expanded.httpRelations[0].target, "group-api");
+  assert.equal(expanded.httpRelations[0].representative?.client_evidence.path, b1.symbol.path);
+});
+
+test("HTTP associations count endpoints hidden by the 40-module canvas ceiling", () => {
+  const modules = Array.from({ length: ARCHITECTURE_MODULE_LIMIT }, (_, index) =>
+    moduleRecord(`large-${index}`, `src/mod${index}.ts`),
+  );
+  const source = moduleRecord("large-hidden", "src/z-hidden.ts");
+  const value = overview(
+    [...modules, source, b1],
+    [directory("group-large", "src", [...modules, source].map((module) => module.module_id)), directory("group-web", "apps/web", [b1.module_id])],
+    [],
+    [httpAssociation("http-hidden-endpoint", source, b1)],
+  );
+  const model = buildArchitectureGraph(value, { expandedGroupIds: ["group-large"] });
+  assert.equal(model.summarizedHttpAssociationCount, 1);
+  assert.equal(model.omittedHttpAssociationCount, 0);
+  assert.equal(model.httpRelations[0].source, "group-large");
+  assert.equal(model.httpRelations[0].target, "group-web");
 });

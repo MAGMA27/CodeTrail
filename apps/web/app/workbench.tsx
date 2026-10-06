@@ -2743,7 +2743,7 @@ export default function Workbench() {
   );
 
   const openArchitectureSource = useCallback(
-    async ({ indexId, path, startLine, endLine }: { indexId: string; path: string; startLine: number; endLine: number }) => {
+    async ({ indexId, path, startLine, endLine, expectedContentHash }: { indexId: string; path: string; startLine: number; endLine: number; expectedContentHash?: string }) => {
       if (!selectedProjectId || indexResponse?.index.index_id !== indexId) {
         return;
       }
@@ -2785,9 +2785,10 @@ export default function Workbench() {
           response.evidence.index_id !== indexId ||
           response.evidence.path !== path ||
           response.evidence.start_line > startLine ||
-          response.evidence.end_line < startLine
+          response.evidence.end_line < startLine ||
+          expectedContentHash !== undefined && response.evidence.content_hash !== expectedContentHash
         ) {
-          throw new Error("源码响应与架构关系所属的固定索引或路径不一致。");
+          throw new Error("源码响应与架构关系所属的固定索引、路径或内容 hash 不一致。");
         }
         setSourceResponse(response);
         setSourceStatus("success");

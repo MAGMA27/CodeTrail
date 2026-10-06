@@ -1,0 +1,313 @@
+"""Offline checks for bounded TypeScript snapshot facts and HTTP shape links."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+from pathlib import Path
+from urllib.parse import urlsplit
+
+import pytest
+
+import app.indexing as indexing
+from app.indexing import build_source_snapshot, extract_definitions
+from app.main import create_app
+from app.relations import extract_relations
+
+
+async def _request(application, method: str, target: str, payload: dict | None = None) -> tuple[int, dict]:
+    parsed = urlsplit(target)
+    body = b"" if payload is None else json.dumps(payload).encode("utf-8")
+    messages: list[dict] = []
+    received = False
+
+    async def receive() -> dict:
+        nonlocal received
+        if received:
+            return {"type": "http.disconnect"}
+        received = True
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    async def send(message: dict) -> None:
+        messages.append(message)
+
+    headers = [(b"host", b"testserver")]
+    if payload is not None:
+        headers.append((b"content-type", b"application/json"))
+    scope = {
+        "type": "http", "asgi": {"version": "3.0", "spec_version": "2.3"},
+        "http_version": "1.1", "method": method, "scheme": "http",
+        "path": parsed.path, "raw_path": parsed.path.encode("ascii"),
+        "query_string": parsed.query.encode("ascii"), "headers": headers,
+        "client": ("127.0.0.1", 50000), "server": ("testserver", 80), "root_path": "",
+    }
+    await application(scope, receive, send)
+    start = next(item for item in messages if item["type"] == "http.response.start")
+    response = b"".join(item.get("body", b"") for item in messages if item["type"] == "http.response.body")
+    return start["status"], json.loads(response or b"{}")
+
+
+def request(application, method: str, target: str, payload: dict | None = None) -> tuple[int, dict]:
+    return asyncio.run(_request(application, method, target, payload))
+
+
+def _write_http_project(root: Path, *, duplicate_route: bool = False) -> None:
+    (root / "server").mkdir(parents=True)
+    (root / "web").mkdir()
+    route = (
+        "from fastapi import FastAPI\n"
+        "app = FastAPI()\n"
+        "@app.get('/api/health')\n"
+        "def health(): return {'ok': True}\n"
+    )
+    if duplicate_route:
+        route += "@app.get('/api/health')\ndef health_again(): return {'ok': True}\n"
+    (root / "server" / "app.py").write_text(route, encoding="utf-8")
+    (root / "web" / "api.ts").write_text(
+        'const apiBaseUrl = "http://remote.example";\n'
+        "function requestJson(path: string, validator: unknown, init: RequestInit = {}) {\n"
+        "  return fetch(`${apiBaseUrl}${path}`, { ...init, headers: {}, cache: 'no-store' });\n"
+        "}\n"
+        'export function getHealth() { return requestJson("/api/health", undefined); }\n'
+        'export const arrowHealth = () => requestJson("/api/health", undefined);\n'
+        'export function getDynamic(path: string) { return requestJson(path, undefined); }\n',
+        encoding="utf-8",
+    )
+
+
+def _create_index(application) -> tuple[str, str]:
+    status, project = request(application, "POST", "/api/projects", {"name": "TypeScript", "repository_id": "ts"})
+    assert status == 200
+    status, result = request(application, "POST", f"/api/projects/{project['project_id']}/indexes", {"revision": "test", "dirty": True})
+    assert status == 200
+    return project["project_id"], result["index"]["index_id"]
+
+
+def test_typescript_facts_use_locked_ast_and_keep_languages_and_generated_dirs_separate(tmp_path: Path) -> None:
+    (tmp_path / "foo.py").write_text("def python_fn(): pass\n", encoding="utf-8")
+    (tmp_path / "foo.ts").write_text('import { x } from "./other"; export function tsFn() { return x; }\n', encoding="utf-8")
+    (tmp_path / "other.tsx").write_text('export const View = () => <div />;\n', encoding="utf-8")
+    (tmp_path / ".next" / "server").mkdir(parents=True)
+    (tmp_path / ".next" / "server" / "generated.ts").write_text("export function ignored() {}\n", encoding="utf-8")
+
+    snapshot = build_source_snapshot(tmp_path, repository_id="ts", revision="test")
+    definitions = extract_definitions(snapshot)
+    symbols = definitions.symbols
+    module_ids = {item.path: item.symbol_id for item in symbols if item.kind == "module"}
+    names = {item.qualified_name for item in symbols}
+
+    assert snapshot.index.status == "ready"
+    assert ".next/server/generated.ts" not in {item.path for item in snapshot.files}
+    assert module_ids["foo.py"] != module_ids["foo.ts"]
+    assert "foo.tsFn" in names
+    assert "other.View" in names
+    assert definitions.typescript_parse_file_count == 2
+
+    cached = dict(definitions.cache_entries)
+    repeated = extract_definitions(snapshot, cached=cached)
+    assert repeated.cache_hits == 1
+    assert repeated.typescript_parse_file_count == 2
+
+
+def test_typescript_syntax_or_missing_locked_parser_fails_index_explicitly(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    source = tmp_path / "broken.ts"
+    source.write_text("export function broken( {\n", encoding="utf-8")
+    snapshot = build_source_snapshot(tmp_path, repository_id="ts", revision="bad")
+    broken = extract_definitions(snapshot)
+    assert broken.snapshot.index.status == "failed"
+    assert any(issue.kind == "typescript_syntax_error" for issue in broken.issues)
+
+    source.write_text("export const ok = 1;\n", encoding="utf-8")
+    snapshot = build_source_snapshot(tmp_path, repository_id="ts", revision="no-node")
+    monkeypatch.setattr(indexing.shutil, "which", lambda _name: None)
+    unavailable = extract_definitions(snapshot)
+    assert unavailable.snapshot.index.status == "failed"
+    assert any(issue.kind == "parser_unavailable" for issue in unavailable.issues)
+
+
+def test_unresolved_capacity_does_not_hide_later_typescript_import_edges(tmp_path: Path) -> None:
+    (tmp_path / "caller.ts").write_text(
+        'import { first } from "external-one";\n'
+        'import { second } from "external-two";\n'
+        'import { left } from "./left";\n'
+        'import { right } from "./right";\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "left.ts").write_text("export const left = 1;\n", encoding="utf-8")
+    (tmp_path / "right.ts").write_text("export const right = 1;\n", encoding="utf-8")
+    definitions = extract_definitions(build_source_snapshot(tmp_path, repository_id="ts", revision="test"))
+    result = extract_relations(definitions, max_unresolved=1)
+    assert {(edge.source_location.path, edge.target_id) for edge in result.edges if edge.kind == "imports"} == {
+        ("caller.ts", next(symbol.symbol_id for symbol in result.symbols if symbol.path == "left.ts" and symbol.kind == "module")),
+        ("caller.ts", next(symbol.symbol_id for symbol in result.symbols if symbol.path == "right.ts" and symbol.kind == "module")),
+    }
+    assert result.unresolved_truncated is True
+
+
+def test_http_request_shape_rejects_shadowed_or_mutable_fetch_wrappers(tmp_path: Path) -> None:
+    _write_http_project(tmp_path)
+    (tmp_path / "web" / "api.ts").write_text("export const placeholder = 1;\n", encoding="utf-8")
+    wrapper = (
+        'const apiBaseUrl = "http://remote.example";\n'
+        "function requestJson(path: string, validator: unknown, init: RequestInit = {}) {\n"
+        "  return fetch(`${apiBaseUrl}${path}`, { ...init, headers: {}, cache: 'no-store' });\n"
+        "}\n"
+    )
+    clients = 'function getHealth() { return requestJson("/api/health", undefined); }\n'
+    (tmp_path / "web" / "shadowed.ts").write_text(
+        'const { fetch } = globalThis;\n' + wrapper + clients,
+        encoding="utf-8",
+    )
+    (tmp_path / "web" / "override.ts").write_text(
+        wrapper.replace("{ ...init, headers:", '{ ...init, method: "POST", headers:') + clients,
+        encoding="utf-8",
+    )
+    (tmp_path / "web" / "mutated.ts").write_text(
+        wrapper.replace("  return fetch", '  init.method = "POST";\n  return fetch') + clients,
+        encoding="utf-8",
+    )
+    (tmp_path / "web" / "reassigned.ts").write_text(
+        wrapper + clients + 'requestJson = (path, validator, init) => fetch(path, init);\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "web" / "nested.ts").write_text(
+        wrapper + "function getHealth({ requestJson }) { requestJson('/api/health', undefined); }\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "web" / "body-shadow.ts").write_text(
+        wrapper.replace("  return fetch", "  const { init } = options;\n  return fetch") + clients,
+        encoding="utf-8",
+    )
+    (tmp_path / "web" / "duplicate.ts").write_text(
+        wrapper + 'function getHealth() { return requestJson("/api/health", undefined, { method: "GET", method: "POST" }); }\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "web" / "computed.ts").write_text(
+        wrapper + 'function getHealth() { return requestJson("/api/health", undefined, { ["method"]: "POST" }); }\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "web" / "shorthand.ts").write_text(
+        wrapper.replace("headers: {},", "headers,") + clients,
+        encoding="utf-8",
+    )
+    (tmp_path / "web" / "ambient.ts").write_text(
+        'const apiBaseUrl = "http://remote.example";\n'
+        'declare function requestJson(path: string, validator: unknown, init?: RequestInit): Promise<unknown>;\n'
+        'function getHealth() { return requestJson("/api/health", undefined); }\n',
+        encoding="utf-8",
+    )
+
+    definitions = extract_definitions(build_source_snapshot(tmp_path, repository_id="ts", revision="test"))
+    requests = {path: fact for path, fact in definitions.typescript_http_requests}
+    assert set(requests) == {"web/duplicate.ts", "web/computed.ts", "web/shorthand.ts"}
+    assert all(requests[path].method is None and requests[path].unknown_reason == "dynamic_method" for path in ("web/duplicate.ts", "web/computed.ts"))
+    assert requests["web/shorthand.ts"].method == "GET"
+    assert requests["web/shorthand.ts"].unknown_reason is None
+
+
+def test_overview_adds_separate_same_index_http_shape_associations(tmp_path: Path) -> None:
+    _write_http_project(tmp_path)
+    application = create_app({"ts": tmp_path})
+    project_id, index_id = _create_index(application)
+    status, overview = request(application, "GET", f"/api/projects/{project_id}/indexes/{index_id}/overview")
+    assert status == 200
+    assert overview["http_association_coverage"] == {
+        "analysis_status": "complete",
+        "client_request_count": 3,
+        "matched_count": 2,
+        "visible_match_count": 2,
+        "unmatched_count": 0,
+        "ambiguous_count": 0,
+        "unknown_count": 1,
+    }
+    assert {(item["method"], item["path"], item["client_name"]) for item in overview["http_associations"]} == {
+        ("GET", "/api/health", "getHealth"),
+        ("GET", "/api/health", "arrowHealth"),
+    }
+    assert all(item["index_id"] == index_id and item["client_evidence"]["index_id"] == index_id for item in overview["http_associations"])
+    assert all(item["client_module"]["path"] == "web/api.ts" and item["server_module"]["path"] == "server/app.py" for item in overview["http_associations"])
+    assert any("apiBaseUrl 可配置为远端" in note for note in overview["notes"])
+
+
+@pytest.mark.parametrize(
+    "rules_version",
+    [
+        "python-source-v2+python-3.13+relations-v3",
+        "source-v3+python-3.13+typescript-5.9.3+relations-v6",
+    ],
+)
+def test_snapshot_without_typescript_fact_rule_says_not_analyzed(
+    tmp_path: Path,
+    rules_version: str,
+) -> None:
+    (tmp_path / "app.py").write_text("def main(): pass\n", encoding="utf-8")
+    application = create_app({"ts": tmp_path})
+    project_id, index_id = _create_index(application)
+    with application.state.registry.store_for_repository("ts") as store:
+        store.connection.execute(
+            "UPDATE index_snapshots SET rules_version = ? WHERE index_id = ?",
+            (rules_version, index_id),
+        )
+    status, overview = request(application, "GET", f"/api/projects/{project_id}/indexes/{index_id}/overview")
+    assert status == 200
+    assert overview["http_association_coverage"]["analysis_status"] == "not_analyzed"
+    assert overview["http_association_coverage"]["client_request_count"] == 0
+    assert any("coverage 为 not_analyzed" in note for note in overview["notes"])
+
+
+def test_typescript_source_change_refreshes_to_new_index_and_keeps_old_source(tmp_path: Path) -> None:
+    client = tmp_path / "client.ts"
+    client.write_text("export const value = 'old';\n", encoding="utf-8")
+    application = create_app({"ts": tmp_path})
+    project_id, old_index_id = _create_index(application)
+    client.write_text("export const value = 'new';\n", encoding="utf-8")
+
+    status, freshness = request(application, "POST", f"/api/projects/{project_id}/indexes/{old_index_id}/freshness")
+    assert status == 200
+    assert freshness["status"] == "changed"
+    assert "client.ts" in freshness["changed_paths"]
+    status, refreshed = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/indexes/{old_index_id}/refresh",
+        {"revision": "changed-ts", "dirty": True},
+    )
+    assert status == 200
+    new_index_id = refreshed["index"]["index"]["index_id"]
+    assert refreshed["mode"] == "created"
+    assert new_index_id != old_index_id
+    with application.state.registry.store_for_repository("ts") as store:
+        assert store.read_evidence(old_index_id, "client.ts", 1, 1).excerpt == "export const value = 'old';"
+        assert store.read_evidence(new_index_id, "client.ts", 1, 1).excerpt == "export const value = 'new';"
+
+
+def test_truncated_route_candidates_never_claim_unique_http_match(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import app.overview as overview_module
+
+    _write_http_project(tmp_path, duplicate_route=True)
+    monkeypatch.setattr(overview_module, "_MAX_ENTRY_CANDIDATES", 1)
+    application = create_app({"ts": tmp_path})
+    project_id, index_id = _create_index(application)
+    status, overview = request(application, "GET", f"/api/projects/{project_id}/indexes/{index_id}/overview")
+    assert status == 200
+    coverage = overview["http_association_coverage"]
+    assert coverage["analysis_status"] == "incomplete"
+    assert coverage["matched_count"] == 0
+    assert coverage["unknown_count"] == 3
+    assert overview["http_associations"] == []
+
+
+def test_http_visible_match_limit_marks_coverage_incomplete(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import app.overview as overview_module
+
+    _write_http_project(tmp_path)
+    monkeypatch.setattr(overview_module, "_MAX_HTTP_ASSOCIATIONS", 1)
+    application = create_app({"ts": tmp_path})
+    project_id, index_id = _create_index(application)
+    status, overview = request(application, "GET", f"/api/projects/{project_id}/indexes/{index_id}/overview")
+    assert status == 200
+    coverage = overview["http_association_coverage"]
+    assert coverage["analysis_status"] == "incomplete"
+    assert coverage["matched_count"] == 2
+    assert coverage["visible_match_count"] == 1
+    assert len(overview["http_associations"]) == 1

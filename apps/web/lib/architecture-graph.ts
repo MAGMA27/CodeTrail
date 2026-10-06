@@ -1,5 +1,6 @@
 import type {
   OverviewGroup,
+  OverviewHttpAssociation,
   OverviewModule,
   OverviewModuleRelation,
   ProjectOverview,
@@ -21,6 +22,7 @@ export type ArchitectureDirectory = {
   omittedByCanvasLimit: number;
   internalRelationCount: number;
   internalEdgeCount: number;
+  internalHttpAssociationCount: number;
   highlighted: boolean;
 };
 
@@ -35,12 +37,25 @@ export type ArchitectureRelation = {
   highlighted: boolean;
 };
 
+export type ArchitectureHttpRelation = {
+  id: string;
+  source: string;
+  target: string;
+  associationCount: number;
+  labels: string[];
+  representative: OverviewHttpAssociation | null;
+  highlighted: boolean;
+};
+
 export type ArchitectureGraphModel = {
   directories: ArchitectureDirectory[];
   relations: ArchitectureRelation[];
+  httpRelations: ArchitectureHttpRelation[];
   visibleModuleCount: number;
   omittedRelationCount: number;
   omittedRelationEdgeCount: number;
+  omittedHttpAssociationCount: number;
+  summarizedHttpAssociationCount: number;
   unmatchedHttpModuleCount: number;
   focusNodeIds: string[];
 };
@@ -52,6 +67,7 @@ export function buildArchitectureGraph(
     selectedHttpGroupId?: string | null;
     selectedGroupId?: string | null;
     relationKinds?: Array<"imports" | "calls">;
+    showHttpAssociations?: boolean;
     maxVisibleModules?: number;
   } = {},
 ): ArchitectureGraphModel {
@@ -113,6 +129,7 @@ export function buildArchitectureGraph(
     highlighted: boolean;
   }>();
   const internalByGroup = new Map<string, { relationCount: number; edgeCount: number }>();
+  const internalHttpByGroup = new Map<string, number>();
   let omittedRelationCount = 0;
   let omittedRelationEdgeCount = 0;
 
@@ -180,6 +197,50 @@ export function buildArchitectureGraph(
       }
     }
     relationsByDisplayPair.set(key, aggregate);
+  }
+
+  const httpRelationsByDisplayPair = new Map<string, {
+    source: string;
+    target: string;
+    associations: OverviewHttpAssociation[];
+    labels: Set<string>;
+    highlighted: boolean;
+  }>();
+  let omittedHttpAssociationCount = 0;
+  let summarizedHttpAssociationCount = 0;
+  if (options.showHttpAssociations !== false) {
+    for (const association of overview.http_associations) {
+      if (association.index_id !== indexId || association.client_module.index_id !== indexId || association.server_module.index_id !== indexId) continue;
+      const sourceGroupId = groupByModuleId.get(association.client_module.symbol_id);
+      const targetGroupId = groupByModuleId.get(association.server_module.symbol_id);
+      if (!sourceGroupId || !targetGroupId) {
+        omittedHttpAssociationCount += 1;
+        continue;
+      }
+      const sourceVisible = visibleModuleIds.has(association.client_module.symbol_id);
+      const targetVisible = visibleModuleIds.has(association.server_module.symbol_id);
+      const sourceExpandedButHidden = expandedGroups.has(sourceGroupId) && !sourceVisible;
+      const targetExpandedButHidden = expandedGroups.has(targetGroupId) && !targetVisible;
+      if (sourceExpandedButHidden || targetExpandedButHidden) summarizedHttpAssociationCount += 1;
+      const source = sourceVisible ? association.client_module.symbol_id : sourceGroupId;
+      const target = targetVisible ? association.server_module.symbol_id : targetGroupId;
+      if (sourceGroupId === targetGroupId && source === target) {
+        internalHttpByGroup.set(sourceGroupId, (internalHttpByGroup.get(sourceGroupId) ?? 0) + 1);
+        continue;
+      }
+      const key = JSON.stringify([source, target]);
+      const aggregate = httpRelationsByDisplayPair.get(key) ?? {
+        source,
+        target,
+        associations: [],
+        labels: new Set<string>(),
+        highlighted: false,
+      };
+      aggregate.associations.push(association);
+      aggregate.labels.add(`${association.method} ${association.path}`);
+      aggregate.highlighted ||= httpModuleIds.size === 0 || httpModuleIds.has(association.client_module.symbol_id) || httpModuleIds.has(association.server_module.symbol_id);
+      httpRelationsByDisplayPair.set(key, aggregate);
+    }
   }
 
   const groupColumnCount = 4;
@@ -254,6 +315,7 @@ export function buildArchitectureGraph(
       omittedByCanvasLimit: expandedGroups.has(group.group_id) ? loadedModules.length - visibleModules.length : 0,
       internalRelationCount: internal.relationCount,
       internalEdgeCount: internal.edgeCount,
+      internalHttpAssociationCount: internalHttpByGroup.get(group.group_id) ?? 0,
       highlighted: httpModuleIds.size === 0 || moduleIds.some((moduleId) => httpModuleIds.has(moduleId)),
     };
   });
@@ -278,15 +340,30 @@ export function buildArchitectureGraph(
     })
     .filter((relation): relation is ArchitectureRelation => relation !== null);
 
+  const httpRelations: ArchitectureHttpRelation[] = [...httpRelationsByDisplayPair.entries()]
+    .sort(([, left], [, right]) => left.source.localeCompare(right.source) || left.target.localeCompare(right.target))
+    .map(([id, aggregate]) => ({
+      id: `architecture-http:${id}`,
+      source: aggregate.source,
+      target: aggregate.target,
+      associationCount: aggregate.associations.length,
+      labels: [...aggregate.labels].sort().slice(0, 3),
+      representative: aggregate.associations[0] ?? null,
+      highlighted: httpModuleIds.size === 0 || aggregate.highlighted,
+    }));
+
   const unmatchedHttpModuleCount = selectedHttpGroup
     ? selectedHttpGroup.module_ids.filter((moduleId) => !groupByModuleId.has(moduleId)).length
     : 0;
   return {
     directories,
     relations,
+    httpRelations,
     visibleModuleCount,
     omittedRelationCount,
     omittedRelationEdgeCount,
+    omittedHttpAssociationCount,
+    summarizedHttpAssociationCount,
     unmatchedHttpModuleCount,
     focusNodeIds: [...focusNodeIds],
   };

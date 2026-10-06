@@ -14,6 +14,8 @@ from .contracts import (
     Evidence,
     OverviewEntryPoint,
     OverviewGroup,
+    OverviewHttpAssociation,
+    OverviewHttpAssociationCoverage,
     OverviewModule,
     OverviewModuleRelation,
     OverviewPath,
@@ -25,7 +27,7 @@ from .contracts import (
 from .relations import RelationIndex, relation_coverage_limitations
 
 
-RULES_VERSION = "python-entry-v4"
+RULES_VERSION = "python-entry-v5+http-shape-v1"
 DEFAULT_MAX_DEPTH = 4
 DEFAULT_MAX_PATHS = 40
 DEFAULT_MAX_MODULES = 100
@@ -35,6 +37,7 @@ DEFAULT_MAX_SECONDS = 2.0
 _MAX_EVIDENCE_LINES = 200
 _MAX_ENTRY_CANDIDATES = 200
 _MAX_RELATION_EDGE_SAMPLES = 8
+_MAX_HTTP_ASSOCIATIONS = 100
 _FASTAPI_ROUTE_METHODS = {
     "get": "GET",
     "post": "POST",
@@ -305,6 +308,18 @@ def build_project_overview(
     if relation.unresolved_truncated is None:
         notes.extend(unresolved_limitations)
 
+    for request_fact in relation.http_client_requests:
+        if request_fact.unknown_reason is not None or request_fact.method is None or request_fact.request_path is None:
+            notes.append("HTTP method/path 形状匹配只覆盖静态 requestJson；动态 URL/method 保留 unknown。")
+            break
+    if relation.http_client_requests:
+        notes.append("HTTP method/path 形状关联不证明请求实际发往本地服务；apiBaseUrl 可配置为远端。")
+
+    if "+typescript-facts-v1" not in (index.rules_version or ""):
+        notes.append("此索引未记录 TypeScript 静态分析；HTTP 关联 coverage 为 not_analyzed。")
+    elif index.status != "ready":
+        notes.append("索引未完整就绪；HTTP 关联 coverage 为 incomplete。")
+
     for entry in entries:
         entry.direct_symbol_ids = direct_symbol_ids_by_entry.get(entry.entry_point_id, [])
 
@@ -375,6 +390,26 @@ def build_project_overview(
         reasons.append("module relation edge samples bounded")
     if _deadline_reached(deadline):
         reasons.append("max_seconds reached")
+    http_associations, http_association_coverage, http_associations_truncated = _build_http_associations(
+        index=index,
+        relation=relation,
+        entries=entries,
+        module_by_path=module_by_path,
+        read_evidence=read_evidence,
+        deadline=deadline,
+        route_candidates_truncated=entry_candidates_truncated,
+        analysis_status=(
+            "not_analyzed"
+            if "+typescript-facts-v1" not in (index.rules_version or "")
+            else "incomplete"
+            if index.status != "ready" or relation.truncated or relation.unresolved_truncated is True or entry_candidates_truncated
+            else "complete"
+        ),
+    )
+    if http_associations_truncated:
+        reasons.append("max_http_associations reached")
+    if _deadline_reached(deadline):
+        reasons.append("max_seconds reached")
     entry_status = (
         "not_identified"
         if not entries
@@ -394,6 +429,8 @@ def build_project_overview(
         groups=groups,
         modules=module_models,
         module_relations=module_relations,
+        http_associations=http_associations,
+        http_association_coverage=http_association_coverage,
         paths=paths,
         unresolved=visible_unresolved,
         coverage=OverviewCoverage(
@@ -411,6 +448,112 @@ def build_project_overview(
         notes=notes,
         truncated=truncated,
         truncation_reason=truncation_reason,
+    )
+
+
+def _build_http_associations(
+    *,
+    index,
+    relation: RelationIndex,
+    entries: list[OverviewEntryPoint],
+    module_by_path: dict[str, Symbol],
+    read_evidence: EvidenceReader,
+    deadline: float,
+    route_candidates_truncated: bool,
+    analysis_status: str,
+) -> tuple[list[OverviewHttpAssociation], OverviewHttpAssociationCoverage, bool]:
+    routes = [entry for entry in entries if entry.kind == "fastapi_route"]
+    requests = sorted(
+        relation.http_client_requests,
+        key=lambda item: (item.source_path, item.start_line, item.end_line, item.request_id),
+    )
+    associations: list[OverviewHttpAssociation] = []
+    matched = unmatched = ambiguous = unknown = 0
+    timed_out = False
+    for request in requests:
+        if _deadline_reached(deadline):
+            unknown += len(requests) - matched - unmatched - ambiguous - unknown
+            timed_out = True
+            break
+        if request.unknown_reason or request.method is None or request.request_path is None:
+            unknown += 1
+            continue
+        source_module = module_by_path.get(request.source_path)
+        if source_module is None:
+            unknown += 1
+            continue
+        candidates = [
+            entry for entry in routes
+            if entry.http_method == request.method and entry.declared_path == request.request_path
+        ]
+        if len(candidates) > 1:
+            ambiguous += 1
+            continue
+        if route_candidates_truncated:
+            # An omitted route may duplicate this path/method, so a visible
+            # single candidate is not proof of a unique association.
+            unknown += 1
+            continue
+        if not candidates:
+            unmatched += 1
+            continue
+        route = candidates[0]
+        handler = route.handler_symbol
+        server_module = module_by_path.get(handler.path) if handler is not None else None
+        if server_module is None:
+            unknown += 1
+            continue
+        if len(associations) >= _MAX_HTTP_ASSOCIATIONS:
+            matched += 1
+            continue
+        try:
+            client_evidence = read_evidence(
+                index.index_id,
+                request.source_path,
+                request.start_line,
+                request.end_line,
+            )
+            route_evidence = route.evidence or read_evidence(
+                index.index_id,
+                route.path,
+                route.start_line,
+                min(route.end_line, route.start_line + _MAX_EVIDENCE_LINES - 1),
+            )
+        except Exception:
+            unknown += 1
+            continue
+        matched += 1
+        association_identity = "\0".join(
+            [index.index_id, request.request_id, route.entry_point_id, "method_path_shape"]
+        )
+        associations.append(
+            OverviewHttpAssociation(
+                association_id=f"http-association-{hashlib.sha256(association_identity.encode('utf-8')).hexdigest()[:32]}",
+                index_id=index.index_id,
+                method=request.method,
+                path=request.request_path,
+                client_name=request.client_name,
+                client_module=source_module,
+                server_module=server_module,
+                route_entry_point_id=route.entry_point_id,
+                client_evidence=client_evidence,
+                route_evidence=route_evidence,
+            )
+        )
+    truncated = matched > len(associations)
+    coverage_status = "incomplete" if timed_out or truncated else analysis_status
+    return (
+        associations,
+        OverviewHttpAssociationCoverage(
+            analysis_status=coverage_status,  # type: ignore[arg-type]
+            client_request_count=len(requests),
+            matched_count=matched,
+            visible_match_count=len(associations),
+            unmatched_count=unmatched,
+            ambiguous_count=ambiguous,
+            unknown_count=unknown,
+        ),
+        truncated or timed_out,
     )
 
 
@@ -638,6 +781,8 @@ def _find_entry_candidates(
     for source_file in sorted(relation.snapshot.files, key=lambda item: item.path):
         if _deadline_reached(deadline):
             break
+        if not source_file.path.lower().endswith(".py"):
+            continue
         module = symbols_by_path.get(source_file.path)
         if module is None:
             continue
