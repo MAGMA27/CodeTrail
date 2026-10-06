@@ -106,7 +106,7 @@ def test_overview_identifies_main_rules_paths_and_stays_on_snapshot(tmp_path: Pa
     )
     assert status == 200
     assert overview["entry_status"] == "identified"
-    assert overview["rules_version"] == "python-entry-v5+http-shape-v1"
+    assert overview["rules_version"] == "python-entry-v5+http-shape-v2"
     assert {entry["kind"] for entry in overview["entries"]} == {
         "python_main_module",
         "python_main_guard",
@@ -441,7 +441,7 @@ def test_overview_invalidates_skipped_bindings_without_cross_scope_pollution(tmp
         ("GET", "/outer"),
         ("GET", "/before-star"),
     }
-    assert overview["rules_version"] == "python-entry-v5+http-shape-v1"
+    assert overview["rules_version"] == "python-entry-v5+http-shape-v2"
     assert overview["http_association_coverage"]["analysis_status"] == "complete"
 
 

@@ -1545,6 +1545,7 @@ class OverviewHttpAssociationCoverage(ContractModel):
     """Coverage for verified static client requests matched to same-index routes."""
 
     analysis_status: Literal["complete", "incomplete", "not_analyzed"] = "not_analyzed"
+    path_analysis: Literal["parameterized", "literal_only", "not_analyzed"] = "not_analyzed"
     client_request_count: NonNegativeInt
     matched_count: NonNegativeInt
     visible_match_count: NonNegativeInt
@@ -1563,6 +1564,8 @@ class OverviewHttpAssociationCoverage(ContractModel):
              self.unmatched_count, self.ambiguous_count, self.unknown_count)
         ):
             raise ValueError("unanalysed HTTP coverage cannot claim observed request counts")
+        if (self.analysis_status == "not_analyzed") != (self.path_analysis == "not_analyzed"):
+            raise ValueError("HTTP path analysis status must agree with analysis availability")
         return self
 
 
@@ -1574,6 +1577,8 @@ class OverviewHttpAssociation(ContractModel):
     match_kind: Literal["method_path_shape"] = "method_path_shape"
     method: OverviewHttpMethod
     path: str = Field(min_length=1, max_length=2_000)
+    client_path_kind: Literal["literal", "parameterized"] = "literal"
+    client_path_template: str | None = Field(default=None, max_length=2_000)
     client_name: str = Field(min_length=1, max_length=500)
     client_module: Symbol
     server_module: Symbol
@@ -1585,6 +1590,20 @@ class OverviewHttpAssociation(ContractModel):
     def validate_association(self) -> OverviewHttpAssociation:
         if not self.path.startswith("/api/") or any(marker in self.path for marker in "?#"):
             raise ValueError("HTTP association paths must be static API paths without query or fragment")
+        if self.client_path_kind == "literal":
+            if self.client_path_template is not None:
+                raise ValueError("literal HTTP clients cannot carry a path template")
+        elif (
+            self.client_path_template is None
+            or not self.client_path_template.startswith("/api/")
+            or any(marker in self.client_path_template for marker in "?#")
+            or "{*}" not in self.client_path_template
+            or any(
+                ("{" in segment or "}" in segment) and segment != "{*}"
+                for segment in self.client_path_template.split("/")
+            )
+        ):
+            raise ValueError("parameterized HTTP clients require a whole-segment path template")
         if (
             self.client_module.index_id != self.index_id
             or self.server_module.index_id != self.index_id

@@ -1118,6 +1118,7 @@ function ArchitectureSection({ overview, knowledge }: { overview: ProjectOvervie
     model.omittedHttpAssociationCount > 0 ? `${model.omittedHttpAssociationCount} 条 HTTP 形状关联未绘制，因为端点目录不在可见分组中；下方双端证据列表仍保留` : null,
     model.summarizedHttpAssociationCount > 0 ? `${model.summarizedHttpAssociationCount} 条 HTTP 形状关联因 40 模块画布上限折叠到目录节点` : null,
     overview.http_association_coverage.analysis_status === "not_analyzed" ? "此旧索引没有 TypeScript HTTP 分析记录，不能将 0 条关联解释为无调用" : null,
+    overview.http_association_coverage.path_analysis === "literal_only" ? "此旧索引只分析静态字面量 URL；参数化路径尚未分析" : null,
     overview.http_association_coverage.analysis_status === "incomplete" ? "TypeScript HTTP 形状关联分析不完整，部分客户端或路由仍为 unknown" : null,
     overview.http_association_coverage.visible_match_count < overview.http_association_coverage.matched_count ? `HTTP 形状关联仅显示 ${overview.http_association_coverage.visible_match_count}/${overview.http_association_coverage.matched_count} 条` : null,
   ].filter((item): item is string => item !== null);
@@ -1203,7 +1204,7 @@ function ArchitectureSection({ overview, knowledge }: { overview: ProjectOvervie
       )}
       <section className="ct-http-associations" aria-label="HTTP 客户端与服务路由形状关联">
         <div className="ct-http-associations-heading">
-          <div><strong>HTTP 方法与路径形状关联</strong><span>静态 requestJson 调用与 FastAPI 声明路由相同，不确认运行时网络目标。</span></div>
+          <div><strong>HTTP 方法与路径形状关联</strong><span>{overview.http_association_coverage.path_analysis === "literal_only" ? "旧索引仅检查字面路径。" : "检查静态 requestJson 路径形状与 FastAPI 声明路由。"}不确认运行时网络目标。</span></div>
           <small>{overview.http_association_coverage.visible_match_count}/{overview.http_association_coverage.matched_count} matched · {overview.http_association_coverage.unknown_count} unknown</small>
         </div>
         {overview.http_associations.length === 0 ? (
@@ -1212,8 +1213,8 @@ function ArchitectureSection({ overview, knowledge }: { overview: ProjectOvervie
           <ul className="ct-http-association-list">
             {overview.http_associations.map((association) => (
               <li key={association.association_id}>
-                <div className="ct-http-association-shape"><strong>{association.method}</strong><code>{association.path}</code><span>形状匹配</span></div>
-                <div className="ct-http-association-endpoint"><small>客户端 · {association.client_name}</small><code>{association.client_module.path}</code><button type="button" onClick={() => knowledge.onOpenArchitectureSource({ indexId: overview.index.index_id, path: association.client_evidence.path, startLine: association.client_evidence.start_line, endLine: association.client_evidence.end_line, expectedContentHash: association.client_evidence.content_hash })}>查看客户端证据</button></div>
+                <div className="ct-http-association-shape"><strong>{association.method}</strong><code>{association.path}</code><span>{association.client_path_kind === "parameterized" ? "参数化形状匹配" : "字面量形状匹配"}</span></div>
+                <div className="ct-http-association-endpoint"><small>客户端 · {association.client_name}</small>{association.client_path_template ? <code>{association.client_path_template}</code> : null}<code>{association.client_module.path}</code><button type="button" onClick={() => knowledge.onOpenArchitectureSource({ indexId: overview.index.index_id, path: association.client_evidence.path, startLine: association.client_evidence.start_line, endLine: association.client_evidence.end_line, expectedContentHash: association.client_evidence.content_hash })}>查看客户端证据</button></div>
                 <div className="ct-http-association-endpoint"><small>FastAPI 路由</small><code>{association.server_module.path}</code><button type="button" onClick={() => knowledge.onOpenArchitectureSource({ indexId: overview.index.index_id, path: association.route_evidence.path, startLine: association.route_evidence.start_line, endLine: association.route_evidence.end_line, expectedContentHash: association.route_evidence.content_hash })}>查看路由证据</button></div>
               </li>
             ))}

@@ -630,6 +630,7 @@ export type OverviewModuleRelation = {
 
 export type OverviewHttpAssociationCoverage = {
   analysis_status: "complete" | "incomplete" | "not_analyzed";
+  path_analysis: "parameterized" | "literal_only" | "not_analyzed";
   client_request_count: number;
   matched_count: number;
   visible_match_count: number;
@@ -644,6 +645,8 @@ export type OverviewHttpAssociation = {
   match_kind: "method_path_shape";
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | "HEAD" | "TRACE";
   path: string;
+  client_path_kind: "literal" | "parameterized";
+  client_path_template: string | null;
   client_name: string;
   client_module: SymbolRecord;
   server_module: SymbolRecord;
@@ -1973,7 +1976,8 @@ function isOverviewCoverage(value: unknown): value is OverviewCoverage {
 }
 
 function isOverviewHttpAssociationCoverage(value: unknown): value is OverviewHttpAssociationCoverage {
-  if (!isRecord(value) || !["complete", "incomplete", "not_analyzed"].includes(String(value.analysis_status))) {
+  if (!isRecord(value) || !["complete", "incomplete", "not_analyzed"].includes(String(value.analysis_status)) ||
+    !["parameterized", "literal_only", "not_analyzed"].includes(String(value.path_analysis))) {
     return false;
   }
   if (
@@ -1999,6 +2003,15 @@ function isOverviewHttpAssociation(value: unknown, indexId: string): value is Ov
     value.match_kind === "method_path_shape" &&
     methods.includes(String(value.method)) &&
     isString(value.path) && value.path.startsWith("/api/") && !/[?#]/.test(value.path) &&
+    (value.client_path_kind === "literal"
+      ? value.client_path_template === null
+      : value.client_path_kind === "parameterized" &&
+        isString(value.client_path_template) &&
+        value.client_path_template.startsWith("/api/") &&
+        !/[?#]/.test(value.client_path_template) &&
+        value.client_path_template.split("/").includes("{*}") &&
+        value.client_path_template.split("/").every((segment) =>
+          segment === "{*}" || (!segment.includes("{") && !segment.includes("}")))) &&
     isString(value.client_name) &&
     isSymbolRecord(value.client_module) && value.client_module.kind === "module" && value.client_module.index_id === indexId &&
     isSymbolRecord(value.server_module) && value.server_module.kind === "module" && value.server_module.index_id === indexId &&

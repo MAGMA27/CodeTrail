@@ -603,6 +603,8 @@ CREATE TABLE IF NOT EXISTS http_client_requests (
     source_path TEXT NOT NULL,
     method TEXT CHECK (method IS NULL OR method IN ('GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD', 'TRACE')),
     request_path TEXT,
+    path_kind TEXT NOT NULL DEFAULT 'literal' CHECK (path_kind IN ('literal', 'parameterized')),
+    request_path_template TEXT,
     unknown_reason TEXT,
     client_name TEXT NOT NULL,
     start_line INTEGER NOT NULL CHECK (start_line > 0),
@@ -1591,6 +1593,15 @@ class IndexStore:
                 self._connection.execute(
                     f"ALTER TABLE index_snapshots ADD COLUMN {column} {definition}"
                 )
+        request_columns = {
+            row[1] for row in self._connection.execute("PRAGMA table_info(http_client_requests)").fetchall()
+        }
+        for column, definition in {
+            "path_kind": "TEXT NOT NULL DEFAULT 'literal' CHECK (path_kind IN ('literal', 'parameterized'))",
+            "request_path_template": "TEXT",
+        }.items():
+            if column not in request_columns:
+                self._connection.execute(f"ALTER TABLE http_client_requests ADD COLUMN {column} {definition}")
 
     def __enter__(self) -> IndexStore:
         return self
@@ -1978,7 +1989,7 @@ class IndexStore:
             for row in unresolved_rows
         )
         request_rows = self._connection.execute(
-            "SELECT request_id, source_module_id, source_path, method, request_path, unknown_reason, "
+            "SELECT request_id, source_module_id, source_path, method, request_path, path_kind, request_path_template, unknown_reason, "
             "client_name, start_line, end_line FROM http_client_requests WHERE index_id = ? "
             "ORDER BY source_path COLLATE BINARY, start_line, request_id",
             (index_id,),
@@ -1991,6 +2002,8 @@ class IndexStore:
                 source_path=row["source_path"],
                 method=row["method"],
                 request_path=row["request_path"],
+                path_kind=row["path_kind"],
+                request_path_template=row["request_path_template"],
                 unknown_reason=row["unknown_reason"],
                 client_name=row["client_name"],
                 start_line=row["start_line"],
@@ -4583,8 +4596,8 @@ class IndexStore:
         for request in relation.http_client_requests:
             self._connection.execute(
                 "INSERT INTO http_client_requests (index_id, request_id, source_module_id, source_path, "
-                "method, request_path, unknown_reason, client_name, start_line, end_line) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "method, request_path, path_kind, request_path_template, unknown_reason, client_name, start_line, end_line) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     request.index_id,
                     request.request_id,
@@ -4592,6 +4605,8 @@ class IndexStore:
                     request.source_path,
                     request.method,
                     request.request_path,
+                    request.path_kind,
+                    request.request_path_template,
                     request.unknown_reason,
                     request.client_name,
                     request.start_line,
@@ -4711,12 +4726,35 @@ class IndexStore:
                 or len(request.client_name) > 500
                 or request.method not in {None, "GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD", "TRACE"}
                 or request.request_path is not None and len(request.request_path) > 2_000
+                or request.path_kind not in {"literal", "parameterized"}
+                or request.request_path_template is not None and len(request.request_path_template) > 2_000
+                or request.path_kind == "literal" and request.request_path_template is not None
+                or request.path_kind == "parameterized" and (
+                    request.request_path is not None
+                    or request.request_path_template is None
+                    or not request.request_path_template.startswith("/api/")
+                    or any(marker in request.request_path_template for marker in "?#")
+                    or "{*}" not in request.request_path_template
+                    or any(
+                        ("{" in segment or "}" in segment) and segment != "{*}"
+                        for segment in request.request_path_template.split("/")
+                    )
+                )
+                or request.request_path is not None and (
+                    not request.request_path.startswith("/api/")
+                    or any(marker in request.request_path for marker in "?#")
+                )
                 or request.unknown_reason is not None and len(request.unknown_reason) > 200
                 or request.unknown_reason is None and (
                     request.method is None
-                    or request.request_path is None
-                    or not request.request_path.startswith("/api/")
-                    or any(marker in request.request_path for marker in "?#")
+                    or request.path_kind == "literal" and (
+                        request.request_path is None
+                        or request.request_path_template is not None
+                        or not request.request_path.startswith("/api/")
+                    )
+                    or request.path_kind == "parameterized" and (
+                        request.request_path_template is None
+                    )
                 )
             ):
                 raise StorageInputError("HTTP client request fact is outside the source snapshot or invalid")

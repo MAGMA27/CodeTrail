@@ -2,7 +2,7 @@
 
 ## 状态
 
-已实现多项目真实工作台、Project/Index/Session/消息、索引新鲜度检查/显式更新、O1/O2/O3 浏览和 P2-R1/P2-R2 Session 内显式 fixture/real Run 面板。项目知识页默认展示当前固定快照的项目架构画布，再展示入口、功能和结构详情；Python/TypeScript 静态 imports/calls 可筛选，HTTP 客户端到 FastAPI 路由的 method/path shape association 以单独虚线边聚合显示，也可独立过滤；关联列表的客户端与路由证据均可打开到同一 index。点击模块进入既有符号关系图，点击代表静态边打开同一 index 的源码证据。概览版本为 `python-entry-v5+http-shape-v1`；旧索引缺少 TypeScript 解析标识时显示 `not_analyzed`，不把零关联解释为无调用。Run 面板支持模式选择、真实模式警告、启动、状态同步、持久化 SSE 事件流、有限重连/轮询回退、工具结果、Issue/代码理解报告 evidence、候选位置与有界静态影响、取消、历史选择和刷新/切换恢复；Codex external Run 会从 Session history 自动发现、选择并订阅，代码理解结果按顺序步骤和覆盖级别展示。
+已实现多项目真实工作台、Project/Index/Session/消息、索引新鲜度检查/显式更新、O1/O2/O3 浏览和 P2-R1/P2-R2 Session 内显式 fixture/real Run 面板。项目知识页默认展示当前固定快照的项目架构画布，再展示入口、功能和结构详情；Python/TypeScript 静态 imports/calls 可筛选，HTTP 客户端到 FastAPI 路由的 method/path shape association 以单独虚线边聚合显示，也可独立过滤；参数化模板只有完整同形且唯一时关联，列表标示字面量/模板并保留客户端与路由的同一 index 双端证据。点击模块进入既有符号关系图，点击代表静态边打开同一 index 的源码证据。概览版本为 `python-entry-v5+http-shape-v2`；无 TypeScript fact 标记的旧索引显示 `not_analyzed`；旧 v1 索引明确显示 `literal_only`，不把未做参数化分析解释为无调用。Run 面板支持模式选择、真实模式警告、启动、状态同步、持久化 SSE 事件流、有限重连/轮询回退、工具结果、Issue/代码理解报告 evidence、候选位置与有界静态影响、取消、历史选择和刷新/切换恢复；Codex external Run 会从 Session history 自动发现、选择并订阅，代码理解结果按顺序步骤和覆盖级别展示。
 
 ## 职责与范围
 

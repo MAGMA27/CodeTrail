@@ -88,6 +88,8 @@ function httpAssociation(id: string, client: OverviewModule, server: OverviewMod
     match_kind: "method_path_shape",
     method: "GET",
     path: "/api/health",
+    client_path_kind: "literal",
+    client_path_template: null,
     client_name: "getHealth",
     client_module: client.symbol,
     server_module: server.symbol,
@@ -125,6 +127,7 @@ function overview(
     http_associations: httpAssociations,
     http_association_coverage: {
       analysis_status: "complete",
+      path_analysis: "parameterized",
       client_request_count: httpAssociations.length,
       matched_count: httpAssociations.length,
       visible_match_count: httpAssociations.length,

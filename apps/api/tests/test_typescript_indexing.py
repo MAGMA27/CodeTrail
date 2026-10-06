@@ -75,6 +75,69 @@ def _write_http_project(root: Path, *, duplicate_route: bool = False) -> None:
     )
 
 
+def _write_parameterized_http_project(
+    root: Path,
+    *,
+    overlapping_literal: bool = False,
+    only_literal: bool = False,
+) -> None:
+    (root / "server").mkdir(parents=True)
+    (root / "web").mkdir()
+    routes = (
+        "from fastapi import FastAPI\n"
+        "app = FastAPI()\n"
+        "@app.get('/api/projects/{project_id}/indexes/{index_id}/overview')\n"
+        "def get_overview(project_id: str, index_id: str): return {}\n"
+        "@app.get('/api/projects/{project_id}/indexes/{index_id}/source')\n"
+        "def read_source(project_id: str, index_id: str): return {}\n"
+        "@app.post('/api/projects/{project_id}/sessions')\n"
+        "def create_session(project_id: str): return {}\n"
+        "@app.get('/api/files/{rest:path}')\n"
+        "def read_file(rest: str): return {}\n"
+    )
+    if overlapping_literal or only_literal:
+        routes += (
+            "@app.get('/api/projects/me/indexes/{index_id}/overview')\n"
+            "def get_me_overview(index_id: str): return {}\n"
+        )
+    if only_literal:
+        routes = routes.replace(
+            "@app.get('/api/projects/{project_id}/indexes/{index_id}/overview')\n"
+            "def get_overview(project_id: str, index_id: str): return {}\n",
+            "",
+        )
+    (root / "server" / "app.py").write_text(routes, encoding="utf-8")
+    client = '''const apiBaseUrl = "http://remote.example";
+function requestJson(path: string, validator: unknown, init: RequestInit = {}) {
+  return fetch(`${apiBaseUrl}${path}`, { ...init, headers: {}, cache: 'no-store' });
+}
+export function getOverview(projectId: string, indexId: string) {
+  const params = new URLSearchParams({ max_depth: "4" });
+  return requestJson(`/api/projects/${encodeURIComponent(projectId)}/indexes/${encodeURIComponent(indexId)}/overview?${params.toString()}`, undefined);
+}
+export function readProjectSource(projectId: string, indexId: string) {
+  return requestJson(`/api/projects/${encodeURIComponent(projectId)}/indexes/${encodeURIComponent(indexId)}/source`, undefined);
+}
+export function createProjectSession(projectId: string) {
+  return requestJson(`/api/projects/${encodeURIComponent(projectId)}/sessions`, undefined, { method: "POST" });
+}
+export function getUnsafe(projectId: string) {
+  return requestJson(`/api/projects/prefix-${encodeURIComponent(projectId)}/overview`, undefined);
+}
+export function getUnencoded(projectId: string) {
+  return requestJson(`/api/projects/${projectId}/overview`, undefined);
+}
+export function getUnsafeQuery(projectId: string, cursor: string) {
+  return requestJson(`/api/projects/${encodeURIComponent(projectId)}/overview?cursor=${cursor}`, undefined);
+}
+export function getLiteralBraces() {
+  const params = new URLSearchParams();
+  return requestJson(`/api/items/{*}?${params.toString()}`, undefined);
+}
+'''
+    (root / "web" / "api.ts").write_text(client, encoding="utf-8")
+
+
 def _create_index(application) -> tuple[str, str]:
     status, project = request(application, "POST", "/api/projects", {"name": "TypeScript", "repository_id": "ts"})
     assert status == 200
@@ -205,6 +268,65 @@ def test_http_request_shape_rejects_shadowed_or_mutable_fetch_wrappers(tmp_path:
     assert requests["web/shorthand.ts"].unknown_reason is None
 
 
+def test_parameterized_paths_require_unshadowed_globals_and_top_level_query_params(tmp_path: Path) -> None:
+    web = tmp_path / "web"
+    web.mkdir()
+    wrapper = '''const apiBaseUrl = "http://remote.example";
+function requestJson(path: string, validator: unknown, init: RequestInit = {}) {
+  return fetch(`${apiBaseUrl}${path}`, { ...init, headers: {}, cache: 'no-store' });
+}
+'''
+    cases = {
+        "good.ts": '''function good(id: string) {
+  const params = new URLSearchParams();
+  return requestJson(`/api/projects/${encodeURIComponent(id)}?${params.toString()}`, undefined);
+}
+''',
+        "shadowed-encode.ts": '''function bad(encodeURIComponent: (value: string) => string, id: string) {
+  return requestJson(`/api/projects/${encodeURIComponent(id)}`, undefined);
+}
+''',
+        "written-encode.ts": '''encodeURIComponent = (value) => value;
+function bad(id: string) { return requestJson(`/api/projects/${encodeURIComponent(id)}`, undefined); }
+''',
+        "shadowed-search.ts": '''function bad(URLSearchParams: unknown, id: string) {
+  const params = new URLSearchParams();
+  return requestJson(`/api/projects/${encodeURIComponent(id)}?${params.toString()}`, undefined);
+}
+''',
+        "nested-query.ts": '''function bad(params: unknown, id: string) {
+  if (id) { const params = new URLSearchParams(); }
+  return requestJson(`/api/projects/${encodeURIComponent(id)}?${params.toString()}`, undefined);
+}
+''',
+        "aliased-query.ts": '''function bad(id: string) {
+  const params = new URLSearchParams();
+  const alias = params;
+  alias.set("cursor", "anything");
+  return requestJson(`/api/projects/${encodeURIComponent(id)}?${params.toString()}`, undefined);
+}
+''',
+    }
+    for name, body in cases.items():
+        (web / name).write_text(wrapper + body, encoding="utf-8")
+
+    definitions = extract_definitions(build_source_snapshot(tmp_path, repository_id="ts", revision="test"))
+    requests = {path: fact for path, fact in definitions.typescript_http_requests}
+    assert requests["web/good.ts"].path_kind == "parameterized"
+    assert requests["web/good.ts"].path_template == "/api/projects/{*}"
+    assert requests["web/good.ts"].unknown_reason is None
+    assert all(
+        requests[path].unknown_reason == "dynamic_path"
+        for path in (
+            "web/shadowed-encode.ts",
+            "web/written-encode.ts",
+            "web/shadowed-search.ts",
+            "web/nested-query.ts",
+            "web/aliased-query.ts",
+        )
+    )
+
+
 def test_overview_adds_separate_same_index_http_shape_associations(tmp_path: Path) -> None:
     _write_http_project(tmp_path)
     application = create_app({"ts": tmp_path})
@@ -213,6 +335,7 @@ def test_overview_adds_separate_same_index_http_shape_associations(tmp_path: Pat
     assert status == 200
     assert overview["http_association_coverage"] == {
         "analysis_status": "complete",
+        "path_analysis": "parameterized",
         "client_request_count": 3,
         "matched_count": 2,
         "visible_match_count": 2,
@@ -227,6 +350,77 @@ def test_overview_adds_separate_same_index_http_shape_associations(tmp_path: Pat
     assert all(item["index_id"] == index_id and item["client_evidence"]["index_id"] == index_id for item in overview["http_associations"])
     assert all(item["client_module"]["path"] == "web/api.ts" and item["server_module"]["path"] == "server/app.py" for item in overview["http_associations"])
     assert any("apiBaseUrl 可配置为远端" in note for note in overview["notes"])
+
+
+def test_parameterized_request_templates_match_same_shape_and_strip_safe_query(tmp_path: Path) -> None:
+    _write_parameterized_http_project(tmp_path)
+    application = create_app({"ts": tmp_path})
+    project_id, index_id = _create_index(application)
+    status, overview = request(application, "GET", f"/api/projects/{project_id}/indexes/{index_id}/overview")
+    assert status == 200
+    coverage = overview["http_association_coverage"]
+    assert coverage == {
+        "analysis_status": "complete",
+        "path_analysis": "parameterized",
+        "client_request_count": 7,
+        "matched_count": 3,
+        "visible_match_count": 3,
+        "unmatched_count": 1,
+        "ambiguous_count": 0,
+        "unknown_count": 3,
+    }
+    found = {item["client_name"]: item for item in overview["http_associations"]}
+    assert set(found) == {"getOverview", "readProjectSource", "createProjectSession"}
+    assert found["getOverview"]["path"] == "/api/projects/{project_id}/indexes/{index_id}/overview"
+    assert found["getOverview"]["client_path_kind"] == "parameterized"
+    assert found["getOverview"]["client_path_template"] == "/api/projects/{*}/indexes/{*}/overview"
+    assert found["createProjectSession"]["method"] == "POST"
+    assert all(item["index_id"] == index_id for item in found.values())
+
+
+@pytest.mark.parametrize("only_literal", [False, True])
+def test_parameterized_path_overlaps_are_ambiguous_or_unknown_not_literal_matches(
+    tmp_path: Path,
+    only_literal: bool,
+) -> None:
+    _write_parameterized_http_project(tmp_path, overlapping_literal=True, only_literal=only_literal)
+    application = create_app({"ts": tmp_path})
+    project_id, index_id = _create_index(application)
+    status, overview = request(application, "GET", f"/api/projects/{project_id}/indexes/{index_id}/overview")
+    assert status == 200
+    coverage = overview["http_association_coverage"]
+    if only_literal:
+        assert coverage["matched_count"] == 2
+        assert coverage["ambiguous_count"] == 0
+        assert coverage["unknown_count"] == 4
+    else:
+        assert coverage["matched_count"] == 2
+        assert coverage["ambiguous_count"] == 1
+    assert not any(item["client_name"] == "getOverview" for item in overview["http_associations"])
+
+
+def test_persisted_v1_literal_http_fact_survives_additive_path_shape_migration(tmp_path: Path) -> None:
+    _write_http_project(tmp_path)
+    application = create_app({"ts": tmp_path})
+    project_id, index_id = _create_index(application)
+    with application.state.registry.store_for_repository("ts") as store:
+        store.connection.execute(
+            "UPDATE index_snapshots SET rules_version = ? WHERE index_id = ?",
+            ("source-v3+python-3.13+typescript-5.9.3+typescript-facts-v1+local", index_id),
+        )
+    database = tmp_path / ".codetrail" / "index.sqlite3"
+    import sqlite3
+
+    with sqlite3.connect(database) as connection:
+        connection.execute("ALTER TABLE http_client_requests DROP COLUMN request_path_template")
+        connection.execute("ALTER TABLE http_client_requests DROP COLUMN path_kind")
+
+    status, overview = request(application, "GET", f"/api/projects/{project_id}/indexes/{index_id}/overview")
+    assert status == 200
+    assert overview["http_association_coverage"]["path_analysis"] == "literal_only"
+    assert overview["http_association_coverage"]["analysis_status"] == "complete"
+    assert overview["http_association_coverage"]["matched_count"] == 2
+    assert {(item["method"], item["path"]) for item in overview["http_associations"]} == {("GET", "/api/health")}
 
 
 @pytest.mark.parametrize(
@@ -279,6 +473,62 @@ def test_typescript_source_change_refreshes_to_new_index_and_keeps_old_source(tm
     with application.state.registry.store_for_repository("ts") as store:
         assert store.read_evidence(old_index_id, "client.ts", 1, 1).excerpt == "export const value = 'old';"
         assert store.read_evidence(new_index_id, "client.ts", 1, 1).excerpt == "export const value = 'new';"
+
+
+def test_typescript_rule_upgrade_changes_index_identity_and_preserves_v1_snapshot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.service as service_module
+
+    _write_http_project(tmp_path)
+    application = create_app({"ts": tmp_path})
+    status, project = request(application, "POST", "/api/projects", {"name": "TypeScript v1", "repository_id": "ts"})
+    assert status == 200
+    project_id = project["project_id"]
+    monkeypatch.setattr(service_module, "INDEX_BUILD_IDENTITY_VERSION", "relations-v6")
+    status, old_result = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/indexes",
+        {"revision": "same-source", "dirty": True},
+    )
+    assert status == 200
+    old_index_id = old_result["index"]["index_id"]
+    with application.state.registry.store_for_repository("ts") as store:
+        old_row = store.connection.execute(
+            "SELECT snapshot_hash FROM index_snapshots WHERE index_id = ?",
+            (old_index_id,),
+        ).fetchone()
+        old_hash = old_row["snapshot_hash"]
+        store.connection.execute(
+            "UPDATE index_snapshots SET rules_version = ? WHERE index_id = ?",
+            ("source-v3+python-3.13+typescript-5.9.3+typescript-facts-v1+relations-v6", old_index_id),
+        )
+
+    monkeypatch.setattr(service_module, "INDEX_BUILD_IDENTITY_VERSION", "relations-v7")
+    status, upgraded = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/indexes",
+        {"revision": "same-source", "dirty": True},
+    )
+    assert status == 200
+    new_index_id = upgraded["index"]["index_id"]
+    assert new_index_id != old_index_id
+    with application.state.registry.store_for_repository("ts") as store:
+        preserved = store.connection.execute(
+            "SELECT snapshot_hash, rules_version FROM index_snapshots WHERE index_id = ?",
+            (old_index_id,),
+        ).fetchone()
+        current = store.connection.execute(
+            "SELECT rules_version FROM index_snapshots WHERE index_id = ?",
+            (new_index_id,),
+        ).fetchone()
+        assert preserved["snapshot_hash"] == old_hash
+        assert "typescript-facts-v1" in preserved["rules_version"]
+        assert "typescript-facts-v2" in current["rules_version"]
+        assert store.read_evidence(old_index_id, "web/api.ts", 1, 1).excerpt.startswith("const apiBaseUrl")
 
 
 def test_truncated_route_candidates_never_claim_unique_http_match(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

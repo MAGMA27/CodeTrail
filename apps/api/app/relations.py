@@ -32,7 +32,7 @@ RELATION_FACT_EXTRACTION_RULES_VERSION = "python-relation-facts-v2"
 _RELATION_FACTS_FORMAT_VERSION = "relation-facts-v2"
 # This namespace is part of generated immutable index IDs. Bump it when source
 # boundaries or build rules can change an index with the same content hash.
-INDEX_BUILD_IDENTITY_VERSION = "relations-v6"
+INDEX_BUILD_IDENTITY_VERSION = "relations-v7"
 
 
 def relation_coverage_limitations(
@@ -208,6 +208,8 @@ class HttpClientRequestFact:
     source_path: str
     method: str | None
     request_path: str | None
+    path_kind: str
+    request_path_template: str | None
     unknown_reason: str | None
     client_name: str
     start_line: int
@@ -485,6 +487,7 @@ def extract_relations(
         request_occurrences[key] = occurrence + 1
         identity = "\0".join(
             [snapshot.index.index_id, source_module.symbol_id, fact.method or "", fact.path or "",
+             fact.path_kind, fact.path_template or "",
              fact.client_name, path, str(fact.start_line), str(fact.end_line), str(occurrence)]
         )
         http_client_requests.append(
@@ -495,6 +498,8 @@ def extract_relations(
                 source_path=path,
                 method=fact.method,
                 request_path=fact.path,
+                path_kind=fact.path_kind,
+                request_path_template=fact.path_template,
                 unknown_reason=fact.unknown_reason,
                 client_name=fact.client_name,
                 start_line=fact.start_line,

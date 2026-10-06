@@ -200,6 +200,8 @@ class TypeScriptHttpRequestDescription:
 
     method: str | None
     path: str | None
+    path_kind: Literal["literal", "parameterized"]
+    path_template: str | None
     client_name: str
     unknown_reason: str | None
     start_line: int
@@ -311,7 +313,7 @@ def build_source_snapshot(
 SOURCE_CAPTURE_RULES_VERSION = "source-v3"
 DEFINITION_EXTRACTION_RULES_VERSION = "python-definitions-v1"
 TYPESCRIPT_COMPILER_VERSION = "5.9.3"
-TYPESCRIPT_FACT_RULES_VERSION = "typescript-facts-v1"
+TYPESCRIPT_FACT_RULES_VERSION = "typescript-facts-v2"
 _TYPESCRIPT_PARSER_TIMEOUT_SECONDS = 15
 _TYPESCRIPT_PARSER_MAX_INPUT_BYTES = 20 * 1024 * 1024
 _TYPESCRIPT_PARSER_MAX_OUTPUT_BYTES = 8 * 1024 * 1024
@@ -626,14 +628,48 @@ def extract_definitions(
                     )
                 )
             for item in file_facts.get("http_requests", []):
+                path_kind = item.get("path_kind", "literal")
+                path = item.get("path")
+                path_template = item.get("path_template")
+                unknown_reason = item.get("unknown_reason")
+                if (
+                    path_kind not in {"literal", "parameterized"}
+                    or path is not None and (not isinstance(path, str) or len(path) > 2_000)
+                    or path_template is not None and (not isinstance(path_template, str) or len(path_template) > 2_000)
+                    or unknown_reason is not None and (not isinstance(unknown_reason, str) or len(unknown_reason) > 200)
+                    or path_kind == "literal" and path_template is not None
+                    or path_kind == "parameterized" and (
+                        path is not None or not isinstance(path_template, str)
+                        or not path_template.startswith("/api/")
+                        or any(marker in path_template for marker in "?#")
+                        or "{*}" not in path_template
+                        or any(
+                            ("{" in segment or "}" in segment) and segment != "{*}"
+                            for segment in path_template.split("/")
+                        )
+                    )
+                    or path is not None and (
+                        not path.startswith("/api/") or any(marker in path for marker in "?#")
+                    )
+                    or unknown_reason is None and (
+                        path_kind == "literal" and (
+                            not isinstance(path, str) or path_template is not None
+                            or not path.startswith("/api/") or any(marker in path for marker in "?#")
+                        )
+                        or path_kind == "parameterized" and path_template is None
+                    )
+                ):
+                    raise ValueError("TypeScript parser returned an invalid HTTP path fact")
                 typescript_http_requests.append(
                     (
                         source_file.path,
                         TypeScriptHttpRequestDescription(
                             method=item["method"],
-                            path=item["path"],
+                            path=path,
+                            path_kind=path_kind,
+                            path_template=path_template,
                             client_name=str(item["client_name"]),
-                            unknown_reason=item["unknown_reason"],
+                            unknown_reason=unknown_reason,
                             start_line=int(item["start_line"]),
                             end_line=int(item["end_line"]),
                         ),

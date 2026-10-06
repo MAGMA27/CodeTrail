@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import re
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
@@ -27,7 +28,7 @@ from .contracts import (
 from .relations import RelationIndex, relation_coverage_limitations
 
 
-RULES_VERSION = "python-entry-v5+http-shape-v1"
+RULES_VERSION = "python-entry-v5+http-shape-v2"
 DEFAULT_MAX_DEPTH = 4
 DEFAULT_MAX_PATHS = 40
 DEFAULT_MAX_MODULES = 100
@@ -315,8 +316,18 @@ def build_project_overview(
     if relation.http_client_requests:
         notes.append("HTTP method/path 形状关联不证明请求实际发往本地服务；apiBaseUrl 可配置为远端。")
 
-    if "+typescript-facts-v1" not in (index.rules_version or ""):
+    rules_version = index.rules_version or ""
+    path_analysis = (
+        "parameterized"
+        if "+typescript-facts-v2" in rules_version
+        else "literal_only"
+        if "+typescript-facts-v1" in rules_version
+        else "not_analyzed"
+    )
+    if path_analysis == "not_analyzed":
         notes.append("此索引未记录 TypeScript 静态分析；HTTP 关联 coverage 为 not_analyzed。")
+    elif path_analysis == "literal_only":
+        notes.append("此旧索引只保留字面量 HTTP 路径分析；参数化路径尚未分析。")
     elif index.status != "ready":
         notes.append("索引未完整就绪；HTTP 关联 coverage 为 incomplete。")
 
@@ -400,11 +411,12 @@ def build_project_overview(
         route_candidates_truncated=entry_candidates_truncated,
         analysis_status=(
             "not_analyzed"
-            if "+typescript-facts-v1" not in (index.rules_version or "")
+            if path_analysis == "not_analyzed"
             else "incomplete"
             if index.status != "ready" or relation.truncated or relation.unresolved_truncated is True or entry_candidates_truncated
             else "complete"
         ),
+        path_analysis=path_analysis,
     )
     if http_associations_truncated:
         reasons.append("max_http_associations reached")
@@ -461,6 +473,7 @@ def _build_http_associations(
     deadline: float,
     route_candidates_truncated: bool,
     analysis_status: str,
+    path_analysis: str,
 ) -> tuple[list[OverviewHttpAssociation], OverviewHttpAssociationCoverage, bool]:
     routes = [entry for entry in entries if entry.kind == "fastapi_route"]
     requests = sorted(
@@ -475,29 +488,73 @@ def _build_http_associations(
             unknown += len(requests) - matched - unmatched - ambiguous - unknown
             timed_out = True
             break
-        if request.unknown_reason or request.method is None or request.request_path is None:
+        if request.unknown_reason or request.method is None or (
+            request.path_kind == "literal" and request.request_path is None
+        ) or (
+            request.path_kind == "parameterized" and request.request_path_template is None
+        ):
             unknown += 1
             continue
         source_module = module_by_path.get(request.source_path)
         if source_module is None:
             unknown += 1
             continue
-        candidates = [
-            entry for entry in routes
-            if entry.http_method == request.method and entry.declared_path == request.request_path
-        ]
-        if len(candidates) > 1:
-            ambiguous += 1
-            continue
         if route_candidates_truncated:
             # An omitted route may duplicate this path/method, so a visible
             # single candidate is not proof of a unique association.
             unknown += 1
             continue
+        candidates = [entry for entry in routes if entry.http_method == request.method]
+        if path_analysis == "literal_only":
+            candidates = [
+                entry for entry in candidates
+                if entry.declared_path == request.request_path
+            ]
+            full_candidates = candidates
+            unsupported_overlap = False
+        else:
+            client_segments = _http_client_path_segments(request)
+            if client_segments is None:
+                unknown += 1
+                continue
+            overlaps: list[OverviewEntryPoint] = []
+            full_candidates = []
+            unsupported_overlap = False
+            for candidate in candidates:
+                route_segments = _http_route_path_segments(candidate.declared_path or "")
+                if route_segments is None:
+                    unsupported_overlap = unsupported_overlap or _http_unsupported_route_overlaps(
+                        client_segments,
+                        candidate.declared_path or "",
+                    )
+                    continue
+                if not _http_paths_overlap(client_segments, route_segments):
+                    continue
+                overlaps.append(candidate)
+                if _http_path_shape_is_full_match(client_segments, route_segments, request.path_kind):
+                    full_candidates.append(candidate)
+            if unsupported_overlap:
+                unknown += 1
+                continue
+            candidates = overlaps
+            if len(candidates) > 1:
+                ambiguous += 1
+                continue
+            if request.path_kind == "parameterized" and candidates and not full_candidates:
+                # A route may overlap only one value of the client's template.
+                # That cannot represent the full static client path shape.
+                unknown += 1
+                continue
+        if len(candidates) > 1 or len(full_candidates) > 1:
+            ambiguous += 1
+            continue
         if not candidates:
             unmatched += 1
             continue
-        route = candidates[0]
+        if len(full_candidates) != 1:
+            unknown += 1
+            continue
+        route = full_candidates[0]
         handler = route.handler_symbol
         server_module = module_by_path.get(handler.path) if handler is not None else None
         if server_module is None:
@@ -531,7 +588,9 @@ def _build_http_associations(
                 association_id=f"http-association-{hashlib.sha256(association_identity.encode('utf-8')).hexdigest()[:32]}",
                 index_id=index.index_id,
                 method=request.method,
-                path=request.request_path,
+                path=route.declared_path or "",
+                client_path_kind=request.path_kind,
+                client_path_template=request.request_path_template,
                 client_name=request.client_name,
                 client_module=source_module,
                 server_module=server_module,
@@ -546,6 +605,7 @@ def _build_http_associations(
         associations,
         OverviewHttpAssociationCoverage(
             analysis_status=coverage_status,  # type: ignore[arg-type]
+            path_analysis=path_analysis,  # type: ignore[arg-type]
             client_request_count=len(requests),
             matched_count=matched,
             visible_match_count=len(associations),
@@ -555,6 +615,83 @@ def _build_http_associations(
         ),
         truncated or timed_out,
     )
+
+
+_FASTAPI_PATH_PARAMETER = re.compile(r"^\{[A-Za-z_][A-Za-z0-9_]*\}$")
+
+
+def _http_client_path_segments(request) -> tuple[str | None, ...] | None:
+    path = request.request_path if request.path_kind == "literal" else request.request_path_template
+    if path is None or not path.startswith("/api/") or any(marker in path for marker in "?#"):
+        return None
+    segments = path.split("/")
+    if request.path_kind == "literal":
+        return tuple(segments)
+    if any("{*" in segment and segment != "{*}" for segment in segments):
+        return None
+    if any("{" in segment or "}" in segment for segment in segments if segment != "{*}"):
+        return None
+    return tuple(None if segment == "{*}" else segment for segment in segments)
+
+
+def _http_route_path_segments(path: str) -> tuple[str | None, ...] | None:
+    if not path.startswith("/api/") or any(marker in path for marker in "?#"):
+        return None
+    segments = path.split("/")
+    result: list[str | None] = []
+    for segment in segments:
+        if "{" in segment or "}" in segment:
+            if not _FASTAPI_PATH_PARAMETER.fullmatch(segment):
+                return None
+            result.append(None)
+        else:
+            result.append(segment)
+    return tuple(result)
+
+
+def _http_unsupported_route_overlaps(
+    client: tuple[str | None, ...],
+    path: str,
+) -> bool:
+    if not path.startswith("/api/"):
+        return False
+    route_segments = path.split("/")
+    prefix: list[str] = []
+    for segment in route_segments:
+        if "{" in segment or "}" in segment:
+            break
+        prefix.append(segment)
+    if len(client) < len(prefix):
+        return False
+    return all(
+        client_segment is None or client_segment == route_segment
+        for client_segment, route_segment in zip(client, prefix, strict=False)
+    )
+
+
+def _http_paths_overlap(
+    client: tuple[str | None, ...],
+    route: tuple[str | None, ...],
+) -> bool:
+    return len(client) == len(route) and all(
+        client_segment is None or route_segment is None or client_segment == route_segment
+        for client_segment, route_segment in zip(client, route, strict=True)
+    )
+
+
+def _http_path_shape_is_full_match(
+    client: tuple[str | None, ...],
+    route: tuple[str | None, ...],
+    path_kind: str,
+) -> bool:
+    if not _http_paths_overlap(client, route):
+        return False
+    if path_kind == "parameterized":
+        return all(
+            (client_segment is None) == (route_segment is None)
+            for client_segment, route_segment in zip(client, route, strict=True)
+        )
+    return True
 
 
 def _build_overview_groups(

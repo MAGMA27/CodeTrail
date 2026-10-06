@@ -22967,6 +22967,28 @@
               "title": "Client Name",
               "type": "string"
             },
+            "client_path_kind": {
+              "default": "literal",
+              "enum": [
+                "literal",
+                "parameterized"
+              ],
+              "title": "Client Path Kind",
+              "type": "string"
+            },
+            "client_path_template": {
+              "anyOf": [
+                {
+                  "maxLength": 2000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Client Path Template"
+            },
             "index_id": {
               "maxLength": 200,
               "minLength": 1,
@@ -23055,6 +23077,16 @@
               "minimum": 0,
               "title": "Matched Count",
               "type": "integer"
+            },
+            "path_analysis": {
+              "default": "not_analyzed",
+              "enum": [
+                "parameterized",
+                "literal_only",
+                "not_analyzed"
+              ],
+              "title": "Path Analysis",
+              "type": "string"
             },
             "unknown_count": {
               "minimum": 0,
@@ -33261,6 +33293,28 @@
               "title": "Client Name",
               "type": "string"
             },
+            "client_path_kind": {
+              "default": "literal",
+              "enum": [
+                "literal",
+                "parameterized"
+              ],
+              "title": "Client Path Kind",
+              "type": "string"
+            },
+            "client_path_template": {
+              "anyOf": [
+                {
+                  "maxLength": 2000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Client Path Template"
+            },
             "index_id": {
               "maxLength": 200,
               "minLength": 1,
@@ -33349,6 +33403,16 @@
               "minimum": 0,
               "title": "Matched Count",
               "type": "integer"
+            },
+            "path_analysis": {
+              "default": "not_analyzed",
+              "enum": [
+                "parameterized",
+                "literal_only",
+                "not_analyzed"
+              ],
+              "title": "Path Analysis",
+              "type": "string"
             },
             "unknown_count": {
               "minimum": 0,

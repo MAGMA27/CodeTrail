@@ -141,6 +141,113 @@ const files = input.files.map(({ path: filePath, text }) => {
     ts.forEachChild(root.body, inspect);
     return found;
   };
+  const queryParamsName = (fn, name) => {
+    const declarations = [];
+    let validUses = true;
+    const inspect = (node, parent = null) => {
+      if (node !== fn.body && (ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node) || ts.isArrowFunction(node) || ts.isMethodDeclaration(node))) return;
+      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === name) declarations.push(node);
+      if (ts.isIdentifier(node) && node.text === name) {
+        const isBindingName = ts.isVariableDeclaration(node.parent) && node.parent.name === node;
+        const isAllowedMethodCall =
+          ts.isPropertyAccessExpression(node.parent) && node.parent.expression === node &&
+          ts.isCallExpression(node.parent.parent) && node.parent.parent.expression === node.parent &&
+          ["set", "toString"].includes(node.parent.name.text);
+        if (!isBindingName && !isAllowedMethodCall) validUses = false;
+      }
+      if (ts.isPropertyAccessExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === name && !["set", "toString"].includes(node.name.text)) validUses = false;
+      ts.forEachChild(node, (child) => inspect(child, node));
+    };
+    inspect(fn.body);
+    const declaration = declarations[0];
+    const topLevelDeclarations = fn.body && ts.isBlock(fn.body)
+      ? fn.body.statements.flatMap((statement) => ts.isVariableStatement(statement)
+        ? statement.declarationList.declarations.filter((item) => ts.isIdentifier(item.name) && item.name.text === name)
+        : [])
+      : [];
+    if (!validUses || declarations.length !== 1 || !declaration.initializer ||
+      topLevelDeclarations.length !== 1 || topLevelDeclarations[0] !== declaration ||
+      fn.parameters.some((parameter) => bindingNames(parameter.name).includes(name)) ||
+      !(declaration.parent.flags & ts.NodeFlags.Const) || !ts.isNewExpression(declaration.initializer) ||
+      !ts.isIdentifier(declaration.initializer.expression) || declaration.initializer.expression.text !== "URLSearchParams" ||
+      topLevelBindingCount("URLSearchParams") !== 0 || hasLocalBinding(fn, "URLSearchParams") ||
+      hasWrites(source, new Set(["URLSearchParams"])) ||
+      hasWrites(fn.body, new Set([name]))) return false;
+    let safeCalls = true;
+    const checkCalls = (node) => {
+      if (node !== fn.body && (ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node) || ts.isArrowFunction(node) || ts.isMethodDeclaration(node))) return;
+      if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) &&
+        ts.isIdentifier(node.expression.expression) && node.expression.expression.text === name) {
+        const method = node.expression.name.text;
+        if (method === "set") {
+          if (node.arguments.length !== 2 || !ts.isStringLiteral(node.arguments[0])) safeCalls = false;
+        } else if (method === "toString") {
+          if (node.arguments.length !== 0) safeCalls = false;
+        } else safeCalls = false;
+      }
+      ts.forEachChild(node, checkCalls);
+    };
+    checkCalls(fn.body);
+    return safeCalls;
+  };
+  const describePath = (url, fn) => {
+    if (url && (ts.isStringLiteral(url) || ts.isNoSubstitutionTemplateLiteral(url))) {
+      return { path: url.text, path_kind: "literal", path_template: null, valid: true };
+    }
+    if (!url || !ts.isTemplateExpression(url)) return { path: null, path_kind: "literal", path_template: null, valid: false };
+    const spans = url.templateSpans;
+    let parts = [url.head.text];
+    let querySeen = false;
+    let parameterCount = 0;
+    for (let i = 0; i < spans.length; i++) {
+      const span = spans[i];
+      const expression = span.expression;
+      if (!querySeen && ts.isCallExpression(expression) && ts.isPropertyAccessExpression(expression.expression) &&
+        ts.isIdentifier(expression.expression.expression) && expression.expression.name.text === "toString" &&
+        expression.arguments.length === 0 && span.literal.text === "" &&
+        parts[parts.length - 1].endsWith("?") && i === spans.length - 1 &&
+        queryParamsName(fn, expression.expression.expression.text)) {
+        parts[parts.length - 1] = parts[parts.length - 1].slice(0, -1);
+        querySeen = true;
+        continue;
+      }
+      if (querySeen || !ts.isCallExpression(expression) || !ts.isIdentifier(expression.expression) ||
+        expression.expression.text !== "encodeURIComponent" || expression.arguments.length !== 1 ||
+        !ts.isIdentifier(expression.arguments[0])) {
+        return { path: null, path_kind: "literal", path_template: null, valid: false };
+      }
+      const identifier = expression.arguments[0].text;
+      if (topLevelBindingCount("encodeURIComponent") !== 0 || hasLocalBinding(fn, "encodeURIComponent") ||
+        hasWrites(source, new Set(["encodeURIComponent"])) ||
+        !fn.parameters.some((parameter) => bindingNames(parameter.name).includes(identifier)) ||
+        hasBodyBinding(fn, identifier) || hasWrites(fn.body, new Set([identifier])) ||
+        !parts[parts.length - 1].endsWith("/") ||
+        !span.literal.text.startsWith("/") && !(
+          span.literal.text.endsWith("?") && i === spans.length - 2 &&
+          ts.isCallExpression(spans[i + 1].expression) &&
+          ts.isPropertyAccessExpression(spans[i + 1].expression.expression) &&
+          ts.isIdentifier(spans[i + 1].expression.expression.expression) &&
+          spans[i + 1].expression.expression.name.text === "toString" &&
+          spans[i + 1].expression.arguments.length === 0 &&
+          spans[i + 1].literal.text === "" &&
+          queryParamsName(fn, spans[i + 1].expression.expression.expression.text)
+        ) && !(i === spans.length - 1 && span.literal.text === "")) {
+        return { path: null, path_kind: "literal", path_template: null, valid: false };
+      }
+      parts.push("{*}");
+      parameterCount++;
+      parts.push(span.literal.text);
+    }
+    const path = parts.join("");
+    if (!path.startsWith("/api/") || /[?#]/.test(path)) return { path: null, path_kind: "literal", path_template: null, valid: false };
+    if (parameterCount > 0) {
+      if (parts.some((part) => part !== "{*}" && /[{}]/.test(part))) {
+        return { path: null, path_kind: "literal", path_template: null, valid: false };
+      }
+      return { path: null, path_kind: "parameterized", path_template: path, valid: true };
+    }
+    return { path, path_kind: "literal", path_template: null, valid: true };
+  };
   const topLevelBindingCount = (name) => {
     let count = 0;
     for (const statement of topLevel) {
@@ -222,8 +329,8 @@ const files = input.files.map(({ path: filePath, text }) => {
       if (!isRoot && (ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node) || ts.isArrowFunction(node) || ts.isMethodDeclaration(node))) return;
       if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === wrapperName) {
         const url = node.arguments[0];
-        let requestPath = null;
-        if (url && (ts.isStringLiteral(url) || ts.isNoSubstitutionTemplateLiteral(url))) requestPath = url.text;
+        const describedPath = describePath(url, fn);
+        const requestPath = describedPath.path;
         const init = node.arguments[2];
         let method = "GET";
         let methodKnown = node.arguments.length === 2 || node.arguments.length === 3;
@@ -242,14 +349,16 @@ const files = input.files.map(({ path: filePath, text }) => {
           }
         } else if (init) methodKnown = false;
         let unknown_reason = null;
-        if (!requestPath) unknown_reason = "dynamic_path";
+        if (!describedPath.valid) unknown_reason = "dynamic_path";
         else if (!methodKnown) unknown_reason = "dynamic_method";
-        else if (!requestPath.startsWith("/api/") || /[?#]/.test(requestPath)) unknown_reason = "unsupported_path_shape";
+        else if (describedPath.path_kind === "literal" && (!requestPath.startsWith("/api/") || /[?#]/.test(requestPath))) unknown_reason = "unsupported_path_shape";
         else if (!["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD", "TRACE"].includes(method)) unknown_reason = "unsupported_method";
         if (++requestCount > maxRequests) throw new Error("TypeScript HTTP request budget exceeded");
         http_requests.push({
           method: methodKnown ? method : null,
           path: requestPath,
+          path_kind: describedPath.path_kind,
+          path_template: describedPath.path_template,
           unknown_reason,
           client_name: clientName,
           ...range(node),

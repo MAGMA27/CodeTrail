@@ -95,6 +95,7 @@ function overview() {
     http_associations: [],
     http_association_coverage: {
       analysis_status: "complete",
+      path_analysis: "parameterized",
       client_request_count: 0,
       matched_count: 0,
       visible_match_count: 0,

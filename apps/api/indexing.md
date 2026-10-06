@@ -2,7 +2,7 @@
 
 ## 状态
 
-已实现 Python 与 TypeScript/TSX 的有界不可变源码快照、定义和相对导入提取，以及本地新鲜度检查和显式索引更新；Python 继续使用文件级定义/关系事实缓存，TypeScript 使用每次有界冷 AST 解析，不计入 Python AST/cache 统计。TypeScript 语法错误、锁定解析器不可用和快照扫描不完整都会显式令新索引 failed。源码捕获规则为 `source-v3`，TypeScript 编译器锁定 `5.9.3`，静态 facts 规则为 `typescript-facts-v1`，关系语义为 `relations-v4`，Python 关系事实缓存规则/格式为 `python-relation-facts-v2` / `relation-facts-v2`，索引身份为 `relations-v6`；定义/关系目标仍基于当前快照全量解析，不是完整增量索引。
+已实现 Python 与 TypeScript/TSX 的有界不可变源码快照、定义、相对导入和保守 HTTP path facts，以及本地 freshness 检查和显式索引更新；Python 继续使用文件级定义/关系事实缓存，TypeScript 使用每次有界冷 AST 解析，不计入 Python AST/cache 统计。TypeScript 语法错误、锁定解析器不可用和快照扫描不完整都会显式令新索引 failed。源码捕获规则为 `source-v3`，TypeScript 编译器锁定 `5.9.3`，当前静态 facts 规则为 `typescript-facts-v2`，关系语义为 `relations-v4`，Python 关系事实缓存规则/格式为 `python-relation-facts-v2` / `relation-facts-v2`，索引身份为 `relations-v7`；定义/关系目标仍基于当前快照全量解析，不是完整增量索引。
 
 ## 职责与范围
 
@@ -14,13 +14,13 @@
 
 ## 数据与生命周期
 
-快照保存文本及 hash、规则版本和配置指纹；符号、导入、HTTP request facts 和后续 evidence 属于同一不可变 index_id。Python 命中缓存后按当前 index_id 重新生成 Symbol，跨文件关系仍由当前 DefinitionMaps 解析。TypeScript 解析计数不冒充 Python AST cache hit。HTTP 客户端只接受 AST 确认的透明 `requestJson`→`fetch(apiBaseUrl + path)` 封装与字面量 method/path；默认 method 为 GET，动态值、wrapper 遮蔽/赋值、动态 options 和重复 method 保留 unknown。概览只将唯一 FastAPI 字面量 method/path 一致项标为 `method_path_shape`，路由候选或关联输出截断、预算耗尽和旧索引都会显式标记 coverage；该关联不生成 CodeEdge，也不证明 URL 实际指向本地服务。显式刷新和 freshness 对 TS/TSX 与 Python 使用同一文件规则和预算；旧 index 保持可读，缺少 TS 规则标识的旧概览 coverage 为 `not_analyzed`。
+快照保存文本及 hash、规则版本和配置指纹；符号、导入、HTTP request facts 和后续 evidence 属于同一不可变 index_id。Python 命中缓存后按当前 index_id 重新生成 Symbol，跨文件关系仍由当前 DefinitionMaps 解析。TypeScript 解析计数不冒充 Python AST cache hit。HTTP 客户端只接受 AST 确认的透明 `requestJson`→`fetch(apiBaseUrl + path)` 封装与静态 method；默认 method 为 GET。路径 facts 分为字面量和安全参数化模板：参数段只接受完整段的未遮蔽 `encodeURIComponent(函数参数)`，query 只允许经过当前函数体顶层 `const URLSearchParams(...).toString()` 的末尾 query；动态 query、fragment、半段/未编码插值、遮蔽、赋值和不支持的形状保留 unknown。概览对客户端与 FastAPI 声明路径做段级 overlap 检查，只有完整同形且唯一的路由才关联；字面路由与模板部分重叠会使结果 ambiguous，只有部分覆盖则为 unknown，转换器或截断候选不会被当作唯一。HTTP association 独立于 `CodeEdge`，不证明 URL 实际指向本地服务。coverage 的 `path_analysis` 将当前 v2 参数化分析、旧 v1 `literal_only` 和未分析分开；旧数据库新列默认 literal，旧 snapshot 的静态字面量关联继续可读。显式刷新和 freshness 对 TS/TSX 与 Python 使用同一文件规则和预算。
 
 GitHub 来源是 freshness 的远端例外：由于成功导入后的归档目录会清理，检查只调用共享客户端解析已跟踪 ref 的当前 commit，不读取归档、不执行 AST/关系提取，也不改变 index。结果同时保留远端 URL、请求 ref、解析 ref、commit 与 `remote_status`；远端 commit 一致时仍需独立比较 index 的 rules/config 身份。显式 GitHub 更新再次解析并通过受限固定 commit 导入，兼容的同 commit snapshot 可复用，ref 移动以实际 attempt 的 commit 为准，失败保留旧 latest。
 
 ## 错误与限制
 
-路径、文件、解析器输出/时间和关系预算受限。Python 缓存损坏、版本不兼容、行号不匹配或读写失败安全降级为未命中；清理不触碰历史 index/evidence。TypeScript 不持久缓存。相对路径别名、包别名和含编码/查询/片段的导入目标不解析。HTTP 第一版只为通过 AST 验证的透明 `requestJson` wrapper 提取直接顶层函数调用；未验证的 wrapper 不产生请求 fact，已识别 wrapper 中的模板路径、动态方法/options、路由挂载前缀和同形多候选不伪造匹配，动态值保留 unknown。文件扫描不完整、读后增长越过总字节预算、读取失败、符号链接、边界逃逸、TOCTOU 或 GitHub metadata 检查异常均不能判定 freshness 一致；旧索引不会回写新的 TypeScript facts。静态目标解析可因时间/边预算不完整，unresolved 详情也可独立截断；空邻接不能证明没有关系。
+路径、文件、解析器输出/时间和关系预算受限。Python 缓存损坏、版本不兼容、行号不匹配或读写失败安全降级为未命中；清理不触碰历史 index/evidence。TypeScript 不持久缓存。相对路径别名、包别名和含编码/查询/片段的导入目标不解析。HTTP 仅为通过 AST 验证的透明 `requestJson` wrapper 提取直接顶层函数调用；未验证 wrapper 不产生请求 fact，已识别 wrapper 中的不支持模板、动态 query/method/options、路由挂载前缀、路径转换器或不唯一候选不伪造匹配，动态值保留 unknown。文件扫描不完整、读后增长越过总字节预算、读取失败、符号链接、边界逃逸、TOCTOU 或 GitHub metadata 检查异常均不能判定 freshness 一致；旧索引不会回写新的 TypeScript facts。静态目标解析可因时间/边预算不完整，unresolved 详情也可独立截断；空邻接不能证明没有关系。
 
 ## 验证
 

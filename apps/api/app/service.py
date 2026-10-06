@@ -778,7 +778,7 @@ class IndexService:
                     raise ServiceError(
                         "invalid_input",
                         400,
-                        "source directory contains no supported Python files",
+                        "source directory contains no supported Python, TypeScript, or TSX files",
                     )
                 resolved_cache_scope_id = cache_scope_id or f"repository:{request.repository_id}"
                 cached_definitions = {}
