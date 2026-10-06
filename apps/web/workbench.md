@@ -46,6 +46,8 @@ API 离线、项目/Session/index 不属于当前范围、索引不在 latest、
 
 ## 验证
 
+展开模块共用 40 个画布名额；当前选中的已展开职责/目录优先分配，其余按展开顺序分配。未返回的 overview 模块与画布名额不足分别提示，选择组不会加载遗漏模块。静态过滤保留至少一种 imports/calls，HTTP 形状开关独立。可复现的较大样本生成与边界见 [样本说明](../../fixtures/README.md)。
+
 从仓库根目录执行 `pnpm --dir apps/web test`、`pnpm web:typecheck` 和 `pnpm web:build`。项目架构画布的浏览器交互验收及未完成项见本地 memory-bank 阶段记录；布局约束见 [工作区 UI 规范](../../docs/design/workspace-ui-spec.md)。2026-10-06 已在真实浏览器验证概览 503 失败后通过重试恢复；产品按用户确认面向 PC 端，窄屏矩阵不属于验收范围；已有 390×844 点检仅作为历史证据。当前架构验收画面可用官方浏览器截图接口查看，未保存截图文件；不能由构建或单测推定 UI 全部通过。其他浏览器流程与已知案例限制见 [影响链验收](../../evals/results/p4-e2b-codex-host-20261001/impact-chain-acceptance.md)，其既有边界状态仍有效。
 
 ## 相关决策

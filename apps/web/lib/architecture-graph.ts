@@ -102,7 +102,10 @@ export function buildArchitectureGraph(
   const maxVisibleModules = Math.max(0, Math.min(options.maxVisibleModules ?? ARCHITECTURE_MODULE_LIMIT, ARCHITECTURE_MODULE_LIMIT));
   const visibleModuleIdsByGroup = new Map<string, string[]>();
   let remainingModuleSlots = maxVisibleModules;
-  for (const groupId of expandedGroupIds) {
+  const allocationOrder = options.selectedGroupId && expandedGroups.has(options.selectedGroupId)
+    ? [options.selectedGroupId, ...expandedGroupIds.filter((groupId) => groupId !== options.selectedGroupId)]
+    : expandedGroupIds;
+  for (const groupId of allocationOrder) {
     const moduleIds = (moduleIdsByGroup.get(groupId) ?? [])
       .filter((moduleId) => moduleById.has(moduleId))
       .sort((left, right) => {

@@ -58,4 +58,10 @@ uv run --project apps/api python fixtures/generate_responses.py
 
 ## 功能生成与验证边界
 
+### 架构浏览容量样本
+
+从仓库根目录运行 `uv run --project apps/api python scripts/generate_architecture_fixture.py --self-test` 检查确定性与非空输出拒绝；不带参数运行会生成独立临时目录，或用 `--output <空目录>` 指定位置。生成器仅使用标准库，不执行生成源码，不修改已有样本、manifest 或评测答案。
+
+样本含 129 个 Python/TypeScript 模块、6 个显式职责、跨职责 imports/calls 循环、静态 HTTP 形状与动态 unknown，以及一个含 46 项定义的模块。通过允许根目录内的本地导入建立实际索引，用于核对默认 overview 100 模块截断、画布 40 模块上限、职责展开/过滤/聚焦及定义分页与固定快照源码回返；这些计数是样本设计，解析结果仍需实际验收。它不是独立模型质量评测或真实运行流程。
+
 O2 的 fixture-feature-v1 从真实索引的入口、search、neighbors 和源码 evidence 确定性生成主要功能结果，不另存一份模拟模型报告。`apps/api/tests/test_features.py` 验证工具上下文、生成、保存、读取和证据钻取；fixture 通过不代表真实模型语义质量。

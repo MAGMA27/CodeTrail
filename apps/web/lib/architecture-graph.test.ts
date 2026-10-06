@@ -257,6 +257,43 @@ test("expanded modules keep valid endpoints and the global 40-node ceiling", () 
   assert.equal(bounded.directories[0].omittedByCanvasLimit, 5);
 });
 
+test("an expanded selected responsibility gets module slots before earlier expanded groups", () => {
+  const makeRole = (role: string, count: number) => {
+    const modules = Array.from({ length: count }, (_, index) =>
+      moduleRecord(`${role}-${index}`, `${role}/mod${index}.py`),
+    );
+    return {
+      modules,
+      group: { ...directory(`role-${role}`, role, modules.map((module) => module.module_id)), group_kind: "responsibility" as const },
+    };
+  };
+  const first = makeRole("first", 30);
+  const second = makeRole("second", 15);
+  const selected = makeRole("selected", 10);
+  const value = overview(
+    [...first.modules, ...second.modules, ...selected.modules],
+    [first.group, second.group, selected.group],
+    [],
+  );
+  const graph = buildArchitectureGraph(value, {
+    expandedGroupIds: [first.group.group_id, second.group.group_id, selected.group.group_id],
+    selectedGroupId: selected.group.group_id,
+  });
+
+  assert.equal(graph.visibleModuleCount, ARCHITECTURE_MODULE_LIMIT);
+  assert.equal(graph.directories.find((item) => item.group.group_id === selected.group.group_id)?.visibleModules.length, 10);
+  assert.equal(graph.directories.find((item) => item.group.group_id === selected.group.group_id)?.omittedByCanvasLimit, 0);
+  assert.equal(graph.directories.find((item) => item.group.group_id === first.group.group_id)?.visibleModules.length, 30);
+  assert.equal(graph.directories.find((item) => item.group.group_id === second.group.group_id)?.visibleModules.length, 0);
+
+  const unselected = buildArchitectureGraph(value, {
+    expandedGroupIds: [first.group.group_id, second.group.group_id, selected.group.group_id],
+  });
+  assert.equal(unselected.directories.find((item) => item.group.group_id === first.group.group_id)?.visibleModules.length, 30);
+  assert.equal(unselected.directories.find((item) => item.group.group_id === second.group.group_id)?.visibleModules.length, 10);
+  assert.equal(unselected.directories.find((item) => item.group.group_id === selected.group.group_id)?.visibleModules.length, 0);
+});
+
 test("HTTP entry focus highlights its source module without changing static relation counts", () => {
   const model = buildArchitectureGraph(baseOverview, {
     expandedGroupIds: ["group-api"],
