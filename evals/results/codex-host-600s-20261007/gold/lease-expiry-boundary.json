@@ -1,0 +1,9 @@
+{
+  "case_id": "lease-expiry-boundary",
+  "expected_outcome": "candidate_found",
+  "root": { "path": "lease_policy.py", "symbol": "lease_is_active", "lines": [4, 4] },
+  "diagnosis": "The inclusive comparison accepts a lease when now equals expires_at. Expiry should exclude that instant, so the predicate should use a strict comparison.",
+  "impact_boundary": "Only requests evaluated at the exact configured expiry instant are affected by this comparison. The snapshot does not establish lease durations, request volume, or any broader authorization impact.",
+  "required_evidence": ["lease_policy.py:4"],
+  "score": { "outcome": 1, "file": 1, "symbol": 1, "location": 1, "diagnosis": 1, "evidence": 1, "impact_boundary": 1 }
+}

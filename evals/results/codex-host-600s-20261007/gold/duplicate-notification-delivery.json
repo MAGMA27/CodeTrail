@@ -1,0 +1,10 @@
+{
+  "case_id": "duplicate-notification-delivery",
+  "expected_outcome": "candidate_found",
+  "root": { "path": "delivery.py", "symbol": "dispatch_notification", "lines": [8, 13] },
+  "related": { "path": "ledger.py", "symbol": "DeliveryLedger", "lines": [1, 9] },
+  "diagnosis": "dispatch_notification creates a new in-memory DeliveryLedger for every invocation. Its sent-ID set therefore starts empty on each retry, and recording a successful send in that temporary instance cannot suppress a later invocation.",
+  "impact_boundary": "Repeated calls for the same notification ID can resend after a successful provider response. The snapshot does not establish retry frequency, provider deduplication behavior, or actual delivery counts.",
+  "required_evidence": ["delivery.py:8-13", "ledger.py:1-9"],
+  "score": { "outcome": 1, "file": 1, "symbol": 1, "location": 1, "diagnosis": 1, "evidence": 1, "impact_boundary": 1, "cross_module_link": 1 }
+}

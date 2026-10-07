@@ -1,0 +1,821 @@
+{
+  "case_id": "lease-expiry-boundary",
+  "project_id": "project-abec76b8b8ea4d31b8caa4ac9e425ab1",
+  "session_id": "session-70a904ca76bb47e39e5ca10d555ec308",
+  "run_id": "run-5defb5cfc04f4bd08e84b58fd9d60f57",
+  "captured_at": "2026-10-07T04:25:36.901433+00:00",
+  "run": {
+    "schema_version": "0.1.0",
+    "run": {
+      "schema_version": "0.1.0",
+      "run_id": "run-5defb5cfc04f4bd08e84b58fd9d60f57",
+      "project_id": "project-abec76b8b8ea4d31b8caa4ac9e425ab1",
+      "session_id": "session-70a904ca76bb47e39e5ca10d555ec308",
+      "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+      "feature_generation_id": null,
+      "issue": {
+        "schema_version": "0.1.0",
+        "id": "lease-expiry-boundary",
+        "title": "An authorization remains valid at its expiry instant",
+        "body": "A request using a time-limited lease is still accepted when the request timestamp exactly matches the lease's configured expiry. Requests after that instant are rejected. Find the code path that explains the boundary behavior, cite the fixed-snapshot source, and state which requests are affected.",
+        "stacktrace": null,
+        "mentioned_paths": []
+      },
+      "mode": "external",
+      "analysis_kind": "issue",
+      "execution_source": "codex",
+      "fixture_scenario": null,
+      "model_provider": null,
+      "model": null,
+      "prompt_version": null,
+      "execution_version": "run-external-codex-v1",
+      "status": "succeeded",
+      "budget": {
+        "max_tool_calls": 8,
+        "max_model_calls": 4,
+        "max_repair_calls": 1,
+        "max_seconds": 600,
+        "max_source_lines": 200,
+        "max_total_source_lines": 800,
+        "max_input_chars": 60000,
+        "max_model_input_chars": 80000,
+        "max_output_chars": 50000,
+        "max_model_output_chars": 20000,
+        "max_events": 100,
+        "tool_calls_used": 4,
+        "model_calls_used": 0,
+        "repair_calls_used": 0,
+        "source_lines_used": 11,
+        "input_chars_used": 351,
+        "model_input_chars_used": 0,
+        "output_chars_used": 4685,
+        "model_output_chars_used": 0,
+        "model_input_tokens_used": null,
+        "model_output_tokens_used": null,
+        "events_used": 11
+      },
+      "message_end_sequence": 1,
+      "input_hash": "e757aeed47cf9124e067d729f4f5b444e99476dd5fadaa742426129c4afa4ae8",
+      "input_chars": 351,
+      "created_at": "2026-10-07T04:21:57.543575Z",
+      "started_at": "2026-10-07T04:22:21.210062Z",
+      "ended_at": "2026-10-07T04:24:39.972620Z",
+      "report_id": "report-run-5defb5cfc04f4bd08e84b58fd9d60f57"
+    },
+    "input": {
+      "schema_version": "0.1.0",
+      "project_id": "project-abec76b8b8ea4d31b8caa4ac9e425ab1",
+      "session_id": "session-70a904ca76bb47e39e5ca10d555ec308",
+      "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+      "feature_generation_id": null,
+      "message_end_sequence": 1,
+      "messages": [
+        {
+          "schema_version": "0.1.0",
+          "message_id": "message-0c5afd36f9894470867535b1108a3085",
+          "session_id": "session-70a904ca76bb47e39e5ca10d555ec308",
+          "sequence": 1,
+          "source": "human",
+          "content": "An authorization remains valid at its expiry instant\n\nA request using a time-limited lease is still accepted when the request timestamp exactly matches the lease's configured expiry. Requests after that instant are rejected. Find the code path that explains the boundary behavior, cite the fixed-snapshot source, and state which requests are affected.",
+          "created_at": "2026-10-07T04:17:28.084210Z"
+        }
+      ],
+      "input_hash": "e757aeed47cf9124e067d729f4f5b444e99476dd5fadaa742426129c4afa4ae8",
+      "input_chars": 351,
+      "frozen_at": "2026-10-07T04:21:57.543575Z"
+    }
+  },
+  "events": {
+    "schema_version": "0.1.0",
+    "project_id": "project-abec76b8b8ea4d31b8caa4ac9e425ab1",
+    "session_id": "session-70a904ca76bb47e39e5ca10d555ec308",
+    "run_id": "run-5defb5cfc04f4bd08e84b58fd9d60f57",
+    "events": [
+      {
+        "run_id": "run-5defb5cfc04f4bd08e84b58fd9d60f57",
+        "sequence": 1,
+        "timestamp": "2026-10-07T04:22:21.210062Z",
+        "type": "run.started",
+        "payload": {
+          "project_id": "project-abec76b8b8ea4d31b8caa4ac9e425ab1",
+          "session_id": "session-70a904ca76bb47e39e5ca10d555ec308",
+          "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+          "issue_id": "lease-expiry-boundary",
+          "mode": "external",
+          "analysis_kind": "issue",
+          "execution_source": "codex",
+          "message_end_sequence": 1,
+          "input_hash": "e757aeed47cf9124e067d729f4f5b444e99476dd5fadaa742426129c4afa4ae8",
+          "feature_generation_id": null,
+          "execution_version": "run-external-codex-v1",
+          "budget": {
+            "max_tool_calls": 8,
+            "max_model_calls": 4,
+            "max_repair_calls": 1,
+            "max_seconds": 600,
+            "max_source_lines": 200,
+            "max_total_source_lines": 800,
+            "max_input_chars": 60000,
+            "max_model_input_chars": 80000,
+            "max_output_chars": 50000,
+            "max_model_output_chars": 20000,
+            "max_events": 100,
+            "tool_calls_used": 0,
+            "model_calls_used": 0,
+            "repair_calls_used": 0,
+            "source_lines_used": 0,
+            "input_chars_used": 351,
+            "model_input_chars_used": 0,
+            "output_chars_used": 0,
+            "model_output_chars_used": 0,
+            "model_input_tokens_used": null,
+            "model_output_tokens_used": null,
+            "events_used": 0
+          }
+        }
+      },
+      {
+        "run_id": "run-5defb5cfc04f4bd08e84b58fd9d60f57",
+        "sequence": 2,
+        "timestamp": "2026-10-07T04:22:21.213949Z",
+        "type": "tool.started",
+        "payload": {
+          "request": {
+            "request_id": "lease-expiry-search-01",
+            "run_id": "run-5defb5cfc04f4bd08e84b58fd9d60f57",
+            "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+            "params": {
+              "tool": "search_code",
+              "query": "lease expiry expiration expires_at valid timestamp",
+              "limit": 30
+            }
+          }
+        }
+      },
+      {
+        "run_id": "run-5defb5cfc04f4bd08e84b58fd9d60f57",
+        "sequence": 3,
+        "timestamp": "2026-10-07T04:22:21.324703Z",
+        "type": "tool.completed",
+        "payload": {
+          "result": {
+            "request_id": "lease-expiry-search-01",
+            "run_id": "run-5defb5cfc04f4bd08e84b58fd9d60f57",
+            "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+            "completed_sequence": 3,
+            "kind": "search_code.succeeded",
+            "tool": "search_code",
+            "matches": [],
+            "truncated": false,
+            "truncation_reason": null
+          }
+        }
+      },
+      {
+        "run_id": "run-5defb5cfc04f4bd08e84b58fd9d60f57",
+        "sequence": 4,
+        "timestamp": "2026-10-07T04:22:48.768240Z",
+        "type": "tool.started",
+        "payload": {
+          "request": {
+            "request_id": "lease-expiry-search-02",
+            "run_id": "run-5defb5cfc04f4bd08e84b58fd9d60f57",
+            "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+            "params": {
+              "tool": "search_code",
+              "query": "lease",
+              "limit": 40
+            }
+          }
+        }
+      },
+      {
+        "run_id": "run-5defb5cfc04f4bd08e84b58fd9d60f57",
+        "sequence": 5,
+        "timestamp": "2026-10-07T04:22:48.889217Z",
+        "type": "tool.completed",
+        "payload": {
+          "result": {
+            "request_id": "lease-expiry-search-02",
+            "run_id": "run-5defb5cfc04f4bd08e84b58fd9d60f57",
+            "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+            "completed_sequence": 5,
+            "kind": "search_code.succeeded",
+            "tool": "search_code",
+            "matches": [
+              {
+                "rank": 1,
+                "symbol": {
+                  "start_line": 1,
+                  "end_line": 11,
+                  "symbol_id": "sym-5a204c1e5863320e60cc321dee62fa8f",
+                  "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+                  "path": "lease_policy.py",
+                  "qualified_name": "lease_policy",
+                  "kind": "module"
+                },
+                "matched_terms": [
+                  "lease"
+                ]
+              },
+              {
+                "rank": 2,
+                "symbol": {
+                  "start_line": 8,
+                  "end_line": 11,
+                  "symbol_id": "sym-f1636c01b9a0acc63d223ccd4b714de1",
+                  "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+                  "path": "lease_policy.py",
+                  "qualified_name": "lease_policy.authorize_action",
+                  "kind": "function"
+                },
+                "matched_terms": [
+                  "lease"
+                ]
+              },
+              {
+                "rank": 3,
+                "symbol": {
+                  "start_line": 4,
+                  "end_line": 5,
+                  "symbol_id": "sym-55c468b8838cb568ae0a0db85f67eab7",
+                  "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+                  "path": "lease_policy.py",
+                  "qualified_name": "lease_policy.lease_is_active",
+                  "kind": "function"
+                },
+                "matched_terms": [
+                  "lease"
+                ]
+              }
+            ],
+            "truncated": false,
+            "truncation_reason": null
+          }
+        }
+      },
+      {
+        "run_id": "run-5defb5cfc04f4bd08e84b58fd9d60f57",
+        "sequence": 6,
+        "timestamp": "2026-10-07T04:23:00.119318Z",
+        "type": "tool.started",
+        "payload": {
+          "request": {
+            "request_id": "lease-expiry-read-01",
+            "run_id": "run-5defb5cfc04f4bd08e84b58fd9d60f57",
+            "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+            "params": {
+              "tool": "read_source",
+              "path": "lease_policy.py",
+              "start_line": 1,
+              "end_line": 11
+            }
+          }
+        }
+      },
+      {
+        "run_id": "run-5defb5cfc04f4bd08e84b58fd9d60f57",
+        "sequence": 7,
+        "timestamp": "2026-10-07T04:23:00.233093Z",
+        "type": "tool.completed",
+        "payload": {
+          "result": {
+            "request_id": "lease-expiry-read-01",
+            "run_id": "run-5defb5cfc04f4bd08e84b58fd9d60f57",
+            "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+            "completed_sequence": 7,
+            "kind": "read_source.succeeded",
+            "tool": "read_source",
+            "evidence": {
+              "start_line": 1,
+              "end_line": 11,
+              "evidence_id": "evidence-e2b841a354b7d0f20db3ef05495fa39c",
+              "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+              "path": "lease_policy.py",
+              "excerpt": "from collections.abc import Callable\n\n\ndef lease_is_active(now: int, expires_at: int) -> bool:\n    return now <= expires_at\n\n\ndef authorize_action(now: int, expires_at: int, action: Callable[[], bool]) -> bool:\n    if not lease_is_active(now, expires_at):\n        return False\n    return action()",
+              "content_hash": "74f16f90d1de042e1f8733da83c430b7e652ca0124c2bcb4db4e4d3bfb496a94",
+              "kind": "source"
+            }
+          }
+        }
+      },
+      {
+        "run_id": "run-5defb5cfc04f4bd08e84b58fd9d60f57",
+        "sequence": 8,
+        "timestamp": "2026-10-07T04:23:45.448983Z",
+        "type": "tool.started",
+        "payload": {
+          "request": {
+            "request_id": "lease-expiry-neighbors-01",
+            "run_id": "run-5defb5cfc04f4bd08e84b58fd9d60f57",
+            "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+            "params": {
+              "tool": "get_neighbors",
+              "symbol_id": "sym-f1636c01b9a0acc63d223ccd4b714de1",
+              "direction": "callees",
+              "depth": 1,
+              "limit": 20
+            }
+          }
+        }
+      },
+      {
+        "run_id": "run-5defb5cfc04f4bd08e84b58fd9d60f57",
+        "sequence": 9,
+        "timestamp": "2026-10-07T04:23:45.573342Z",
+        "type": "tool.completed",
+        "payload": {
+          "result": {
+            "request_id": "lease-expiry-neighbors-01",
+            "run_id": "run-5defb5cfc04f4bd08e84b58fd9d60f57",
+            "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+            "completed_sequence": 9,
+            "kind": "get_neighbors.succeeded",
+            "tool": "get_neighbors",
+            "root": {
+              "start_line": 8,
+              "end_line": 11,
+              "symbol_id": "sym-f1636c01b9a0acc63d223ccd4b714de1",
+              "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+              "path": "lease_policy.py",
+              "qualified_name": "lease_policy.authorize_action",
+              "kind": "function"
+            },
+            "nodes": [
+              {
+                "start_line": 8,
+                "end_line": 11,
+                "symbol_id": "sym-f1636c01b9a0acc63d223ccd4b714de1",
+                "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+                "path": "lease_policy.py",
+                "qualified_name": "lease_policy.authorize_action",
+                "kind": "function"
+              },
+              {
+                "start_line": 4,
+                "end_line": 5,
+                "symbol_id": "sym-55c468b8838cb568ae0a0db85f67eab7",
+                "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+                "path": "lease_policy.py",
+                "qualified_name": "lease_policy.lease_is_active",
+                "kind": "function"
+              }
+            ],
+            "neighbors": [
+              {
+                "symbol": {
+                  "start_line": 4,
+                  "end_line": 5,
+                  "symbol_id": "sym-55c468b8838cb568ae0a0db85f67eab7",
+                  "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+                  "path": "lease_policy.py",
+                  "qualified_name": "lease_policy.lease_is_active",
+                  "kind": "function"
+                },
+                "edge": {
+                  "edge_id": "edge-1903a59c24031cc73dcb6cd9d4b71ee8",
+                  "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+                  "source_id": "sym-f1636c01b9a0acc63d223ccd4b714de1",
+                  "target_id": "sym-55c468b8838cb568ae0a0db85f67eab7",
+                  "kind": "calls",
+                  "extraction_method": "ast",
+                  "source_location": {
+                    "start_line": 9,
+                    "end_line": 9,
+                    "path": "lease_policy.py"
+                  }
+                }
+              }
+            ],
+            "contextual_calls": [],
+            "unresolved": [
+              {
+                "start_line": 11,
+                "end_line": 11,
+                "unresolved_id": "unresolved-0fda12d0b468fc8481899a5bb871b175",
+                "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+                "source_symbol_id": "sym-f1636c01b9a0acc63d223ccd4b714de1",
+                "path": "lease_policy.py",
+                "expression": "action()",
+                "reason": "name_rebound_in_scope",
+                "possible_target_ids": []
+              }
+            ],
+            "truncated": false,
+            "truncation_reason": null,
+            "index_truncated": false,
+            "index_truncation_reason": null,
+            "index_unresolved_truncated": false,
+            "index_unresolved_truncation_reason": null
+          }
+        }
+      },
+      {
+        "run_id": "run-5defb5cfc04f4bd08e84b58fd9d60f57",
+        "sequence": 10,
+        "timestamp": "2026-10-07T04:24:39.968759Z",
+        "type": "graph.updated",
+        "payload": {
+          "graph": {
+            "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+            "nodes": [
+              {
+                "start_line": 1,
+                "end_line": 11,
+                "symbol_id": "sym-5a204c1e5863320e60cc321dee62fa8f",
+                "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+                "path": "lease_policy.py",
+                "qualified_name": "lease_policy",
+                "kind": "module"
+              },
+              {
+                "start_line": 8,
+                "end_line": 11,
+                "symbol_id": "sym-f1636c01b9a0acc63d223ccd4b714de1",
+                "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+                "path": "lease_policy.py",
+                "qualified_name": "lease_policy.authorize_action",
+                "kind": "function"
+              },
+              {
+                "start_line": 4,
+                "end_line": 5,
+                "symbol_id": "sym-55c468b8838cb568ae0a0db85f67eab7",
+                "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+                "path": "lease_policy.py",
+                "qualified_name": "lease_policy.lease_is_active",
+                "kind": "function"
+              }
+            ],
+            "static_edges": [
+              {
+                "edge_id": "edge-1903a59c24031cc73dcb6cd9d4b71ee8",
+                "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+                "source_id": "sym-f1636c01b9a0acc63d223ccd4b714de1",
+                "target_id": "sym-55c468b8838cb568ae0a0db85f67eab7",
+                "kind": "calls",
+                "extraction_method": "ast",
+                "source_location": {
+                  "start_line": 9,
+                  "end_line": 9,
+                  "path": "lease_policy.py"
+                }
+              }
+            ],
+            "unresolved": [
+              {
+                "start_line": 11,
+                "end_line": 11,
+                "unresolved_id": "unresolved-0fda12d0b468fc8481899a5bb871b175",
+                "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+                "source_symbol_id": "sym-f1636c01b9a0acc63d223ccd4b714de1",
+                "path": "lease_policy.py",
+                "expression": "action()",
+                "reason": "name_rebound_in_scope",
+                "possible_target_ids": []
+              }
+            ],
+            "candidate_links": [
+              {
+                "candidate_id": "sym-55c468b8838cb568ae0a0db85f67eab7",
+                "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+                "source_symbol_id": "sym-f1636c01b9a0acc63d223ccd4b714de1",
+                "target_symbol_id": "sym-55c468b8838cb568ae0a0db85f67eab7",
+                "relation": "lease validity check used by authorization",
+                "evidence_ids": [
+                  "evidence-e2b841a354b7d0f20db3ef05495fa39c"
+                ]
+              }
+            ],
+            "truncated": false,
+            "truncation_reason": null
+          }
+        }
+      },
+      {
+        "run_id": "run-5defb5cfc04f4bd08e84b58fd9d60f57",
+        "sequence": 11,
+        "timestamp": "2026-10-07T04:24:39.972620Z",
+        "type": "run.completed",
+        "payload": {
+          "status": "succeeded",
+          "outcome": "candidate_found",
+          "report_id": "report-run-5defb5cfc04f4bd08e84b58fd9d60f57"
+        }
+      }
+    ],
+    "next_after_sequence": null,
+    "has_more": false
+  },
+  "tool_results": {
+    "schema_version": "0.1.0",
+    "project_id": "project-abec76b8b8ea4d31b8caa4ac9e425ab1",
+    "session_id": "session-70a904ca76bb47e39e5ca10d555ec308",
+    "run_id": "run-5defb5cfc04f4bd08e84b58fd9d60f57",
+    "results": [
+      {
+        "request_id": "lease-expiry-search-01",
+        "run_id": "run-5defb5cfc04f4bd08e84b58fd9d60f57",
+        "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+        "completed_sequence": 3,
+        "kind": "search_code.succeeded",
+        "tool": "search_code",
+        "matches": [],
+        "truncated": false,
+        "truncation_reason": null
+      },
+      {
+        "request_id": "lease-expiry-search-02",
+        "run_id": "run-5defb5cfc04f4bd08e84b58fd9d60f57",
+        "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+        "completed_sequence": 5,
+        "kind": "search_code.succeeded",
+        "tool": "search_code",
+        "matches": [
+          {
+            "rank": 1,
+            "symbol": {
+              "start_line": 1,
+              "end_line": 11,
+              "symbol_id": "sym-5a204c1e5863320e60cc321dee62fa8f",
+              "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+              "path": "lease_policy.py",
+              "qualified_name": "lease_policy",
+              "kind": "module"
+            },
+            "matched_terms": [
+              "lease"
+            ]
+          },
+          {
+            "rank": 2,
+            "symbol": {
+              "start_line": 8,
+              "end_line": 11,
+              "symbol_id": "sym-f1636c01b9a0acc63d223ccd4b714de1",
+              "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+              "path": "lease_policy.py",
+              "qualified_name": "lease_policy.authorize_action",
+              "kind": "function"
+            },
+            "matched_terms": [
+              "lease"
+            ]
+          },
+          {
+            "rank": 3,
+            "symbol": {
+              "start_line": 4,
+              "end_line": 5,
+              "symbol_id": "sym-55c468b8838cb568ae0a0db85f67eab7",
+              "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+              "path": "lease_policy.py",
+              "qualified_name": "lease_policy.lease_is_active",
+              "kind": "function"
+            },
+            "matched_terms": [
+              "lease"
+            ]
+          }
+        ],
+        "truncated": false,
+        "truncation_reason": null
+      },
+      {
+        "request_id": "lease-expiry-read-01",
+        "run_id": "run-5defb5cfc04f4bd08e84b58fd9d60f57",
+        "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+        "completed_sequence": 7,
+        "kind": "read_source.succeeded",
+        "tool": "read_source",
+        "evidence": {
+          "start_line": 1,
+          "end_line": 11,
+          "evidence_id": "evidence-e2b841a354b7d0f20db3ef05495fa39c",
+          "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+          "path": "lease_policy.py",
+          "excerpt": "from collections.abc import Callable\n\n\ndef lease_is_active(now: int, expires_at: int) -> bool:\n    return now <= expires_at\n\n\ndef authorize_action(now: int, expires_at: int, action: Callable[[], bool]) -> bool:\n    if not lease_is_active(now, expires_at):\n        return False\n    return action()",
+          "content_hash": "74f16f90d1de042e1f8733da83c430b7e652ca0124c2bcb4db4e4d3bfb496a94",
+          "kind": "source"
+        }
+      },
+      {
+        "request_id": "lease-expiry-neighbors-01",
+        "run_id": "run-5defb5cfc04f4bd08e84b58fd9d60f57",
+        "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+        "completed_sequence": 9,
+        "kind": "get_neighbors.succeeded",
+        "tool": "get_neighbors",
+        "root": {
+          "start_line": 8,
+          "end_line": 11,
+          "symbol_id": "sym-f1636c01b9a0acc63d223ccd4b714de1",
+          "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+          "path": "lease_policy.py",
+          "qualified_name": "lease_policy.authorize_action",
+          "kind": "function"
+        },
+        "nodes": [
+          {
+            "start_line": 8,
+            "end_line": 11,
+            "symbol_id": "sym-f1636c01b9a0acc63d223ccd4b714de1",
+            "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+            "path": "lease_policy.py",
+            "qualified_name": "lease_policy.authorize_action",
+            "kind": "function"
+          },
+          {
+            "start_line": 4,
+            "end_line": 5,
+            "symbol_id": "sym-55c468b8838cb568ae0a0db85f67eab7",
+            "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+            "path": "lease_policy.py",
+            "qualified_name": "lease_policy.lease_is_active",
+            "kind": "function"
+          }
+        ],
+        "neighbors": [
+          {
+            "symbol": {
+              "start_line": 4,
+              "end_line": 5,
+              "symbol_id": "sym-55c468b8838cb568ae0a0db85f67eab7",
+              "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+              "path": "lease_policy.py",
+              "qualified_name": "lease_policy.lease_is_active",
+              "kind": "function"
+            },
+            "edge": {
+              "edge_id": "edge-1903a59c24031cc73dcb6cd9d4b71ee8",
+              "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+              "source_id": "sym-f1636c01b9a0acc63d223ccd4b714de1",
+              "target_id": "sym-55c468b8838cb568ae0a0db85f67eab7",
+              "kind": "calls",
+              "extraction_method": "ast",
+              "source_location": {
+                "start_line": 9,
+                "end_line": 9,
+                "path": "lease_policy.py"
+              }
+            }
+          }
+        ],
+        "contextual_calls": [],
+        "unresolved": [
+          {
+            "start_line": 11,
+            "end_line": 11,
+            "unresolved_id": "unresolved-0fda12d0b468fc8481899a5bb871b175",
+            "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+            "source_symbol_id": "sym-f1636c01b9a0acc63d223ccd4b714de1",
+            "path": "lease_policy.py",
+            "expression": "action()",
+            "reason": "name_rebound_in_scope",
+            "possible_target_ids": []
+          }
+        ],
+        "truncated": false,
+        "truncation_reason": null,
+        "index_truncated": false,
+        "index_truncation_reason": null,
+        "index_unresolved_truncated": false,
+        "index_unresolved_truncation_reason": null
+      }
+    ],
+    "next_after_sequence": null,
+    "has_more": false
+  },
+  "report": {
+    "schema_version": "0.1.0",
+    "report": {
+      "schema_version": "0.1.0",
+      "report_id": "report-run-5defb5cfc04f4bd08e84b58fd9d60f57",
+      "run_id": "run-5defb5cfc04f4bd08e84b58fd9d60f57",
+      "project_id": "project-abec76b8b8ea4d31b8caa4ac9e425ab1",
+      "session_id": "session-70a904ca76bb47e39e5ca10d555ec308",
+      "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+      "status": "succeeded",
+      "outcome": "candidate_found",
+      "fixture_mode": false,
+      "summary": "Lease expiry is inclusive: an authorization request with now equal to expires_at is accepted. Requests with a later timestamp are rejected before the action runs.",
+      "graph": {
+        "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+        "nodes": [
+          {
+            "start_line": 1,
+            "end_line": 11,
+            "symbol_id": "sym-5a204c1e5863320e60cc321dee62fa8f",
+            "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+            "path": "lease_policy.py",
+            "qualified_name": "lease_policy",
+            "kind": "module"
+          },
+          {
+            "start_line": 8,
+            "end_line": 11,
+            "symbol_id": "sym-f1636c01b9a0acc63d223ccd4b714de1",
+            "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+            "path": "lease_policy.py",
+            "qualified_name": "lease_policy.authorize_action",
+            "kind": "function"
+          },
+          {
+            "start_line": 4,
+            "end_line": 5,
+            "symbol_id": "sym-55c468b8838cb568ae0a0db85f67eab7",
+            "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+            "path": "lease_policy.py",
+            "qualified_name": "lease_policy.lease_is_active",
+            "kind": "function"
+          }
+        ],
+        "static_edges": [
+          {
+            "edge_id": "edge-1903a59c24031cc73dcb6cd9d4b71ee8",
+            "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+            "source_id": "sym-f1636c01b9a0acc63d223ccd4b714de1",
+            "target_id": "sym-55c468b8838cb568ae0a0db85f67eab7",
+            "kind": "calls",
+            "extraction_method": "ast",
+            "source_location": {
+              "start_line": 9,
+              "end_line": 9,
+              "path": "lease_policy.py"
+            }
+          }
+        ],
+        "unresolved": [
+          {
+            "start_line": 11,
+            "end_line": 11,
+            "unresolved_id": "unresolved-0fda12d0b468fc8481899a5bb871b175",
+            "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+            "source_symbol_id": "sym-f1636c01b9a0acc63d223ccd4b714de1",
+            "path": "lease_policy.py",
+            "expression": "action()",
+            "reason": "name_rebound_in_scope",
+            "possible_target_ids": []
+          }
+        ],
+        "candidate_links": [
+          {
+            "candidate_id": "sym-55c468b8838cb568ae0a0db85f67eab7",
+            "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+            "source_symbol_id": "sym-f1636c01b9a0acc63d223ccd4b714de1",
+            "target_symbol_id": "sym-55c468b8838cb568ae0a0db85f67eab7",
+            "relation": "lease validity check used by authorization",
+            "evidence_ids": [
+              "evidence-e2b841a354b7d0f20db3ef05495fa39c"
+            ]
+          }
+        ],
+        "truncated": false,
+        "truncation_reason": null
+      },
+      "evidence": [
+        {
+          "start_line": 1,
+          "end_line": 11,
+          "evidence_id": "evidence-e2b841a354b7d0f20db3ef05495fa39c",
+          "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+          "path": "lease_policy.py",
+          "excerpt": "from collections.abc import Callable\n\n\ndef lease_is_active(now: int, expires_at: int) -> bool:\n    return now <= expires_at\n\n\ndef authorize_action(now: int, expires_at: int, action: Callable[[], bool]) -> bool:\n    if not lease_is_active(now, expires_at):\n        return False\n    return action()",
+          "content_hash": "74f16f90d1de042e1f8733da83c430b7e652ca0124c2bcb4db4e4d3bfb496a94",
+          "kind": "source"
+        }
+      ],
+      "findings": [
+        {
+          "finding_id": "lease-expiry-inclusive-boundary",
+          "kind": "observation",
+          "text": "authorize_action checks lease_is_active before invoking the action. lease_is_active returns now <= expires_at, so requests at the configured expiry are accepted; requests with now > expires_at are rejected before action invocation.",
+          "symbol_ids": [
+            "sym-f1636c01b9a0acc63d223ccd4b714de1",
+            "sym-55c468b8838cb568ae0a0db85f67eab7"
+          ],
+          "evidence_ids": [
+            "evidence-e2b841a354b7d0f20db3ef05495fa39c"
+          ]
+        }
+      ],
+      "candidate_links": [
+        {
+          "candidate_id": "sym-55c468b8838cb568ae0a0db85f67eab7",
+          "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+          "source_symbol_id": "sym-f1636c01b9a0acc63d223ccd4b714de1",
+          "target_symbol_id": "sym-55c468b8838cb568ae0a0db85f67eab7",
+          "relation": "lease validity check used by authorization",
+          "evidence_ids": [
+            "evidence-e2b841a354b7d0f20db3ef05495fa39c"
+          ]
+        }
+      ],
+      "explanation": null,
+      "limitations": [
+        "The static neighbor result leaves the passed action() call unresolved; the lease boundary behavior itself is explicit in the read source."
+      ],
+      "terminal_sequence": 11
+    }
+  }
+}

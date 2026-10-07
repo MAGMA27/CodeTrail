@@ -1,0 +1,69 @@
+{
+  "schema_version": "codetrail.external-issue-eval.score.v1",
+  "scored_after_all_first_round_reports_reached_terminal_state": true,
+  "scoring_sources": [
+    "gold/lease-expiry-boundary.json",
+    "gold/duplicate-notification-delivery.json",
+    "gold/unobservable-gateway-timeout.json"
+  ],
+  "denominator_policy": "All three frozen first-round cases remain in the denominator; no guided or follow-up run is included.",
+  "total_score": 22,
+  "maximum_score": 22,
+  "cases": [
+    {
+      "case_id": "lease-expiry-boundary",
+      "run_id": "run-5defb5cfc04f4bd08e84b58fd9d60f57",
+      "expected_outcome": "candidate_found",
+      "actual_outcome": "candidate_found",
+      "criteria": {
+        "outcome": 1,
+        "file": 1,
+        "symbol": 1,
+        "location": 1,
+        "diagnosis": 1,
+        "evidence": 1,
+        "impact_boundary": 1
+      },
+      "score": 7,
+      "maximum_score": 7,
+      "assessment": "Candidate link resolves to lease_is_active at lease_policy.py, and same-run evidence covers the inclusive comparison. The finding states that now == expires_at is accepted and now > expires_at is rejected; no broader authorization impact is claimed."
+    },
+    {
+      "case_id": "duplicate-notification-delivery",
+      "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+      "expected_outcome": "candidate_found",
+      "actual_outcome": "candidate_found",
+      "criteria": {
+        "outcome": 1,
+        "file": 1,
+        "symbol": 1,
+        "location": 1,
+        "diagnosis": 1,
+        "evidence": 1,
+        "impact_boundary": 1,
+        "cross_module_link": 1
+      },
+      "score": 8,
+      "maximum_score": 8,
+      "assessment": "Candidate link points to dispatch_notification. The two evidence excerpts establish construction of a fresh DeliveryLedger and its per-instance empty ID set; report limits the claim to this dispatch path and says no upstream caller was returned."
+    },
+    {
+      "case_id": "unobservable-gateway-timeout",
+      "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+      "expected_outcome": "insufficient_evidence",
+      "actual_outcome": "insufficient_evidence",
+      "criteria": {
+        "outcome": 1,
+        "scope_file": 1,
+        "scope_symbol": 1,
+        "diagnosis": 1,
+        "evidence": 1,
+        "impact_boundary": 1,
+        "abstention_calibration": 1
+      },
+      "score": 7,
+      "maximum_score": 7,
+      "assessment": "Report cites bridge.deliver and the GatewayPort Protocol stub, with no candidate link. It declines to attribute the observed delay to code not present in the snapshot."
+    }
+  ]
+}

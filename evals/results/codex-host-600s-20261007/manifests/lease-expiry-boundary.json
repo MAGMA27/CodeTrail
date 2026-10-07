@@ -1,0 +1,12 @@
+{
+  "schema_version": "p4-e1",
+  "case_id": "lease-expiry-boundary",
+  "files": [
+    {
+      "path": "lease_policy.py",
+      "size": 297,
+      "sha256": "74f16f90d1de042e1f8733da83c430b7e652ca0124c2bcb4db4e4d3bfb496a94"
+    }
+  ],
+  "snapshot_hash": "6370f4474649f47fbbcda1e7edc4246fe8e5e98d8fa868c38c9b4eff8a451868"
+}

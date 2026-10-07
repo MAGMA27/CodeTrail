@@ -1,0 +1,9 @@
+{
+  "case_id": "unobservable-gateway-timeout",
+  "expected_outcome": "insufficient_evidence",
+  "scope": { "path": "bridge.py", "symbol": "deliver", "related_path": "ports.py", "related_symbol": "GatewayPort.send" },
+  "diagnosis": "The visible implementation forwards to a GatewayPort protocol. The snapshot contains no concrete adapter, timeout configuration, retry policy, response handling, or partner transport implementation that could explain the delayed acknowledgement.",
+  "impact_boundary": "The snapshot establishes delegation only. It cannot attribute the local timeout or later partner acknowledgement to application code, a concrete gateway, network timing, or partner behavior.",
+  "required_evidence": ["bridge.py:4", "ports.py:4-7"],
+  "score": { "outcome": 1, "scope_file": 1, "scope_symbol": 1, "diagnosis": 1, "evidence": 1, "impact_boundary": 1, "abstention_calibration": 1 }
+}

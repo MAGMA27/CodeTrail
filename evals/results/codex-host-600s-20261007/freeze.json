@@ -1,0 +1,55 @@
+{
+  "dataset_id": "codex-host-600s-20261007",
+  "created_at": "2026-10-07T04:18:10.439903+00:00",
+  "cases": [
+    {
+      "case_id": "lease-expiry-boundary",
+      "issue_sha256": "65d09cbe0177eaf2b9392675450ffe89625c4d334039568f66bb0101e9d39466",
+      "gold_sha256": "38f3e179bb3d32a40396bc16d734b012b32b810f2e081cab354d78a33cf318e2",
+      "source_files": [
+        {
+          "path": "lease_policy.py",
+          "size": 297,
+          "sha256": "74f16f90d1de042e1f8733da83c430b7e652ca0124c2bcb4db4e4d3bfb496a94"
+        }
+      ],
+      "source_snapshot_hash": "6370f4474649f47fbbcda1e7edc4246fe8e5e98d8fa868c38c9b4eff8a451868"
+    },
+    {
+      "case_id": "duplicate-notification-delivery",
+      "issue_sha256": "20974b05ebdb2156b188ce1a76eb3b1eee0e900b94af465219784d080a6976ba",
+      "gold_sha256": "3dbbba58eae1d5db0f07528ed8cd621c9a9000622ed406f4107992f685958a45",
+      "source_files": [
+        {
+          "path": "delivery.py",
+          "size": 463,
+          "sha256": "53a88f0011452c69cb1ae63e1cbd0d9dd232a1dd8ed1f34148982b4453af201c"
+        },
+        {
+          "path": "ledger.py",
+          "size": 299,
+          "sha256": "4ced2d041d83961b2d93aebd7120256ec95cd449a069e8a46f81cacdca6bebab"
+        }
+      ],
+      "source_snapshot_hash": "929a7ef4cde147351a44addd744fad36aacbb255a3888dec162b8f2f74d2aaae"
+    },
+    {
+      "case_id": "unobservable-gateway-timeout",
+      "issue_sha256": "8dbe3343c0c90ca8606572b631971b59ab0990495b493d37c623ad387198dfc3",
+      "gold_sha256": "b809bcf329ad45d343b425a4e64bdd88c5412450f66934c39a924e7e8ceb1882",
+      "source_files": [
+        {
+          "path": "bridge.py",
+          "size": 150,
+          "sha256": "ee46cf5afc8ec139bab147ac780e23a8cecd5c3883378d7907f26cb49578f85a"
+        },
+        {
+          "path": "ports.py",
+          "size": 190,
+          "sha256": "0b9a67b95dfb2787242aa94d6e23bd74f8e9389975d9bf2c3dfe92b30737a33e"
+        }
+      ],
+      "source_snapshot_hash": "5230fc31c1ea9d43d36c5e8bccfcdb620978602a2433e73effba149df097a80e"
+    }
+  ]
+}

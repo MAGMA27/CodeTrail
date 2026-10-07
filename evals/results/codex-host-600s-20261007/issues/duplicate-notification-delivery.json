@@ -1,0 +1,6 @@
+{
+  "id": "duplicate-notification-delivery",
+  "title": "A retry can send the same notification again",
+  "body": "A notification is accepted by the provider, but a later retry for the same notification ID sends it again. Please trace the application path and any related delivery state, cite the relevant source from this snapshot, and explain the scope of the behavior.",
+  "mentioned_paths": []
+}

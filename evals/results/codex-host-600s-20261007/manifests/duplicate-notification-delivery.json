@@ -1,0 +1,17 @@
+{
+  "schema_version": "p4-e1",
+  "case_id": "duplicate-notification-delivery",
+  "files": [
+    {
+      "path": "delivery.py",
+      "size": 463,
+      "sha256": "53a88f0011452c69cb1ae63e1cbd0d9dd232a1dd8ed1f34148982b4453af201c"
+    },
+    {
+      "path": "ledger.py",
+      "size": 299,
+      "sha256": "4ced2d041d83961b2d93aebd7120256ec95cd449a069e8a46f81cacdca6bebab"
+    }
+  ],
+  "snapshot_hash": "929a7ef4cde147351a44addd744fad36aacbb255a3888dec162b8f2f74d2aaae"
+}

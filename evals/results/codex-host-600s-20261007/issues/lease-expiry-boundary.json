@@ -1,0 +1,6 @@
+{
+  "id": "lease-expiry-boundary",
+  "title": "An authorization remains valid at its expiry instant",
+  "body": "A request using a time-limited lease is still accepted when the request timestamp exactly matches the lease's configured expiry. Requests after that instant are rejected. Find the code path that explains the boundary behavior, cite the fixed-snapshot source, and state which requests are affected.",
+  "mentioned_paths": []
+}

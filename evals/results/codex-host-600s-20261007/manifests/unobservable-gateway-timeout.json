@@ -1,0 +1,17 @@
+{
+  "schema_version": "p4-e1",
+  "case_id": "unobservable-gateway-timeout",
+  "files": [
+    {
+      "path": "bridge.py",
+      "size": 150,
+      "sha256": "ee46cf5afc8ec139bab147ac780e23a8cecd5c3883378d7907f26cb49578f85a"
+    },
+    {
+      "path": "ports.py",
+      "size": 190,
+      "sha256": "0b9a67b95dfb2787242aa94d6e23bd74f8e9389975d9bf2c3dfe92b30737a33e"
+    }
+  ],
+  "snapshot_hash": "5230fc31c1ea9d43d36c5e8bccfcdb620978602a2433e73effba149df097a80e"
+}

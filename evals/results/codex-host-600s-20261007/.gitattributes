@@ -1,0 +1,5 @@
+sources/** -text
+issues/** -text
+gold/** -text
+manifests/** -text
+freeze.json -text

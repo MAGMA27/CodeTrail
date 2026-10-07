@@ -1,0 +1,6 @@
+{
+  "id": "unobservable-gateway-timeout",
+  "title": "Partner acknowledgements sometimes arrive after our timeout",
+  "body": "Some outbound events are logged as timed out locally even though the partner later confirms receiving them. Identify a source-level cause if this repository supports one. Cite the available code and distinguish what the snapshot establishes from what remains unknown.",
+  "mentioned_paths": []
+}

@@ -1,0 +1,1855 @@
+{
+  "case_id": "duplicate-notification-delivery",
+  "project_id": "project-5e05f0cb303a4c9285a052f99cf7d010",
+  "session_id": "session-3f120e08e963462e9d6ee19faaf36447",
+  "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+  "captured_at": "2026-10-07T04:25:39.208691+00:00",
+  "run": {
+    "schema_version": "0.1.0",
+    "run": {
+      "schema_version": "0.1.0",
+      "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+      "project_id": "project-5e05f0cb303a4c9285a052f99cf7d010",
+      "session_id": "session-3f120e08e963462e9d6ee19faaf36447",
+      "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+      "feature_generation_id": null,
+      "issue": {
+        "schema_version": "0.1.0",
+        "id": "duplicate-notification-delivery",
+        "title": "A retry can send the same notification again",
+        "body": "A notification is accepted by the provider, but a later retry for the same notification ID sends it again. Please trace the application path and any related delivery state, cite the relevant source from this snapshot, and explain the scope of the behavior.",
+        "stacktrace": null,
+        "mentioned_paths": []
+      },
+      "mode": "external",
+      "analysis_kind": "issue",
+      "execution_source": "codex",
+      "fixture_scenario": null,
+      "model_provider": null,
+      "model": null,
+      "prompt_version": null,
+      "execution_version": "run-external-codex-v1",
+      "status": "succeeded",
+      "budget": {
+        "max_tool_calls": 8,
+        "max_model_calls": 4,
+        "max_repair_calls": 1,
+        "max_seconds": 600,
+        "max_source_lines": 200,
+        "max_total_source_lines": 800,
+        "max_input_chars": 60000,
+        "max_model_input_chars": 80000,
+        "max_output_chars": 50000,
+        "max_model_output_chars": 20000,
+        "max_events": 100,
+        "tool_calls_used": 8,
+        "model_calls_used": 0,
+        "repair_calls_used": 0,
+        "source_lines_used": 17,
+        "input_chars_used": 302,
+        "model_input_chars_used": 0,
+        "output_chars_used": 13110,
+        "model_output_chars_used": 0,
+        "model_input_tokens_used": null,
+        "model_output_tokens_used": null,
+        "events_used": 19
+      },
+      "message_end_sequence": 1,
+      "input_hash": "4b8b716284d2559becba784cc473e6a78572359ef5fb772e09a0d7a50bc94f92",
+      "input_chars": 302,
+      "created_at": "2026-10-07T04:21:37.758674Z",
+      "started_at": "2026-10-07T04:21:52.603907Z",
+      "ended_at": "2026-10-07T04:23:37.177875Z",
+      "report_id": "report-run-08eb2743f3f74969851a3fe607a1a74b"
+    },
+    "input": {
+      "schema_version": "0.1.0",
+      "project_id": "project-5e05f0cb303a4c9285a052f99cf7d010",
+      "session_id": "session-3f120e08e963462e9d6ee19faaf36447",
+      "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+      "feature_generation_id": null,
+      "message_end_sequence": 1,
+      "messages": [
+        {
+          "schema_version": "0.1.0",
+          "message_id": "message-f7dd2875222c4190ac0c652cba426680",
+          "session_id": "session-3f120e08e963462e9d6ee19faaf36447",
+          "sequence": 1,
+          "source": "human",
+          "content": "A retry can send the same notification again\n\nA notification is accepted by the provider, but a later retry for the same notification ID sends it again. Please trace the application path and any related delivery state, cite the relevant source from this snapshot, and explain the scope of the behavior.",
+          "created_at": "2026-10-07T04:17:30.153612Z"
+        }
+      ],
+      "input_hash": "4b8b716284d2559becba784cc473e6a78572359ef5fb772e09a0d7a50bc94f92",
+      "input_chars": 302,
+      "frozen_at": "2026-10-07T04:21:37.758674Z"
+    }
+  },
+  "events": {
+    "schema_version": "0.1.0",
+    "project_id": "project-5e05f0cb303a4c9285a052f99cf7d010",
+    "session_id": "session-3f120e08e963462e9d6ee19faaf36447",
+    "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+    "events": [
+      {
+        "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+        "sequence": 1,
+        "timestamp": "2026-10-07T04:21:52.603907Z",
+        "type": "run.started",
+        "payload": {
+          "project_id": "project-5e05f0cb303a4c9285a052f99cf7d010",
+          "session_id": "session-3f120e08e963462e9d6ee19faaf36447",
+          "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+          "issue_id": "duplicate-notification-delivery",
+          "mode": "external",
+          "analysis_kind": "issue",
+          "execution_source": "codex",
+          "message_end_sequence": 1,
+          "input_hash": "4b8b716284d2559becba784cc473e6a78572359ef5fb772e09a0d7a50bc94f92",
+          "feature_generation_id": null,
+          "execution_version": "run-external-codex-v1",
+          "budget": {
+            "max_tool_calls": 8,
+            "max_model_calls": 4,
+            "max_repair_calls": 1,
+            "max_seconds": 600,
+            "max_source_lines": 200,
+            "max_total_source_lines": 800,
+            "max_input_chars": 60000,
+            "max_model_input_chars": 80000,
+            "max_output_chars": 50000,
+            "max_model_output_chars": 20000,
+            "max_events": 100,
+            "tool_calls_used": 0,
+            "model_calls_used": 0,
+            "repair_calls_used": 0,
+            "source_lines_used": 0,
+            "input_chars_used": 302,
+            "model_input_chars_used": 0,
+            "output_chars_used": 0,
+            "model_output_chars_used": 0,
+            "model_input_tokens_used": null,
+            "model_output_tokens_used": null,
+            "events_used": 0
+          }
+        }
+      },
+      {
+        "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+        "sequence": 2,
+        "timestamp": "2026-10-07T04:21:52.607814Z",
+        "type": "tool.started",
+        "payload": {
+          "request": {
+            "request_id": "delivery-search-1",
+            "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+            "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+            "params": {
+              "tool": "search_code",
+              "query": "notification",
+              "limit": 30
+            }
+          }
+        }
+      },
+      {
+        "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+        "sequence": 3,
+        "timestamp": "2026-10-07T04:21:52.631138Z",
+        "type": "tool.completed",
+        "payload": {
+          "result": {
+            "request_id": "delivery-search-1",
+            "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+            "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+            "completed_sequence": 3,
+            "kind": "search_code.succeeded",
+            "tool": "search_code",
+            "matches": [
+              {
+                "rank": 1,
+                "symbol": {
+                  "start_line": 9,
+                  "end_line": 16,
+                  "symbol_id": "sym-896d2dd0c7538f0f6b0ff272c9353bdf",
+                  "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+                  "path": "delivery.py",
+                  "qualified_name": "delivery.dispatch_notification",
+                  "kind": "function"
+                },
+                "matched_terms": [
+                  "notification"
+                ]
+              }
+            ],
+            "truncated": false,
+            "truncation_reason": null
+          }
+        }
+      },
+      {
+        "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+        "sequence": 4,
+        "timestamp": "2026-10-07T04:21:58.729112Z",
+        "type": "tool.started",
+        "payload": {
+          "request": {
+            "request_id": "delivery-search-2",
+            "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+            "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+            "params": {
+              "tool": "search_code",
+              "query": "retry",
+              "limit": 30
+            }
+          }
+        }
+      },
+      {
+        "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+        "sequence": 5,
+        "timestamp": "2026-10-07T04:21:58.752629Z",
+        "type": "tool.completed",
+        "payload": {
+          "result": {
+            "request_id": "delivery-search-2",
+            "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+            "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+            "completed_sequence": 5,
+            "kind": "search_code.succeeded",
+            "tool": "search_code",
+            "matches": [],
+            "truncated": false,
+            "truncation_reason": null
+          }
+        }
+      },
+      {
+        "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+        "sequence": 6,
+        "timestamp": "2026-10-07T04:22:04.489142Z",
+        "type": "tool.started",
+        "payload": {
+          "request": {
+            "request_id": "delivery-read-1",
+            "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+            "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+            "params": {
+              "tool": "read_source",
+              "path": "delivery.py",
+              "start_line": 1,
+              "end_line": 40
+            }
+          }
+        }
+      },
+      {
+        "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+        "sequence": 7,
+        "timestamp": "2026-10-07T04:22:04.519265Z",
+        "type": "tool.failed",
+        "payload": {
+          "result": {
+            "request_id": "delivery-read-1",
+            "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+            "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+            "completed_sequence": 7,
+            "kind": "read_source.failed",
+            "tool": "read_source",
+            "error": {
+              "code": "invalid_input",
+              "message": "query parameters are invalid",
+              "retryable": false
+            }
+          }
+        }
+      },
+      {
+        "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+        "sequence": 8,
+        "timestamp": "2026-10-07T04:22:10.675614Z",
+        "type": "tool.started",
+        "payload": {
+          "request": {
+            "request_id": "delivery-read-2",
+            "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+            "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+            "params": {
+              "tool": "read_source",
+              "path": "delivery.py",
+              "start_line": 9,
+              "end_line": 16
+            }
+          }
+        }
+      },
+      {
+        "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+        "sequence": 9,
+        "timestamp": "2026-10-07T04:22:10.697196Z",
+        "type": "tool.completed",
+        "payload": {
+          "result": {
+            "request_id": "delivery-read-2",
+            "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+            "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+            "completed_sequence": 9,
+            "kind": "read_source.succeeded",
+            "tool": "read_source",
+            "evidence": {
+              "start_line": 9,
+              "end_line": 16,
+              "evidence_id": "evidence-cc393ec148a33fdbd7cfa8db7ca6a876",
+              "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+              "path": "delivery.py",
+              "excerpt": "def dispatch_notification(notification_id: str, sender) -> ProviderResponse:\n    ledger = DeliveryLedger()\n    if ledger.was_sent(notification_id):\n        return ProviderResponse(False)\n    response = sender.send(notification_id)\n    if response.accepted:\n        ledger.mark_sent(notification_id)\n    return response",
+              "content_hash": "53a88f0011452c69cb1ae63e1cbd0d9dd232a1dd8ed1f34148982b4453af201c",
+              "kind": "source"
+            }
+          }
+        }
+      },
+      {
+        "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+        "sequence": 10,
+        "timestamp": "2026-10-07T04:22:15.847363Z",
+        "type": "tool.started",
+        "payload": {
+          "request": {
+            "request_id": "delivery-search-3",
+            "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+            "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+            "params": {
+              "tool": "search_code",
+              "query": "DeliveryLedger",
+              "limit": 20
+            }
+          }
+        }
+      },
+      {
+        "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+        "sequence": 11,
+        "timestamp": "2026-10-07T04:22:15.871373Z",
+        "type": "tool.completed",
+        "payload": {
+          "result": {
+            "request_id": "delivery-search-3",
+            "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+            "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+            "completed_sequence": 11,
+            "kind": "search_code.succeeded",
+            "tool": "search_code",
+            "matches": [
+              {
+                "rank": 1,
+                "symbol": {
+                  "start_line": 1,
+                  "end_line": 9,
+                  "symbol_id": "sym-76d712e649cd33261ef87c97a01a1160",
+                  "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+                  "path": "ledger.py",
+                  "qualified_name": "ledger.DeliveryLedger",
+                  "kind": "class"
+                },
+                "matched_terms": [
+                  "deliveryledger"
+                ]
+              },
+              {
+                "rank": 2,
+                "symbol": {
+                  "start_line": 2,
+                  "end_line": 3,
+                  "symbol_id": "sym-36fe0b36d1e532393c302c5f4a9d88dd",
+                  "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+                  "path": "ledger.py",
+                  "qualified_name": "ledger.DeliveryLedger.__init__",
+                  "kind": "function"
+                },
+                "matched_terms": [
+                  "deliveryledger"
+                ]
+              },
+              {
+                "rank": 3,
+                "symbol": {
+                  "start_line": 8,
+                  "end_line": 9,
+                  "symbol_id": "sym-9f1023537623ea67fd3cb681215311ec",
+                  "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+                  "path": "ledger.py",
+                  "qualified_name": "ledger.DeliveryLedger.mark_sent",
+                  "kind": "function"
+                },
+                "matched_terms": [
+                  "deliveryledger"
+                ]
+              },
+              {
+                "rank": 4,
+                "symbol": {
+                  "start_line": 5,
+                  "end_line": 6,
+                  "symbol_id": "sym-95abe0c0d25902905e456c9c143ec6b2",
+                  "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+                  "path": "ledger.py",
+                  "qualified_name": "ledger.DeliveryLedger.was_sent",
+                  "kind": "function"
+                },
+                "matched_terms": [
+                  "deliveryledger"
+                ]
+              },
+              {
+                "rank": 5,
+                "symbol": {
+                  "start_line": 1,
+                  "end_line": 16,
+                  "symbol_id": "sym-4bb591bb3a4539557791ed3788d3f487",
+                  "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+                  "path": "delivery.py",
+                  "qualified_name": "delivery",
+                  "kind": "module"
+                },
+                "matched_terms": [
+                  "deliveryledger"
+                ]
+              },
+              {
+                "rank": 6,
+                "symbol": {
+                  "start_line": 9,
+                  "end_line": 16,
+                  "symbol_id": "sym-896d2dd0c7538f0f6b0ff272c9353bdf",
+                  "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+                  "path": "delivery.py",
+                  "qualified_name": "delivery.dispatch_notification",
+                  "kind": "function"
+                },
+                "matched_terms": [
+                  "deliveryledger"
+                ]
+              },
+              {
+                "rank": 7,
+                "symbol": {
+                  "start_line": 1,
+                  "end_line": 9,
+                  "symbol_id": "sym-599e36f7f3330978db6c1b8df65ed6f8",
+                  "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+                  "path": "ledger.py",
+                  "qualified_name": "ledger",
+                  "kind": "module"
+                },
+                "matched_terms": [
+                  "deliveryledger"
+                ]
+              }
+            ],
+            "truncated": false,
+            "truncation_reason": null
+          }
+        }
+      },
+      {
+        "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+        "sequence": 12,
+        "timestamp": "2026-10-07T04:22:20.999868Z",
+        "type": "tool.started",
+        "payload": {
+          "request": {
+            "request_id": "ledger-read-1",
+            "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+            "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+            "params": {
+              "tool": "read_source",
+              "path": "ledger.py",
+              "start_line": 1,
+              "end_line": 9
+            }
+          }
+        }
+      },
+      {
+        "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+        "sequence": 13,
+        "timestamp": "2026-10-07T04:22:21.023843Z",
+        "type": "tool.completed",
+        "payload": {
+          "result": {
+            "request_id": "ledger-read-1",
+            "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+            "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+            "completed_sequence": 13,
+            "kind": "read_source.succeeded",
+            "tool": "read_source",
+            "evidence": {
+              "start_line": 1,
+              "end_line": 9,
+              "evidence_id": "evidence-4585d47adc7a9e058e5416421d9b39fd",
+              "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+              "path": "ledger.py",
+              "excerpt": "class DeliveryLedger:\n    def __init__(self) -> None:\n        self._sent_ids: set[str] = set()\n\n    def was_sent(self, notification_id: str) -> bool:\n        return notification_id in self._sent_ids\n\n    def mark_sent(self, notification_id: str) -> None:\n        self._sent_ids.add(notification_id)",
+              "content_hash": "4ced2d041d83961b2d93aebd7120256ec95cd449a069e8a46f81cacdca6bebab",
+              "kind": "source"
+            }
+          }
+        }
+      },
+      {
+        "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+        "sequence": 14,
+        "timestamp": "2026-10-07T04:22:32.421847Z",
+        "type": "tool.started",
+        "payload": {
+          "request": {
+            "request_id": "delivery-neighbors-1",
+            "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+            "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+            "params": {
+              "tool": "get_neighbors",
+              "symbol_id": "sym-896d2dd0c7538f0f6b0ff272c9353bdf",
+              "direction": "both",
+              "depth": 2,
+              "limit": 30
+            }
+          }
+        }
+      },
+      {
+        "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+        "sequence": 15,
+        "timestamp": "2026-10-07T04:22:32.446674Z",
+        "type": "tool.completed",
+        "payload": {
+          "result": {
+            "request_id": "delivery-neighbors-1",
+            "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+            "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+            "completed_sequence": 15,
+            "kind": "get_neighbors.succeeded",
+            "tool": "get_neighbors",
+            "root": {
+              "start_line": 9,
+              "end_line": 16,
+              "symbol_id": "sym-896d2dd0c7538f0f6b0ff272c9353bdf",
+              "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+              "path": "delivery.py",
+              "qualified_name": "delivery.dispatch_notification",
+              "kind": "function"
+            },
+            "nodes": [
+              {
+                "start_line": 9,
+                "end_line": 16,
+                "symbol_id": "sym-896d2dd0c7538f0f6b0ff272c9353bdf",
+                "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+                "path": "delivery.py",
+                "qualified_name": "delivery.dispatch_notification",
+                "kind": "function"
+              },
+              {
+                "start_line": 1,
+                "end_line": 9,
+                "symbol_id": "sym-76d712e649cd33261ef87c97a01a1160",
+                "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+                "path": "ledger.py",
+                "qualified_name": "ledger.DeliveryLedger",
+                "kind": "class"
+              },
+              {
+                "start_line": 5,
+                "end_line": 6,
+                "symbol_id": "sym-95abe0c0d25902905e456c9c143ec6b2",
+                "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+                "path": "ledger.py",
+                "qualified_name": "ledger.DeliveryLedger.was_sent",
+                "kind": "function"
+              },
+              {
+                "start_line": 8,
+                "end_line": 9,
+                "symbol_id": "sym-9f1023537623ea67fd3cb681215311ec",
+                "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+                "path": "ledger.py",
+                "qualified_name": "ledger.DeliveryLedger.mark_sent",
+                "kind": "function"
+              },
+              {
+                "start_line": 4,
+                "end_line": 6,
+                "symbol_id": "sym-a05477a32f8f85a581f25a62646963ea",
+                "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+                "path": "delivery.py",
+                "qualified_name": "delivery.ProviderResponse",
+                "kind": "class"
+              },
+              {
+                "start_line": 1,
+                "end_line": 16,
+                "symbol_id": "sym-4bb591bb3a4539557791ed3788d3f487",
+                "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+                "path": "delivery.py",
+                "qualified_name": "delivery",
+                "kind": "module"
+              }
+            ],
+            "neighbors": [
+              {
+                "symbol": {
+                  "start_line": 1,
+                  "end_line": 9,
+                  "symbol_id": "sym-76d712e649cd33261ef87c97a01a1160",
+                  "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+                  "path": "ledger.py",
+                  "qualified_name": "ledger.DeliveryLedger",
+                  "kind": "class"
+                },
+                "edge": {
+                  "edge_id": "edge-6d786430259c99821e112f293e69f8d4",
+                  "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+                  "source_id": "sym-896d2dd0c7538f0f6b0ff272c9353bdf",
+                  "target_id": "sym-76d712e649cd33261ef87c97a01a1160",
+                  "kind": "calls",
+                  "extraction_method": "ast",
+                  "source_location": {
+                    "start_line": 10,
+                    "end_line": 10,
+                    "path": "delivery.py"
+                  }
+                }
+              },
+              {
+                "symbol": {
+                  "start_line": 5,
+                  "end_line": 6,
+                  "symbol_id": "sym-95abe0c0d25902905e456c9c143ec6b2",
+                  "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+                  "path": "ledger.py",
+                  "qualified_name": "ledger.DeliveryLedger.was_sent",
+                  "kind": "function"
+                },
+                "edge": {
+                  "edge_id": "edge-e16faaf93be202ffb7cb0dae27f97f69",
+                  "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+                  "source_id": "sym-896d2dd0c7538f0f6b0ff272c9353bdf",
+                  "target_id": "sym-95abe0c0d25902905e456c9c143ec6b2",
+                  "kind": "calls",
+                  "extraction_method": "ast",
+                  "source_location": {
+                    "start_line": 11,
+                    "end_line": 11,
+                    "path": "delivery.py"
+                  }
+                }
+              },
+              {
+                "symbol": {
+                  "start_line": 8,
+                  "end_line": 9,
+                  "symbol_id": "sym-9f1023537623ea67fd3cb681215311ec",
+                  "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+                  "path": "ledger.py",
+                  "qualified_name": "ledger.DeliveryLedger.mark_sent",
+                  "kind": "function"
+                },
+                "edge": {
+                  "edge_id": "edge-82eb729f68fef033e8eec6dd124382ac",
+                  "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+                  "source_id": "sym-896d2dd0c7538f0f6b0ff272c9353bdf",
+                  "target_id": "sym-9f1023537623ea67fd3cb681215311ec",
+                  "kind": "calls",
+                  "extraction_method": "ast",
+                  "source_location": {
+                    "start_line": 15,
+                    "end_line": 15,
+                    "path": "delivery.py"
+                  }
+                }
+              },
+              {
+                "symbol": {
+                  "start_line": 4,
+                  "end_line": 6,
+                  "symbol_id": "sym-a05477a32f8f85a581f25a62646963ea",
+                  "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+                  "path": "delivery.py",
+                  "qualified_name": "delivery.ProviderResponse",
+                  "kind": "class"
+                },
+                "edge": {
+                  "edge_id": "edge-1dabca630041d88762b55e6cb24b7d7a",
+                  "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+                  "source_id": "sym-896d2dd0c7538f0f6b0ff272c9353bdf",
+                  "target_id": "sym-a05477a32f8f85a581f25a62646963ea",
+                  "kind": "calls",
+                  "extraction_method": "ast",
+                  "source_location": {
+                    "start_line": 12,
+                    "end_line": 12,
+                    "path": "delivery.py"
+                  }
+                }
+              },
+              {
+                "symbol": {
+                  "start_line": 1,
+                  "end_line": 16,
+                  "symbol_id": "sym-4bb591bb3a4539557791ed3788d3f487",
+                  "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+                  "path": "delivery.py",
+                  "qualified_name": "delivery",
+                  "kind": "module"
+                },
+                "edge": {
+                  "edge_id": "edge-1b9e0a8dde588ca9d63f9caf6b46a0c6",
+                  "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+                  "source_id": "sym-4bb591bb3a4539557791ed3788d3f487",
+                  "target_id": "sym-76d712e649cd33261ef87c97a01a1160",
+                  "kind": "imports",
+                  "extraction_method": "explicit_import",
+                  "source_location": {
+                    "start_line": 1,
+                    "end_line": 1,
+                    "path": "delivery.py"
+                  }
+                }
+              }
+            ],
+            "contextual_calls": [],
+            "unresolved": [
+              {
+                "start_line": 13,
+                "end_line": 13,
+                "unresolved_id": "unresolved-eb8932ab0f68bf3ddceb8d1fb4af98a0",
+                "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+                "source_symbol_id": "sym-896d2dd0c7538f0f6b0ff272c9353bdf",
+                "path": "delivery.py",
+                "expression": "sender.send(notification_id)",
+                "reason": "name_rebound_in_scope",
+                "possible_target_ids": []
+              },
+              {
+                "start_line": 9,
+                "end_line": 9,
+                "unresolved_id": "unresolved-c49b12ea6a3584879a9bfabb56b7de9f",
+                "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+                "source_symbol_id": "sym-9f1023537623ea67fd3cb681215311ec",
+                "path": "ledger.py",
+                "expression": "self._sent_ids.add(notification_id)",
+                "reason": "object_method_not_resolved",
+                "possible_target_ids": []
+              }
+            ],
+            "truncated": false,
+            "truncation_reason": null,
+            "index_truncated": false,
+            "index_truncation_reason": null,
+            "index_unresolved_truncated": false,
+            "index_unresolved_truncation_reason": null
+          }
+        }
+      },
+      {
+        "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+        "sequence": 16,
+        "timestamp": "2026-10-07T04:22:40.762573Z",
+        "type": "tool.started",
+        "payload": {
+          "request": {
+            "request_id": "delivery-search-4",
+            "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+            "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+            "params": {
+              "tool": "search_code",
+              "query": "accepted",
+              "limit": 20
+            }
+          }
+        }
+      },
+      {
+        "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+        "sequence": 17,
+        "timestamp": "2026-10-07T04:22:40.785256Z",
+        "type": "tool.completed",
+        "payload": {
+          "result": {
+            "request_id": "delivery-search-4",
+            "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+            "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+            "completed_sequence": 17,
+            "kind": "search_code.succeeded",
+            "tool": "search_code",
+            "matches": [
+              {
+                "rank": 1,
+                "symbol": {
+                  "start_line": 1,
+                  "end_line": 16,
+                  "symbol_id": "sym-4bb591bb3a4539557791ed3788d3f487",
+                  "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+                  "path": "delivery.py",
+                  "qualified_name": "delivery",
+                  "kind": "module"
+                },
+                "matched_terms": [
+                  "accepted"
+                ]
+              },
+              {
+                "rank": 2,
+                "symbol": {
+                  "start_line": 4,
+                  "end_line": 6,
+                  "symbol_id": "sym-a05477a32f8f85a581f25a62646963ea",
+                  "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+                  "path": "delivery.py",
+                  "qualified_name": "delivery.ProviderResponse",
+                  "kind": "class"
+                },
+                "matched_terms": [
+                  "accepted"
+                ]
+              },
+              {
+                "rank": 3,
+                "symbol": {
+                  "start_line": 9,
+                  "end_line": 16,
+                  "symbol_id": "sym-896d2dd0c7538f0f6b0ff272c9353bdf",
+                  "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+                  "path": "delivery.py",
+                  "qualified_name": "delivery.dispatch_notification",
+                  "kind": "function"
+                },
+                "matched_terms": [
+                  "accepted"
+                ]
+              },
+              {
+                "rank": 4,
+                "symbol": {
+                  "start_line": 5,
+                  "end_line": 6,
+                  "symbol_id": "sym-b75e8e688c02d2bdc92b0d03b7962117",
+                  "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+                  "path": "delivery.py",
+                  "qualified_name": "delivery.ProviderResponse.__init__",
+                  "kind": "function"
+                },
+                "matched_terms": [
+                  "accepted"
+                ]
+              }
+            ],
+            "truncated": false,
+            "truncation_reason": null
+          }
+        }
+      },
+      {
+        "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+        "sequence": 18,
+        "timestamp": "2026-10-07T04:23:37.173737Z",
+        "type": "graph.updated",
+        "payload": {
+          "graph": {
+            "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+            "nodes": [
+              {
+                "start_line": 9,
+                "end_line": 16,
+                "symbol_id": "sym-896d2dd0c7538f0f6b0ff272c9353bdf",
+                "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+                "path": "delivery.py",
+                "qualified_name": "delivery.dispatch_notification",
+                "kind": "function"
+              },
+              {
+                "start_line": 1,
+                "end_line": 9,
+                "symbol_id": "sym-76d712e649cd33261ef87c97a01a1160",
+                "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+                "path": "ledger.py",
+                "qualified_name": "ledger.DeliveryLedger",
+                "kind": "class"
+              },
+              {
+                "start_line": 2,
+                "end_line": 3,
+                "symbol_id": "sym-36fe0b36d1e532393c302c5f4a9d88dd",
+                "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+                "path": "ledger.py",
+                "qualified_name": "ledger.DeliveryLedger.__init__",
+                "kind": "function"
+              },
+              {
+                "start_line": 8,
+                "end_line": 9,
+                "symbol_id": "sym-9f1023537623ea67fd3cb681215311ec",
+                "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+                "path": "ledger.py",
+                "qualified_name": "ledger.DeliveryLedger.mark_sent",
+                "kind": "function"
+              },
+              {
+                "start_line": 5,
+                "end_line": 6,
+                "symbol_id": "sym-95abe0c0d25902905e456c9c143ec6b2",
+                "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+                "path": "ledger.py",
+                "qualified_name": "ledger.DeliveryLedger.was_sent",
+                "kind": "function"
+              },
+              {
+                "start_line": 1,
+                "end_line": 16,
+                "symbol_id": "sym-4bb591bb3a4539557791ed3788d3f487",
+                "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+                "path": "delivery.py",
+                "qualified_name": "delivery",
+                "kind": "module"
+              },
+              {
+                "start_line": 1,
+                "end_line": 9,
+                "symbol_id": "sym-599e36f7f3330978db6c1b8df65ed6f8",
+                "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+                "path": "ledger.py",
+                "qualified_name": "ledger",
+                "kind": "module"
+              },
+              {
+                "start_line": 4,
+                "end_line": 6,
+                "symbol_id": "sym-a05477a32f8f85a581f25a62646963ea",
+                "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+                "path": "delivery.py",
+                "qualified_name": "delivery.ProviderResponse",
+                "kind": "class"
+              },
+              {
+                "start_line": 5,
+                "end_line": 6,
+                "symbol_id": "sym-b75e8e688c02d2bdc92b0d03b7962117",
+                "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+                "path": "delivery.py",
+                "qualified_name": "delivery.ProviderResponse.__init__",
+                "kind": "function"
+              }
+            ],
+            "static_edges": [
+              {
+                "edge_id": "edge-6d786430259c99821e112f293e69f8d4",
+                "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+                "source_id": "sym-896d2dd0c7538f0f6b0ff272c9353bdf",
+                "target_id": "sym-76d712e649cd33261ef87c97a01a1160",
+                "kind": "calls",
+                "extraction_method": "ast",
+                "source_location": {
+                  "start_line": 10,
+                  "end_line": 10,
+                  "path": "delivery.py"
+                }
+              },
+              {
+                "edge_id": "edge-e16faaf93be202ffb7cb0dae27f97f69",
+                "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+                "source_id": "sym-896d2dd0c7538f0f6b0ff272c9353bdf",
+                "target_id": "sym-95abe0c0d25902905e456c9c143ec6b2",
+                "kind": "calls",
+                "extraction_method": "ast",
+                "source_location": {
+                  "start_line": 11,
+                  "end_line": 11,
+                  "path": "delivery.py"
+                }
+              },
+              {
+                "edge_id": "edge-82eb729f68fef033e8eec6dd124382ac",
+                "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+                "source_id": "sym-896d2dd0c7538f0f6b0ff272c9353bdf",
+                "target_id": "sym-9f1023537623ea67fd3cb681215311ec",
+                "kind": "calls",
+                "extraction_method": "ast",
+                "source_location": {
+                  "start_line": 15,
+                  "end_line": 15,
+                  "path": "delivery.py"
+                }
+              },
+              {
+                "edge_id": "edge-1dabca630041d88762b55e6cb24b7d7a",
+                "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+                "source_id": "sym-896d2dd0c7538f0f6b0ff272c9353bdf",
+                "target_id": "sym-a05477a32f8f85a581f25a62646963ea",
+                "kind": "calls",
+                "extraction_method": "ast",
+                "source_location": {
+                  "start_line": 12,
+                  "end_line": 12,
+                  "path": "delivery.py"
+                }
+              },
+              {
+                "edge_id": "edge-1b9e0a8dde588ca9d63f9caf6b46a0c6",
+                "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+                "source_id": "sym-4bb591bb3a4539557791ed3788d3f487",
+                "target_id": "sym-76d712e649cd33261ef87c97a01a1160",
+                "kind": "imports",
+                "extraction_method": "explicit_import",
+                "source_location": {
+                  "start_line": 1,
+                  "end_line": 1,
+                  "path": "delivery.py"
+                }
+              }
+            ],
+            "unresolved": [
+              {
+                "start_line": 13,
+                "end_line": 13,
+                "unresolved_id": "unresolved-eb8932ab0f68bf3ddceb8d1fb4af98a0",
+                "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+                "source_symbol_id": "sym-896d2dd0c7538f0f6b0ff272c9353bdf",
+                "path": "delivery.py",
+                "expression": "sender.send(notification_id)",
+                "reason": "name_rebound_in_scope",
+                "possible_target_ids": []
+              },
+              {
+                "start_line": 9,
+                "end_line": 9,
+                "unresolved_id": "unresolved-c49b12ea6a3584879a9bfabb56b7de9f",
+                "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+                "source_symbol_id": "sym-9f1023537623ea67fd3cb681215311ec",
+                "path": "ledger.py",
+                "expression": "self._sent_ids.add(notification_id)",
+                "reason": "object_method_not_resolved",
+                "possible_target_ids": []
+              }
+            ],
+            "candidate_links": [
+              {
+                "candidate_id": "sym-896d2dd0c7538f0f6b0ff272c9353bdf",
+                "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+                "source_symbol_id": "sym-896d2dd0c7538f0f6b0ff272c9353bdf",
+                "target_symbol_id": "sym-76d712e649cd33261ef87c97a01a1160",
+                "relation": "dispatch creates a fresh ledger and uses its instance-local sent set",
+                "evidence_ids": [
+                  "evidence-cc393ec148a33fdbd7cfa8db7ca6a876",
+                  "evidence-4585d47adc7a9e058e5416421d9b39fd"
+                ]
+              }
+            ],
+            "truncated": false,
+            "truncation_reason": null
+          }
+        }
+      },
+      {
+        "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+        "sequence": 19,
+        "timestamp": "2026-10-07T04:23:37.177875Z",
+        "type": "run.completed",
+        "payload": {
+          "status": "succeeded",
+          "outcome": "candidate_found",
+          "report_id": "report-run-08eb2743f3f74969851a3fe607a1a74b"
+        }
+      }
+    ],
+    "next_after_sequence": null,
+    "has_more": false
+  },
+  "tool_results": {
+    "schema_version": "0.1.0",
+    "project_id": "project-5e05f0cb303a4c9285a052f99cf7d010",
+    "session_id": "session-3f120e08e963462e9d6ee19faaf36447",
+    "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+    "results": [
+      {
+        "request_id": "delivery-search-1",
+        "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+        "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+        "completed_sequence": 3,
+        "kind": "search_code.succeeded",
+        "tool": "search_code",
+        "matches": [
+          {
+            "rank": 1,
+            "symbol": {
+              "start_line": 9,
+              "end_line": 16,
+              "symbol_id": "sym-896d2dd0c7538f0f6b0ff272c9353bdf",
+              "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+              "path": "delivery.py",
+              "qualified_name": "delivery.dispatch_notification",
+              "kind": "function"
+            },
+            "matched_terms": [
+              "notification"
+            ]
+          }
+        ],
+        "truncated": false,
+        "truncation_reason": null
+      },
+      {
+        "request_id": "delivery-search-2",
+        "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+        "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+        "completed_sequence": 5,
+        "kind": "search_code.succeeded",
+        "tool": "search_code",
+        "matches": [],
+        "truncated": false,
+        "truncation_reason": null
+      },
+      {
+        "request_id": "delivery-read-1",
+        "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+        "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+        "completed_sequence": 7,
+        "kind": "read_source.failed",
+        "tool": "read_source",
+        "error": {
+          "code": "invalid_input",
+          "message": "query parameters are invalid",
+          "retryable": false
+        }
+      },
+      {
+        "request_id": "delivery-read-2",
+        "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+        "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+        "completed_sequence": 9,
+        "kind": "read_source.succeeded",
+        "tool": "read_source",
+        "evidence": {
+          "start_line": 9,
+          "end_line": 16,
+          "evidence_id": "evidence-cc393ec148a33fdbd7cfa8db7ca6a876",
+          "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+          "path": "delivery.py",
+          "excerpt": "def dispatch_notification(notification_id: str, sender) -> ProviderResponse:\n    ledger = DeliveryLedger()\n    if ledger.was_sent(notification_id):\n        return ProviderResponse(False)\n    response = sender.send(notification_id)\n    if response.accepted:\n        ledger.mark_sent(notification_id)\n    return response",
+          "content_hash": "53a88f0011452c69cb1ae63e1cbd0d9dd232a1dd8ed1f34148982b4453af201c",
+          "kind": "source"
+        }
+      },
+      {
+        "request_id": "delivery-search-3",
+        "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+        "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+        "completed_sequence": 11,
+        "kind": "search_code.succeeded",
+        "tool": "search_code",
+        "matches": [
+          {
+            "rank": 1,
+            "symbol": {
+              "start_line": 1,
+              "end_line": 9,
+              "symbol_id": "sym-76d712e649cd33261ef87c97a01a1160",
+              "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+              "path": "ledger.py",
+              "qualified_name": "ledger.DeliveryLedger",
+              "kind": "class"
+            },
+            "matched_terms": [
+              "deliveryledger"
+            ]
+          },
+          {
+            "rank": 2,
+            "symbol": {
+              "start_line": 2,
+              "end_line": 3,
+              "symbol_id": "sym-36fe0b36d1e532393c302c5f4a9d88dd",
+              "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+              "path": "ledger.py",
+              "qualified_name": "ledger.DeliveryLedger.__init__",
+              "kind": "function"
+            },
+            "matched_terms": [
+              "deliveryledger"
+            ]
+          },
+          {
+            "rank": 3,
+            "symbol": {
+              "start_line": 8,
+              "end_line": 9,
+              "symbol_id": "sym-9f1023537623ea67fd3cb681215311ec",
+              "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+              "path": "ledger.py",
+              "qualified_name": "ledger.DeliveryLedger.mark_sent",
+              "kind": "function"
+            },
+            "matched_terms": [
+              "deliveryledger"
+            ]
+          },
+          {
+            "rank": 4,
+            "symbol": {
+              "start_line": 5,
+              "end_line": 6,
+              "symbol_id": "sym-95abe0c0d25902905e456c9c143ec6b2",
+              "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+              "path": "ledger.py",
+              "qualified_name": "ledger.DeliveryLedger.was_sent",
+              "kind": "function"
+            },
+            "matched_terms": [
+              "deliveryledger"
+            ]
+          },
+          {
+            "rank": 5,
+            "symbol": {
+              "start_line": 1,
+              "end_line": 16,
+              "symbol_id": "sym-4bb591bb3a4539557791ed3788d3f487",
+              "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+              "path": "delivery.py",
+              "qualified_name": "delivery",
+              "kind": "module"
+            },
+            "matched_terms": [
+              "deliveryledger"
+            ]
+          },
+          {
+            "rank": 6,
+            "symbol": {
+              "start_line": 9,
+              "end_line": 16,
+              "symbol_id": "sym-896d2dd0c7538f0f6b0ff272c9353bdf",
+              "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+              "path": "delivery.py",
+              "qualified_name": "delivery.dispatch_notification",
+              "kind": "function"
+            },
+            "matched_terms": [
+              "deliveryledger"
+            ]
+          },
+          {
+            "rank": 7,
+            "symbol": {
+              "start_line": 1,
+              "end_line": 9,
+              "symbol_id": "sym-599e36f7f3330978db6c1b8df65ed6f8",
+              "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+              "path": "ledger.py",
+              "qualified_name": "ledger",
+              "kind": "module"
+            },
+            "matched_terms": [
+              "deliveryledger"
+            ]
+          }
+        ],
+        "truncated": false,
+        "truncation_reason": null
+      },
+      {
+        "request_id": "ledger-read-1",
+        "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+        "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+        "completed_sequence": 13,
+        "kind": "read_source.succeeded",
+        "tool": "read_source",
+        "evidence": {
+          "start_line": 1,
+          "end_line": 9,
+          "evidence_id": "evidence-4585d47adc7a9e058e5416421d9b39fd",
+          "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+          "path": "ledger.py",
+          "excerpt": "class DeliveryLedger:\n    def __init__(self) -> None:\n        self._sent_ids: set[str] = set()\n\n    def was_sent(self, notification_id: str) -> bool:\n        return notification_id in self._sent_ids\n\n    def mark_sent(self, notification_id: str) -> None:\n        self._sent_ids.add(notification_id)",
+          "content_hash": "4ced2d041d83961b2d93aebd7120256ec95cd449a069e8a46f81cacdca6bebab",
+          "kind": "source"
+        }
+      },
+      {
+        "request_id": "delivery-neighbors-1",
+        "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+        "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+        "completed_sequence": 15,
+        "kind": "get_neighbors.succeeded",
+        "tool": "get_neighbors",
+        "root": {
+          "start_line": 9,
+          "end_line": 16,
+          "symbol_id": "sym-896d2dd0c7538f0f6b0ff272c9353bdf",
+          "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+          "path": "delivery.py",
+          "qualified_name": "delivery.dispatch_notification",
+          "kind": "function"
+        },
+        "nodes": [
+          {
+            "start_line": 9,
+            "end_line": 16,
+            "symbol_id": "sym-896d2dd0c7538f0f6b0ff272c9353bdf",
+            "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+            "path": "delivery.py",
+            "qualified_name": "delivery.dispatch_notification",
+            "kind": "function"
+          },
+          {
+            "start_line": 1,
+            "end_line": 9,
+            "symbol_id": "sym-76d712e649cd33261ef87c97a01a1160",
+            "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+            "path": "ledger.py",
+            "qualified_name": "ledger.DeliveryLedger",
+            "kind": "class"
+          },
+          {
+            "start_line": 5,
+            "end_line": 6,
+            "symbol_id": "sym-95abe0c0d25902905e456c9c143ec6b2",
+            "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+            "path": "ledger.py",
+            "qualified_name": "ledger.DeliveryLedger.was_sent",
+            "kind": "function"
+          },
+          {
+            "start_line": 8,
+            "end_line": 9,
+            "symbol_id": "sym-9f1023537623ea67fd3cb681215311ec",
+            "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+            "path": "ledger.py",
+            "qualified_name": "ledger.DeliveryLedger.mark_sent",
+            "kind": "function"
+          },
+          {
+            "start_line": 4,
+            "end_line": 6,
+            "symbol_id": "sym-a05477a32f8f85a581f25a62646963ea",
+            "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+            "path": "delivery.py",
+            "qualified_name": "delivery.ProviderResponse",
+            "kind": "class"
+          },
+          {
+            "start_line": 1,
+            "end_line": 16,
+            "symbol_id": "sym-4bb591bb3a4539557791ed3788d3f487",
+            "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+            "path": "delivery.py",
+            "qualified_name": "delivery",
+            "kind": "module"
+          }
+        ],
+        "neighbors": [
+          {
+            "symbol": {
+              "start_line": 1,
+              "end_line": 9,
+              "symbol_id": "sym-76d712e649cd33261ef87c97a01a1160",
+              "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+              "path": "ledger.py",
+              "qualified_name": "ledger.DeliveryLedger",
+              "kind": "class"
+            },
+            "edge": {
+              "edge_id": "edge-6d786430259c99821e112f293e69f8d4",
+              "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+              "source_id": "sym-896d2dd0c7538f0f6b0ff272c9353bdf",
+              "target_id": "sym-76d712e649cd33261ef87c97a01a1160",
+              "kind": "calls",
+              "extraction_method": "ast",
+              "source_location": {
+                "start_line": 10,
+                "end_line": 10,
+                "path": "delivery.py"
+              }
+            }
+          },
+          {
+            "symbol": {
+              "start_line": 5,
+              "end_line": 6,
+              "symbol_id": "sym-95abe0c0d25902905e456c9c143ec6b2",
+              "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+              "path": "ledger.py",
+              "qualified_name": "ledger.DeliveryLedger.was_sent",
+              "kind": "function"
+            },
+            "edge": {
+              "edge_id": "edge-e16faaf93be202ffb7cb0dae27f97f69",
+              "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+              "source_id": "sym-896d2dd0c7538f0f6b0ff272c9353bdf",
+              "target_id": "sym-95abe0c0d25902905e456c9c143ec6b2",
+              "kind": "calls",
+              "extraction_method": "ast",
+              "source_location": {
+                "start_line": 11,
+                "end_line": 11,
+                "path": "delivery.py"
+              }
+            }
+          },
+          {
+            "symbol": {
+              "start_line": 8,
+              "end_line": 9,
+              "symbol_id": "sym-9f1023537623ea67fd3cb681215311ec",
+              "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+              "path": "ledger.py",
+              "qualified_name": "ledger.DeliveryLedger.mark_sent",
+              "kind": "function"
+            },
+            "edge": {
+              "edge_id": "edge-82eb729f68fef033e8eec6dd124382ac",
+              "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+              "source_id": "sym-896d2dd0c7538f0f6b0ff272c9353bdf",
+              "target_id": "sym-9f1023537623ea67fd3cb681215311ec",
+              "kind": "calls",
+              "extraction_method": "ast",
+              "source_location": {
+                "start_line": 15,
+                "end_line": 15,
+                "path": "delivery.py"
+              }
+            }
+          },
+          {
+            "symbol": {
+              "start_line": 4,
+              "end_line": 6,
+              "symbol_id": "sym-a05477a32f8f85a581f25a62646963ea",
+              "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+              "path": "delivery.py",
+              "qualified_name": "delivery.ProviderResponse",
+              "kind": "class"
+            },
+            "edge": {
+              "edge_id": "edge-1dabca630041d88762b55e6cb24b7d7a",
+              "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+              "source_id": "sym-896d2dd0c7538f0f6b0ff272c9353bdf",
+              "target_id": "sym-a05477a32f8f85a581f25a62646963ea",
+              "kind": "calls",
+              "extraction_method": "ast",
+              "source_location": {
+                "start_line": 12,
+                "end_line": 12,
+                "path": "delivery.py"
+              }
+            }
+          },
+          {
+            "symbol": {
+              "start_line": 1,
+              "end_line": 16,
+              "symbol_id": "sym-4bb591bb3a4539557791ed3788d3f487",
+              "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+              "path": "delivery.py",
+              "qualified_name": "delivery",
+              "kind": "module"
+            },
+            "edge": {
+              "edge_id": "edge-1b9e0a8dde588ca9d63f9caf6b46a0c6",
+              "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+              "source_id": "sym-4bb591bb3a4539557791ed3788d3f487",
+              "target_id": "sym-76d712e649cd33261ef87c97a01a1160",
+              "kind": "imports",
+              "extraction_method": "explicit_import",
+              "source_location": {
+                "start_line": 1,
+                "end_line": 1,
+                "path": "delivery.py"
+              }
+            }
+          }
+        ],
+        "contextual_calls": [],
+        "unresolved": [
+          {
+            "start_line": 13,
+            "end_line": 13,
+            "unresolved_id": "unresolved-eb8932ab0f68bf3ddceb8d1fb4af98a0",
+            "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+            "source_symbol_id": "sym-896d2dd0c7538f0f6b0ff272c9353bdf",
+            "path": "delivery.py",
+            "expression": "sender.send(notification_id)",
+            "reason": "name_rebound_in_scope",
+            "possible_target_ids": []
+          },
+          {
+            "start_line": 9,
+            "end_line": 9,
+            "unresolved_id": "unresolved-c49b12ea6a3584879a9bfabb56b7de9f",
+            "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+            "source_symbol_id": "sym-9f1023537623ea67fd3cb681215311ec",
+            "path": "ledger.py",
+            "expression": "self._sent_ids.add(notification_id)",
+            "reason": "object_method_not_resolved",
+            "possible_target_ids": []
+          }
+        ],
+        "truncated": false,
+        "truncation_reason": null,
+        "index_truncated": false,
+        "index_truncation_reason": null,
+        "index_unresolved_truncated": false,
+        "index_unresolved_truncation_reason": null
+      },
+      {
+        "request_id": "delivery-search-4",
+        "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+        "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+        "completed_sequence": 17,
+        "kind": "search_code.succeeded",
+        "tool": "search_code",
+        "matches": [
+          {
+            "rank": 1,
+            "symbol": {
+              "start_line": 1,
+              "end_line": 16,
+              "symbol_id": "sym-4bb591bb3a4539557791ed3788d3f487",
+              "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+              "path": "delivery.py",
+              "qualified_name": "delivery",
+              "kind": "module"
+            },
+            "matched_terms": [
+              "accepted"
+            ]
+          },
+          {
+            "rank": 2,
+            "symbol": {
+              "start_line": 4,
+              "end_line": 6,
+              "symbol_id": "sym-a05477a32f8f85a581f25a62646963ea",
+              "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+              "path": "delivery.py",
+              "qualified_name": "delivery.ProviderResponse",
+              "kind": "class"
+            },
+            "matched_terms": [
+              "accepted"
+            ]
+          },
+          {
+            "rank": 3,
+            "symbol": {
+              "start_line": 9,
+              "end_line": 16,
+              "symbol_id": "sym-896d2dd0c7538f0f6b0ff272c9353bdf",
+              "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+              "path": "delivery.py",
+              "qualified_name": "delivery.dispatch_notification",
+              "kind": "function"
+            },
+            "matched_terms": [
+              "accepted"
+            ]
+          },
+          {
+            "rank": 4,
+            "symbol": {
+              "start_line": 5,
+              "end_line": 6,
+              "symbol_id": "sym-b75e8e688c02d2bdc92b0d03b7962117",
+              "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+              "path": "delivery.py",
+              "qualified_name": "delivery.ProviderResponse.__init__",
+              "kind": "function"
+            },
+            "matched_terms": [
+              "accepted"
+            ]
+          }
+        ],
+        "truncated": false,
+        "truncation_reason": null
+      }
+    ],
+    "next_after_sequence": null,
+    "has_more": false
+  },
+  "report": {
+    "schema_version": "0.1.0",
+    "report": {
+      "schema_version": "0.1.0",
+      "report_id": "report-run-08eb2743f3f74969851a3fe607a1a74b",
+      "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+      "project_id": "project-5e05f0cb303a4c9285a052f99cf7d010",
+      "session_id": "session-3f120e08e963462e9d6ee19faaf36447",
+      "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+      "status": "succeeded",
+      "outcome": "candidate_found",
+      "fixture_mode": false,
+      "summary": "dispatch_notification constructs a fresh DeliveryLedger for each call. The ledger initializes an empty instance-local set, then the function checks it, sends the notification, and marks the ID only when the provider response is accepted. A later retry creates another empty ledger, so it can send the same ID again. This establishes the behavior in this dispatch path; the Run returned no upstream caller.",
+      "graph": {
+        "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+        "nodes": [
+          {
+            "start_line": 9,
+            "end_line": 16,
+            "symbol_id": "sym-896d2dd0c7538f0f6b0ff272c9353bdf",
+            "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+            "path": "delivery.py",
+            "qualified_name": "delivery.dispatch_notification",
+            "kind": "function"
+          },
+          {
+            "start_line": 1,
+            "end_line": 9,
+            "symbol_id": "sym-76d712e649cd33261ef87c97a01a1160",
+            "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+            "path": "ledger.py",
+            "qualified_name": "ledger.DeliveryLedger",
+            "kind": "class"
+          },
+          {
+            "start_line": 2,
+            "end_line": 3,
+            "symbol_id": "sym-36fe0b36d1e532393c302c5f4a9d88dd",
+            "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+            "path": "ledger.py",
+            "qualified_name": "ledger.DeliveryLedger.__init__",
+            "kind": "function"
+          },
+          {
+            "start_line": 8,
+            "end_line": 9,
+            "symbol_id": "sym-9f1023537623ea67fd3cb681215311ec",
+            "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+            "path": "ledger.py",
+            "qualified_name": "ledger.DeliveryLedger.mark_sent",
+            "kind": "function"
+          },
+          {
+            "start_line": 5,
+            "end_line": 6,
+            "symbol_id": "sym-95abe0c0d25902905e456c9c143ec6b2",
+            "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+            "path": "ledger.py",
+            "qualified_name": "ledger.DeliveryLedger.was_sent",
+            "kind": "function"
+          },
+          {
+            "start_line": 1,
+            "end_line": 16,
+            "symbol_id": "sym-4bb591bb3a4539557791ed3788d3f487",
+            "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+            "path": "delivery.py",
+            "qualified_name": "delivery",
+            "kind": "module"
+          },
+          {
+            "start_line": 1,
+            "end_line": 9,
+            "symbol_id": "sym-599e36f7f3330978db6c1b8df65ed6f8",
+            "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+            "path": "ledger.py",
+            "qualified_name": "ledger",
+            "kind": "module"
+          },
+          {
+            "start_line": 4,
+            "end_line": 6,
+            "symbol_id": "sym-a05477a32f8f85a581f25a62646963ea",
+            "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+            "path": "delivery.py",
+            "qualified_name": "delivery.ProviderResponse",
+            "kind": "class"
+          },
+          {
+            "start_line": 5,
+            "end_line": 6,
+            "symbol_id": "sym-b75e8e688c02d2bdc92b0d03b7962117",
+            "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+            "path": "delivery.py",
+            "qualified_name": "delivery.ProviderResponse.__init__",
+            "kind": "function"
+          }
+        ],
+        "static_edges": [
+          {
+            "edge_id": "edge-6d786430259c99821e112f293e69f8d4",
+            "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+            "source_id": "sym-896d2dd0c7538f0f6b0ff272c9353bdf",
+            "target_id": "sym-76d712e649cd33261ef87c97a01a1160",
+            "kind": "calls",
+            "extraction_method": "ast",
+            "source_location": {
+              "start_line": 10,
+              "end_line": 10,
+              "path": "delivery.py"
+            }
+          },
+          {
+            "edge_id": "edge-e16faaf93be202ffb7cb0dae27f97f69",
+            "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+            "source_id": "sym-896d2dd0c7538f0f6b0ff272c9353bdf",
+            "target_id": "sym-95abe0c0d25902905e456c9c143ec6b2",
+            "kind": "calls",
+            "extraction_method": "ast",
+            "source_location": {
+              "start_line": 11,
+              "end_line": 11,
+              "path": "delivery.py"
+            }
+          },
+          {
+            "edge_id": "edge-82eb729f68fef033e8eec6dd124382ac",
+            "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+            "source_id": "sym-896d2dd0c7538f0f6b0ff272c9353bdf",
+            "target_id": "sym-9f1023537623ea67fd3cb681215311ec",
+            "kind": "calls",
+            "extraction_method": "ast",
+            "source_location": {
+              "start_line": 15,
+              "end_line": 15,
+              "path": "delivery.py"
+            }
+          },
+          {
+            "edge_id": "edge-1dabca630041d88762b55e6cb24b7d7a",
+            "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+            "source_id": "sym-896d2dd0c7538f0f6b0ff272c9353bdf",
+            "target_id": "sym-a05477a32f8f85a581f25a62646963ea",
+            "kind": "calls",
+            "extraction_method": "ast",
+            "source_location": {
+              "start_line": 12,
+              "end_line": 12,
+              "path": "delivery.py"
+            }
+          },
+          {
+            "edge_id": "edge-1b9e0a8dde588ca9d63f9caf6b46a0c6",
+            "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+            "source_id": "sym-4bb591bb3a4539557791ed3788d3f487",
+            "target_id": "sym-76d712e649cd33261ef87c97a01a1160",
+            "kind": "imports",
+            "extraction_method": "explicit_import",
+            "source_location": {
+              "start_line": 1,
+              "end_line": 1,
+              "path": "delivery.py"
+            }
+          }
+        ],
+        "unresolved": [
+          {
+            "start_line": 13,
+            "end_line": 13,
+            "unresolved_id": "unresolved-eb8932ab0f68bf3ddceb8d1fb4af98a0",
+            "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+            "source_symbol_id": "sym-896d2dd0c7538f0f6b0ff272c9353bdf",
+            "path": "delivery.py",
+            "expression": "sender.send(notification_id)",
+            "reason": "name_rebound_in_scope",
+            "possible_target_ids": []
+          },
+          {
+            "start_line": 9,
+            "end_line": 9,
+            "unresolved_id": "unresolved-c49b12ea6a3584879a9bfabb56b7de9f",
+            "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+            "source_symbol_id": "sym-9f1023537623ea67fd3cb681215311ec",
+            "path": "ledger.py",
+            "expression": "self._sent_ids.add(notification_id)",
+            "reason": "object_method_not_resolved",
+            "possible_target_ids": []
+          }
+        ],
+        "candidate_links": [
+          {
+            "candidate_id": "sym-896d2dd0c7538f0f6b0ff272c9353bdf",
+            "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+            "source_symbol_id": "sym-896d2dd0c7538f0f6b0ff272c9353bdf",
+            "target_symbol_id": "sym-76d712e649cd33261ef87c97a01a1160",
+            "relation": "dispatch creates a fresh ledger and uses its instance-local sent set",
+            "evidence_ids": [
+              "evidence-cc393ec148a33fdbd7cfa8db7ca6a876",
+              "evidence-4585d47adc7a9e058e5416421d9b39fd"
+            ]
+          }
+        ],
+        "truncated": false,
+        "truncation_reason": null
+      },
+      "evidence": [
+        {
+          "start_line": 9,
+          "end_line": 16,
+          "evidence_id": "evidence-cc393ec148a33fdbd7cfa8db7ca6a876",
+          "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+          "path": "delivery.py",
+          "excerpt": "def dispatch_notification(notification_id: str, sender) -> ProviderResponse:\n    ledger = DeliveryLedger()\n    if ledger.was_sent(notification_id):\n        return ProviderResponse(False)\n    response = sender.send(notification_id)\n    if response.accepted:\n        ledger.mark_sent(notification_id)\n    return response",
+          "content_hash": "53a88f0011452c69cb1ae63e1cbd0d9dd232a1dd8ed1f34148982b4453af201c",
+          "kind": "source"
+        },
+        {
+          "start_line": 1,
+          "end_line": 9,
+          "evidence_id": "evidence-4585d47adc7a9e058e5416421d9b39fd",
+          "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+          "path": "ledger.py",
+          "excerpt": "class DeliveryLedger:\n    def __init__(self) -> None:\n        self._sent_ids: set[str] = set()\n\n    def was_sent(self, notification_id: str) -> bool:\n        return notification_id in self._sent_ids\n\n    def mark_sent(self, notification_id: str) -> None:\n        self._sent_ids.add(notification_id)",
+          "content_hash": "4ced2d041d83961b2d93aebd7120256ec95cd449a069e8a46f81cacdca6bebab",
+          "kind": "source"
+        }
+      ],
+      "findings": [
+        {
+          "finding_id": "finding-dispatch-flow",
+          "kind": "observation",
+          "text": "dispatch_notification creates a new DeliveryLedger before checking was_sent; when the ID is absent it invokes sender.send(notification_id), and an accepted response triggers mark_sent.",
+          "symbol_ids": [
+            "sym-896d2dd0c7538f0f6b0ff272c9353bdf",
+            "sym-76d712e649cd33261ef87c97a01a1160",
+            "sym-95abe0c0d25902905e456c9c143ec6b2",
+            "sym-9f1023537623ea67fd3cb681215311ec"
+          ],
+          "evidence_ids": [
+            "evidence-cc393ec148a33fdbd7cfa8db7ca6a876"
+          ]
+        },
+        {
+          "finding_id": "finding-ledger-scope",
+          "kind": "observation",
+          "text": "DeliveryLedger initializes _sent_ids as a new empty set and reads/writes notification IDs only through that instance's was_sent and mark_sent methods.",
+          "symbol_ids": [
+            "sym-76d712e649cd33261ef87c97a01a1160",
+            "sym-95abe0c0d25902905e456c9c143ec6b2",
+            "sym-9f1023537623ea67fd3cb681215311ec"
+          ],
+          "evidence_ids": [
+            "evidence-4585d47adc7a9e058e5416421d9b39fd"
+          ]
+        }
+      ],
+      "candidate_links": [
+        {
+          "candidate_id": "sym-896d2dd0c7538f0f6b0ff272c9353bdf",
+          "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+          "source_symbol_id": "sym-896d2dd0c7538f0f6b0ff272c9353bdf",
+          "target_symbol_id": "sym-76d712e649cd33261ef87c97a01a1160",
+          "relation": "dispatch creates a fresh ledger and uses its instance-local sent set",
+          "evidence_ids": [
+            "evidence-cc393ec148a33fdbd7cfa8db7ca6a876",
+            "evidence-4585d47adc7a9e058e5416421d9b39fd"
+          ]
+        }
+      ],
+      "explanation": null,
+      "limitations": [
+        "The static neighbor result returned no upstream caller for dispatch_notification, so the established scope is this indexed dispatch path; the Run does not establish how external retry scheduling invokes it."
+      ],
+      "terminal_sequence": 19
+    }
+  }
+}

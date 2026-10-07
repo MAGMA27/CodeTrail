@@ -1,0 +1,1248 @@
+{
+  "case_id": "unobservable-gateway-timeout",
+  "project_id": "project-cd8c3a0000d342e8a1145e7deafb6cfd",
+  "session_id": "session-59fa1dbb903448138d55b27e9137de15",
+  "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+  "captured_at": "2026-10-07T04:27:33.359Z",
+  "run": {
+    "schema_version": "0.1.0",
+    "run": {
+      "schema_version": "0.1.0",
+      "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+      "project_id": "project-cd8c3a0000d342e8a1145e7deafb6cfd",
+      "session_id": "session-59fa1dbb903448138d55b27e9137de15",
+      "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+      "feature_generation_id": null,
+      "issue": {
+        "schema_version": "0.1.0",
+        "id": "unobservable-gateway-timeout",
+        "title": "Partner acknowledgements sometimes arrive after our timeout",
+        "body": "Some outbound events are logged as timed out locally even though the partner later confirms receiving them. Identify a source-level cause if this repository supports one. Cite the available code and distinguish what the snapshot establishes from what remains unknown.",
+        "stacktrace": null,
+        "mentioned_paths": []
+      },
+      "mode": "external",
+      "analysis_kind": "issue",
+      "execution_source": "codex",
+      "fixture_scenario": null,
+      "model_provider": null,
+      "model": null,
+      "prompt_version": null,
+      "execution_version": "run-external-codex-v1",
+      "status": "succeeded",
+      "budget": {
+        "max_tool_calls": 8,
+        "max_model_calls": 4,
+        "max_repair_calls": 1,
+        "max_seconds": 600,
+        "max_source_lines": 200,
+        "max_total_source_lines": 800,
+        "max_input_chars": 60000,
+        "max_model_input_chars": 80000,
+        "max_output_chars": 50000,
+        "max_model_output_chars": 20000,
+        "max_events": 100,
+        "tool_calls_used": 8,
+        "model_calls_used": 0,
+        "repair_calls_used": 0,
+        "source_lines_used": 12,
+        "input_chars_used": 328,
+        "model_input_chars_used": 0,
+        "output_chars_used": 8091,
+        "model_output_chars_used": 0,
+        "model_input_tokens_used": null,
+        "model_output_tokens_used": null,
+        "events_used": 19
+      },
+      "message_end_sequence": 1,
+      "input_hash": "0658e908cf28086e61176adad8197dcf9f5695206c1f44730dc0e172f4865e6e",
+      "input_chars": 328,
+      "created_at": "2026-10-07T04:24:56.621581Z",
+      "started_at": "2026-10-07T04:25:05.242375Z",
+      "ended_at": "2026-10-07T04:26:29.058176Z",
+      "report_id": "report-run-125dbc9c5f8845d7be564d8b5a477ea6"
+    },
+    "input": {
+      "schema_version": "0.1.0",
+      "project_id": "project-cd8c3a0000d342e8a1145e7deafb6cfd",
+      "session_id": "session-59fa1dbb903448138d55b27e9137de15",
+      "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+      "feature_generation_id": null,
+      "message_end_sequence": 1,
+      "messages": [
+        {
+          "schema_version": "0.1.0",
+          "message_id": "message-68a101c23a0f445694c3bc5103bbb055",
+          "session_id": "session-59fa1dbb903448138d55b27e9137de15",
+          "sequence": 1,
+          "source": "human",
+          "content": "Partner acknowledgements sometimes arrive after our timeout\n\nSome outbound events are logged as timed out locally even though the partner later confirms receiving them. Identify a source-level cause if this repository supports one. Cite the available code and distinguish what the snapshot establishes from what remains unknown.",
+          "created_at": "2026-10-07T04:17:32.921627Z"
+        }
+      ],
+      "input_hash": "0658e908cf28086e61176adad8197dcf9f5695206c1f44730dc0e172f4865e6e",
+      "input_chars": 328,
+      "frozen_at": "2026-10-07T04:24:56.621581Z"
+    }
+  },
+  "events": {
+    "schema_version": "0.1.0",
+    "project_id": "project-cd8c3a0000d342e8a1145e7deafb6cfd",
+    "session_id": "session-59fa1dbb903448138d55b27e9137de15",
+    "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+    "events": [
+      {
+        "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+        "sequence": 1,
+        "timestamp": "2026-10-07T04:25:05.242375Z",
+        "type": "run.started",
+        "payload": {
+          "project_id": "project-cd8c3a0000d342e8a1145e7deafb6cfd",
+          "session_id": "session-59fa1dbb903448138d55b27e9137de15",
+          "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+          "issue_id": "unobservable-gateway-timeout",
+          "mode": "external",
+          "analysis_kind": "issue",
+          "execution_source": "codex",
+          "message_end_sequence": 1,
+          "input_hash": "0658e908cf28086e61176adad8197dcf9f5695206c1f44730dc0e172f4865e6e",
+          "feature_generation_id": null,
+          "execution_version": "run-external-codex-v1",
+          "budget": {
+            "max_tool_calls": 8,
+            "max_model_calls": 4,
+            "max_repair_calls": 1,
+            "max_seconds": 600,
+            "max_source_lines": 200,
+            "max_total_source_lines": 800,
+            "max_input_chars": 60000,
+            "max_model_input_chars": 80000,
+            "max_output_chars": 50000,
+            "max_model_output_chars": 20000,
+            "max_events": 100,
+            "tool_calls_used": 0,
+            "model_calls_used": 0,
+            "repair_calls_used": 0,
+            "source_lines_used": 0,
+            "input_chars_used": 328,
+            "model_input_chars_used": 0,
+            "output_chars_used": 0,
+            "model_output_chars_used": 0,
+            "model_input_tokens_used": null,
+            "model_output_tokens_used": null,
+            "events_used": 0
+          }
+        }
+      },
+      {
+        "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+        "sequence": 2,
+        "timestamp": "2026-10-07T04:25:05.246280Z",
+        "type": "tool.started",
+        "payload": {
+          "request": {
+            "request_id": "request-1-timeout",
+            "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+            "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+            "params": {
+              "tool": "search_code",
+              "query": "timeout",
+              "limit": 12
+            }
+          }
+        }
+      },
+      {
+        "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+        "sequence": 3,
+        "timestamp": "2026-10-07T04:25:05.313671Z",
+        "type": "tool.completed",
+        "payload": {
+          "result": {
+            "request_id": "request-1-timeout",
+            "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+            "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+            "completed_sequence": 3,
+            "kind": "search_code.succeeded",
+            "tool": "search_code",
+            "matches": [],
+            "truncated": false,
+            "truncation_reason": null
+          }
+        }
+      },
+      {
+        "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+        "sequence": 4,
+        "timestamp": "2026-10-07T04:25:15.610845Z",
+        "type": "tool.started",
+        "payload": {
+          "request": {
+            "request_id": "request-2-gateway",
+            "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+            "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+            "params": {
+              "tool": "search_code",
+              "query": "gateway",
+              "limit": 12
+            }
+          }
+        }
+      },
+      {
+        "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+        "sequence": 5,
+        "timestamp": "2026-10-07T04:25:15.679507Z",
+        "type": "tool.completed",
+        "payload": {
+          "result": {
+            "request_id": "request-2-gateway",
+            "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+            "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+            "completed_sequence": 5,
+            "kind": "search_code.succeeded",
+            "tool": "search_code",
+            "matches": [
+              {
+                "rank": 1,
+                "symbol": {
+                  "start_line": 4,
+                  "end_line": 7,
+                  "symbol_id": "sym-0eaa629214826592d79cf02a476cc6ca",
+                  "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+                  "path": "ports.py",
+                  "qualified_name": "ports.GatewayPort",
+                  "kind": "class"
+                },
+                "matched_terms": [
+                  "gateway"
+                ]
+              },
+              {
+                "rank": 2,
+                "symbol": {
+                  "start_line": 5,
+                  "end_line": 7,
+                  "symbol_id": "sym-c03ce1fd9f0ca0ccb4cbcbcae01163eb",
+                  "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+                  "path": "ports.py",
+                  "qualified_name": "ports.GatewayPort.send",
+                  "kind": "function"
+                },
+                "matched_terms": [
+                  "gateway"
+                ]
+              },
+              {
+                "rank": 3,
+                "symbol": {
+                  "start_line": 1,
+                  "end_line": 5,
+                  "symbol_id": "sym-730a6bf15afaccede330da7144f524f3",
+                  "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+                  "path": "bridge.py",
+                  "qualified_name": "bridge",
+                  "kind": "module"
+                },
+                "matched_terms": [
+                  "gateway"
+                ]
+              },
+              {
+                "rank": 4,
+                "symbol": {
+                  "start_line": 4,
+                  "end_line": 5,
+                  "symbol_id": "sym-d250393c14d723833f07249f99bfec3e",
+                  "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+                  "path": "bridge.py",
+                  "qualified_name": "bridge.deliver",
+                  "kind": "function"
+                },
+                "matched_terms": [
+                  "gateway"
+                ]
+              },
+              {
+                "rank": 5,
+                "symbol": {
+                  "start_line": 1,
+                  "end_line": 7,
+                  "symbol_id": "sym-d1c68a27c7a6c23d7d4738f8a549bfb3",
+                  "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+                  "path": "ports.py",
+                  "qualified_name": "ports",
+                  "kind": "module"
+                },
+                "matched_terms": [
+                  "gateway"
+                ]
+              }
+            ],
+            "truncated": false,
+            "truncation_reason": null
+          }
+        }
+      },
+      {
+        "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+        "sequence": 6,
+        "timestamp": "2026-10-07T04:25:16.065854Z",
+        "type": "tool.started",
+        "payload": {
+          "request": {
+            "request_id": "request-3-acknowledge",
+            "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+            "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+            "params": {
+              "tool": "search_code",
+              "query": "acknowledgement",
+              "limit": 12
+            }
+          }
+        }
+      },
+      {
+        "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+        "sequence": 7,
+        "timestamp": "2026-10-07T04:25:16.164849Z",
+        "type": "tool.completed",
+        "payload": {
+          "result": {
+            "request_id": "request-3-acknowledge",
+            "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+            "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+            "completed_sequence": 7,
+            "kind": "search_code.succeeded",
+            "tool": "search_code",
+            "matches": [
+              {
+                "rank": 1,
+                "symbol": {
+                  "start_line": 1,
+                  "end_line": 7,
+                  "symbol_id": "sym-d1c68a27c7a6c23d7d4738f8a549bfb3",
+                  "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+                  "path": "ports.py",
+                  "qualified_name": "ports",
+                  "kind": "module"
+                },
+                "matched_terms": [
+                  "acknowledgement"
+                ]
+              },
+              {
+                "rank": 2,
+                "symbol": {
+                  "start_line": 4,
+                  "end_line": 7,
+                  "symbol_id": "sym-0eaa629214826592d79cf02a476cc6ca",
+                  "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+                  "path": "ports.py",
+                  "qualified_name": "ports.GatewayPort",
+                  "kind": "class"
+                },
+                "matched_terms": [
+                  "acknowledgement"
+                ]
+              },
+              {
+                "rank": 3,
+                "symbol": {
+                  "start_line": 5,
+                  "end_line": 7,
+                  "symbol_id": "sym-c03ce1fd9f0ca0ccb4cbcbcae01163eb",
+                  "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+                  "path": "ports.py",
+                  "qualified_name": "ports.GatewayPort.send",
+                  "kind": "function"
+                },
+                "matched_terms": [
+                  "acknowledgement"
+                ]
+              }
+            ],
+            "truncated": false,
+            "truncation_reason": null
+          }
+        }
+      },
+      {
+        "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+        "sequence": 8,
+        "timestamp": "2026-10-07T04:25:16.583544Z",
+        "type": "tool.started",
+        "payload": {
+          "request": {
+            "request_id": "request-4-send",
+            "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+            "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+            "params": {
+              "tool": "search_code",
+              "query": "send",
+              "limit": 12
+            }
+          }
+        }
+      },
+      {
+        "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+        "sequence": 9,
+        "timestamp": "2026-10-07T04:25:16.667097Z",
+        "type": "tool.completed",
+        "payload": {
+          "result": {
+            "request_id": "request-4-send",
+            "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+            "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+            "completed_sequence": 9,
+            "kind": "search_code.succeeded",
+            "tool": "search_code",
+            "matches": [
+              {
+                "rank": 1,
+                "symbol": {
+                  "start_line": 5,
+                  "end_line": 7,
+                  "symbol_id": "sym-c03ce1fd9f0ca0ccb4cbcbcae01163eb",
+                  "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+                  "path": "ports.py",
+                  "qualified_name": "ports.GatewayPort.send",
+                  "kind": "function"
+                },
+                "matched_terms": [
+                  "send"
+                ]
+              },
+              {
+                "rank": 2,
+                "symbol": {
+                  "start_line": 1,
+                  "end_line": 5,
+                  "symbol_id": "sym-730a6bf15afaccede330da7144f524f3",
+                  "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+                  "path": "bridge.py",
+                  "qualified_name": "bridge",
+                  "kind": "module"
+                },
+                "matched_terms": [
+                  "send"
+                ]
+              },
+              {
+                "rank": 3,
+                "symbol": {
+                  "start_line": 4,
+                  "end_line": 5,
+                  "symbol_id": "sym-d250393c14d723833f07249f99bfec3e",
+                  "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+                  "path": "bridge.py",
+                  "qualified_name": "bridge.deliver",
+                  "kind": "function"
+                },
+                "matched_terms": [
+                  "send"
+                ]
+              },
+              {
+                "rank": 4,
+                "symbol": {
+                  "start_line": 1,
+                  "end_line": 7,
+                  "symbol_id": "sym-d1c68a27c7a6c23d7d4738f8a549bfb3",
+                  "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+                  "path": "ports.py",
+                  "qualified_name": "ports",
+                  "kind": "module"
+                },
+                "matched_terms": [
+                  "send"
+                ]
+              },
+              {
+                "rank": 5,
+                "symbol": {
+                  "start_line": 4,
+                  "end_line": 7,
+                  "symbol_id": "sym-0eaa629214826592d79cf02a476cc6ca",
+                  "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+                  "path": "ports.py",
+                  "qualified_name": "ports.GatewayPort",
+                  "kind": "class"
+                },
+                "matched_terms": [
+                  "send"
+                ]
+              }
+            ],
+            "truncated": false,
+            "truncation_reason": null
+          }
+        }
+      },
+      {
+        "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+        "sequence": 10,
+        "timestamp": "2026-10-07T04:25:28.710203Z",
+        "type": "tool.started",
+        "payload": {
+          "request": {
+            "request_id": "request-5-ports",
+            "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+            "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+            "params": {
+              "tool": "read_source",
+              "path": "ports.py",
+              "start_line": 1,
+              "end_line": 7
+            }
+          }
+        }
+      },
+      {
+        "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+        "sequence": 11,
+        "timestamp": "2026-10-07T04:25:28.777023Z",
+        "type": "tool.completed",
+        "payload": {
+          "result": {
+            "request_id": "request-5-ports",
+            "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+            "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+            "completed_sequence": 11,
+            "kind": "read_source.succeeded",
+            "tool": "read_source",
+            "evidence": {
+              "start_line": 1,
+              "end_line": 7,
+              "evidence_id": "evidence-c63eafbe1924331af27f5cd8bf3046ed",
+              "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+              "path": "ports.py",
+              "excerpt": "from typing import Protocol\n\n\nclass GatewayPort(Protocol):\n    def send(self, event_id: str, payload: bytes) -> bool:\n        \"\"\"Return the partner gateway's acknowledgement.\"\"\"\n        ...",
+              "content_hash": "0b9a67b95dfb2787242aa94d6e23bd74f8e9389975d9bf2c3dfe92b30737a33e",
+              "kind": "source"
+            }
+          }
+        }
+      },
+      {
+        "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+        "sequence": 12,
+        "timestamp": "2026-10-07T04:25:29.168389Z",
+        "type": "tool.started",
+        "payload": {
+          "request": {
+            "request_id": "request-6-bridge",
+            "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+            "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+            "params": {
+              "tool": "read_source",
+              "path": "bridge.py",
+              "start_line": 1,
+              "end_line": 5
+            }
+          }
+        }
+      },
+      {
+        "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+        "sequence": 13,
+        "timestamp": "2026-10-07T04:25:29.240894Z",
+        "type": "tool.completed",
+        "payload": {
+          "result": {
+            "request_id": "request-6-bridge",
+            "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+            "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+            "completed_sequence": 13,
+            "kind": "read_source.succeeded",
+            "tool": "read_source",
+            "evidence": {
+              "start_line": 1,
+              "end_line": 5,
+              "evidence_id": "evidence-d2eb9a79ae0657f93ec809d4384e3ecc",
+              "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+              "path": "bridge.py",
+              "excerpt": "from .ports import GatewayPort\n\n\ndef deliver(gateway: GatewayPort, event_id: str, payload: bytes) -> bool:\n    return gateway.send(event_id, payload)",
+              "content_hash": "ee46cf5afc8ec139bab147ac780e23a8cecd5c3883378d7907f26cb49578f85a",
+              "kind": "source"
+            }
+          }
+        }
+      },
+      {
+        "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+        "sequence": 14,
+        "timestamp": "2026-10-07T04:25:41.273688Z",
+        "type": "tool.started",
+        "payload": {
+          "request": {
+            "request_id": "request-7-deliver-neighbors",
+            "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+            "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+            "params": {
+              "tool": "get_neighbors",
+              "symbol_id": "sym-d250393c14d723833f07249f99bfec3e",
+              "direction": "both",
+              "depth": 2,
+              "limit": 10
+            }
+          }
+        }
+      },
+      {
+        "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+        "sequence": 15,
+        "timestamp": "2026-10-07T04:25:41.339042Z",
+        "type": "tool.completed",
+        "payload": {
+          "result": {
+            "request_id": "request-7-deliver-neighbors",
+            "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+            "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+            "completed_sequence": 15,
+            "kind": "get_neighbors.succeeded",
+            "tool": "get_neighbors",
+            "root": {
+              "start_line": 4,
+              "end_line": 5,
+              "symbol_id": "sym-d250393c14d723833f07249f99bfec3e",
+              "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+              "path": "bridge.py",
+              "qualified_name": "bridge.deliver",
+              "kind": "function"
+            },
+            "nodes": [
+              {
+                "start_line": 4,
+                "end_line": 5,
+                "symbol_id": "sym-d250393c14d723833f07249f99bfec3e",
+                "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+                "path": "bridge.py",
+                "qualified_name": "bridge.deliver",
+                "kind": "function"
+              }
+            ],
+            "neighbors": [],
+            "contextual_calls": [],
+            "unresolved": [
+              {
+                "start_line": 5,
+                "end_line": 5,
+                "unresolved_id": "unresolved-94d32e61ed79bf0df85b9820f0aea23f",
+                "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+                "source_symbol_id": "sym-d250393c14d723833f07249f99bfec3e",
+                "path": "bridge.py",
+                "expression": "gateway.send(event_id, payload)",
+                "reason": "name_rebound_in_scope",
+                "possible_target_ids": []
+              }
+            ],
+            "truncated": false,
+            "truncation_reason": null,
+            "index_truncated": false,
+            "index_truncation_reason": null,
+            "index_unresolved_truncated": false,
+            "index_unresolved_truncation_reason": null
+          }
+        }
+      },
+      {
+        "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+        "sequence": 16,
+        "timestamp": "2026-10-07T04:25:55.280585Z",
+        "type": "tool.started",
+        "payload": {
+          "request": {
+            "request_id": "request-8-event",
+            "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+            "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+            "params": {
+              "tool": "search_code",
+              "query": "event",
+              "limit": 20
+            }
+          }
+        }
+      },
+      {
+        "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+        "sequence": 17,
+        "timestamp": "2026-10-07T04:25:55.362191Z",
+        "type": "tool.completed",
+        "payload": {
+          "result": {
+            "request_id": "request-8-event",
+            "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+            "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+            "completed_sequence": 17,
+            "kind": "search_code.succeeded",
+            "tool": "search_code",
+            "matches": [],
+            "truncated": false,
+            "truncation_reason": null
+          }
+        }
+      },
+      {
+        "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+        "sequence": 18,
+        "timestamp": "2026-10-07T04:26:29.054230Z",
+        "type": "graph.updated",
+        "payload": {
+          "graph": {
+            "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+            "nodes": [
+              {
+                "start_line": 4,
+                "end_line": 7,
+                "symbol_id": "sym-0eaa629214826592d79cf02a476cc6ca",
+                "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+                "path": "ports.py",
+                "qualified_name": "ports.GatewayPort",
+                "kind": "class"
+              },
+              {
+                "start_line": 5,
+                "end_line": 7,
+                "symbol_id": "sym-c03ce1fd9f0ca0ccb4cbcbcae01163eb",
+                "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+                "path": "ports.py",
+                "qualified_name": "ports.GatewayPort.send",
+                "kind": "function"
+              },
+              {
+                "start_line": 1,
+                "end_line": 5,
+                "symbol_id": "sym-730a6bf15afaccede330da7144f524f3",
+                "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+                "path": "bridge.py",
+                "qualified_name": "bridge",
+                "kind": "module"
+              },
+              {
+                "start_line": 4,
+                "end_line": 5,
+                "symbol_id": "sym-d250393c14d723833f07249f99bfec3e",
+                "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+                "path": "bridge.py",
+                "qualified_name": "bridge.deliver",
+                "kind": "function"
+              },
+              {
+                "start_line": 1,
+                "end_line": 7,
+                "symbol_id": "sym-d1c68a27c7a6c23d7d4738f8a549bfb3",
+                "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+                "path": "ports.py",
+                "qualified_name": "ports",
+                "kind": "module"
+              }
+            ],
+            "static_edges": [],
+            "unresolved": [
+              {
+                "start_line": 5,
+                "end_line": 5,
+                "unresolved_id": "unresolved-94d32e61ed79bf0df85b9820f0aea23f",
+                "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+                "source_symbol_id": "sym-d250393c14d723833f07249f99bfec3e",
+                "path": "bridge.py",
+                "expression": "gateway.send(event_id, payload)",
+                "reason": "name_rebound_in_scope",
+                "possible_target_ids": []
+              }
+            ],
+            "candidate_links": [],
+            "truncated": false,
+            "truncation_reason": null
+          }
+        }
+      },
+      {
+        "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+        "sequence": 19,
+        "timestamp": "2026-10-07T04:26:29.058176Z",
+        "type": "run.completed",
+        "payload": {
+          "status": "succeeded",
+          "outcome": "insufficient_evidence",
+          "report_id": "report-run-125dbc9c5f8845d7be564d8b5a477ea6"
+        }
+      }
+    ],
+    "next_after_sequence": null,
+    "has_more": false
+  },
+  "tool_results": {
+    "schema_version": "0.1.0",
+    "project_id": "project-cd8c3a0000d342e8a1145e7deafb6cfd",
+    "session_id": "session-59fa1dbb903448138d55b27e9137de15",
+    "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+    "results": [
+      {
+        "request_id": "request-1-timeout",
+        "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+        "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+        "completed_sequence": 3,
+        "kind": "search_code.succeeded",
+        "tool": "search_code",
+        "matches": [],
+        "truncated": false,
+        "truncation_reason": null
+      },
+      {
+        "request_id": "request-2-gateway",
+        "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+        "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+        "completed_sequence": 5,
+        "kind": "search_code.succeeded",
+        "tool": "search_code",
+        "matches": [
+          {
+            "rank": 1,
+            "symbol": {
+              "start_line": 4,
+              "end_line": 7,
+              "symbol_id": "sym-0eaa629214826592d79cf02a476cc6ca",
+              "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+              "path": "ports.py",
+              "qualified_name": "ports.GatewayPort",
+              "kind": "class"
+            },
+            "matched_terms": [
+              "gateway"
+            ]
+          },
+          {
+            "rank": 2,
+            "symbol": {
+              "start_line": 5,
+              "end_line": 7,
+              "symbol_id": "sym-c03ce1fd9f0ca0ccb4cbcbcae01163eb",
+              "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+              "path": "ports.py",
+              "qualified_name": "ports.GatewayPort.send",
+              "kind": "function"
+            },
+            "matched_terms": [
+              "gateway"
+            ]
+          },
+          {
+            "rank": 3,
+            "symbol": {
+              "start_line": 1,
+              "end_line": 5,
+              "symbol_id": "sym-730a6bf15afaccede330da7144f524f3",
+              "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+              "path": "bridge.py",
+              "qualified_name": "bridge",
+              "kind": "module"
+            },
+            "matched_terms": [
+              "gateway"
+            ]
+          },
+          {
+            "rank": 4,
+            "symbol": {
+              "start_line": 4,
+              "end_line": 5,
+              "symbol_id": "sym-d250393c14d723833f07249f99bfec3e",
+              "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+              "path": "bridge.py",
+              "qualified_name": "bridge.deliver",
+              "kind": "function"
+            },
+            "matched_terms": [
+              "gateway"
+            ]
+          },
+          {
+            "rank": 5,
+            "symbol": {
+              "start_line": 1,
+              "end_line": 7,
+              "symbol_id": "sym-d1c68a27c7a6c23d7d4738f8a549bfb3",
+              "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+              "path": "ports.py",
+              "qualified_name": "ports",
+              "kind": "module"
+            },
+            "matched_terms": [
+              "gateway"
+            ]
+          }
+        ],
+        "truncated": false,
+        "truncation_reason": null
+      },
+      {
+        "request_id": "request-3-acknowledge",
+        "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+        "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+        "completed_sequence": 7,
+        "kind": "search_code.succeeded",
+        "tool": "search_code",
+        "matches": [
+          {
+            "rank": 1,
+            "symbol": {
+              "start_line": 1,
+              "end_line": 7,
+              "symbol_id": "sym-d1c68a27c7a6c23d7d4738f8a549bfb3",
+              "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+              "path": "ports.py",
+              "qualified_name": "ports",
+              "kind": "module"
+            },
+            "matched_terms": [
+              "acknowledgement"
+            ]
+          },
+          {
+            "rank": 2,
+            "symbol": {
+              "start_line": 4,
+              "end_line": 7,
+              "symbol_id": "sym-0eaa629214826592d79cf02a476cc6ca",
+              "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+              "path": "ports.py",
+              "qualified_name": "ports.GatewayPort",
+              "kind": "class"
+            },
+            "matched_terms": [
+              "acknowledgement"
+            ]
+          },
+          {
+            "rank": 3,
+            "symbol": {
+              "start_line": 5,
+              "end_line": 7,
+              "symbol_id": "sym-c03ce1fd9f0ca0ccb4cbcbcae01163eb",
+              "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+              "path": "ports.py",
+              "qualified_name": "ports.GatewayPort.send",
+              "kind": "function"
+            },
+            "matched_terms": [
+              "acknowledgement"
+            ]
+          }
+        ],
+        "truncated": false,
+        "truncation_reason": null
+      },
+      {
+        "request_id": "request-4-send",
+        "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+        "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+        "completed_sequence": 9,
+        "kind": "search_code.succeeded",
+        "tool": "search_code",
+        "matches": [
+          {
+            "rank": 1,
+            "symbol": {
+              "start_line": 5,
+              "end_line": 7,
+              "symbol_id": "sym-c03ce1fd9f0ca0ccb4cbcbcae01163eb",
+              "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+              "path": "ports.py",
+              "qualified_name": "ports.GatewayPort.send",
+              "kind": "function"
+            },
+            "matched_terms": [
+              "send"
+            ]
+          },
+          {
+            "rank": 2,
+            "symbol": {
+              "start_line": 1,
+              "end_line": 5,
+              "symbol_id": "sym-730a6bf15afaccede330da7144f524f3",
+              "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+              "path": "bridge.py",
+              "qualified_name": "bridge",
+              "kind": "module"
+            },
+            "matched_terms": [
+              "send"
+            ]
+          },
+          {
+            "rank": 3,
+            "symbol": {
+              "start_line": 4,
+              "end_line": 5,
+              "symbol_id": "sym-d250393c14d723833f07249f99bfec3e",
+              "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+              "path": "bridge.py",
+              "qualified_name": "bridge.deliver",
+              "kind": "function"
+            },
+            "matched_terms": [
+              "send"
+            ]
+          },
+          {
+            "rank": 4,
+            "symbol": {
+              "start_line": 1,
+              "end_line": 7,
+              "symbol_id": "sym-d1c68a27c7a6c23d7d4738f8a549bfb3",
+              "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+              "path": "ports.py",
+              "qualified_name": "ports",
+              "kind": "module"
+            },
+            "matched_terms": [
+              "send"
+            ]
+          },
+          {
+            "rank": 5,
+            "symbol": {
+              "start_line": 4,
+              "end_line": 7,
+              "symbol_id": "sym-0eaa629214826592d79cf02a476cc6ca",
+              "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+              "path": "ports.py",
+              "qualified_name": "ports.GatewayPort",
+              "kind": "class"
+            },
+            "matched_terms": [
+              "send"
+            ]
+          }
+        ],
+        "truncated": false,
+        "truncation_reason": null
+      },
+      {
+        "request_id": "request-5-ports",
+        "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+        "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+        "completed_sequence": 11,
+        "kind": "read_source.succeeded",
+        "tool": "read_source",
+        "evidence": {
+          "start_line": 1,
+          "end_line": 7,
+          "evidence_id": "evidence-c63eafbe1924331af27f5cd8bf3046ed",
+          "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+          "path": "ports.py",
+          "excerpt": "from typing import Protocol\n\n\nclass GatewayPort(Protocol):\n    def send(self, event_id: str, payload: bytes) -> bool:\n        \"\"\"Return the partner gateway's acknowledgement.\"\"\"\n        ...",
+          "content_hash": "0b9a67b95dfb2787242aa94d6e23bd74f8e9389975d9bf2c3dfe92b30737a33e",
+          "kind": "source"
+        }
+      },
+      {
+        "request_id": "request-6-bridge",
+        "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+        "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+        "completed_sequence": 13,
+        "kind": "read_source.succeeded",
+        "tool": "read_source",
+        "evidence": {
+          "start_line": 1,
+          "end_line": 5,
+          "evidence_id": "evidence-d2eb9a79ae0657f93ec809d4384e3ecc",
+          "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+          "path": "bridge.py",
+          "excerpt": "from .ports import GatewayPort\n\n\ndef deliver(gateway: GatewayPort, event_id: str, payload: bytes) -> bool:\n    return gateway.send(event_id, payload)",
+          "content_hash": "ee46cf5afc8ec139bab147ac780e23a8cecd5c3883378d7907f26cb49578f85a",
+          "kind": "source"
+        }
+      },
+      {
+        "request_id": "request-7-deliver-neighbors",
+        "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+        "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+        "completed_sequence": 15,
+        "kind": "get_neighbors.succeeded",
+        "tool": "get_neighbors",
+        "root": {
+          "start_line": 4,
+          "end_line": 5,
+          "symbol_id": "sym-d250393c14d723833f07249f99bfec3e",
+          "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+          "path": "bridge.py",
+          "qualified_name": "bridge.deliver",
+          "kind": "function"
+        },
+        "nodes": [
+          {
+            "start_line": 4,
+            "end_line": 5,
+            "symbol_id": "sym-d250393c14d723833f07249f99bfec3e",
+            "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+            "path": "bridge.py",
+            "qualified_name": "bridge.deliver",
+            "kind": "function"
+          }
+        ],
+        "neighbors": [],
+        "contextual_calls": [],
+        "unresolved": [
+          {
+            "start_line": 5,
+            "end_line": 5,
+            "unresolved_id": "unresolved-94d32e61ed79bf0df85b9820f0aea23f",
+            "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+            "source_symbol_id": "sym-d250393c14d723833f07249f99bfec3e",
+            "path": "bridge.py",
+            "expression": "gateway.send(event_id, payload)",
+            "reason": "name_rebound_in_scope",
+            "possible_target_ids": []
+          }
+        ],
+        "truncated": false,
+        "truncation_reason": null,
+        "index_truncated": false,
+        "index_truncation_reason": null,
+        "index_unresolved_truncated": false,
+        "index_unresolved_truncation_reason": null
+      },
+      {
+        "request_id": "request-8-event",
+        "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+        "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+        "completed_sequence": 17,
+        "kind": "search_code.succeeded",
+        "tool": "search_code",
+        "matches": [],
+        "truncated": false,
+        "truncation_reason": null
+      }
+    ],
+    "next_after_sequence": null,
+    "has_more": false
+  },
+  "report": {
+    "schema_version": "0.1.0",
+    "report_id": "report-run-125dbc9c5f8845d7be564d8b5a477ea6",
+    "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+    "project_id": "project-cd8c3a0000d342e8a1145e7deafb6cfd",
+    "session_id": "session-59fa1dbb903448138d55b27e9137de15",
+    "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+    "status": "succeeded",
+    "outcome": "insufficient_evidence",
+    "fixture_mode": false,
+    "summary": "The snapshot shows a pass-through to a gateway port but no concrete timeout or transport behavior, so it cannot establish why a locally timed-out event is later confirmed by the partner.",
+    "graph": {
+      "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+      "nodes": [
+        {
+          "start_line": 4,
+          "end_line": 7,
+          "symbol_id": "sym-0eaa629214826592d79cf02a476cc6ca",
+          "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+          "path": "ports.py",
+          "qualified_name": "ports.GatewayPort",
+          "kind": "class"
+        },
+        {
+          "start_line": 5,
+          "end_line": 7,
+          "symbol_id": "sym-c03ce1fd9f0ca0ccb4cbcbcae01163eb",
+          "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+          "path": "ports.py",
+          "qualified_name": "ports.GatewayPort.send",
+          "kind": "function"
+        },
+        {
+          "start_line": 1,
+          "end_line": 5,
+          "symbol_id": "sym-730a6bf15afaccede330da7144f524f3",
+          "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+          "path": "bridge.py",
+          "qualified_name": "bridge",
+          "kind": "module"
+        },
+        {
+          "start_line": 4,
+          "end_line": 5,
+          "symbol_id": "sym-d250393c14d723833f07249f99bfec3e",
+          "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+          "path": "bridge.py",
+          "qualified_name": "bridge.deliver",
+          "kind": "function"
+        },
+        {
+          "start_line": 1,
+          "end_line": 7,
+          "symbol_id": "sym-d1c68a27c7a6c23d7d4738f8a549bfb3",
+          "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+          "path": "ports.py",
+          "qualified_name": "ports",
+          "kind": "module"
+        }
+      ],
+      "static_edges": [],
+      "unresolved": [
+        {
+          "start_line": 5,
+          "end_line": 5,
+          "unresolved_id": "unresolved-94d32e61ed79bf0df85b9820f0aea23f",
+          "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+          "source_symbol_id": "sym-d250393c14d723833f07249f99bfec3e",
+          "path": "bridge.py",
+          "expression": "gateway.send(event_id, payload)",
+          "reason": "name_rebound_in_scope",
+          "possible_target_ids": []
+        }
+      ],
+      "candidate_links": [],
+      "truncated": false,
+      "truncation_reason": null
+    },
+    "evidence": [
+      {
+        "start_line": 1,
+        "end_line": 5,
+        "evidence_id": "evidence-d2eb9a79ae0657f93ec809d4384e3ecc",
+        "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+        "path": "bridge.py",
+        "excerpt": "from .ports import GatewayPort\n\n\ndef deliver(gateway: GatewayPort, event_id: str, payload: bytes) -> bool:\n    return gateway.send(event_id, payload)",
+        "content_hash": "ee46cf5afc8ec139bab147ac780e23a8cecd5c3883378d7907f26cb49578f85a",
+        "kind": "source"
+      },
+      {
+        "start_line": 1,
+        "end_line": 7,
+        "evidence_id": "evidence-c63eafbe1924331af27f5cd8bf3046ed",
+        "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+        "path": "ports.py",
+        "excerpt": "from typing import Protocol\n\n\nclass GatewayPort(Protocol):\n    def send(self, event_id: str, payload: bytes) -> bool:\n        \"\"\"Return the partner gateway's acknowledgement.\"\"\"\n        ...",
+        "content_hash": "0b9a67b95dfb2787242aa94d6e23bd74f8e9389975d9bf2c3dfe92b30737a33e",
+        "kind": "source"
+      }
+    ],
+    "findings": [
+      {
+        "finding_id": "gateway-pass-through",
+        "kind": "observation",
+        "text": "bridge.deliver returns gateway.send(event_id, payload) directly, while GatewayPort.send is only a Protocol stub declaring a boolean acknowledgement. The snapshot does not show a local timeout handler or the concrete gateway implementation.",
+        "symbol_ids": [
+          "sym-d250393c14d723833f07249f99bfec3e",
+          "sym-c03ce1fd9f0ca0ccb4cbcbcae01163eb"
+        ],
+        "evidence_ids": [
+          "evidence-d2eb9a79ae0657f93ec809d4384e3ecc",
+          "evidence-c63eafbe1924331af27f5cd8bf3046ed"
+        ]
+      }
+    ],
+    "candidate_links": [],
+    "explanation": null,
+    "limitations": [
+      "The static call graph leaves gateway.send unresolved as name_rebound_in_scope; the concrete transport, timeout, and logging paths remain unknown.",
+      "The retry search could not run because the Run tool-call budget was exhausted."
+    ],
+    "terminal_sequence": 19
+  }
+}

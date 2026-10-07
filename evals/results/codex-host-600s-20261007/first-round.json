@@ -1,0 +1,218 @@
+{
+  "schema_version": "codetrail.external-issue-eval.first-round.v1",
+  "evaluated_at": "2026-10-07",
+  "baseline_revision": "affd43f",
+  "execution": {
+    "host": "Codex desktop host after client restart",
+    "host_tool_directory_checked": true,
+    "start_description_verified": "analysis_kind defaults to issue",
+    "submit_description_verified": "Issue conclusions support candidate_found or insufficient_evidence; candidate_found requires candidate_links; insufficient_evidence forbids candidate_links; evidence references must come from the same Run/index",
+    "solver_setup": "Three fresh GPT-6 Luna / xhigh subagents created with fork_turns=none; each received only its Issue and its own project/index/session IDs plus the public MCP Run tool instructions. No source or gold was provided.",
+    "process_boundary": "Solvers used only mcp__codetrail__ Run-scoped MCP tools. The evaluator alone read frozen files for setup/scoring. No source code/tests were executed and no external provider was called.",
+    "start_external_run": "max_seconds=600 explicitly passed; analysis_kind omitted to exercise the refreshed issue default. Persisted run records confirm analysis_kind=issue and max_seconds=600.",
+    "imports": "Each case was imported to a new project, immutable index, and session before its Run. Allowed import root was limited to this result folder."
+  },
+  "timing_note": "Server timestamps show queue-to-terminal and active-to-terminal spans. Client totals are sums of individually observed MCP await times and exclude between-call thinking and orchestration; they are not model-only inference time. Exact continuous client wall time was not retained for the first two cases. CodeTrail's model_calls_used is 0 because the Codex host supplied the solver model; it does not mean no model reasoning occurred.",
+  "cases": [
+    {
+      "case_id": "lease-expiry-boundary",
+      "project_id": "project-abec76b8b8ea4d31b8caa4ac9e425ab1",
+      "repository_id": "import-e71f760430883a76e30356a4a401cdb7",
+      "index_id": "index-import-e71f760430883a76e30356a4a401cdb7-relations-v13-6370f4474649f47f",
+      "snapshot_hash": "6370f4474649f47fbbcda1e7edc4246fe8e5e98d8fa868c38c9b4eff8a451868",
+      "session_id": "session-70a904ca76bb47e39e5ca10d555ec308",
+      "input_hash": "e757aeed47cf9124e067d729f4f5b444e99476dd5fadaa742426129c4afa4ae8",
+      "run_id": "run-5defb5cfc04f4bd08e84b58fd9d60f57",
+      "report_id": "report-run-5defb5cfc04f4bd08e84b58fd9d60f57",
+      "status": "succeeded",
+      "outcome": "candidate_found",
+      "created_to_terminal_ms": 162429.045,
+      "active_to_terminal_ms": 138762.558,
+      "client_observed_mcp_ms": 5435,
+      "client_mcp_calls": [
+        {
+          "tool": "start_external_run",
+          "elapsed_ms": 2687
+        },
+        {
+          "tool": "run_search_code",
+          "elapsed_ms": 579
+        },
+        {
+          "tool": "run_search_code",
+          "elapsed_ms": 564
+        },
+        {
+          "tool": "run_read_source",
+          "elapsed_ms": 564
+        },
+        {
+          "tool": "run_get_neighbors",
+          "elapsed_ms": 577
+        },
+        {
+          "tool": "submit_external_run",
+          "elapsed_ms": 464
+        }
+      ],
+      "budget": {
+        "max_seconds": 600,
+        "tool_calls_used": 4,
+        "max_tool_calls": 8,
+        "events_used": 11
+      },
+      "result": "Correctly identifies lease_is_active's inclusive comparison and the effect on requests at exactly expires_at; candidate link maps to lease_is_active and cites same-run evidence.",
+      "evidence_ids": [
+        "evidence-e2b841a354b7d0f20db3ef05495fa39c"
+      ],
+      "raw_report": "runs/lease-expiry-boundary.json"
+    },
+    {
+      "case_id": "duplicate-notification-delivery",
+      "project_id": "project-5e05f0cb303a4c9285a052f99cf7d010",
+      "repository_id": "import-00a4b04e2ce21f30739f8762482083c5",
+      "index_id": "index-import-00a4b04e2ce21f30739f8762482083c5-relations-v13-929a7ef4cde14735",
+      "snapshot_hash": "929a7ef4cde147351a44addd744fad36aacbb255a3888dec162b8f2f74d2aaae",
+      "session_id": "session-3f120e08e963462e9d6ee19faaf36447",
+      "input_hash": "4b8b716284d2559becba784cc473e6a78572359ef5fb772e09a0d7a50bc94f92",
+      "run_id": "run-08eb2743f3f74969851a3fe607a1a74b",
+      "report_id": "report-run-08eb2743f3f74969851a3fe607a1a74b",
+      "status": "succeeded",
+      "outcome": "candidate_found",
+      "created_to_terminal_ms": 119419.201,
+      "active_to_terminal_ms": 104573.968,
+      "client_observed_mcp_ms": 5516,
+      "client_mcp_calls": [
+        {
+          "tool": "start_external_run",
+          "elapsed_ms": 2477
+        },
+        {
+          "tool": "run_search_code",
+          "elapsed_ms": 342
+        },
+        {
+          "tool": "run_search_code",
+          "elapsed_ms": 348
+        },
+        {
+          "tool": "run_read_source",
+          "elapsed_ms": 338,
+          "result": "invalid_input: requested range 1-40 exceeded tool limit"
+        },
+        {
+          "tool": "run_read_source",
+          "elapsed_ms": 328,
+          "result": "recovered with lines 9-16"
+        },
+        {
+          "tool": "run_search_code",
+          "elapsed_ms": 337
+        },
+        {
+          "tool": "run_read_source",
+          "elapsed_ms": 347
+        },
+        {
+          "tool": "run_get_neighbors",
+          "elapsed_ms": 346
+        },
+        {
+          "tool": "run_search_code",
+          "elapsed_ms": 329
+        },
+        {
+          "tool": "submit_external_run",
+          "elapsed_ms": 324
+        }
+      ],
+      "budget": {
+        "max_seconds": 600,
+        "tool_calls_used": 8,
+        "max_tool_calls": 8,
+        "events_used": 19
+      },
+      "result": "Correctly links dispatch_notification's per-call new DeliveryLedger with the ledger's instance-local empty set; bounds the conclusion to the visible dispatch path and does not infer an upstream retry scheduler.",
+      "evidence_ids": [
+        "evidence-cc393ec148a33fdbd7cfa8db7ca6a876",
+        "evidence-4585d47adc7a9e058e5416421d9b39fd"
+      ],
+      "raw_report": "runs/duplicate-notification-delivery.json"
+    },
+    {
+      "case_id": "unobservable-gateway-timeout",
+      "project_id": "project-cd8c3a0000d342e8a1145e7deafb6cfd",
+      "repository_id": "import-b4184ab2c3790f87e0254d7720ea5588",
+      "index_id": "index-import-b4184ab2c3790f87e0254d7720ea5588-relations-v13-5230fc31c1ea9d43",
+      "snapshot_hash": "5230fc31c1ea9d43d36c5e8bccfcdb620978602a2433e73effba149df097a80e",
+      "session_id": "session-59fa1dbb903448138d55b27e9137de15",
+      "input_hash": "0658e908cf28086e61176adad8197dcf9f5695206c1f44730dc0e172f4865e6e",
+      "run_id": "run-125dbc9c5f8845d7be564d8b5a477ea6",
+      "report_id": "report-run-125dbc9c5f8845d7be564d8b5a477ea6",
+      "status": "succeeded",
+      "outcome": "insufficient_evidence",
+      "created_to_terminal_ms": 92436.595,
+      "active_to_terminal_ms": 83815.801,
+      "client_observed_mcp_ms": 7248,
+      "client_mcp_calls": [
+        {
+          "tool": "start_external_run",
+          "elapsed_ms": 2723
+        },
+        {
+          "tool": "run_search_code",
+          "elapsed_ms": 459
+        },
+        {
+          "tool": "run_search_code",
+          "elapsed_ms": 465
+        },
+        {
+          "tool": "run_search_code",
+          "elapsed_ms": 487
+        },
+        {
+          "tool": "run_search_code",
+          "elapsed_ms": 502
+        },
+        {
+          "tool": "run_read_source",
+          "elapsed_ms": 438
+        },
+        {
+          "tool": "run_read_source",
+          "elapsed_ms": 464
+        },
+        {
+          "tool": "run_get_neighbors",
+          "elapsed_ms": 444
+        },
+        {
+          "tool": "run_search_code",
+          "elapsed_ms": 504
+        },
+        {
+          "tool": "run_search_code",
+          "elapsed_ms": 376,
+          "result": "budget_exceeded; retry-policy search was not executed"
+        },
+        {
+          "tool": "submit_external_run",
+          "elapsed_ms": 386
+        }
+      ],
+      "budget": {
+        "max_seconds": 600,
+        "tool_calls_used": 8,
+        "max_tool_calls": 8,
+        "events_used": 19
+      },
+      "result": "Correctly abstains: bridge.deliver delegates to GatewayPort; no concrete adapter, timeout configuration, or partner transport is visible. It leaves candidate_links empty and cites both the pass-through and protocol stub.",
+      "evidence_ids": [
+        "evidence-d2eb9a79ae0657f93ec809d4384e3ecc",
+        "evidence-c63eafbe1924331af27f5cd8bf3046ed"
+      ],
+      "raw_report": "runs/unobservable-gateway-timeout.json"
+    }
+  ]
+}
