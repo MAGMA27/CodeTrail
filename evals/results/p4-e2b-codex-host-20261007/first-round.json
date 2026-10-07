@@ -1,0 +1,132 @@
+{
+  "dataset_id": "p4-e2b-codex-host-20261007",
+  "first_round_frozen_at": "2026-10-07T03:50:00Z",
+  "scoring_status": "frozen_unscored",
+  "summary": "All three first Runs reached a terminal interrupted state. Each has the server-generated interrupted report and no solver-submitted structured conclusion; therefore the first-round structured-hit numerator is 0/3. This is recorded before opening gold.",
+  "timing_notes": [
+    "Client timings are solver Date.now() before/after each MCP await; they include client/transport overhead but exclude time between calls.",
+    "Server tool timings are derived from persisted tool.started/tool.completed timestamps and are not model inference times.",
+    "Whole investigation wall is client-observed from immediately before start_external_run to the final submit response; the remainder beyond tool awaits may include agent response/coordination, host scheduling, waits, and submit retries, and was not decomposed into pure model inference time.",
+    "HTTP import/index wall measures the complete import/index request, not pure AST parsing time."
+  ],
+  "cases": [
+    {
+      "case_id": "empty-cache-value",
+      "project_id": "project-26ad292d5ed24915b6276eb0200d64f9",
+      "index_id": "index-import-b635a822e7fab317eeb774cd07de64a7-relations-v13-1416f0b2a496523e",
+      "session_id": "session-12c2271000c74e8982d178de770b89a7",
+      "run_id": "run-8b738e8dabd745c995f7c805aa5ea8a6",
+      "snapshot_hash": "1416f0b2a496523e5216ff59f77a4d0ae85e40531b51f5b14f99104056b6c9bc",
+      "import_index_http_wall_ms": 1010.5983,
+      "run": {
+        "server_status": "interrupted",
+        "server_created_at": "2026-10-07T03:40:06.902679Z",
+        "server_started_at": "2026-10-07T03:40:19.045915Z",
+        "server_ended_at": "2026-10-07T03:42:20.078056Z",
+        "max_seconds": 90,
+        "tool_calls_used": 4,
+        "source_lines_used": 13,
+        "events_used": 10,
+        "report_outcome": "interrupted",
+        "submitted_structured_conclusion": false,
+        "client_whole_investigation_wall_ms": 135801
+      },
+      "client_tool_wall_ms": [
+        { "tool": "start_external_run", "ms": 2656 },
+        { "tool": "run_search_code", "request_id": "empty-lookup-search-cache-1", "query": "cache", "ms": 291 },
+        { "tool": "run_search_code", "request_id": "empty-lookup-search-lookup-1", "query": "lookup", "ms": 334 },
+        { "tool": "run_read_source", "request_id": "empty-lookup-read-cache-1", "ms": 284 },
+        { "tool": "run_get_neighbors", "request_id": "empty-lookup-neighbors-callers-1", "ms": 291 },
+        { "tool": "submit_external_run", "ms": 14, "server_error": "invalid_input" },
+        { "tool": "submit_external_run", "ms": 237, "server_error": "conflict" },
+        { "tool": "submit_external_run", "ms": 13, "server_error": "invalid_input" },
+        { "tool": "submit_external_run", "ms": 237, "server_error": "budget_exceeded" }
+      ],
+      "server_tool_wall_ms": [50, 60, 54, 49]
+    },
+    {
+      "case_id": "order-reservation-release",
+      "project_id": "project-38981b640aad4f39a1e4a9d3200194a6",
+      "index_id": "index-import-9bd35e5577de3e59252d9f1c9d0bbd95-relations-v13-8f03042578fb1a16",
+      "session_id": "session-b1049379f99d479795e44aafe7b40ef4",
+      "run_id": "run-98b6c64f700d44adbc094cad4b05ec0e",
+      "snapshot_hash": "8f03042578fb1a1670a0c394c1bb644e0e9866abb4775e90f4c981b324df9f1c",
+      "import_index_http_wall_ms": 1057.7473,
+      "run": {
+        "server_status": "interrupted",
+        "server_created_at": "2026-10-07T03:40:14.978844Z",
+        "server_started_at": "2026-10-07T03:40:23.822900Z",
+        "server_ended_at": "2026-10-07T03:44:00.277832Z",
+        "max_seconds": 90,
+        "tool_calls_used": 7,
+        "source_lines_used": 21,
+        "events_used": 16,
+        "report_outcome": "interrupted",
+        "submitted_structured_conclusion": false,
+        "client_whole_investigation_wall_ms": 227823
+      },
+      "client_tool_wall_ms": [
+        { "tool": "start_external_run", "ms": 2528 },
+        { "tool": "run_search_code", "request_id": "issue-stock-decline-search-1", "query": "payment declined release inventory reservation order", "ms": 316 },
+        { "tool": "run_search_code", "request_id": "issue-stock-decline-search-2", "query": "reservation inventory order payment", "ms": 261 },
+        { "tool": "run_search_code", "request_id": "issue-stock-decline-search-3", "query": "declined", "ms": 259 },
+        { "tool": "run_search_code", "request_id": "issue-stock-decline-search-4", "query": "reserve", "ms": 268 },
+        { "tool": "run_read_source", "request_id": "issue-stock-decline-read-orders", "ms": 263 },
+        { "tool": "run_read_source", "request_id": "issue-stock-decline-read-inventory", "ms": 264 },
+        { "tool": "run_get_neighbors", "request_id": "issue-stock-decline-neighbors", "ms": 268 },
+        { "tool": "submit_external_run", "ms": 14, "server_error": "invalid_input" },
+        { "tool": "submit_external_run", "ms": 254, "server_error": "conflict" },
+        { "tool": "submit_external_run", "ms": 13, "server_error": "invalid_input" },
+        { "tool": "submit_external_run", "ms": 221, "server_error": "budget_exceeded" }
+      ],
+      "server_tool_wall_ms": [46, 38, 38, 39, 37, 39, 45]
+    },
+    {
+      "case_id": "opaque-payment-timeout",
+      "project_id": "project-9d9c9e42a5104c85a38a7ac848623fc1",
+      "index_id": "index-import-1ce5a84ec992f64f765ecc131454da03-relations-v13-32cd993e130b5fd0",
+      "session_id": "session-2bfd3edb11d34faa9d799393127b9bc0",
+      "run_id": "run-a2d68216df9e49369c8c5f1cf54d12c7",
+      "snapshot_hash": "32cd993e130b5fd0929bb48a1a56eda5751869326a851900bf39a7d7f73717b5",
+      "import_index_http_wall_ms": 1100.9773,
+      "run": {
+        "server_status": "interrupted",
+        "server_created_at": "2026-10-07T03:45:18.708028Z",
+        "server_started_at": "2026-10-07T03:45:30.081018Z",
+        "server_ended_at": "2026-10-07T03:47:40.903449Z",
+        "max_seconds": 90,
+        "tool_calls_used": 7,
+        "source_lines_used": 9,
+        "events_used": 16,
+        "report_outcome": "interrupted",
+        "submitted_structured_conclusion": false,
+        "client_whole_investigation_wall_ms": 144521
+      },
+      "client_tool_wall_ms": [
+        { "tool": "start_external_run", "ms": 2325 },
+        { "tool": "run_search_code", "request_id": "capture-resubmit-search-1", "query": "capture", "ms": 213 },
+        { "tool": "run_search_code", "request_id": "completed-capture-search-2", "query": "completed", "ms": 296 },
+        { "tool": "run_search_code", "request_id": "timeout-retry-search-3", "query": "retry timeout", "ms": 206 },
+        { "tool": "run_read_source", "request_id": "read-settlement-settle-1", "ms": 220 },
+        { "tool": "run_get_neighbors", "request_id": "settle-callers-1", "ms": 210 },
+        { "tool": "run_search_code", "request_id": "payment-scope-search-4", "query": "payment", "ms": 210 },
+        { "tool": "run_read_source", "request_id": "read-payment-gateway-interface-2", "ms": 221 },
+        { "tool": "submit_external_run", "ms": 16, "server_error": "invalid_input" },
+        { "tool": "submit_external_run", "ms": 206, "server_error": "budget_exceeded" }
+      ],
+      "server_tool_wall_ms": [20, 22, 18, 20, 21, 20, 22]
+    }
+  ],
+  "ui_first_round": {
+    "application": "http://localhost:3000",
+    "api_status": "ONLINE",
+    "case_id": "empty-cache-value",
+    "visible_session_message_count": 1,
+    "visible_runs": [
+      { "case_id": "empty-cache-value", "visible_run_status": "已中断", "visible_public_event_count": 10, "visible_persisted_tool_result_count": 4, "visible_report_summary": "Run was interrupted after its wall-clock budget was exhausted." },
+      { "case_id": "order-reservation-release", "visible_run_status": "已中断", "visible_public_event_count": 16, "visible_persisted_tool_result_count": 7, "visible_report_summary": "Run was interrupted after its wall-clock budget was exhausted." },
+      { "case_id": "opaque-payment-timeout", "visible_run_status": "已中断", "visible_public_event_count": 16, "visible_persisted_tool_result_count": 7, "visible_report_summary": "Run was interrupted after its wall-clock budget was exhausted." }
+    ],
+    "candidate_report_card": "not present in any first-round Run; the visible result is the system-generated interrupted report"
+  }
+}

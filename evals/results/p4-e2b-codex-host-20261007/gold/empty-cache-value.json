@@ -1,0 +1,9 @@
+{
+  "case_id": "empty-cache-value",
+  "expected_outcome": "candidate_found",
+  "root": { "path": "cache.py", "symbol": "get_or_load", "lines": [9, 11] },
+  "diagnosis": "The truthiness check treats any falsey cached value as a cache miss. Empty lists, dictionaries, strings, zero, False, and None are reloaded and overwritten on every call.",
+  "impact_boundary": "Only keys whose stored value is falsey. Truthy cache values are reused. The source does not establish how often callers produce each value or any wider request impact.",
+  "required_evidence": ["cache.py:9-11"],
+  "score": { "outcome": 1, "file": 1, "symbol": 1, "location": 1, "diagnosis": 1, "evidence": 1, "impact_boundary": 1 }
+}

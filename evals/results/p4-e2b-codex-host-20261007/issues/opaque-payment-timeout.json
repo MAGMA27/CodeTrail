@@ -1,0 +1,6 @@
+{
+  "id": "opaque-payment-timeout",
+  "title": "Timeout reports and repeated payment captures have unclear ownership",
+  "body": "After provider timeouts, some orders remain pending while customers report completed or repeated charges. Identify the local function that resubmits a completed capture and the affected request scope. If the indexed source cannot establish the cause or scope, report what is unknown and what evidence is missing.",
+  "mentioned_paths": []
+}

@@ -1,0 +1,17 @@
+{
+  "schema_version": "p4-e1",
+  "case_id": "order-reservation-release",
+  "files": [
+    {
+      "path": "inventory.py",
+      "size": 199,
+      "sha256": "6dc1bffa15e58c75daf147755804163a8c99522fdc9513226bae0fcd6d6a5a82"
+    },
+    {
+      "path": "orders.py",
+      "size": 359,
+      "sha256": "028f2a78820b3a753371a82a84b2abb357bc3a49175f491d1b2f07f02a33f1cf"
+    }
+  ],
+  "snapshot_hash": "8f03042578fb1a1670a0c394c1bb644e0e9866abb4775e90f4c981b324df9f1c"
+}

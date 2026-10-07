@@ -24,6 +24,7 @@
 - `results/p4-e2a-fix-v1/`：P4-E2a 验收修复后的独立执行清单、raw Run 报告和基线对照报告；raw state 不含 gold，可用于恢复且包含 v2 执行身份与累计预算。
 - `results/p4-e2b-external-v1/`：当前 DeepSeek calibration external dry-run 清单；配置缺失时只记录 `configuration_status=missing`，不代表真实评测已执行。
 - [results/p4-e2b-codex-host-20261001/](results/p4-e2b-codex-host-20261001/codex-host-holdout.md)：实际 Codex 宿主已知案例复测，保留首轮失败和独立补充 Run；[影响链验收](results/p4-e2b-codex-host-20261001/impact-chain-acceptance.md) 记录接口、截图与未验收的 UI 边界，不代表盲测或供应商质量。
+- [results/p4-e2b-codex-host-20261007/](results/p4-e2b-codex-host-20261007/README.md)：三例自有 synthetic Issue 的新一轮宿主验收；[首轮评分](results/p4-e2b-codex-host-20261007/first-round-scoring.json)、[提交契约失败记录](results/p4-e2b-codex-host-20261007/submission-failures.md) 与[独立指导 UI 补验](results/p4-e2b-codex-host-20261007/guided-acceptance.md)分开保存。首轮 0/3 为 submit 形状误用后 Run 超时；三例和过程隔离均不代表外部仓库泛化或训练集陌生性。
 
 ## 接口与依赖
 

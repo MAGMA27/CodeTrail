@@ -1,0 +1,4 @@
+* text eol=lf
+sources/** -text
+gold/** -text
+issues/** -text

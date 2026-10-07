@@ -1,0 +1,9 @@
+{
+  "case_id": "opaque-payment-timeout",
+  "expected_outcome": "insufficient_evidence",
+  "visible_path": { "path": "settlement.py", "symbol": "settle", "lines": [4, 7] },
+  "missing_evidence": ["PaymentGateway implementation and timeout/idempotency semantics", "Ledger implementation and persistence/failure behavior", "caller or retry path"],
+  "diagnosis": "The available code shows one call to the PaymentGateway protocol followed by one Ledger protocol call. It does not show a retry, provider capture behavior after timeout, idempotency, or ledger persistence. Naming settle as the cause of repeat charges or pending orders is unsupported.",
+  "impact_boundary": "Only the call ordering in settle is confirmed. Duplicate charges, retry frequency, pending-order scope, and ownership are unknown from this snapshot.",
+  "score": { "outcome": 1, "abstention_reason": 1, "evidence_boundary": 1, "unknowns": 1, "unsupported_claims": 1 }
+}

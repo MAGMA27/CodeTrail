@@ -1,0 +1,12 @@
+{
+  "schema_version": "p4-e1",
+  "case_id": "empty-cache-value",
+  "files": [
+    {
+      "path": "cache.py",
+      "size": 339,
+      "sha256": "f31f835c3446ca4482c379cfa559acf22dbe6ea6539d10355c45135848add8d0"
+    }
+  ],
+  "snapshot_hash": "1416f0b2a496523e5216ff59f77a4d0ae85e40531b51f5b14f99104056b6c9bc"
+}

@@ -1,0 +1,6 @@
+{
+  "id": "empty-cache-value",
+  "title": "Empty lookup results are loaded again on the next request",
+  "body": "When a lookup finds no records, the loader runs again for the same key on the next request. Non-empty results appear to be reused. Identify the local defect with source evidence, explain which stored values trigger it, and state the impact boundary.",
+  "mentioned_paths": []
+}

@@ -1,0 +1,17 @@
+{
+  "schema_version": "p4-e1",
+  "case_id": "opaque-payment-timeout",
+  "files": [
+    {
+      "path": "ports.py",
+      "size": 233,
+      "sha256": "c31a320c6aefc000fb9104d7287817ee8e2fea5f9930fff3ad32b0a6edfb373a"
+    },
+    {
+      "path": "settlement.py",
+      "size": 261,
+      "sha256": "15d2b1b0a67285de9d839139b300f36da7d80a9482bde2c4d4a1f7c5ea997124"
+    }
+  ],
+  "snapshot_hash": "32cd993e130b5fd0929bb48a1a56eda5751869326a851900bf39a7d7f73717b5"
+}

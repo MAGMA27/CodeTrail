@@ -1,0 +1,10 @@
+{
+  "case_id": "order-reservation-release",
+  "expected_outcome": "candidate_found",
+  "root": { "path": "orders.py", "symbol": "place_order", "lines": [9, 14] },
+  "supporting_contract": { "path": "inventory.py", "symbol": "release", "lines": [5, 6] },
+  "diagnosis": "reserve returns a reservation ID, but the PaymentDeclined handler passes order.sku to release, whose parameter is a reservation ID. The wrong identifier prevents releasing the reservation created for this order.",
+  "impact_boundary": "The demonstrated path is PaymentDeclined after reserve succeeds. The successful payment path returns the reservation ID; no other order-failure behavior is shown.",
+  "required_evidence": ["orders.py:9-14", "inventory.py:5-6"],
+  "score": { "outcome": 1, "file": 1, "symbol": 1, "location": 1, "cross_module_trace": 1, "evidence": 1, "impact_boundary": 1 }
+}

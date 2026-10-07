@@ -1,0 +1,65 @@
+{
+  "dataset_id": "p4-e2b-codex-host-20261007",
+  "score_basis": "Persisted first-round Run report only. A server-generated interrupted report is not a solver conclusion. Free-form text outside the Run is not scored as a structured hit.",
+  "gold_opened_after_first_round_freeze": true,
+  "denominator_policy": "All three started first-round Runs remain in the denominator, including interrupted/time-budget failures.",
+  "case_hits": 0,
+  "case_denominator": 3,
+  "cases": [
+    {
+      "case_id": "empty-cache-value",
+      "run_id": "run-8b738e8dabd745c995f7c805aa5ea8a6",
+      "run_status": "interrupted",
+      "persisted_solver_conclusion": false,
+      "case_hit": false,
+      "rubric": {
+        "outcome": 0,
+        "file": 0,
+        "symbol": 0,
+        "location": 0,
+        "diagnosis": 0,
+        "evidence": 0,
+        "impact_boundary": 0
+      },
+      "rubric_points": 0,
+      "rubric_max": 7
+    },
+    {
+      "case_id": "order-reservation-release",
+      "run_id": "run-98b6c64f700d44adbc094cad4b05ec0e",
+      "run_status": "interrupted",
+      "persisted_solver_conclusion": false,
+      "case_hit": false,
+      "rubric": {
+        "outcome": 0,
+        "file": 0,
+        "symbol": 0,
+        "location": 0,
+        "cross_module_trace": 0,
+        "evidence": 0,
+        "impact_boundary": 0
+      },
+      "rubric_points": 0,
+      "rubric_max": 7
+    },
+    {
+      "case_id": "opaque-payment-timeout",
+      "run_id": "run-a2d68216df9e49369c8c5f1cf54d12c7",
+      "run_status": "interrupted",
+      "persisted_solver_conclusion": false,
+      "case_hit": false,
+      "rubric": {
+        "outcome": 0,
+        "abstention_reason": 0,
+        "evidence_boundary": 0,
+        "unknowns": 0,
+        "unsupported_claims": 0
+      },
+      "rubric_points": 0,
+      "rubric_max": 5
+    }
+  ],
+  "aggregate_rubric_points": 0,
+  "aggregate_rubric_max": 19,
+  "interpretation": "0/3 structured first-round hits. Some solver final text named plausible causes or limitations, but repeated rejected submit payloads followed by service timeout prevented any case from producing a persisted solver report. This small synthetic sample does not establish stable quality or external-repository generalization."
+}

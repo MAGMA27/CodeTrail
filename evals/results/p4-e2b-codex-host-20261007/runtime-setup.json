@@ -1,0 +1,53 @@
+[
+  {
+    "case_id": "empty-cache-value",
+    "project_id": "project-26ad292d5ed24915b6276eb0200d64f9",
+    "repository_id": "import-b635a822e7fab317eeb774cd07de64a7",
+    "index_id": "index-import-b635a822e7fab317eeb774cd07de64a7-relations-v13-1416f0b2a496523e",
+    "snapshot_hash": "1416f0b2a496523e5216ff59f77a4d0ae85e40531b51f5b14f99104056b6c9bc",
+    "status": "ready",
+    "started_at": "2026-10-07T11:38:12.4433628+08:00",
+    "completed_at": "2026-10-07T11:38:13.4608393+08:00",
+    "http_import_index_wall_ms": 1010.5983,
+    "truncated": false,
+    "truncation_reason": null,
+    "unresolved_truncated": false,
+    "session_id": "session-12c2271000c74e8982d178de770b89a7",
+    "message_end_sequence": 1,
+    "session_http_setup_ms": null
+  },
+  {
+    "case_id": "order-reservation-release",
+    "project_id": "project-38981b640aad4f39a1e4a9d3200194a6",
+    "repository_id": "import-9bd35e5577de3e59252d9f1c9d0bbd95",
+    "index_id": "index-import-9bd35e5577de3e59252d9f1c9d0bbd95-relations-v13-8f03042578fb1a16",
+    "snapshot_hash": "8f03042578fb1a1670a0c394c1bb644e0e9866abb4775e90f4c981b324df9f1c",
+    "status": "ready",
+    "started_at": "2026-10-07T11:38:13.4668829+08:00",
+    "completed_at": "2026-10-07T11:38:14.5249435+08:00",
+    "http_import_index_wall_ms": 1057.7473,
+    "truncated": false,
+    "truncation_reason": null,
+    "unresolved_truncated": false,
+    "session_id": "session-b1049379f99d479795e44aafe7b40ef4",
+    "message_end_sequence": 1,
+    "session_http_setup_ms": null
+  },
+  {
+    "case_id": "opaque-payment-timeout",
+    "project_id": "project-9d9c9e42a5104c85a38a7ac848623fc1",
+    "repository_id": "import-1ce5a84ec992f64f765ecc131454da03",
+    "index_id": "index-import-1ce5a84ec992f64f765ecc131454da03-relations-v13-32cd993e130b5fd0",
+    "snapshot_hash": "32cd993e130b5fd0929bb48a1a56eda5751869326a851900bf39a7d7f73717b5",
+    "status": "ready",
+    "started_at": "2026-10-07T11:38:14.5250483+08:00",
+    "completed_at": "2026-10-07T11:38:15.6260899+08:00",
+    "http_import_index_wall_ms": 1100.9773,
+    "truncated": false,
+    "truncation_reason": null,
+    "unresolved_truncated": false,
+    "session_id": "session-2bfd3edb11d34faa9d799393127b9bc0",
+    "message_end_sequence": 1,
+    "session_http_setup_ms": null
+  }
+]

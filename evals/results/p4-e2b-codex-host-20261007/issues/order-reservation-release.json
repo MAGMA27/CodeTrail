@@ -1,0 +1,6 @@
+{
+  "id": "order-reservation-release",
+  "title": "Declined orders keep inventory unavailable",
+  "body": "After a payment is declined, the order fails but the reserved stock remains unavailable. Trace the failure path across the order and inventory code, identify a supported root cause with evidence, and state which path is affected.",
+  "mentioned_paths": []
+}
