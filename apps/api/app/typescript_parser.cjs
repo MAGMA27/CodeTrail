@@ -67,6 +67,9 @@ const files = input.files.map(({ path: filePath, text }) => {
     const values = initializer.arguments.filter(isFunctionValue);
     return values.length === 1 ? values[0] : null;
   };
+  const isCallableBinding = (declaration) =>
+    ts.isFunctionDeclaration(declaration) ||
+    ts.isVariableDeclaration(declaration) && Boolean(declaration.initializer) && isFunctionValue(declaration.initializer);
   const functionInfos = [];
   const moduleName = filePath.replace(/\\/g, "/").replace(/\.(tsx?|mts|cts)$/i, "").replaceAll("/", ".");
   const visitDefinitions = (node, parentNames, scopeNode = source) => {
@@ -103,6 +106,7 @@ const files = input.files.map(({ path: filePath, text }) => {
             start_line: range(node).start_line,
             declaration: node,
             function_node: functionNode,
+            callable_binding: isCallableBinding(node),
             direct_binding: directBinding,
             named_binding: ts.isFunctionDeclaration(node) || ts.isVariableDeclaration(node),
             immutable_binding: ts.isFunctionDeclaration(node) ||
@@ -182,7 +186,7 @@ const files = input.files.map(({ path: filePath, text }) => {
     }
   }
   const topLevelFunctions = functionInfos.filter((info) => info.direct_binding &&
-    info.immutable_binding && info.parent_names.length === 1 && info.named_binding);
+    info.callable_binding && info.immutable_binding && info.parent_names.length === 1 && info.named_binding);
   const addExport = (exportedName, localName) => {
     const matches = topLevelFunctions.filter((info) => info.qualified_name === `${moduleName}.${localName}`);
     if (matches.length === 1) exports.push({
@@ -195,7 +199,7 @@ const files = input.files.map(({ path: filePath, text }) => {
     if (isExported(statement)) {
       if (ts.isFunctionDeclaration(statement) && statement.name) addExport(statement.name.text, statement.name.text);
       else if (ts.isVariableStatement(statement)) for (const declaration of statement.declarationList.declarations) {
-        if (ts.isIdentifier(declaration.name) && functionValueFor(declaration)) addExport(declaration.name.text, declaration.name.text);
+        if (ts.isIdentifier(declaration.name) && isCallableBinding(declaration)) addExport(declaration.name.text, declaration.name.text);
       }
     } else if (ts.isExportDeclaration(statement) && !statement.moduleSpecifier &&
       statement.exportClause && ts.isNamedExports(statement.exportClause)) {
@@ -204,39 +208,59 @@ const files = input.files.map(({ path: filePath, text }) => {
       }
     }
   }
-  const collectScopeFacts = (info) => {
-    const body = info.function_node.body;
-    const names = new Set(info.function_node.parameters.flatMap((parameter) => bindingNames(parameter.name)));
-    const assigned = new Set();
-    const assignTarget = (target) => {
-      if (ts.isIdentifier(target)) assigned.add(target.text);
-      else if (ts.isArrayLiteralExpression(target) || ts.isObjectLiteralExpression(target)) {
-        for (const element of target.elements ?? target.properties) {
-          if (ts.isSpreadElement(element)) assignTarget(element.expression);
-          else if (ts.isShorthandPropertyAssignment(element)) assignTarget(element.name);
-          else if (ts.isPropertyAssignment(element)) assignTarget(element.initializer);
-          else if (element.name) assignTarget(element.name);
+  const namedBindingInStatements = (statements, name, blockScopedOnly = true) => {
+    const matches = [];
+    for (const statement of statements) {
+      if ((ts.isFunctionDeclaration(statement) || ts.isClassDeclaration(statement)) &&
+        statement.name?.text === name) matches.push(statement);
+      if (!ts.isVariableStatement(statement)) continue;
+      const blockScoped = Boolean(statement.declarationList.flags & ts.NodeFlags.BlockScoped);
+      if (blockScopedOnly !== blockScoped) continue;
+      matches.push(...statement.declarationList.declarations.filter((item) => bindingNames(item.name).includes(name)));
+    }
+    return matches.length > 1 ? { ambiguous: true } : matches[0] ?? null;
+  };
+  const scopedBinding = (declaration, owner) => declaration
+    ? declaration.ambiguous ? { ambiguous: true, owner } : { declaration, owner }
+    : null;
+  const bindingAt = (info, position, name) => {
+    const fn = info.function_node;
+    let current = position;
+    while (current && current !== fn) {
+      if (ts.isBlock(current)) {
+        const declaration = namedBindingInStatements(current.statements, name);
+        if (declaration) return scopedBinding(declaration, info);
+      } else if (ts.isCatchClause(current) && current.variableDeclaration &&
+        bindingNames(current.variableDeclaration.name).includes(name)) {
+        return { declaration: current.variableDeclaration, owner: info };
+      } else if (ts.isForStatement(current) || ts.isForInStatement(current) || ts.isForOfStatement(current)) {
+        const initializer = current.initializer;
+        if (initializer && ts.isVariableDeclarationList(initializer) &&
+          initializer.declarations.some((item) => bindingNames(item.name).includes(name))) {
+          return { declaration: initializer.declarations.find((item) => bindingNames(item.name).includes(name)), owner: info };
         }
+      } else if (ts.isCaseBlock(current)) {
+        const declaration = namedBindingInStatements(current.clauses.flatMap((clause) => clause.statements), name);
+        if (declaration) return scopedBinding(declaration, info);
       }
+      current = current.parent;
+    }
+    if (fn.parameters.some((parameter) => bindingNames(parameter.name).includes(name))) {
+      return { declaration: null, owner: info };
+    }
+    let varDeclaration = null;
+    const findVar = (node, isRoot = false) => {
+      if (!isRoot && isCallableNode(node)) return;
+      if (ts.isVariableDeclaration(node) && !(node.parent.flags & ts.NodeFlags.BlockScoped) &&
+        bindingNames(node.name).includes(name)) varDeclaration ??= node;
+      ts.forEachChild(node, (child) => findVar(child));
     };
-    const inspect = (node, isRoot = false) => {
-      if (!isRoot && isCallableNode(node)) {
-        if (ts.isFunctionDeclaration(node) && node.name) names.add(node.name.text);
-        return;
-      }
-      if (ts.isVariableDeclaration(node)) for (const name of bindingNames(node.name)) names.add(name);
-      if (ts.isClassDeclaration(node) && node.name) names.add(node.name.text);
-      if (ts.isCatchClause(node) && node.variableDeclaration) {
-        for (const name of bindingNames(node.variableDeclaration.name)) names.add(name);
-      }
-      if (ts.isBinaryExpression(node) && node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
-        node.operatorToken.kind <= ts.SyntaxKind.LastAssignment) assignTarget(node.left);
-      if ((ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) &&
-        [ts.SyntaxKind.PlusPlusToken, ts.SyntaxKind.MinusMinusToken].includes(node.operator)) assignTarget(node.operand);
-      ts.forEachChild(node, (child) => inspect(child));
-    };
-    if (body) inspect(body, true);
-    return { names, assigned };
+    if (fn.body) findVar(fn.body, true);
+    if (varDeclaration) return { declaration: varDeclaration, owner: info };
+    if ((ts.isFunctionDeclaration(fn) || ts.isFunctionExpression(fn)) && fn.name?.text === name) {
+      return { functionInfo: info, owner: info };
+    }
+    return null;
   };
   const callerScopePaths = (info) => {
     const paths = new Set([moduleName]);
@@ -250,7 +274,7 @@ const files = input.files.map(({ path: filePath, text }) => {
   };
   const localTarget = (name, allowedScopes) => {
     const visible = functionInfos.filter((info) => info.direct_binding && info.immutable_binding &&
-      info.named_binding && declarationName(info.declaration) === name &&
+      info.callable_binding && info.named_binding && declarationName(info.declaration) === name &&
       allowedScopes.has(info.parent_names.join(".")));
     if (!visible.length) return { target: null, reason: "call_target_not_in_snapshot" };
     const nearest = Math.max(...visible.map((info) => info.parent_names.length));
@@ -259,12 +283,30 @@ const files = input.files.map(({ path: filePath, text }) => {
       ? { target: matches[0], reason: null }
       : { target: null, reason: "ambiguous_call_target" };
   };
-  const scopeFacts = new Map(functionInfos.map((info) => [info, collectScopeFacts(info)]));
+  const lexicalBinding = (info, callNode, name) => {
+    const own = bindingAt(info, callNode, name);
+    if (own) return own;
+    const parentPaths = [];
+    let parentPath = moduleName;
+    for (const namePart of info.parent_names.slice(1)) {
+      parentPath = `${parentPath}.${namePart}`;
+      parentPaths.push(parentPath);
+    }
+    for (const parentName of parentPaths.reverse()) {
+      const parent = functionInfos.find((candidate) => candidate.qualified_name === parentName);
+      if (parent) {
+        const binding = bindingAt(parent, info.declaration, name);
+        if (binding) return binding;
+      }
+    }
+    return null;
+  };
+  const functionInfoForBinding = (binding) => binding.functionInfo ??
+    functionInfos.find((candidate) => candidate.declaration === binding.declaration);
   for (const info of functionInfos) {
     if (callBudgetTruncated) break;
     const body = info.function_node.body;
     if (!body) continue;
-    const local = scopeFacts.get(info);
     const inspect = (node, isRoot = false) => {
       if (callBudgetTruncated || !isRoot && isCallableNode(node)) return;
       if (ts.isCallExpression(node)) {
@@ -277,15 +319,21 @@ const files = input.files.map(({ path: filePath, text }) => {
         let reason = null;
         if (ts.isIdentifier(node.expression)) {
           const name = node.expression.text;
-          if (local.names.has(name)) {
-            if (local.assigned.has(name)) reason = "name_rebound_in_scope";
-            else {
-              const target = localTarget(name, new Set([info.qualified_name]));
-              if (target.target) {
-                targetQualifiedName = target.target.qualified_name;
-                targetStartLine = target.target.start_line;
-              } else reason = "name_shadowed_in_scope";
-            }
+          const binding = lexicalBinding(info, node, name);
+          if (binding) {
+            const boundFunction = binding.ambiguous ? null : functionInfoForBinding(binding);
+            const target = boundFunction && boundFunction.direct_binding && boundFunction.callable_binding &&
+              boundFunction.immutable_binding && boundFunction.named_binding &&
+              !hasWrites(binding.owner.function_node.body, new Set([name]))
+              ? boundFunction
+              : null;
+            if (target) {
+              targetQualifiedName = target.qualified_name;
+              targetStartLine = target.start_line;
+            } else if (binding.ambiguous) reason = "ambiguous_call_target";
+            else if (binding.owner && binding.owner.function_node.body &&
+              hasWrites(binding.owner.function_node.body, new Set([name]))) reason = "name_rebound_in_scope";
+            else reason = "name_shadowed_in_scope";
           } else {
             const bindings = moduleBindings.get(name) ?? [];
             const imported = importBindings.get(name) ?? [];

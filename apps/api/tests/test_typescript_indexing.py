@@ -211,12 +211,19 @@ def test_typescript_calls_resolve_proven_bindings_and_keep_ambiguous_calls_unres
     (tmp_path / "lib.ts").write_text(
         "export function importedTarget() {}\n"
         "function anotherTarget() {}\n"
+        "function noop() {}\n"
+        "export function wrap(callback: () => void) { return noop; }\n"
+        "export const wrapped = wrap(() => importedTarget());\n"
         "export { importedTarget as duplicated };\n"
-        "export { anotherTarget as duplicated };\n",
+        "export { anotherTarget as duplicated };\n"
+        "export function f() {}\n"
+        "export function sibling() {}\n",
         encoding="utf-8",
     )
     (tmp_path / "main.ts").write_text(
         'import { importedTarget as alias } from "./lib";\n'
+        'import { f, wrapped as importedWrapped } from "./lib";\n'
+        'import { sibling } from "./lib";\n'
         'import { absent, duplicated } from "./lib";\n'
         'import { readProjectSource } from "@/lib/api";\n'
         "function localTarget() {}\n"
@@ -241,8 +248,18 @@ def test_typescript_calls_resolve_proven_bindings_and_keep_ambiguous_calls_unres
         "  changing = () => {};\n"
         "  changing();\n"
         "}\n"
+        "function closureParameter(f: () => void) { function inner() { f(); } }\n"
+        "function closureVariable() { const f = () => importedTarget(); function inner() { f(); } }\n"
+        "function closureRebound() { let f = () => {}; function inner() { f(); } f = () => {}; }\n"
+        "function closureFunctionRebound() { function f() {} function inner() { f(); } f = () => {}; }\n"
+        "function blockScopes() { { const sibling = () => {}; sibling(); } { sibling(); } }\n"
+        "const namedExpression = function f() { f(); };\n"
+        "function invokeWrapped() { importedWrapped(); }\n"
+        "function invokesLocalWrapper() { const localWrapped = withCallback(() => alias(), []); localWrapped(); }\n"
         "function usesMethod(service: { run: () => void }) { service.run(); }\n"
-        "function catches() { try {} catch (localTarget) { localTarget(); } }\n",
+        "function catches() { try {} catch (localTarget) { localTarget(); } }\n"
+        "function duplicateFunctionBindings() { function f() {} function f() {} f(); }\n"
+        "const shadowedNamedExpression = function f() { var f; f(); };\n",
         encoding="utf-8",
     )
 
@@ -255,11 +272,17 @@ def test_typescript_calls_resolve_proven_bindings_and_keep_ambiguous_calls_unres
         if edge.kind == "calls" and edge.extraction_method == "ast"
     }
     assert resolved == {
-        ("main.entry", "main.localTarget", 8),
-        ("main.entry", "main.functionValue", 9),
-        ("main.entry", "lib.importedTarget", 10),
-        ("main.runWrapped", "main.withCallback", 15),
-        ("main.runWrapped.wrapped", "main.functionValue", 15),
+        ("main.entry", "main.localTarget", 10),
+        ("main.entry", "main.functionValue", 11),
+        ("main.entry", "lib.importedTarget", 12),
+        ("main.runWrapped", "main.withCallback", 17),
+        ("main.runWrapped.wrapped", "main.functionValue", 17),
+        ("main.invokesLocalWrapper", "main.withCallback", 35),
+        ("main.closureVariable.inner", "main.closureVariable.f", 29),
+        ("main.blockScopes", "lib.sibling", 32),
+        ("main.namedExpression", "main.namedExpression", 33),
+        ("main.invokesLocalWrapper.localWrapped", "lib.importedTarget", 35),
+        ("lib.wrapped", "lib.importedTarget", 5),
     }
     unresolved = {(item.expression, item.reason) for item in result.unresolved}
     assert ("readProjectSource", "external_import_or_path_alias") in unresolved
@@ -267,6 +290,18 @@ def test_typescript_calls_resolve_proven_bindings_and_keep_ambiguous_calls_unres
     assert ("changing", "name_rebound_in_scope") in unresolved
     assert ("service.run", "object_method_not_resolved") in unresolved
     assert ("localTarget", "name_shadowed_in_scope") in unresolved
+    assert ("f", "name_rebound_in_scope") in unresolved
+    assert ("f", "name_shadowed_in_scope") in unresolved
+    assert ("sibling", "name_shadowed_in_scope") in unresolved
+    assert ("f", "ambiguous_call_target") in unresolved
+    unresolved_sources = {
+        (symbols[item.source_symbol_id].qualified_name, item.expression, item.reason)
+        for item in result.unresolved
+    }
+    assert ("main.duplicateFunctionBindings", "f", "ambiguous_call_target") in unresolved_sources
+    assert ("main.shadowedNamedExpression", "f", "name_shadowed_in_scope") in unresolved_sources
+    assert ("importedWrapped", "missing_named_export") in unresolved
+    assert ("localWrapped", "name_shadowed_in_scope") in unresolved
     assert ("absent", "missing_named_export") in unresolved
     assert ("duplicated", "ambiguous_named_import_target") in unresolved
     assert not result.truncated
@@ -563,7 +598,7 @@ def test_typescript_rule_upgrade_changes_index_identity_and_preserves_v1_snapsho
     status, project = request(application, "POST", "/api/projects", {"name": "TypeScript v1", "repository_id": "ts"})
     assert status == 200
     project_id = project["project_id"]
-    monkeypatch.setattr(service_module, "INDEX_BUILD_IDENTITY_VERSION", "relations-v7")
+    monkeypatch.setattr(service_module, "INDEX_BUILD_IDENTITY_VERSION", "relations-v12")
     status, old_result = request(
         application,
         "POST",
@@ -580,10 +615,10 @@ def test_typescript_rule_upgrade_changes_index_identity_and_preserves_v1_snapsho
         old_hash = old_row["snapshot_hash"]
         store.connection.execute(
             "UPDATE index_snapshots SET rules_version = ? WHERE index_id = ?",
-            ("source-v3+python-3.13+typescript-5.9.3+typescript-facts-v1+relations-v7", old_index_id),
+            ("source-v3+python-3.13+typescript-5.9.3+typescript-facts-v3+relations-v12", old_index_id),
         )
 
-    monkeypatch.setattr(service_module, "INDEX_BUILD_IDENTITY_VERSION", "relations-v8")
+    monkeypatch.setattr(service_module, "INDEX_BUILD_IDENTITY_VERSION", "relations-v13")
     status, upgraded = request(
         application,
         "POST",
@@ -603,8 +638,8 @@ def test_typescript_rule_upgrade_changes_index_identity_and_preserves_v1_snapsho
             (new_index_id,),
         ).fetchone()
         assert preserved["snapshot_hash"] == old_hash
-        assert "typescript-facts-v1" in preserved["rules_version"]
-        assert "typescript-facts-v3" in current["rules_version"]
+        assert "typescript-facts-v3" in preserved["rules_version"]
+        assert "typescript-facts-v4" in current["rules_version"]
         assert store.read_evidence(old_index_id, "web/api.ts", 1, 1).excerpt.startswith("const apiBaseUrl")
 
 

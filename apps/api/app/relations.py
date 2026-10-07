@@ -27,13 +27,13 @@ RelationKind = Literal["imports", "calls"]
 BindingKind = Literal["module", "symbol"]
 RelationScopeKind = Literal["module", "class", "function"]
 # The semantic version changes when the graph/unresolved meaning changes.
-RELATION_SEMANTICS_VERSION = "relations-v8"
+RELATION_SEMANTICS_VERSION = "relations-v9"
 # This version only governs the persisted, index-independent facts payload.
 RELATION_FACT_EXTRACTION_RULES_VERSION = "python-relation-facts-v4"
 _RELATION_FACTS_FORMAT_VERSION = "relation-facts-v4"
 # This namespace is part of generated immutable index IDs. Bump it when source
 # boundaries or build rules can change an index with the same content hash.
-INDEX_BUILD_IDENTITY_VERSION = "relations-v12"
+INDEX_BUILD_IDENTITY_VERSION = "relations-v13"
 
 
 def relation_coverage_limitations(

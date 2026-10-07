@@ -2,7 +2,7 @@
 
 ## 状态
 
-已实现 Python 与 TypeScript/TSX 的有界不可变源码快照、定义、相对导入、静态调用及保守 HTTP path facts，以及本地 freshness 检查和显式索引更新；Python 继续使用文件级定义/关系事实缓存，TypeScript 使用每次有界冷 AST 解析，不计入 Python AST/cache 统计。TypeScript 语法错误、锁定解析器不可用和快照扫描不完整都会显式令新索引 failed。源码捕获规则为 `source-v4`，TypeScript 编译器锁定 `5.9.3`，当前静态 facts 规则为 `typescript-facts-v3`，关系语义为 `relations-v8`，Python 关系事实缓存规则/格式为 `python-relation-facts-v4` / `relation-facts-v4`，索引身份为 `relations-v12`；定义/关系目标仍基于当前快照全量解析，不是完整增量索引。
+已实现 Python 与 TypeScript/TSX 的有界不可变源码快照、定义、相对导入、静态调用及保守 HTTP path facts，以及本地 freshness 检查和显式索引更新；Python 继续使用文件级定义/关系事实缓存，TypeScript 使用每次有界冷 AST 解析，不计入 Python AST/cache 统计。TypeScript 语法错误、锁定解析器不可用和快照扫描不完整都会显式令新索引 failed。源码捕获规则为 `source-v4`，TypeScript 编译器锁定 `5.9.3`，当前静态 facts 规则为 `typescript-facts-v4`，关系语义为 `relations-v9`，Python 关系事实缓存规则/格式为 `python-relation-facts-v4` / `relation-facts-v4`，索引身份为 `relations-v13`；定义/关系目标仍基于当前快照全量解析，不是完整增量索引。
 
 Python calls 可将安全实例构造点绑定到构造器直接赋值的 `self.field`，再解析 `self.field.method()`。仅当当前快照中该类的所有可解析构造调用都把同一个安全类实例传给唯一参数、构造器与参数绑定没有动态展开/重赋值、类无继承/装饰器/`__new__` 或自定义属性协议，并且同名字段没有不兼容写入或可识别类引用逃逸时才生成静态边。裸类名作为普通调用实参、直接返回类名、字段/局部别名和绕过 `__init__` 的 `Class.__new__(Class)` 都使该类的实例来源不再可证明；仅有未知动态反射仍不构成运行时保证。类型注解不会单独证明实例类型；工厂、未知构造点、字段变更和未证明为同类实例的外部多段字段写继续 unresolved。该边只表示快照中的静态语法一致，不保证运行时一定采用该类型或执行调用。
 
@@ -18,7 +18,7 @@ Python 绝对导入可使用捕获快照中唯一嵌套 package 的短名：依�
 
 ## 接口与依赖
 
-[indexing.py](app/indexing.py) 生成快照和只读 manifest；[typescript_parser.cjs](app/typescript_parser.cjs) 通过仓库锁定的 TypeScript 5.9.3 编译器 AST 解析 captured TS/TSX 源码文本，只读语法结构，不加载目标仓库模块、配置或依赖，也不执行仓库代码；缺少 Node.js 或锁定 `apps/web/node_modules/typescript` 时，含 TypeScript 的新索引会失败并报告 `parser_unavailable`。`relations.py` 将 Python 文件事实、TypeScript 相对导入和调用与当前快照目标解析分开。TypeScript 对词法可见且唯一的同文件具名函数/函数值，以及显式 named import（含别名）指向唯一 captured 相对模块导出，写入现有 `calls/ast`；单函数参数包装中的函数值只补定义定位，不推断包装器执行回调。属性/元素方法、动态调用、遮蔽、重赋值、路径别名及缺失或多义目标保留 unresolved。调用位置绑定调用者源码范围。Python 只将精确导入的 FastAPI/Starlette `run_in_threadpool` 首个简单 callable 参数按静态 calls 解析，目标须唯一落到快照函数或安全直接实例方法；该边使用 `ast` 来源和外层调用位置，不证明运行时一定执行。两种语言的静态导入关系均使用既有 `CodeEdge.extraction_method="ast"`。HTTP 形状关联与 Python `ContextualCall` 仍各自独立，不转换成静态调用边。`storage.py` 将 HTTP 客户端请求事实和静态关系都写入同一个 index_id。Python 缓存键包含路径、内容 hash、规则、Python AST 版本和配置 hash；TypeScript 暂不持久缓存，计数单独报告。
+[indexing.py](app/indexing.py) 生成快照和只读 manifest；[typescript_parser.cjs](app/typescript_parser.cjs) 通过仓库锁定的 TypeScript 5.9.3 编译器 AST 解析 captured TS/TSX 源码文本，只读语法结构，不加载目标仓库模块、配置或依赖，也不执行仓库代码；缺少 Node.js 或锁定 `apps/web/node_modules/typescript` 时，含 TypeScript 的新索引会失败并报告 `parser_unavailable`。`relations.py` 将 Python 文件事实、TypeScript 相对导入和调用与当前快照目标解析分开。TypeScript 对词法可见且唯一的同文件具名函数/函数值，以及显式 named import（含别名）指向唯一 captured 相对模块导出，写入现有 `calls/ast`；词法查找优先使用调用点可见的块、函数及祖先绑定，兄弟块声明不遮蔽调用；无法证明的遮蔽或重绑定保留 unresolved。函数调用初始化中的单个回调仍可建立独立函数定义和源码定位，但未知返回值不视为变量的可调用目标，也不作为静态导出目标。属性/元素方法、动态调用、缺失或多义目标保留 unresolved。调用位置绑定调用者源码范围。Python 只将精确导入的 FastAPI/Starlette `run_in_threadpool` 首个简单 callable 参数按静态 calls 解析，目标须唯一落到快照函数或安全直接实例方法；该边使用 `ast` 来源和外层调用位置，不证明运行时一定执行。两种语言的静态导入关系均使用既有 `CodeEdge.extraction_method="ast"`。HTTP 形状关联与 Python `ContextualCall` 仍各自独立，不转换成静态调用边。`storage.py` 将 HTTP 客户端请求事实和静态关系都写入同一个 index_id。Python 缓存键包含路径、内容 hash、规则、Python AST 版本和配置 hash；TypeScript 暂不持久缓存，计数单独报告。
 
 ## 数据与生命周期
 
@@ -32,7 +32,7 @@ GitHub 来源是 freshness 的远端例外：由于成功导入后的归档目�
 
 ## 错误与限制
 
-路径、文件、解析器输出/时间和关系预算受限。Python 缓存损坏、版本不兼容、行号不匹配或读写失败安全降级为未命中；清理不触碰历史 index/evidence。TypeScript 不持久缓存。相对路径别名（例如 `@/lib/api`）、包别名和含编码/查询/片段的导入目标不解析；即使仓库存在 tsconfig，当前固定快照不读取该配置。静态调用仅识别直接标识符且能证明唯一绑定的函数目标；属性/元素方法、动态调用、作用域遮蔽、重赋值、变量别名、缺失或多义导入/导出及未建模的回调执行均保留 unresolved。单函数参数包装只定位函数值，不产生包装器到回调的假边。Threadpool 转发只接受白名单模块的绝对 `from` import，且导入事件须先于调用（捕获作用域中的导入须先于嵌套函数定义）；同名本地模块、遮蔽、赋值别名、动态目标、类目标、多义方法、继承/装饰/覆盖以及捕获作用域内其他赋值均保留 unresolved。HTTP 仅为通过 AST 验证的透明 `requestJson` wrapper 提取直接顶层函数调用；未验证 wrapper 不产生请求 fact，已识别 wrapper 中的不支持模板、动态 query/method/options、路由挂载前缀、路径转换器或不唯一候选不伪造匹配，动态值保留 unknown。文件扫描不完整、读后增长越过总字节预算、读取失败、符号链接、边界逃逸、TOCTOU 或 GitHub metadata 检查异常均不能判定 freshness 一致；旧索引不会回写新的 TypeScript facts。静态目标解析可因时间/边预算不完整，unresolved 详情也可独立截断；空邻接不能证明没有关系。
+路径、文件、解析器输出/时间和关系预算受限。Python 缓存损坏、版本不兼容、行号不匹配或读写失败安全降级为未命中；清理不触碰历史 index/evidence。TypeScript 不持久缓存。相对路径别名（例如 `@/lib/api`）、包别名和含编码/查询/片段的导入目标不解析；即使仓库存在 tsconfig，当前固定快照不读取该配置。静态调用仅识别直接标识符且能证明唯一绑定的函数目标；属性/元素方法、动态调用、无法判定的块级或闭包遮蔽、重绑定、变量别名、未知包装器返回值、缺失或多义导入/导出及未建模的回调执行均保留 unresolved。函数调用初始化中的回调只作为独立定义定位，不证明包装器返回或执行该回调。Threadpool 转发只接受白名单模块的绝对 `from` import，且导入事件须先于调用（捕获作用域中的导入须先于嵌套函数定义）；同名本地模块、遮蔽、赋值别名、动态目标、类目标、多义方法、继承/装饰/覆盖以及捕获作用域内其他赋值均保留 unresolved。HTTP 仅为通过 AST 验证的透明 `requestJson` wrapper 提取直接顶层函数调用；未验证 wrapper 不产生请求 fact，已识别 wrapper 中的不支持模板、动态 query/method/options、路由挂载前缀、路径转换器或不唯一候选不伪造匹配，动态值保留 unknown。文件扫描不完整、读后增长越过总字节预算、读取失败、符号链接、边界逃逸、TOCTOU 或 GitHub metadata 检查异常均不能判定 freshness 一致；旧索引不会回写新的 TypeScript facts。静态目标解析可因时间/边预算不完整，unresolved 详情也可独立截断；空邻接不能证明没有关系。
 
 ## 验证
 
