@@ -970,7 +970,8 @@ def create_mcp_server(
             description=(
                 "Start one queued Run for a Codex-led investigation. The server freezes the selected Session's saved "
                 "messages and immutable index, but does not start the internal worker; the external Agent must call the "
-                "bound run_* tools and submit one structured conclusion."
+                "bound run_* tools and submit one structured conclusion. By default analysis_kind is issue; choose "
+                "understanding when the Run should accept a code-flow explanation conclusion."
             ),
             structured_output=True,
         )
@@ -1157,9 +1158,14 @@ def create_mcp_server(
             name="submit_external_run",
             title="Submit a Codex Run conclusion",
             description=(
-                "Submit one structured candidate_found, insufficient_evidence, or explanation conclusion. The server "
-                "verifies every evidence, symbol, candidate, and index reference against results actually returned by "
-                "this Run before persisting the report. Repeating the same conclusion is idempotent."
+                "Submit one conclusion whose shape must match analysis_kind selected by start_external_run: issue Runs "
+                "accept candidate_found or insufficient_evidence and forbid explanation; understanding Runs accept "
+                "explanation and forbid findings and candidate_links. candidate_found requires at least one "
+                "candidate_links entry; insufficient_evidence forbids candidate_links. Top-level evidence_ids must include "
+                "every evidence ID referenced by findings and candidate_links. For explanation, evidence_ids must "
+                "exactly match the IDs referenced by its ordered steps. Every evidence, symbol, candidate, and index "
+                "reference must come from results actually returned by this Run. Repeating the same conclusion is "
+                "idempotent."
             ),
             structured_output=True,
         )

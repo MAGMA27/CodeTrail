@@ -1701,7 +1701,8 @@ def test_mcp_external_run_persists_actual_tools_and_report(tmp_path: Path) -> No
             cwd=API_ROOT,
         )
         async with Client(parameters, read_timeout_seconds=10) as client:
-            tools = {tool.name for tool in (await client.list_tools()).tools}
+            listed_tools = (await client.list_tools()).tools
+            tools = {tool.name for tool in listed_tools}
             assert {
                 "start_external_run",
                 "run_search_code",
@@ -1710,6 +1711,17 @@ def test_mcp_external_run_persists_actual_tools_and_report(tmp_path: Path) -> No
                 "submit_external_run",
                 "cancel_external_run",
             } <= tools
+            start_description = next(
+                tool.description for tool in listed_tools if tool.name == "start_external_run"
+            )
+            assert "By default analysis_kind is issue" in start_description
+            assert "choose understanding" in start_description
+            submit_description = next(
+                tool.description for tool in listed_tools if tool.name == "submit_external_run"
+            )
+            assert "analysis_kind" in submit_description
+            assert "candidate_found requires at least one candidate_links entry" in submit_description
+            assert "evidence_ids must include every evidence ID" in submit_description
 
             started = await client.call_tool(
                 "start_external_run",
@@ -1726,6 +1738,37 @@ def test_mcp_external_run_persists_actual_tools_and_report(tmp_path: Path) -> No
             assert started.structured_content["ok"] is True
             external_run_id = started.structured_content["result"]["run_id"]
             run_id = external_run_id
+
+            wrong_mode = await client.call_tool(
+                "submit_external_run",
+                {
+                    "project_id": project_id,
+                    "session_id": session_id,
+                    "run_id": run_id,
+                    "index_id": index_id,
+                    "outcome": "explanation",
+                    "summary": "This conclusion uses the wrong analysis kind.",
+                    "evidence_ids": ["evidence-not-returned"],
+                    "explanation": {
+                        "coverage": "partial",
+                        "steps": [
+                            {
+                                "step_id": "wrong-mode-step",
+                                "title": "Wrong conclusion kind",
+                                "description": "An explanation is not valid for this Issue Run.",
+                                "kind": "unknown",
+                                "evidence_ids": ["evidence-not-returned"],
+                            }
+                        ],
+                    },
+                },
+            )
+            assert wrong_mode.structured_content["ok"] is False
+            assert wrong_mode.structured_content["error"]["code"] == "conflict"
+            assert (
+                wrong_mode.structured_content["error"]["message"]
+                == "external conclusion must be a Issue conclusion for this Run"
+            )
 
             searched = await client.call_tool(
                 "run_search_code",
