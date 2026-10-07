@@ -1,0 +1,70 @@
+{
+  "schema_version": "1.0",
+  "evaluation": "researcher-scored after the solver report and raw Run events were persisted",
+  "repository": "pytest-dev/pluggy",
+  "issue_id": "pytest-dev/pluggy#733",
+  "issue_url": "https://github.com/pytest-dev/pluggy/issues/733",
+  "reference_fix": {
+    "pull_request": "https://github.com/pytest-dev/pluggy/pull/741",
+    "merge_commit": "f51e3a70c7f8414bff96e05c4ddb066972353376",
+    "pre_fix_commit": "f91048bede722a546a0fc7e776231459b90af75b"
+  },
+  "run_id": "run-27c09fc8dd9841c8a8a3630f44480169",
+  "report_id": "report-run-27c09fc8dd9841c8a8a3630f44480169",
+  "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+  "rubric_status": "post-hoc; written after raw report/events were persisted; not pre-registered",
+  "rubric": [
+    {
+      "criterion": "Locate PluginManager.register in src/pluggy/_manager.py",
+      "points": 3,
+      "score": 3,
+      "evidence_ids": ["evidence-cef29607c855d2204d5a0f713b3b1b3f"]
+    },
+    {
+      "criterion": "Explain incremental mutation before all validation completes, including the later _verify_hook error path",
+      "points": 3,
+      "score": 3,
+      "evidence_ids": [
+        "evidence-cef29607c855d2204d5a0f713b3b1b3f",
+        "evidence-5d1c82404c8aefe8a7d559ef88db6708",
+        "evidence-4aff4455061206b53d5c71a735943bad"
+      ]
+    },
+    {
+      "criterion": "Connect a valid earlier hook and later invalid hook to partial state after PluginValidationError",
+      "points": 2,
+      "score": 2,
+      "evidence_ids": [
+        "evidence-cef29607c855d2204d5a0f713b3b1b3f",
+        "evidence-5d1c82404c8aefe8a7d559ef88db6708",
+        "evidence-4aff4455061206b53d5c71a735943bad"
+      ]
+    },
+    {
+      "criterion": "Recommend staging/validating before mutation and a regression for rollback and successful retry",
+      "points": 1,
+      "score": 1,
+      "evidence_ids": [
+        "evidence-cef29607c855d2204d5a0f713b3b1b3f",
+        "evidence-5d1c82404c8aefe8a7d559ef88db6708",
+        "evidence-4aff4455061206b53d5c71a735943bad",
+        "evidence-01c58026ae339829c3f1067f93acdfc6"
+      ]
+    },
+    {
+      "criterion": "Use only same-index evidence and state that runtime reproduction/tests were not performed",
+      "points": 1,
+      "score": 1,
+      "evidence_ids": [
+        "evidence-cef29607c855d2204d5a0f713b3b1b3f",
+        "evidence-5d1c82404c8aefe8a7d559ef88db6708",
+        "evidence-4aff4455061206b53d5c71a735943bad",
+        "evidence-01c58026ae339829c3f1067f93acdfc6"
+      ]
+    }
+  ],
+  "total_score": 10,
+  "max_score": 10,
+  "interpretation": "Correct evidence-backed static localization and fix direction for this Issue. The score does not establish runtime behavior, test success, confirmed downstream impact, or broad repository generalization.",
+  "solver_context_boundary": "The solver received only the original Issue title/body, legal project/repository/index/session/issue IDs, and public host tool descriptions. The reference PR was reviewed after the first report/events were persisted. Scoring criteria were authored post-hoc and were not pre-registered or given to the solver."
+}

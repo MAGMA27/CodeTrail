@@ -26,6 +26,7 @@
 - [results/p4-e2b-codex-host-20261001/](results/p4-e2b-codex-host-20261001/codex-host-holdout.md)：实际 Codex 宿主已知案例复测，保留首轮失败和独立补充 Run；[影响链验收](results/p4-e2b-codex-host-20261001/impact-chain-acceptance.md) 记录接口、截图与未验收的 UI 边界，不代表盲测或供应商质量。
 - [results/p4-e2b-codex-host-20261007/](results/p4-e2b-codex-host-20261007/README.md)：三例自有 synthetic Issue 的新一轮宿主验收；[首轮评分](results/p4-e2b-codex-host-20261007/first-round-scoring.json)、[提交契约失败记录](results/p4-e2b-codex-host-20261007/submission-failures.md) 与[独立指导 UI 补验](results/p4-e2b-codex-host-20261007/guided-acceptance.md)分开保存。首轮 0/3 为 submit 形状误用后 Run 超时；三例和过程隔离均不代表外部仓库泛化或训练集陌生性。
 - [results/codex-host-600s-20261007/](results/codex-host-600s-20261007/README.md)：客户端重启后，在显式 600 秒 Run 预算下执行的三例全新 synthetic Issue 首轮；报告冻结后评分为 22/22，含各例完整 Run 原始报告和 PC 工作台证据、影响边界、刷新恢复记录。限于小样本，不代表真实仓库泛化。
+- [results/real-repository-pluggy-issue-733-20261007/](results/real-repository-pluggy-issue-733-20261007/README.md)：公开 pluggy 历史 Issue #733 的真实仓库旅程；GitHub 产品导入 429 后另走明确标记的本地路径，fresh solver 静态定位 10/10，Session/刷新/新鲜度更新验收与插件入口架构缺口分项记录。整体 partial，不代表泛化。
 
 ## 接口与依赖
 

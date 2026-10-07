@@ -1,0 +1,869 @@
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "{\n  \"schema_version\": \"0.1.0\",\n  \"ok\": true,\n  \"error\": null,\n  \"report\": {\n    \"schema_version\": \"0.1.0\",\n    \"report_id\": \"report-run-27c09fc8dd9841c8a8a3630f44480169\",\n    \"run_id\": \"run-27c09fc8dd9841c8a8a3630f44480169\",\n    \"project_id\": \"project-6bb41715c4ff4eedbff6d6bc2ae6508d\",\n    \"session_id\": \"session-84f84838ab0c479fb9b3008c20c2fec3\",\n    \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n    \"status\": \"succeeded\",\n    \"outcome\": \"candidate_found\",\n    \"fixture_mode\": false,\n    \"summary\": \"The indexed register path stores the plugin mapping before processing hook implementations, then adds each implementation as it goes; a later _verify_hook validation error can therefore leave earlier manager and hook state installed. A focused fix candidate is to validate/stage the full set before committing state, with a regression that checks clean state and successful retry.\",\n    \"graph\": {\n      \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n      \"nodes\": [\n        {\n          \"start_line\": 186,\n          \"end_line\": 244,\n          \"symbol_id\": \"sym-fc25fca7a1df25dea3d1b417df358f5a\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"qualified_name\": \"src.pluggy._manager.PluginManager.register\",\n          \"kind\": \"function\"\n        },\n        {\n          \"start_line\": 376,\n          \"end_line\": 378,\n          \"symbol_id\": \"sym-839340051a7ba8872fca5b6ccd5f0a66\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"qualified_name\": \"src.pluggy._manager.PluginManager.is_registered\",\n          \"kind\": \"function\"\n        },\n        {\n          \"start_line\": 269,\n          \"end_line\": 299,\n          \"symbol_id\": \"sym-3c8b5a50a004dc56b0009a77a45476d4\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"qualified_name\": \"src.pluggy._manager.PluginManager.unregister\",\n          \"kind\": \"function\"\n        },\n        {\n          \"start_line\": 23,\n          \"end_line\": 29,\n          \"symbol_id\": \"sym-e92687c4fd859008a03504e81afdc21e\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"path\": \"testing/test_pluginmanager.py\",\n          \"qualified_name\": \"testing.test_pluginmanager.test_plugin_double_register\",\n          \"kind\": \"function\"\n        },\n        {\n          \"start_line\": 402,\n          \"end_line\": 421,\n          \"symbol_id\": \"sym-3d63c671cc4b6983d01882835d4f573a\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"path\": \"testing/test_pluginmanager.py\",\n          \"qualified_name\": \"testing.test_pluginmanager.test_register\",\n          \"kind\": \"function\"\n        },\n        {\n          \"start_line\": 403,\n          \"end_line\": 405,\n          \"symbol_id\": \"sym-0476c49db818da618f542cd900c25960\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"path\": \"testing/test_pluginmanager.py\",\n          \"qualified_name\": \"testing.test_pluginmanager.test_register.MyPlugin\",\n          \"kind\": \"class\"\n        },\n        {\n          \"start_line\": 405,\n          \"end_line\": 405,\n          \"symbol_id\": \"sym-97549218f9555bc3a26fbf41e31ab50b\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"path\": \"testing/test_pluginmanager.py\",\n          \"qualified_name\": \"testing.test_pluginmanager.test_register.MyPlugin.he_method1\",\n          \"kind\": \"function\"\n        },\n        {\n          \"start_line\": 387,\n          \"end_line\": 399,\n          \"symbol_id\": \"sym-ec3a7ce227c324d5986857ccb49cfc89\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"path\": \"testing/test_pluginmanager.py\",\n          \"qualified_name\": \"testing.test_pluginmanager.test_register_both_wrapper_and_hookwrapper\",\n          \"kind\": \"function\"\n        },\n        {\n          \"start_line\": 388,\n          \"end_line\": 391,\n          \"symbol_id\": \"sym-290bf6cca50bdc901af67e377f058127\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"path\": \"testing/test_pluginmanager.py\",\n          \"qualified_name\": \"testing.test_pluginmanager.test_register_both_wrapper_and_hookwrapper.hello\",\n          \"kind\": \"class\"\n        },\n        {\n          \"start_line\": 390,\n          \"end_line\": 391,\n          \"symbol_id\": \"sym-02eb716dcdef4e3d8fc7d4a3f3314568\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"path\": \"testing/test_pluginmanager.py\",\n          \"qualified_name\": \"testing.test_pluginmanager.test_register_both_wrapper_and_hookwrapper.hello.he_method1\",\n          \"kind\": \"function\"\n        },\n        {\n          \"start_line\": 129,\n          \"end_line\": 139,\n          \"symbol_id\": \"sym-86d4e9a4e680f4da0b32c62173451dda\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"qualified_name\": \"src.pluggy._manager.PluginValidationError\",\n          \"kind\": \"class\"\n        },\n        {\n          \"start_line\": 136,\n          \"end_line\": 139,\n          \"symbol_id\": \"sym-8f47e21b4dd696b4af926c7d2e05a256\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"qualified_name\": \"src.pluggy._manager.PluginValidationError.__init__\",\n          \"kind\": \"function\"\n        },\n        {\n          \"start_line\": 1,\n          \"end_line\": 38,\n          \"symbol_id\": \"sym-82786f2c0bd44efeb330fde0602df54c\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"path\": \"src/pluggy/__init__.py\",\n          \"qualified_name\": \"src.pluggy\",\n          \"kind\": \"module\"\n        },\n        {\n          \"start_line\": 1,\n          \"end_line\": 628,\n          \"symbol_id\": \"sym-e2ed6f5b047b70b0f041f566c7a148e3\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"qualified_name\": \"src.pluggy._manager\",\n          \"kind\": \"module\"\n        },\n        {\n          \"start_line\": 142,\n          \"end_line\": 624,\n          \"symbol_id\": \"sym-91f609d2a268ab68f3667f57f28c9c79\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"qualified_name\": \"src.pluggy._manager.PluginManager\",\n          \"kind\": \"class\"\n        },\n        {\n          \"start_line\": 407,\n          \"end_line\": 455,\n          \"symbol_id\": \"sym-cb62e7d79493a39f23fa9e483db31fe3\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"qualified_name\": \"src.pluggy._manager.PluginManager._verify_hook\",\n          \"kind\": \"function\"\n        },\n        {\n          \"start_line\": 457,\n          \"end_line\": 471,\n          \"symbol_id\": \"sym-f8b606946ad3ad0f25becefcdea52396\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"qualified_name\": \"src.pluggy._manager.PluginManager.check_pending\",\n          \"kind\": \"function\"\n        },\n        {\n          \"start_line\": 1,\n          \"end_line\": 1226,\n          \"symbol_id\": \"sym-415a433e32088929d46cd4aa25f93bfa\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"path\": \"testing/test_pluginmanager.py\",\n          \"qualified_name\": \"testing.test_pluginmanager\",\n          \"kind\": \"module\"\n        },\n        {\n          \"start_line\": 361,\n          \"end_line\": 371,\n          \"symbol_id\": \"sym-52831be71ca812d7980d49c3b031de75\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"path\": \"testing/test_pluginmanager.py\",\n          \"qualified_name\": \"testing.test_pluginmanager.test_register_mismatch_arg\",\n          \"kind\": \"function\"\n        },\n        {\n          \"start_line\": 347,\n          \"end_line\": 358,\n          \"symbol_id\": \"sym-047c7fba3ffa9dbfd3fed39f3a98968e\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"path\": \"testing/test_pluginmanager.py\",\n          \"qualified_name\": \"testing.test_pluginmanager.test_register_mismatch_method\",\n          \"kind\": \"function\"\n        },\n        {\n          \"start_line\": 127,\n          \"end_line\": 149,\n          \"symbol_id\": \"sym-62336f99c771a0d1370617707817155d\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"path\": \"src/pluggy/_caller.py\",\n          \"qualified_name\": \"src.pluggy._caller.HookCaller._add_hookimpl\",\n          \"kind\": \"function\"\n        },\n        {\n          \"start_line\": 1,\n          \"end_line\": 322,\n          \"symbol_id\": \"sym-f3e783682aa82c935b5efe9ac556e0ce\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"path\": \"src/pluggy/_caller.py\",\n          \"qualified_name\": \"src.pluggy._caller\",\n          \"kind\": \"module\"\n        },\n        {\n          \"start_line\": 56,\n          \"end_line\": 273,\n          \"symbol_id\": \"sym-0ef639662c23efa0b0ca7ff17cfe7a0c\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"path\": \"src/pluggy/_caller.py\",\n          \"qualified_name\": \"src.pluggy._caller.HookCaller\",\n          \"kind\": \"class\"\n        },\n        {\n          \"start_line\": 1,\n          \"end_line\": 535,\n          \"symbol_id\": \"sym-f7cd3f858d0c7cfc23971c7dd743ee28\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"path\": \"testing/test_hookcaller.py\",\n          \"qualified_name\": \"testing.test_hookcaller\",\n          \"kind\": \"module\"\n        },\n        {\n          \"start_line\": 34,\n          \"end_line\": 57,\n          \"symbol_id\": \"sym-d071c6b7182cae92f9747416133a6f10\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"path\": \"testing/test_hookcaller.py\",\n          \"qualified_name\": \"testing.test_hookcaller.AddMeth\",\n          \"kind\": \"class\"\n        },\n        {\n          \"start_line\": 38,\n          \"end_line\": 57,\n          \"symbol_id\": \"sym-da0ff273990b7fa49b60e584ab0b7726\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"path\": \"testing/test_hookcaller.py\",\n          \"qualified_name\": \"testing.test_hookcaller.AddMeth.__call__\",\n          \"kind\": \"function\"\n        },\n        {\n          \"start_line\": 45,\n          \"end_line\": 55,\n          \"symbol_id\": \"sym-ac62197dea53c4169ec4774a07dbfe79\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"path\": \"testing/test_hookcaller.py\",\n          \"qualified_name\": \"testing.test_hookcaller.AddMeth.__call__.wrap\",\n          \"kind\": \"function\"\n        },\n        {\n          \"start_line\": 65,\n          \"end_line\": 113,\n          \"symbol_id\": \"sym-355c05a2718a4b9efc913d64b32d5533\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"qualified_name\": \"src.pluggy._manager._static_hook_attr\",\n          \"kind\": \"function\"\n        }\n      ],\n      \"static_edges\": [\n        {\n          \"edge_id\": \"edge-3dbc56172b3f4b97cb92c91af242d425\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"source_id\": \"sym-fc25fca7a1df25dea3d1b417df358f5a\",\n          \"target_id\": \"sym-355c05a2718a4b9efc913d64b32d5533\",\n          \"kind\": \"calls\",\n          \"extraction_method\": \"ast\",\n          \"source_location\": {\n            \"start_line\": 227,\n            \"end_line\": 227,\n            \"path\": \"src/pluggy/_manager.py\"\n          }\n        }\n      ],\n      \"unresolved\": [\n        {\n          \"start_line\": 81,\n          \"end_line\": 81,\n          \"unresolved_id\": \"unresolved-6d5767340589da1071f2e10a354d4817\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"source_symbol_id\": \"sym-355c05a2718a4b9efc913d64b32d5533\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"expression\": \"inspect.isclass(obj)\",\n          \"reason\": \"object_method_not_resolved\",\n          \"possible_target_ids\": []\n        },\n        {\n          \"start_line\": 81,\n          \"end_line\": 81,\n          \"unresolved_id\": \"unresolved-3ee1ce67c4fa5aeb5b21696b638f425e\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"source_symbol_id\": \"sym-355c05a2718a4b9efc913d64b32d5533\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"expression\": \"inspect.ismodule(obj)\",\n          \"reason\": \"object_method_not_resolved\",\n          \"possible_target_ids\": []\n        },\n        {\n          \"start_line\": 85,\n          \"end_line\": 85,\n          \"unresolved_id\": \"unresolved-b1ac6931f4ab330382f355a314c51598\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"source_symbol_id\": \"sym-355c05a2718a4b9efc913d64b32d5533\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"expression\": \"_instance_dict(obj).get(name, _ABSENT)\",\n          \"reason\": \"dynamic_call_target\",\n          \"possible_target_ids\": []\n        },\n        {\n          \"start_line\": 87,\n          \"end_line\": 87,\n          \"unresolved_id\": \"unresolved-c3edca8b5af17e4891bbb19500cc0b6e\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"source_symbol_id\": \"sym-355c05a2718a4b9efc913d64b32d5533\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"expression\": \"inspect.getattr_static(obj, name, None)\",\n          \"reason\": \"object_method_not_resolved\",\n          \"possible_target_ids\": []\n        },\n        {\n          \"start_line\": 88,\n          \"end_line\": 88,\n          \"unresolved_id\": \"unresolved-873923d76bf34ddfb69d2fb967c232e8\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"source_symbol_id\": \"sym-355c05a2718a4b9efc913d64b32d5533\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"expression\": \"isinstance(slot, types.MemberDescriptorType)\",\n          \"reason\": \"call_target_not_in_snapshot\",\n          \"possible_target_ids\": []\n        },\n        {\n          \"start_line\": 91,\n          \"end_line\": 91,\n          \"unresolved_id\": \"unresolved-82543f79c71bcbe387d8d004cae6577d\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"source_symbol_id\": \"sym-355c05a2718a4b9efc913d64b32d5533\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"expression\": \"slot.__get__(obj, type(obj))\",\n          \"reason\": \"name_rebound_in_scope\",\n          \"possible_target_ids\": []\n        },\n        {\n          \"start_line\": 91,\n          \"end_line\": 91,\n          \"unresolved_id\": \"unresolved-f4651b2f5177b14cd92d7f02af285eb7\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"source_symbol_id\": \"sym-355c05a2718a4b9efc913d64b32d5533\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"expression\": \"type(obj)\",\n          \"reason\": \"call_target_not_in_snapshot\",\n          \"possible_target_ids\": []\n        },\n        {\n          \"start_line\": 95,\n          \"end_line\": 95,\n          \"unresolved_id\": \"unresolved-01403612bbc16698eecdd9cda584d346\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"source_symbol_id\": \"sym-355c05a2718a4b9efc913d64b32d5533\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"expression\": \"isinstance(value, types.MethodType)\",\n          \"reason\": \"call_target_not_in_snapshot\",\n          \"possible_target_ids\": []\n        },\n        {\n          \"start_line\": 97,\n          \"end_line\": 97,\n          \"unresolved_id\": \"unresolved-651af6937f5c40f6eb1ffbeb6bc39963\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"source_symbol_id\": \"sym-355c05a2718a4b9efc913d64b32d5533\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"expression\": \"inspect.isfunction(value)\",\n          \"reason\": \"object_method_not_resolved\",\n          \"possible_target_ids\": []\n        },\n        {\n          \"start_line\": 101,\n          \"end_line\": 101,\n          \"unresolved_id\": \"unresolved-7f571cd4773f354676cc8b91b50a7eb1\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"source_symbol_id\": \"sym-355c05a2718a4b9efc913d64b32d5533\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"expression\": \"inspect.getattr_static(obj, name, None)\",\n          \"reason\": \"object_method_not_resolved\",\n          \"possible_target_ids\": []\n        },\n        {\n          \"start_line\": 102,\n          \"end_line\": 102,\n          \"unresolved_id\": \"unresolved-58db3169a20895a0468ec15905948b01\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"source_symbol_id\": \"sym-355c05a2718a4b9efc913d64b32d5533\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"expression\": \"isinstance(static, staticmethod)\",\n          \"reason\": \"call_target_not_in_snapshot\",\n          \"possible_target_ids\": []\n        },\n        {\n          \"start_line\": 104,\n          \"end_line\": 104,\n          \"unresolved_id\": \"unresolved-99fb1a3d9bd1d228738a3cac5eb51966\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"source_symbol_id\": \"sym-355c05a2718a4b9efc913d64b32d5533\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"expression\": \"isinstance(static, classmethod)\",\n          \"reason\": \"call_target_not_in_snapshot\",\n          \"possible_target_ids\": []\n        },\n        {\n          \"start_line\": 105,\n          \"end_line\": 105,\n          \"unresolved_id\": \"unresolved-8265668682e4548bc0d5e3462f5d0c56\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"source_symbol_id\": \"sym-355c05a2718a4b9efc913d64b32d5533\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"expression\": \"inspect.isclass(obj)\",\n          \"reason\": \"object_method_not_resolved\",\n          \"possible_target_ids\": []\n        },\n        {\n          \"start_line\": 105,\n          \"end_line\": 105,\n          \"unresolved_id\": \"unresolved-5c84e5fdd4622bc38bd5bc757c348e5d\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"source_symbol_id\": \"sym-355c05a2718a4b9efc913d64b32d5533\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"expression\": \"type(obj)\",\n          \"reason\": \"call_target_not_in_snapshot\",\n          \"possible_target_ids\": []\n        },\n        {\n          \"start_line\": 106,\n          \"end_line\": 106,\n          \"unresolved_id\": \"unresolved-7a3250c40665553437a6de7a24c00dee\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"source_symbol_id\": \"sym-355c05a2718a4b9efc913d64b32d5533\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"expression\": \"cast(Callable[..., object], static.__get__(owner, owner))\",\n          \"reason\": \"call_target_not_in_snapshot\",\n          \"possible_target_ids\": []\n        },\n        {\n          \"start_line\": 106,\n          \"end_line\": 106,\n          \"unresolved_id\": \"unresolved-340bf03342374c2b18efe86166b3627c\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"source_symbol_id\": \"sym-355c05a2718a4b9efc913d64b32d5533\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"expression\": \"static.__get__(owner, owner)\",\n          \"reason\": \"name_rebound_in_scope\",\n          \"possible_target_ids\": []\n        },\n        {\n          \"start_line\": 107,\n          \"end_line\": 107,\n          \"unresolved_id\": \"unresolved-2b0bc73cdcabe0016581affc14dbbaf0\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"source_symbol_id\": \"sym-355c05a2718a4b9efc913d64b32d5533\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"expression\": \"isinstance(static, types.MethodType)\",\n          \"reason\": \"call_target_not_in_snapshot\",\n          \"possible_target_ids\": []\n        },\n        {\n          \"start_line\": 109,\n          \"end_line\": 109,\n          \"unresolved_id\": \"unresolved-55407595935a5dfe649392cf43347614\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"source_symbol_id\": \"sym-355c05a2718a4b9efc913d64b32d5533\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"expression\": \"inspect.isfunction(static)\",\n          \"reason\": \"object_method_not_resolved\",\n          \"possible_target_ids\": []\n        },\n        {\n          \"start_line\": 110,\n          \"end_line\": 110,\n          \"unresolved_id\": \"unresolved-8ddbc63524ba98fb6505e92b6bee5242\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"source_symbol_id\": \"sym-355c05a2718a4b9efc913d64b32d5533\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"expression\": \"inspect.isclass(obj)\",\n          \"reason\": \"object_method_not_resolved\",\n          \"possible_target_ids\": []\n        },\n        {\n          \"start_line\": 110,\n          \"end_line\": 110,\n          \"unresolved_id\": \"unresolved-d39593cafa706c28fad4e2668705287b\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"source_symbol_id\": \"sym-355c05a2718a4b9efc913d64b32d5533\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"expression\": \"inspect.ismodule(obj)\",\n          \"reason\": \"object_method_not_resolved\",\n          \"possible_target_ids\": []\n        },\n        {\n          \"start_line\": 112,\n          \"end_line\": 112,\n          \"unresolved_id\": \"unresolved-d525d7c7ca796c2e1002fba2d1059809\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"source_symbol_id\": \"sym-355c05a2718a4b9efc913d64b32d5533\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"expression\": \"static.__get__(obj, type(obj))\",\n          \"reason\": \"name_rebound_in_scope\",\n          \"possible_target_ids\": []\n        },\n        {\n          \"start_line\": 112,\n          \"end_line\": 112,\n          \"unresolved_id\": \"unresolved-9003fdcf6829db76a5ce002f16a909e0\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"source_symbol_id\": \"sym-355c05a2718a4b9efc913d64b32d5533\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"expression\": \"type(obj)\",\n          \"reason\": \"call_target_not_in_snapshot\",\n          \"possible_target_ids\": []\n        },\n        {\n          \"start_line\": 200,\n          \"end_line\": 200,\n          \"unresolved_id\": \"unresolved-2039c71c72ee9050fe9dcc8dd734f551\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"source_symbol_id\": \"sym-fc25fca7a1df25dea3d1b417df358f5a\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"expression\": \"TypeError('plugin must not be None')\",\n          \"reason\": \"call_target_not_in_snapshot\",\n          \"possible_target_ids\": []\n        },\n        {\n          \"start_line\": 202,\n          \"end_line\": 202,\n          \"unresolved_id\": \"unresolved-32f75916b97c048c83f71012f97cb6b9\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"source_symbol_id\": \"sym-fc25fca7a1df25dea3d1b417df358f5a\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"expression\": \"self.get_canonical_name(plugin)\",\n          \"reason\": \"name_rebound_in_scope\",\n          \"possible_target_ids\": []\n        },\n        {\n          \"start_line\": 205,\n          \"end_line\": 205,\n          \"unresolved_id\": \"unresolved-946c70137e6f580ede89344e9c59f3c7\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"source_symbol_id\": \"sym-fc25fca7a1df25dea3d1b417df358f5a\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"expression\": \"self._name2plugin.get(plugin_name, -1)\",\n          \"reason\": \"object_method_not_resolved\",\n          \"possible_target_ids\": [\n            \"sym-7b1a2800171bc0d4b3a002dd2de82be9\",\n            \"sym-9dda058e4d2c73597fb5ad14494caf57\"\n          ]\n        },\n        {\n          \"start_line\": 207,\n          \"end_line\": 210,\n          \"unresolved_id\": \"unresolved-b9c7a04d06caa4e95a26c6934b72bab4\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"source_symbol_id\": \"sym-fc25fca7a1df25dea3d1b417df358f5a\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"expression\": \"ValueError(f'Plugin name already registered: {plugin_name}={plugin}\\\\n{self._name2plugin}')\",\n          \"reason\": \"call_target_not_in_snapshot\",\n          \"possible_target_ids\": []\n        },\n        {\n          \"start_line\": 212,\n          \"end_line\": 212,\n          \"unresolved_id\": \"unresolved-3fe42741e912bab09657be2c7b331edb\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"source_symbol_id\": \"sym-fc25fca7a1df25dea3d1b417df358f5a\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"expression\": \"self._name2plugin.values()\",\n          \"reason\": \"object_method_not_resolved\",\n          \"possible_target_ids\": []\n        },\n        {\n          \"start_line\": 213,\n          \"end_line\": 216,\n          \"unresolved_id\": \"unresolved-2fb45b8e996abf6a801094777537d899\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"source_symbol_id\": \"sym-fc25fca7a1df25dea3d1b417df358f5a\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"expression\": \"ValueError(f'Plugin already registered under a different name: {plugin_name}={plugin}\\\\n{self._name2plugin}')\",\n          \"reason\": \"call_target_not_in_snapshot\",\n          \"possible_target_ids\": []\n        },\n        {\n          \"start_line\": 223,\n          \"end_line\": 223,\n          \"unresolved_id\": \"unresolved-422a3fe283432718217d5efee1739299\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"source_symbol_id\": \"sym-fc25fca7a1df25dea3d1b417df358f5a\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"expression\": \"dir(plugin)\",\n          \"reason\": \"call_target_not_in_snapshot\",\n          \"possible_target_ids\": []\n        },\n        {\n          \"start_line\": 224,\n          \"end_line\": 224,\n          \"unresolved_id\": \"unresolved-9572807aca39755aad18a8531b57023d\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"source_symbol_id\": \"sym-fc25fca7a1df25dea3d1b417df358f5a\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"expression\": \"self.parse_hookimpl_opts(plugin, attr_name)\",\n          \"reason\": \"name_rebound_in_scope\",\n          \"possible_target_ids\": []\n        },\n        {\n          \"start_line\": 226,\n          \"end_line\": 226,\n          \"unresolved_id\": \"unresolved-1055623ff84516db9129779513a65d99\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"source_symbol_id\": \"sym-fc25fca7a1df25dea3d1b417df358f5a\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"expression\": \"normalize_hookimpl_opts(hookimpl_opts)\",\n          \"reason\": \"call_target_not_in_snapshot\",\n          \"possible_target_ids\": [\n            \"sym-a0ac515639edcf6d0a575b027a93de30\"\n          ]\n        },\n        {\n          \"start_line\": 234,\n          \"end_line\": 234,\n          \"unresolved_id\": \"unresolved-52644e60771817a1018b052b996fb976\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"source_symbol_id\": \"sym-fc25fca7a1df25dea3d1b417df358f5a\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"expression\": \"HookImpl(plugin, plugin_name, method, hookimpl_opts)\",\n          \"reason\": \"call_target_not_in_snapshot\",\n          \"possible_target_ids\": [\n            \"sym-a7a3a84e085b82a17230cfd76c50e6b4\"\n          ]\n        },\n        {\n          \"start_line\": 235,\n          \"end_line\": 235,\n          \"unresolved_id\": \"unresolved-4515e608345243de422d9972343e5da6\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"source_symbol_id\": \"sym-fc25fca7a1df25dea3d1b417df358f5a\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"expression\": \"hookimpl_opts.get('specname')\",\n          \"reason\": \"name_rebound_in_scope\",\n          \"possible_target_ids\": []\n        },\n        {\n          \"start_line\": 236,\n          \"end_line\": 236,\n          \"unresolved_id\": \"unresolved-af0a077764b1582ff8f13f04fc4ea0ce\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"source_symbol_id\": \"sym-fc25fca7a1df25dea3d1b417df358f5a\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"expression\": \"getattr(self.hook, hook_name, None)\",\n          \"reason\": \"call_target_not_in_snapshot\",\n          \"possible_target_ids\": []\n        },\n        {\n          \"start_line\": 238,\n          \"end_line\": 238,\n          \"unresolved_id\": \"unresolved-ea34e336e64555481492f3f5998531c9\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"source_symbol_id\": \"sym-fc25fca7a1df25dea3d1b417df358f5a\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"expression\": \"HookCaller(hook_name, self._hookexec)\",\n          \"reason\": \"call_target_not_in_snapshot\",\n          \"possible_target_ids\": [\n            \"sym-0ef639662c23efa0b0ca7ff17cfe7a0c\"\n          ]\n        },\n        {\n          \"start_line\": 239,\n          \"end_line\": 239,\n          \"unresolved_id\": \"unresolved-b11be9fa6a44000e2eb84c2c34d8c1c8\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"source_symbol_id\": \"sym-fc25fca7a1df25dea3d1b417df358f5a\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"expression\": \"setattr(self.hook, hook_name, hook)\",\n          \"reason\": \"call_target_not_in_snapshot\",\n          \"possible_target_ids\": []\n        },\n        {\n          \"start_line\": 240,\n          \"end_line\": 240,\n          \"unresolved_id\": \"unresolved-3564da6caa9de166d39ab75624dc06d2\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"source_symbol_id\": \"sym-fc25fca7a1df25dea3d1b417df358f5a\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"expression\": \"hook.has_spec()\",\n          \"reason\": \"dynamic_call_target\",\n          \"possible_target_ids\": []\n        },\n        {\n          \"start_line\": 241,\n          \"end_line\": 241,\n          \"unresolved_id\": \"unresolved-fe39ef1a1374071ebc2a15c388321502\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"source_symbol_id\": \"sym-fc25fca7a1df25dea3d1b417df358f5a\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"expression\": \"self._verify_hook(hook, hookimpl)\",\n          \"reason\": \"name_rebound_in_scope\",\n          \"possible_target_ids\": []\n        },\n        {\n          \"start_line\": 242,\n          \"end_line\": 242,\n          \"unresolved_id\": \"unresolved-5672aeb2cbc59f9dc435f59fcf182741\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"source_symbol_id\": \"sym-fc25fca7a1df25dea3d1b417df358f5a\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"expression\": \"hook._maybe_apply_history(hookimpl)\",\n          \"reason\": \"dynamic_call_target\",\n          \"possible_target_ids\": []\n        },\n        {\n          \"start_line\": 243,\n          \"end_line\": 243,\n          \"unresolved_id\": \"unresolved-945f4a7e7319da8fe007af440045c0e6\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"source_symbol_id\": \"sym-fc25fca7a1df25dea3d1b417df358f5a\",\n          \"path\": \"src/pluggy/_manager.py\",\n          \"expression\": \"hook._add_hookimpl(hookimpl)\",\n          \"reason\": \"dynamic_call_target\",\n          \"possible_target_ids\": []\n        }\n      ],\n      \"candidate_links\": [\n        {\n          \"candidate_id\": \"candidate-1\",\n          \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n          \"source_symbol_id\": \"sym-fc25fca7a1df25dea3d1b417df358f5a\",\n          \"target_symbol_id\": \"sym-52831be71ca812d7980d49c3b031de75\",\n          \"relation\": \"fixes\",\n          \"evidence_ids\": [\n            \"evidence-cef29607c855d2204d5a0f713b3b1b3f\",\n            \"evidence-5d1c82404c8aefe8a7d559ef88db6708\",\n            \"evidence-4aff4455061206b53d5c71a735943bad\",\n            \"evidence-01c58026ae339829c3f1067f93acdfc6\"\n          ]\n        }\n      ],\n      \"truncated\": true,\n      \"truncation_reason\": \"max_results reached\"\n    },\n    \"evidence\": [\n      {\n        \"start_line\": 175,\n        \"end_line\": 255,\n        \"evidence_id\": \"evidence-cef29607c855d2204d5a0f713b3b1b3f\",\n        \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n        \"path\": \"src/pluggy/_manager.py\",\n        \"excerpt\": \"    def _hookexec(\\n        self,\\n        hook_name: str,\\n        methods: Sequence[HookImpl],\\n        kwargs: Mapping[str, object],\\n        firstresult: bool,\\n    ) -> object | list[object]:\\n        # called from all hookcaller instances.\\n        # enable_tracing will set its own wrapping function at self._inner_hookexec\\n        return self._inner_hookexec(hook_name, methods, kwargs, firstresult)\\n\\n    def register(self, plugin: _Plugin, name: str | None = None) -> str | None:\\n        \\\"\\\"\\\"Register a plugin and return its name.\\n\\n        :param name:\\n            The name under which to register the plugin. If not specified, a\\n            name is generated using :func:`get_canonical_name`.\\n\\n        :returns:\\n            The plugin name. If the name is blocked from registering, returns\\n            ``None``.\\n\\n        If the plugin is already registered, raises a :exc:`ValueError`.\\n        \\\"\\\"\\\"\\n        if plugin is None:\\n            raise TypeError(\\\"plugin must not be None\\\")\\n\\n        plugin_name = name or self.get_canonical_name(plugin)\\n\\n        if plugin_name in self._name2plugin:\\n            if self._name2plugin.get(plugin_name, -1) is None:\\n                return None  # blocked plugin, return None to indicate no registration\\n            raise ValueError(\\n                \\\"Plugin name already registered: \\\"\\n                f\\\"{plugin_name}={plugin}\\\\n{self._name2plugin}\\\"\\n            )\\n\\n        if plugin in self._name2plugin.values():\\n            raise ValueError(\\n                \\\"Plugin already registered under a different name: \\\"\\n                f\\\"{plugin_name}={plugin}\\\\n{self._name2plugin}\\\"\\n            )\\n\\n        # XXX if an error happens we should make sure no state has been\\n        # changed at point of return\\n        self._name2plugin[plugin_name] = plugin\\n\\n        # register matching hook implementations of the plugin\\n        for attr_name in dir(plugin):\\n            hookimpl_opts = self.parse_hookimpl_opts(plugin, attr_name)\\n            if hookimpl_opts is not None:\\n                normalize_hookimpl_opts(hookimpl_opts)\\n                found = _static_hook_attr(plugin, attr_name)\\n                # Only reachable when a subclass overrode parse_hookimpl_opts\\n                # to claim an attribute pluggy cannot bind.\\n                assert found is not None, (\\n                    f\\\"{plugin!r}.{attr_name} is not a hookable attribute\\\"\\n                )\\n                method: _HookImplFunction[object] = found[1]\\n                hookimpl = HookImpl(plugin, plugin_name, method, hookimpl_opts)\\n                hook_name = hookimpl_opts.get(\\\"specname\\\") or attr_name\\n                hook: HookCaller | None = getattr(self.hook, hook_name, None)\\n                if hook is None:\\n                    hook = HookCaller(hook_name, self._hookexec)\\n                    setattr(self.hook, hook_name, hook)\\n                elif hook.has_spec():\\n                    self._verify_hook(hook, hookimpl)\\n                    hook._maybe_apply_history(hookimpl)\\n                hook._add_hookimpl(hookimpl)\\n        return plugin_name\\n\\n    def parse_hookimpl_opts(self, plugin: _Plugin, name: str) -> HookimplOpts | None:\\n        \\\"\\\"\\\"Try to obtain a hook implementation from an item with the given name\\n        in the given plugin which is being searched for hook impls.\\n\\n        :returns:\\n            The parsed hookimpl options, or None to skip the given item.\\n\\n        This method can be overridden by ``PluginManager`` subclasses to\\n        customize how hook implementation are picked up. By default, returns the\\n        options for items decorated with :class:`HookimplMarker`.\",\n        \"content_hash\": \"c38e50d040fe64df3a3a6f17cc366cfa9008f61b9ed8f832871d52502a139e65\",\n        \"kind\": \"source\"\n      },\n      {\n        \"start_line\": 407,\n        \"end_line\": 455,\n        \"evidence_id\": \"evidence-5d1c82404c8aefe8a7d559ef88db6708\",\n        \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n        \"path\": \"src/pluggy/_manager.py\",\n        \"excerpt\": \"    def _verify_hook(self, hook: HookCaller, hookimpl: HookImpl) -> None:\\n        if hook.is_historic() and (hookimpl.hookwrapper or hookimpl.wrapper):\\n            raise PluginValidationError(\\n                hookimpl.plugin,\\n                f\\\"Plugin {hookimpl.plugin_name!r}\\\\nhook {hook.name!r}\\\\n\\\"\\n                \\\"historic incompatible with yield/wrapper/hookwrapper\\\",\\n            )\\n\\n        assert hook.spec is not None\\n        if hook.spec.warn_on_impl:\\n            _warn_for_function(hook.spec.warn_on_impl, hookimpl.function)\\n\\n        # positional arg checking\\n        notinspec = set(hookimpl.argnames) - (\\n            set(hook.spec.argnames) | set(hook.spec.kwargnames)\\n        )\\n        if notinspec:\\n            raise PluginValidationError(\\n                hookimpl.plugin,\\n                f\\\"Plugin {hookimpl.plugin_name!r} for hook {hook.name!r}\\\\n\\\"\\n                f\\\"hookimpl definition: {_formatdef(hookimpl.function)}\\\\n\\\"\\n                f\\\"Argument(s) {notinspec} are declared in the hookimpl but \\\"\\n                \\\"can not be found in the hookspec\\\",\\n            )\\n\\n        if hook.spec.warn_on_impl_args:\\n            for hookimpl_argname in hookimpl.argnames:\\n                argname_warning = hook.spec.warn_on_impl_args.get(hookimpl_argname)\\n                if argname_warning is not None:\\n                    _warn_for_function(argname_warning, hookimpl.function)\\n\\n        if (\\n            hookimpl.wrapper or hookimpl.hookwrapper\\n        ) and not inspect.isgeneratorfunction(hookimpl.function):\\n            raise PluginValidationError(\\n                hookimpl.plugin,\\n                f\\\"Plugin {hookimpl.plugin_name!r} for hook {hook.name!r}\\\\n\\\"\\n                f\\\"hookimpl definition: {_formatdef(hookimpl.function)}\\\\n\\\"\\n                \\\"Declared as wrapper=True or hookwrapper=True \\\"\\n                \\\"but function is not a generator function\\\",\\n            )\\n\\n        if hookimpl.wrapper and hookimpl.hookwrapper:\\n            raise PluginValidationError(\\n                hookimpl.plugin,\\n                f\\\"Plugin {hookimpl.plugin_name!r} for hook {hook.name!r}\\\\n\\\"\\n                f\\\"hookimpl definition: {_formatdef(hookimpl.function)}\\\\n\\\"\\n                \\\"The wrapper=True and hookwrapper=True options are mutually exclusive\\\",\\n            )\",\n        \"content_hash\": \"c38e50d040fe64df3a3a6f17cc366cfa9008f61b9ed8f832871d52502a139e65\",\n        \"kind\": \"source\"\n      },\n      {\n        \"start_line\": 127,\n        \"end_line\": 149,\n        \"evidence_id\": \"evidence-4aff4455061206b53d5c71a735943bad\",\n        \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n        \"path\": \"src/pluggy/_caller.py\",\n        \"excerpt\": \"    def _add_hookimpl(self, hookimpl: HookImpl) -> None:\\n        \\\"\\\"\\\"Add an implementation to the callback chain.\\\"\\\"\\\"\\n        for i, method in enumerate(self._hookimpls):\\n            if method.hookwrapper or method.wrapper:\\n                splitpoint = i\\n                break\\n        else:\\n            splitpoint = len(self._hookimpls)\\n        if hookimpl.hookwrapper or hookimpl.wrapper:\\n            start, end = splitpoint, len(self._hookimpls)\\n        else:\\n            start, end = 0, splitpoint\\n\\n        if hookimpl.trylast:\\n            self._hookimpls.insert(start, hookimpl)\\n        elif hookimpl.tryfirst:\\n            self._hookimpls.insert(end, hookimpl)\\n        else:\\n            # find last non-tryfirst method\\n            i = end - 1\\n            while i >= start and self._hookimpls[i].tryfirst:\\n                i -= 1\\n            self._hookimpls.insert(i + 1, hookimpl)\",\n        \"content_hash\": \"bcc532adc754aa370ffb80bd4dfb93ce6cc4cb1fb6a7924aa95e9dc2bfa703a9\",\n        \"kind\": \"source\"\n      },\n      {\n        \"start_line\": 330,\n        \"end_line\": 375,\n        \"evidence_id\": \"evidence-01c58026ae339829c3f1067f93acdfc6\",\n        \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n        \"path\": \"testing/test_pluginmanager.py\",\n        \"excerpt\": \"    class Spec:\\n        was_executed = False\\n\\n        @property\\n        def not_a_spec(self) -> None:\\n            type(self).was_executed = True  # pragma: no cover\\n\\n        @hookspec\\n        def he_method1(self, arg: object) -> object: ...\\n\\n    # Spec instances are supported at runtime, see the ``he_pm`` fixture.\\n    spec = cast(Any, Spec())\\n    pm.add_hookspecs(spec)\\n    assert not Spec.was_executed\\n    assert pm.parse_hookspec_opts(spec, \\\"not_a_spec\\\") is None\\n\\n\\ndef test_register_mismatch_method(he_pm: PluginManager) -> None:\\n    class hello:\\n        @hookimpl\\n        def he_method_notexists(self):\\n            pass  # pragma: no cover\\n\\n    plugin = hello()\\n\\n    he_pm.register(plugin)\\n    with pytest.raises(PluginValidationError) as excinfo:\\n        he_pm.check_pending()\\n    assert excinfo.value.plugin is plugin\\n\\n\\ndef test_register_mismatch_arg(he_pm: PluginManager) -> None:\\n    class hello:\\n        @hookimpl\\n        def he_method1(self, qlwkje):\\n            pass  # pragma: no cover\\n\\n    plugin = hello()\\n\\n    with pytest.raises(PluginValidationError) as excinfo:\\n        he_pm.register(plugin)\\n    assert excinfo.value.plugin is plugin\\n\\n\\ndef test_register_hookwrapper_not_a_generator_function(he_pm: PluginManager) -> None:\\n    class hello:\",\n        \"content_hash\": \"abff1592a7dc5f0b52d90e2f1b10f41e6de92c4661fc66095da190976bce4776\",\n        \"kind\": \"source\"\n      }\n    ],\n    \"findings\": [\n      {\n        \"finding_id\": \"finding-register-mutates-before-validation\",\n        \"kind\": \"observation\",\n        \"text\": \"PluginManager.register writes _name2plugin before entering its hook-implementation loop. The loop adds each implementation before moving to the next one, while _verify_hook can raise PluginValidationError for a later implementation. This ordering explains the reported partial registration state.\",\n        \"symbol_ids\": [\n          \"sym-fc25fca7a1df25dea3d1b417df358f5a\"\n        ],\n        \"evidence_ids\": [\n          \"evidence-cef29607c855d2204d5a0f713b3b1b3f\",\n          \"evidence-5d1c82404c8aefe8a7d559ef88db6708\",\n          \"evidence-4aff4455061206b53d5c71a735943bad\"\n        ]\n      },\n      {\n        \"finding_id\": \"finding-test-does-not-check-rollback\",\n        \"kind\": \"observation\",\n        \"text\": \"The existing mismatched-argument registration test expects PluginValidationError and checks the exception's plugin, but does not assert that the plugin mapping or hook implementations were rolled back.\",\n        \"symbol_ids\": [\n          \"sym-52831be71ca812d7980d49c3b031de75\"\n        ],\n        \"evidence_ids\": [\n          \"evidence-01c58026ae339829c3f1067f93acdfc6\"\n        ]\n      },\n      {\n        \"finding_id\": \"finding-transactional-registration\",\n        \"kind\": \"suggestion\",\n        \"text\": \"Stage or validate all hook implementations before mutating _name2plugin and HookCaller state. Add a regression where an earlier valid hook precedes a later invalid hook, assert neither plugin nor hook remains registered after failure, then correct the invalid hook and retry.\",\n        \"symbol_ids\": [\n          \"sym-fc25fca7a1df25dea3d1b417df358f5a\",\n          \"sym-52831be71ca812d7980d49c3b031de75\"\n        ],\n        \"evidence_ids\": [\n          \"evidence-cef29607c855d2204d5a0f713b3b1b3f\",\n          \"evidence-5d1c82404c8aefe8a7d559ef88db6708\",\n          \"evidence-4aff4455061206b53d5c71a735943bad\",\n          \"evidence-01c58026ae339829c3f1067f93acdfc6\"\n        ]\n      }\n    ],\n    \"candidate_links\": [\n      {\n        \"candidate_id\": \"candidate-1\",\n        \"index_id\": \"index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004\",\n        \"source_symbol_id\": \"sym-fc25fca7a1df25dea3d1b417df358f5a\",\n        \"target_symbol_id\": \"sym-52831be71ca812d7980d49c3b031de75\",\n        \"relation\": \"fixes\",\n        \"evidence_ids\": [\n          \"evidence-cef29607c855d2204d5a0f713b3b1b3f\",\n          \"evidence-5d1c82404c8aefe8a7d559ef88db6708\",\n          \"evidence-4aff4455061206b53d5c71a735943bad\",\n          \"evidence-01c58026ae339829c3f1067f93acdfc6\"\n        ]\n      }\n    ],\n    \"explanation\": null,\n    \"limitations\": [\n      \"Static source review only; no runtime reproduction or test execution was performed. Conclusions are scoped to the supplied immutable local-path index.\"\n    ],\n    \"terminal_sequence\": 19\n  }\n}"
+    }
+  ],
+  "structuredContent": {
+    "schema_version": "0.1.0",
+    "ok": true,
+    "error": null,
+    "report": {
+      "schema_version": "0.1.0",
+      "report_id": "report-run-27c09fc8dd9841c8a8a3630f44480169",
+      "run_id": "run-27c09fc8dd9841c8a8a3630f44480169",
+      "project_id": "project-6bb41715c4ff4eedbff6d6bc2ae6508d",
+      "session_id": "session-84f84838ab0c479fb9b3008c20c2fec3",
+      "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+      "status": "succeeded",
+      "outcome": "candidate_found",
+      "fixture_mode": false,
+      "summary": "The indexed register path stores the plugin mapping before processing hook implementations, then adds each implementation as it goes; a later _verify_hook validation error can therefore leave earlier manager and hook state installed. A focused fix candidate is to validate/stage the full set before committing state, with a regression that checks clean state and successful retry.",
+      "graph": {
+        "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+        "nodes": [
+          {
+            "start_line": 186,
+            "end_line": 244,
+            "symbol_id": "sym-fc25fca7a1df25dea3d1b417df358f5a",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "path": "src/pluggy/_manager.py",
+            "qualified_name": "src.pluggy._manager.PluginManager.register",
+            "kind": "function"
+          },
+          {
+            "start_line": 376,
+            "end_line": 378,
+            "symbol_id": "sym-839340051a7ba8872fca5b6ccd5f0a66",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "path": "src/pluggy/_manager.py",
+            "qualified_name": "src.pluggy._manager.PluginManager.is_registered",
+            "kind": "function"
+          },
+          {
+            "start_line": 269,
+            "end_line": 299,
+            "symbol_id": "sym-3c8b5a50a004dc56b0009a77a45476d4",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "path": "src/pluggy/_manager.py",
+            "qualified_name": "src.pluggy._manager.PluginManager.unregister",
+            "kind": "function"
+          },
+          {
+            "start_line": 23,
+            "end_line": 29,
+            "symbol_id": "sym-e92687c4fd859008a03504e81afdc21e",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "path": "testing/test_pluginmanager.py",
+            "qualified_name": "testing.test_pluginmanager.test_plugin_double_register",
+            "kind": "function"
+          },
+          {
+            "start_line": 402,
+            "end_line": 421,
+            "symbol_id": "sym-3d63c671cc4b6983d01882835d4f573a",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "path": "testing/test_pluginmanager.py",
+            "qualified_name": "testing.test_pluginmanager.test_register",
+            "kind": "function"
+          },
+          {
+            "start_line": 403,
+            "end_line": 405,
+            "symbol_id": "sym-0476c49db818da618f542cd900c25960",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "path": "testing/test_pluginmanager.py",
+            "qualified_name": "testing.test_pluginmanager.test_register.MyPlugin",
+            "kind": "class"
+          },
+          {
+            "start_line": 405,
+            "end_line": 405,
+            "symbol_id": "sym-97549218f9555bc3a26fbf41e31ab50b",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "path": "testing/test_pluginmanager.py",
+            "qualified_name": "testing.test_pluginmanager.test_register.MyPlugin.he_method1",
+            "kind": "function"
+          },
+          {
+            "start_line": 387,
+            "end_line": 399,
+            "symbol_id": "sym-ec3a7ce227c324d5986857ccb49cfc89",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "path": "testing/test_pluginmanager.py",
+            "qualified_name": "testing.test_pluginmanager.test_register_both_wrapper_and_hookwrapper",
+            "kind": "function"
+          },
+          {
+            "start_line": 388,
+            "end_line": 391,
+            "symbol_id": "sym-290bf6cca50bdc901af67e377f058127",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "path": "testing/test_pluginmanager.py",
+            "qualified_name": "testing.test_pluginmanager.test_register_both_wrapper_and_hookwrapper.hello",
+            "kind": "class"
+          },
+          {
+            "start_line": 390,
+            "end_line": 391,
+            "symbol_id": "sym-02eb716dcdef4e3d8fc7d4a3f3314568",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "path": "testing/test_pluginmanager.py",
+            "qualified_name": "testing.test_pluginmanager.test_register_both_wrapper_and_hookwrapper.hello.he_method1",
+            "kind": "function"
+          },
+          {
+            "start_line": 129,
+            "end_line": 139,
+            "symbol_id": "sym-86d4e9a4e680f4da0b32c62173451dda",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "path": "src/pluggy/_manager.py",
+            "qualified_name": "src.pluggy._manager.PluginValidationError",
+            "kind": "class"
+          },
+          {
+            "start_line": 136,
+            "end_line": 139,
+            "symbol_id": "sym-8f47e21b4dd696b4af926c7d2e05a256",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "path": "src/pluggy/_manager.py",
+            "qualified_name": "src.pluggy._manager.PluginValidationError.__init__",
+            "kind": "function"
+          },
+          {
+            "start_line": 1,
+            "end_line": 38,
+            "symbol_id": "sym-82786f2c0bd44efeb330fde0602df54c",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "path": "src/pluggy/__init__.py",
+            "qualified_name": "src.pluggy",
+            "kind": "module"
+          },
+          {
+            "start_line": 1,
+            "end_line": 628,
+            "symbol_id": "sym-e2ed6f5b047b70b0f041f566c7a148e3",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "path": "src/pluggy/_manager.py",
+            "qualified_name": "src.pluggy._manager",
+            "kind": "module"
+          },
+          {
+            "start_line": 142,
+            "end_line": 624,
+            "symbol_id": "sym-91f609d2a268ab68f3667f57f28c9c79",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "path": "src/pluggy/_manager.py",
+            "qualified_name": "src.pluggy._manager.PluginManager",
+            "kind": "class"
+          },
+          {
+            "start_line": 407,
+            "end_line": 455,
+            "symbol_id": "sym-cb62e7d79493a39f23fa9e483db31fe3",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "path": "src/pluggy/_manager.py",
+            "qualified_name": "src.pluggy._manager.PluginManager._verify_hook",
+            "kind": "function"
+          },
+          {
+            "start_line": 457,
+            "end_line": 471,
+            "symbol_id": "sym-f8b606946ad3ad0f25becefcdea52396",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "path": "src/pluggy/_manager.py",
+            "qualified_name": "src.pluggy._manager.PluginManager.check_pending",
+            "kind": "function"
+          },
+          {
+            "start_line": 1,
+            "end_line": 1226,
+            "symbol_id": "sym-415a433e32088929d46cd4aa25f93bfa",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "path": "testing/test_pluginmanager.py",
+            "qualified_name": "testing.test_pluginmanager",
+            "kind": "module"
+          },
+          {
+            "start_line": 361,
+            "end_line": 371,
+            "symbol_id": "sym-52831be71ca812d7980d49c3b031de75",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "path": "testing/test_pluginmanager.py",
+            "qualified_name": "testing.test_pluginmanager.test_register_mismatch_arg",
+            "kind": "function"
+          },
+          {
+            "start_line": 347,
+            "end_line": 358,
+            "symbol_id": "sym-047c7fba3ffa9dbfd3fed39f3a98968e",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "path": "testing/test_pluginmanager.py",
+            "qualified_name": "testing.test_pluginmanager.test_register_mismatch_method",
+            "kind": "function"
+          },
+          {
+            "start_line": 127,
+            "end_line": 149,
+            "symbol_id": "sym-62336f99c771a0d1370617707817155d",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "path": "src/pluggy/_caller.py",
+            "qualified_name": "src.pluggy._caller.HookCaller._add_hookimpl",
+            "kind": "function"
+          },
+          {
+            "start_line": 1,
+            "end_line": 322,
+            "symbol_id": "sym-f3e783682aa82c935b5efe9ac556e0ce",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "path": "src/pluggy/_caller.py",
+            "qualified_name": "src.pluggy._caller",
+            "kind": "module"
+          },
+          {
+            "start_line": 56,
+            "end_line": 273,
+            "symbol_id": "sym-0ef639662c23efa0b0ca7ff17cfe7a0c",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "path": "src/pluggy/_caller.py",
+            "qualified_name": "src.pluggy._caller.HookCaller",
+            "kind": "class"
+          },
+          {
+            "start_line": 1,
+            "end_line": 535,
+            "symbol_id": "sym-f7cd3f858d0c7cfc23971c7dd743ee28",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "path": "testing/test_hookcaller.py",
+            "qualified_name": "testing.test_hookcaller",
+            "kind": "module"
+          },
+          {
+            "start_line": 34,
+            "end_line": 57,
+            "symbol_id": "sym-d071c6b7182cae92f9747416133a6f10",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "path": "testing/test_hookcaller.py",
+            "qualified_name": "testing.test_hookcaller.AddMeth",
+            "kind": "class"
+          },
+          {
+            "start_line": 38,
+            "end_line": 57,
+            "symbol_id": "sym-da0ff273990b7fa49b60e584ab0b7726",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "path": "testing/test_hookcaller.py",
+            "qualified_name": "testing.test_hookcaller.AddMeth.__call__",
+            "kind": "function"
+          },
+          {
+            "start_line": 45,
+            "end_line": 55,
+            "symbol_id": "sym-ac62197dea53c4169ec4774a07dbfe79",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "path": "testing/test_hookcaller.py",
+            "qualified_name": "testing.test_hookcaller.AddMeth.__call__.wrap",
+            "kind": "function"
+          },
+          {
+            "start_line": 65,
+            "end_line": 113,
+            "symbol_id": "sym-355c05a2718a4b9efc913d64b32d5533",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "path": "src/pluggy/_manager.py",
+            "qualified_name": "src.pluggy._manager._static_hook_attr",
+            "kind": "function"
+          }
+        ],
+        "static_edges": [
+          {
+            "edge_id": "edge-3dbc56172b3f4b97cb92c91af242d425",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "source_id": "sym-fc25fca7a1df25dea3d1b417df358f5a",
+            "target_id": "sym-355c05a2718a4b9efc913d64b32d5533",
+            "kind": "calls",
+            "extraction_method": "ast",
+            "source_location": {
+              "start_line": 227,
+              "end_line": 227,
+              "path": "src/pluggy/_manager.py"
+            }
+          }
+        ],
+        "unresolved": [
+          {
+            "start_line": 81,
+            "end_line": 81,
+            "unresolved_id": "unresolved-6d5767340589da1071f2e10a354d4817",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "source_symbol_id": "sym-355c05a2718a4b9efc913d64b32d5533",
+            "path": "src/pluggy/_manager.py",
+            "expression": "inspect.isclass(obj)",
+            "reason": "object_method_not_resolved",
+            "possible_target_ids": []
+          },
+          {
+            "start_line": 81,
+            "end_line": 81,
+            "unresolved_id": "unresolved-3ee1ce67c4fa5aeb5b21696b638f425e",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "source_symbol_id": "sym-355c05a2718a4b9efc913d64b32d5533",
+            "path": "src/pluggy/_manager.py",
+            "expression": "inspect.ismodule(obj)",
+            "reason": "object_method_not_resolved",
+            "possible_target_ids": []
+          },
+          {
+            "start_line": 85,
+            "end_line": 85,
+            "unresolved_id": "unresolved-b1ac6931f4ab330382f355a314c51598",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "source_symbol_id": "sym-355c05a2718a4b9efc913d64b32d5533",
+            "path": "src/pluggy/_manager.py",
+            "expression": "_instance_dict(obj).get(name, _ABSENT)",
+            "reason": "dynamic_call_target",
+            "possible_target_ids": []
+          },
+          {
+            "start_line": 87,
+            "end_line": 87,
+            "unresolved_id": "unresolved-c3edca8b5af17e4891bbb19500cc0b6e",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "source_symbol_id": "sym-355c05a2718a4b9efc913d64b32d5533",
+            "path": "src/pluggy/_manager.py",
+            "expression": "inspect.getattr_static(obj, name, None)",
+            "reason": "object_method_not_resolved",
+            "possible_target_ids": []
+          },
+          {
+            "start_line": 88,
+            "end_line": 88,
+            "unresolved_id": "unresolved-873923d76bf34ddfb69d2fb967c232e8",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "source_symbol_id": "sym-355c05a2718a4b9efc913d64b32d5533",
+            "path": "src/pluggy/_manager.py",
+            "expression": "isinstance(slot, types.MemberDescriptorType)",
+            "reason": "call_target_not_in_snapshot",
+            "possible_target_ids": []
+          },
+          {
+            "start_line": 91,
+            "end_line": 91,
+            "unresolved_id": "unresolved-82543f79c71bcbe387d8d004cae6577d",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "source_symbol_id": "sym-355c05a2718a4b9efc913d64b32d5533",
+            "path": "src/pluggy/_manager.py",
+            "expression": "slot.__get__(obj, type(obj))",
+            "reason": "name_rebound_in_scope",
+            "possible_target_ids": []
+          },
+          {
+            "start_line": 91,
+            "end_line": 91,
+            "unresolved_id": "unresolved-f4651b2f5177b14cd92d7f02af285eb7",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "source_symbol_id": "sym-355c05a2718a4b9efc913d64b32d5533",
+            "path": "src/pluggy/_manager.py",
+            "expression": "type(obj)",
+            "reason": "call_target_not_in_snapshot",
+            "possible_target_ids": []
+          },
+          {
+            "start_line": 95,
+            "end_line": 95,
+            "unresolved_id": "unresolved-01403612bbc16698eecdd9cda584d346",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "source_symbol_id": "sym-355c05a2718a4b9efc913d64b32d5533",
+            "path": "src/pluggy/_manager.py",
+            "expression": "isinstance(value, types.MethodType)",
+            "reason": "call_target_not_in_snapshot",
+            "possible_target_ids": []
+          },
+          {
+            "start_line": 97,
+            "end_line": 97,
+            "unresolved_id": "unresolved-651af6937f5c40f6eb1ffbeb6bc39963",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "source_symbol_id": "sym-355c05a2718a4b9efc913d64b32d5533",
+            "path": "src/pluggy/_manager.py",
+            "expression": "inspect.isfunction(value)",
+            "reason": "object_method_not_resolved",
+            "possible_target_ids": []
+          },
+          {
+            "start_line": 101,
+            "end_line": 101,
+            "unresolved_id": "unresolved-7f571cd4773f354676cc8b91b50a7eb1",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "source_symbol_id": "sym-355c05a2718a4b9efc913d64b32d5533",
+            "path": "src/pluggy/_manager.py",
+            "expression": "inspect.getattr_static(obj, name, None)",
+            "reason": "object_method_not_resolved",
+            "possible_target_ids": []
+          },
+          {
+            "start_line": 102,
+            "end_line": 102,
+            "unresolved_id": "unresolved-58db3169a20895a0468ec15905948b01",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "source_symbol_id": "sym-355c05a2718a4b9efc913d64b32d5533",
+            "path": "src/pluggy/_manager.py",
+            "expression": "isinstance(static, staticmethod)",
+            "reason": "call_target_not_in_snapshot",
+            "possible_target_ids": []
+          },
+          {
+            "start_line": 104,
+            "end_line": 104,
+            "unresolved_id": "unresolved-99fb1a3d9bd1d228738a3cac5eb51966",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "source_symbol_id": "sym-355c05a2718a4b9efc913d64b32d5533",
+            "path": "src/pluggy/_manager.py",
+            "expression": "isinstance(static, classmethod)",
+            "reason": "call_target_not_in_snapshot",
+            "possible_target_ids": []
+          },
+          {
+            "start_line": 105,
+            "end_line": 105,
+            "unresolved_id": "unresolved-8265668682e4548bc0d5e3462f5d0c56",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "source_symbol_id": "sym-355c05a2718a4b9efc913d64b32d5533",
+            "path": "src/pluggy/_manager.py",
+            "expression": "inspect.isclass(obj)",
+            "reason": "object_method_not_resolved",
+            "possible_target_ids": []
+          },
+          {
+            "start_line": 105,
+            "end_line": 105,
+            "unresolved_id": "unresolved-5c84e5fdd4622bc38bd5bc757c348e5d",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "source_symbol_id": "sym-355c05a2718a4b9efc913d64b32d5533",
+            "path": "src/pluggy/_manager.py",
+            "expression": "type(obj)",
+            "reason": "call_target_not_in_snapshot",
+            "possible_target_ids": []
+          },
+          {
+            "start_line": 106,
+            "end_line": 106,
+            "unresolved_id": "unresolved-7a3250c40665553437a6de7a24c00dee",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "source_symbol_id": "sym-355c05a2718a4b9efc913d64b32d5533",
+            "path": "src/pluggy/_manager.py",
+            "expression": "cast(Callable[..., object], static.__get__(owner, owner))",
+            "reason": "call_target_not_in_snapshot",
+            "possible_target_ids": []
+          },
+          {
+            "start_line": 106,
+            "end_line": 106,
+            "unresolved_id": "unresolved-340bf03342374c2b18efe86166b3627c",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "source_symbol_id": "sym-355c05a2718a4b9efc913d64b32d5533",
+            "path": "src/pluggy/_manager.py",
+            "expression": "static.__get__(owner, owner)",
+            "reason": "name_rebound_in_scope",
+            "possible_target_ids": []
+          },
+          {
+            "start_line": 107,
+            "end_line": 107,
+            "unresolved_id": "unresolved-2b0bc73cdcabe0016581affc14dbbaf0",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "source_symbol_id": "sym-355c05a2718a4b9efc913d64b32d5533",
+            "path": "src/pluggy/_manager.py",
+            "expression": "isinstance(static, types.MethodType)",
+            "reason": "call_target_not_in_snapshot",
+            "possible_target_ids": []
+          },
+          {
+            "start_line": 109,
+            "end_line": 109,
+            "unresolved_id": "unresolved-55407595935a5dfe649392cf43347614",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "source_symbol_id": "sym-355c05a2718a4b9efc913d64b32d5533",
+            "path": "src/pluggy/_manager.py",
+            "expression": "inspect.isfunction(static)",
+            "reason": "object_method_not_resolved",
+            "possible_target_ids": []
+          },
+          {
+            "start_line": 110,
+            "end_line": 110,
+            "unresolved_id": "unresolved-8ddbc63524ba98fb6505e92b6bee5242",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "source_symbol_id": "sym-355c05a2718a4b9efc913d64b32d5533",
+            "path": "src/pluggy/_manager.py",
+            "expression": "inspect.isclass(obj)",
+            "reason": "object_method_not_resolved",
+            "possible_target_ids": []
+          },
+          {
+            "start_line": 110,
+            "end_line": 110,
+            "unresolved_id": "unresolved-d39593cafa706c28fad4e2668705287b",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "source_symbol_id": "sym-355c05a2718a4b9efc913d64b32d5533",
+            "path": "src/pluggy/_manager.py",
+            "expression": "inspect.ismodule(obj)",
+            "reason": "object_method_not_resolved",
+            "possible_target_ids": []
+          },
+          {
+            "start_line": 112,
+            "end_line": 112,
+            "unresolved_id": "unresolved-d525d7c7ca796c2e1002fba2d1059809",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "source_symbol_id": "sym-355c05a2718a4b9efc913d64b32d5533",
+            "path": "src/pluggy/_manager.py",
+            "expression": "static.__get__(obj, type(obj))",
+            "reason": "name_rebound_in_scope",
+            "possible_target_ids": []
+          },
+          {
+            "start_line": 112,
+            "end_line": 112,
+            "unresolved_id": "unresolved-9003fdcf6829db76a5ce002f16a909e0",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "source_symbol_id": "sym-355c05a2718a4b9efc913d64b32d5533",
+            "path": "src/pluggy/_manager.py",
+            "expression": "type(obj)",
+            "reason": "call_target_not_in_snapshot",
+            "possible_target_ids": []
+          },
+          {
+            "start_line": 200,
+            "end_line": 200,
+            "unresolved_id": "unresolved-2039c71c72ee9050fe9dcc8dd734f551",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "source_symbol_id": "sym-fc25fca7a1df25dea3d1b417df358f5a",
+            "path": "src/pluggy/_manager.py",
+            "expression": "TypeError('plugin must not be None')",
+            "reason": "call_target_not_in_snapshot",
+            "possible_target_ids": []
+          },
+          {
+            "start_line": 202,
+            "end_line": 202,
+            "unresolved_id": "unresolved-32f75916b97c048c83f71012f97cb6b9",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "source_symbol_id": "sym-fc25fca7a1df25dea3d1b417df358f5a",
+            "path": "src/pluggy/_manager.py",
+            "expression": "self.get_canonical_name(plugin)",
+            "reason": "name_rebound_in_scope",
+            "possible_target_ids": []
+          },
+          {
+            "start_line": 205,
+            "end_line": 205,
+            "unresolved_id": "unresolved-946c70137e6f580ede89344e9c59f3c7",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "source_symbol_id": "sym-fc25fca7a1df25dea3d1b417df358f5a",
+            "path": "src/pluggy/_manager.py",
+            "expression": "self._name2plugin.get(plugin_name, -1)",
+            "reason": "object_method_not_resolved",
+            "possible_target_ids": [
+              "sym-7b1a2800171bc0d4b3a002dd2de82be9",
+              "sym-9dda058e4d2c73597fb5ad14494caf57"
+            ]
+          },
+          {
+            "start_line": 207,
+            "end_line": 210,
+            "unresolved_id": "unresolved-b9c7a04d06caa4e95a26c6934b72bab4",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "source_symbol_id": "sym-fc25fca7a1df25dea3d1b417df358f5a",
+            "path": "src/pluggy/_manager.py",
+            "expression": "ValueError(f'Plugin name already registered: {plugin_name}={plugin}\\n{self._name2plugin}')",
+            "reason": "call_target_not_in_snapshot",
+            "possible_target_ids": []
+          },
+          {
+            "start_line": 212,
+            "end_line": 212,
+            "unresolved_id": "unresolved-3fe42741e912bab09657be2c7b331edb",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "source_symbol_id": "sym-fc25fca7a1df25dea3d1b417df358f5a",
+            "path": "src/pluggy/_manager.py",
+            "expression": "self._name2plugin.values()",
+            "reason": "object_method_not_resolved",
+            "possible_target_ids": []
+          },
+          {
+            "start_line": 213,
+            "end_line": 216,
+            "unresolved_id": "unresolved-2fb45b8e996abf6a801094777537d899",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "source_symbol_id": "sym-fc25fca7a1df25dea3d1b417df358f5a",
+            "path": "src/pluggy/_manager.py",
+            "expression": "ValueError(f'Plugin already registered under a different name: {plugin_name}={plugin}\\n{self._name2plugin}')",
+            "reason": "call_target_not_in_snapshot",
+            "possible_target_ids": []
+          },
+          {
+            "start_line": 223,
+            "end_line": 223,
+            "unresolved_id": "unresolved-422a3fe283432718217d5efee1739299",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "source_symbol_id": "sym-fc25fca7a1df25dea3d1b417df358f5a",
+            "path": "src/pluggy/_manager.py",
+            "expression": "dir(plugin)",
+            "reason": "call_target_not_in_snapshot",
+            "possible_target_ids": []
+          },
+          {
+            "start_line": 224,
+            "end_line": 224,
+            "unresolved_id": "unresolved-9572807aca39755aad18a8531b57023d",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "source_symbol_id": "sym-fc25fca7a1df25dea3d1b417df358f5a",
+            "path": "src/pluggy/_manager.py",
+            "expression": "self.parse_hookimpl_opts(plugin, attr_name)",
+            "reason": "name_rebound_in_scope",
+            "possible_target_ids": []
+          },
+          {
+            "start_line": 226,
+            "end_line": 226,
+            "unresolved_id": "unresolved-1055623ff84516db9129779513a65d99",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "source_symbol_id": "sym-fc25fca7a1df25dea3d1b417df358f5a",
+            "path": "src/pluggy/_manager.py",
+            "expression": "normalize_hookimpl_opts(hookimpl_opts)",
+            "reason": "call_target_not_in_snapshot",
+            "possible_target_ids": [
+              "sym-a0ac515639edcf6d0a575b027a93de30"
+            ]
+          },
+          {
+            "start_line": 234,
+            "end_line": 234,
+            "unresolved_id": "unresolved-52644e60771817a1018b052b996fb976",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "source_symbol_id": "sym-fc25fca7a1df25dea3d1b417df358f5a",
+            "path": "src/pluggy/_manager.py",
+            "expression": "HookImpl(plugin, plugin_name, method, hookimpl_opts)",
+            "reason": "call_target_not_in_snapshot",
+            "possible_target_ids": [
+              "sym-a7a3a84e085b82a17230cfd76c50e6b4"
+            ]
+          },
+          {
+            "start_line": 235,
+            "end_line": 235,
+            "unresolved_id": "unresolved-4515e608345243de422d9972343e5da6",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "source_symbol_id": "sym-fc25fca7a1df25dea3d1b417df358f5a",
+            "path": "src/pluggy/_manager.py",
+            "expression": "hookimpl_opts.get('specname')",
+            "reason": "name_rebound_in_scope",
+            "possible_target_ids": []
+          },
+          {
+            "start_line": 236,
+            "end_line": 236,
+            "unresolved_id": "unresolved-af0a077764b1582ff8f13f04fc4ea0ce",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "source_symbol_id": "sym-fc25fca7a1df25dea3d1b417df358f5a",
+            "path": "src/pluggy/_manager.py",
+            "expression": "getattr(self.hook, hook_name, None)",
+            "reason": "call_target_not_in_snapshot",
+            "possible_target_ids": []
+          },
+          {
+            "start_line": 238,
+            "end_line": 238,
+            "unresolved_id": "unresolved-ea34e336e64555481492f3f5998531c9",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "source_symbol_id": "sym-fc25fca7a1df25dea3d1b417df358f5a",
+            "path": "src/pluggy/_manager.py",
+            "expression": "HookCaller(hook_name, self._hookexec)",
+            "reason": "call_target_not_in_snapshot",
+            "possible_target_ids": [
+              "sym-0ef639662c23efa0b0ca7ff17cfe7a0c"
+            ]
+          },
+          {
+            "start_line": 239,
+            "end_line": 239,
+            "unresolved_id": "unresolved-b11be9fa6a44000e2eb84c2c34d8c1c8",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "source_symbol_id": "sym-fc25fca7a1df25dea3d1b417df358f5a",
+            "path": "src/pluggy/_manager.py",
+            "expression": "setattr(self.hook, hook_name, hook)",
+            "reason": "call_target_not_in_snapshot",
+            "possible_target_ids": []
+          },
+          {
+            "start_line": 240,
+            "end_line": 240,
+            "unresolved_id": "unresolved-3564da6caa9de166d39ab75624dc06d2",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "source_symbol_id": "sym-fc25fca7a1df25dea3d1b417df358f5a",
+            "path": "src/pluggy/_manager.py",
+            "expression": "hook.has_spec()",
+            "reason": "dynamic_call_target",
+            "possible_target_ids": []
+          },
+          {
+            "start_line": 241,
+            "end_line": 241,
+            "unresolved_id": "unresolved-fe39ef1a1374071ebc2a15c388321502",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "source_symbol_id": "sym-fc25fca7a1df25dea3d1b417df358f5a",
+            "path": "src/pluggy/_manager.py",
+            "expression": "self._verify_hook(hook, hookimpl)",
+            "reason": "name_rebound_in_scope",
+            "possible_target_ids": []
+          },
+          {
+            "start_line": 242,
+            "end_line": 242,
+            "unresolved_id": "unresolved-5672aeb2cbc59f9dc435f59fcf182741",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "source_symbol_id": "sym-fc25fca7a1df25dea3d1b417df358f5a",
+            "path": "src/pluggy/_manager.py",
+            "expression": "hook._maybe_apply_history(hookimpl)",
+            "reason": "dynamic_call_target",
+            "possible_target_ids": []
+          },
+          {
+            "start_line": 243,
+            "end_line": 243,
+            "unresolved_id": "unresolved-945f4a7e7319da8fe007af440045c0e6",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "source_symbol_id": "sym-fc25fca7a1df25dea3d1b417df358f5a",
+            "path": "src/pluggy/_manager.py",
+            "expression": "hook._add_hookimpl(hookimpl)",
+            "reason": "dynamic_call_target",
+            "possible_target_ids": []
+          }
+        ],
+        "candidate_links": [
+          {
+            "candidate_id": "candidate-1",
+            "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+            "source_symbol_id": "sym-fc25fca7a1df25dea3d1b417df358f5a",
+            "target_symbol_id": "sym-52831be71ca812d7980d49c3b031de75",
+            "relation": "fixes",
+            "evidence_ids": [
+              "evidence-cef29607c855d2204d5a0f713b3b1b3f",
+              "evidence-5d1c82404c8aefe8a7d559ef88db6708",
+              "evidence-4aff4455061206b53d5c71a735943bad",
+              "evidence-01c58026ae339829c3f1067f93acdfc6"
+            ]
+          }
+        ],
+        "truncated": true,
+        "truncation_reason": "max_results reached"
+      },
+      "evidence": [
+        {
+          "start_line": 175,
+          "end_line": 255,
+          "evidence_id": "evidence-cef29607c855d2204d5a0f713b3b1b3f",
+          "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+          "path": "src/pluggy/_manager.py",
+          "excerpt": "    def _hookexec(\n        self,\n        hook_name: str,\n        methods: Sequence[HookImpl],\n        kwargs: Mapping[str, object],\n        firstresult: bool,\n    ) -> object | list[object]:\n        # called from all hookcaller instances.\n        # enable_tracing will set its own wrapping function at self._inner_hookexec\n        return self._inner_hookexec(hook_name, methods, kwargs, firstresult)\n\n    def register(self, plugin: _Plugin, name: str | None = None) -> str | None:\n        \"\"\"Register a plugin and return its name.\n\n        :param name:\n            The name under which to register the plugin. If not specified, a\n            name is generated using :func:`get_canonical_name`.\n\n        :returns:\n            The plugin name. If the name is blocked from registering, returns\n            ``None``.\n\n        If the plugin is already registered, raises a :exc:`ValueError`.\n        \"\"\"\n        if plugin is None:\n            raise TypeError(\"plugin must not be None\")\n\n        plugin_name = name or self.get_canonical_name(plugin)\n\n        if plugin_name in self._name2plugin:\n            if self._name2plugin.get(plugin_name, -1) is None:\n                return None  # blocked plugin, return None to indicate no registration\n            raise ValueError(\n                \"Plugin name already registered: \"\n                f\"{plugin_name}={plugin}\\n{self._name2plugin}\"\n            )\n\n        if plugin in self._name2plugin.values():\n            raise ValueError(\n                \"Plugin already registered under a different name: \"\n                f\"{plugin_name}={plugin}\\n{self._name2plugin}\"\n            )\n\n        # XXX if an error happens we should make sure no state has been\n        # changed at point of return\n        self._name2plugin[plugin_name] = plugin\n\n        # register matching hook implementations of the plugin\n        for attr_name in dir(plugin):\n            hookimpl_opts = self.parse_hookimpl_opts(plugin, attr_name)\n            if hookimpl_opts is not None:\n                normalize_hookimpl_opts(hookimpl_opts)\n                found = _static_hook_attr(plugin, attr_name)\n                # Only reachable when a subclass overrode parse_hookimpl_opts\n                # to claim an attribute pluggy cannot bind.\n                assert found is not None, (\n                    f\"{plugin!r}.{attr_name} is not a hookable attribute\"\n                )\n                method: _HookImplFunction[object] = found[1]\n                hookimpl = HookImpl(plugin, plugin_name, method, hookimpl_opts)\n                hook_name = hookimpl_opts.get(\"specname\") or attr_name\n                hook: HookCaller | None = getattr(self.hook, hook_name, None)\n                if hook is None:\n                    hook = HookCaller(hook_name, self._hookexec)\n                    setattr(self.hook, hook_name, hook)\n                elif hook.has_spec():\n                    self._verify_hook(hook, hookimpl)\n                    hook._maybe_apply_history(hookimpl)\n                hook._add_hookimpl(hookimpl)\n        return plugin_name\n\n    def parse_hookimpl_opts(self, plugin: _Plugin, name: str) -> HookimplOpts | None:\n        \"\"\"Try to obtain a hook implementation from an item with the given name\n        in the given plugin which is being searched for hook impls.\n\n        :returns:\n            The parsed hookimpl options, or None to skip the given item.\n\n        This method can be overridden by ``PluginManager`` subclasses to\n        customize how hook implementation are picked up. By default, returns the\n        options for items decorated with :class:`HookimplMarker`.",
+          "content_hash": "c38e50d040fe64df3a3a6f17cc366cfa9008f61b9ed8f832871d52502a139e65",
+          "kind": "source"
+        },
+        {
+          "start_line": 407,
+          "end_line": 455,
+          "evidence_id": "evidence-5d1c82404c8aefe8a7d559ef88db6708",
+          "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+          "path": "src/pluggy/_manager.py",
+          "excerpt": "    def _verify_hook(self, hook: HookCaller, hookimpl: HookImpl) -> None:\n        if hook.is_historic() and (hookimpl.hookwrapper or hookimpl.wrapper):\n            raise PluginValidationError(\n                hookimpl.plugin,\n                f\"Plugin {hookimpl.plugin_name!r}\\nhook {hook.name!r}\\n\"\n                \"historic incompatible with yield/wrapper/hookwrapper\",\n            )\n\n        assert hook.spec is not None\n        if hook.spec.warn_on_impl:\n            _warn_for_function(hook.spec.warn_on_impl, hookimpl.function)\n\n        # positional arg checking\n        notinspec = set(hookimpl.argnames) - (\n            set(hook.spec.argnames) | set(hook.spec.kwargnames)\n        )\n        if notinspec:\n            raise PluginValidationError(\n                hookimpl.plugin,\n                f\"Plugin {hookimpl.plugin_name!r} for hook {hook.name!r}\\n\"\n                f\"hookimpl definition: {_formatdef(hookimpl.function)}\\n\"\n                f\"Argument(s) {notinspec} are declared in the hookimpl but \"\n                \"can not be found in the hookspec\",\n            )\n\n        if hook.spec.warn_on_impl_args:\n            for hookimpl_argname in hookimpl.argnames:\n                argname_warning = hook.spec.warn_on_impl_args.get(hookimpl_argname)\n                if argname_warning is not None:\n                    _warn_for_function(argname_warning, hookimpl.function)\n\n        if (\n            hookimpl.wrapper or hookimpl.hookwrapper\n        ) and not inspect.isgeneratorfunction(hookimpl.function):\n            raise PluginValidationError(\n                hookimpl.plugin,\n                f\"Plugin {hookimpl.plugin_name!r} for hook {hook.name!r}\\n\"\n                f\"hookimpl definition: {_formatdef(hookimpl.function)}\\n\"\n                \"Declared as wrapper=True or hookwrapper=True \"\n                \"but function is not a generator function\",\n            )\n\n        if hookimpl.wrapper and hookimpl.hookwrapper:\n            raise PluginValidationError(\n                hookimpl.plugin,\n                f\"Plugin {hookimpl.plugin_name!r} for hook {hook.name!r}\\n\"\n                f\"hookimpl definition: {_formatdef(hookimpl.function)}\\n\"\n                \"The wrapper=True and hookwrapper=True options are mutually exclusive\",\n            )",
+          "content_hash": "c38e50d040fe64df3a3a6f17cc366cfa9008f61b9ed8f832871d52502a139e65",
+          "kind": "source"
+        },
+        {
+          "start_line": 127,
+          "end_line": 149,
+          "evidence_id": "evidence-4aff4455061206b53d5c71a735943bad",
+          "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+          "path": "src/pluggy/_caller.py",
+          "excerpt": "    def _add_hookimpl(self, hookimpl: HookImpl) -> None:\n        \"\"\"Add an implementation to the callback chain.\"\"\"\n        for i, method in enumerate(self._hookimpls):\n            if method.hookwrapper or method.wrapper:\n                splitpoint = i\n                break\n        else:\n            splitpoint = len(self._hookimpls)\n        if hookimpl.hookwrapper or hookimpl.wrapper:\n            start, end = splitpoint, len(self._hookimpls)\n        else:\n            start, end = 0, splitpoint\n\n        if hookimpl.trylast:\n            self._hookimpls.insert(start, hookimpl)\n        elif hookimpl.tryfirst:\n            self._hookimpls.insert(end, hookimpl)\n        else:\n            # find last non-tryfirst method\n            i = end - 1\n            while i >= start and self._hookimpls[i].tryfirst:\n                i -= 1\n            self._hookimpls.insert(i + 1, hookimpl)",
+          "content_hash": "bcc532adc754aa370ffb80bd4dfb93ce6cc4cb1fb6a7924aa95e9dc2bfa703a9",
+          "kind": "source"
+        },
+        {
+          "start_line": 330,
+          "end_line": 375,
+          "evidence_id": "evidence-01c58026ae339829c3f1067f93acdfc6",
+          "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+          "path": "testing/test_pluginmanager.py",
+          "excerpt": "    class Spec:\n        was_executed = False\n\n        @property\n        def not_a_spec(self) -> None:\n            type(self).was_executed = True  # pragma: no cover\n\n        @hookspec\n        def he_method1(self, arg: object) -> object: ...\n\n    # Spec instances are supported at runtime, see the ``he_pm`` fixture.\n    spec = cast(Any, Spec())\n    pm.add_hookspecs(spec)\n    assert not Spec.was_executed\n    assert pm.parse_hookspec_opts(spec, \"not_a_spec\") is None\n\n\ndef test_register_mismatch_method(he_pm: PluginManager) -> None:\n    class hello:\n        @hookimpl\n        def he_method_notexists(self):\n            pass  # pragma: no cover\n\n    plugin = hello()\n\n    he_pm.register(plugin)\n    with pytest.raises(PluginValidationError) as excinfo:\n        he_pm.check_pending()\n    assert excinfo.value.plugin is plugin\n\n\ndef test_register_mismatch_arg(he_pm: PluginManager) -> None:\n    class hello:\n        @hookimpl\n        def he_method1(self, qlwkje):\n            pass  # pragma: no cover\n\n    plugin = hello()\n\n    with pytest.raises(PluginValidationError) as excinfo:\n        he_pm.register(plugin)\n    assert excinfo.value.plugin is plugin\n\n\ndef test_register_hookwrapper_not_a_generator_function(he_pm: PluginManager) -> None:\n    class hello:",
+          "content_hash": "abff1592a7dc5f0b52d90e2f1b10f41e6de92c4661fc66095da190976bce4776",
+          "kind": "source"
+        }
+      ],
+      "findings": [
+        {
+          "finding_id": "finding-register-mutates-before-validation",
+          "kind": "observation",
+          "text": "PluginManager.register writes _name2plugin before entering its hook-implementation loop. The loop adds each implementation before moving to the next one, while _verify_hook can raise PluginValidationError for a later implementation. This ordering explains the reported partial registration state.",
+          "symbol_ids": [
+            "sym-fc25fca7a1df25dea3d1b417df358f5a"
+          ],
+          "evidence_ids": [
+            "evidence-cef29607c855d2204d5a0f713b3b1b3f",
+            "evidence-5d1c82404c8aefe8a7d559ef88db6708",
+            "evidence-4aff4455061206b53d5c71a735943bad"
+          ]
+        },
+        {
+          "finding_id": "finding-test-does-not-check-rollback",
+          "kind": "observation",
+          "text": "The existing mismatched-argument registration test expects PluginValidationError and checks the exception's plugin, but does not assert that the plugin mapping or hook implementations were rolled back.",
+          "symbol_ids": [
+            "sym-52831be71ca812d7980d49c3b031de75"
+          ],
+          "evidence_ids": [
+            "evidence-01c58026ae339829c3f1067f93acdfc6"
+          ]
+        },
+        {
+          "finding_id": "finding-transactional-registration",
+          "kind": "suggestion",
+          "text": "Stage or validate all hook implementations before mutating _name2plugin and HookCaller state. Add a regression where an earlier valid hook precedes a later invalid hook, assert neither plugin nor hook remains registered after failure, then correct the invalid hook and retry.",
+          "symbol_ids": [
+            "sym-fc25fca7a1df25dea3d1b417df358f5a",
+            "sym-52831be71ca812d7980d49c3b031de75"
+          ],
+          "evidence_ids": [
+            "evidence-cef29607c855d2204d5a0f713b3b1b3f",
+            "evidence-5d1c82404c8aefe8a7d559ef88db6708",
+            "evidence-4aff4455061206b53d5c71a735943bad",
+            "evidence-01c58026ae339829c3f1067f93acdfc6"
+          ]
+        }
+      ],
+      "candidate_links": [
+        {
+          "candidate_id": "candidate-1",
+          "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+          "source_symbol_id": "sym-fc25fca7a1df25dea3d1b417df358f5a",
+          "target_symbol_id": "sym-52831be71ca812d7980d49c3b031de75",
+          "relation": "fixes",
+          "evidence_ids": [
+            "evidence-cef29607c855d2204d5a0f713b3b1b3f",
+            "evidence-5d1c82404c8aefe8a7d559ef88db6708",
+            "evidence-4aff4455061206b53d5c71a735943bad",
+            "evidence-01c58026ae339829c3f1067f93acdfc6"
+          ]
+        }
+      ],
+      "explanation": null,
+      "limitations": [
+        "Static source review only; no runtime reproduction or test execution was performed. Conclusions are scoped to the supplied immutable local-path index."
+      ],
+      "terminal_sequence": 19
+    }
+  },
+  "isError": false
+}

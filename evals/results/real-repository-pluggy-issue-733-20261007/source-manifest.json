@@ -1,0 +1,159 @@
+{
+  "repository": "pytest-dev/pluggy",
+  "git_commit": "f91048bede722a546a0fc7e776231459b90af75b",
+  "git_tree": "bccf202865ecde768ae4be0400927af158b208ed",
+  "product_revision": "fixture-v1 (metadata only)",
+  "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+  "snapshot_hash": "5c7945218a427004d20df0008667baa113f121ec84b76ba65f6d3f66344c60a0",
+  "source_files_scanned": 36,
+  "exact_index_module_paths": 36,
+  "hash_basis": "SHA-256 of the bytes in the clean Windows checkout (CRLF under autocrlf), not the raw LF Git blob bytes.",
+  "method": "Hashed the exact 36 module paths returned by get_overview for the frozen baseline index from the independent clean Windows clone while git rev-parse HEAD was f91048bede722a546a0fc7e776231459b90af75b and git status was clean; not from the clone after its later checkout. Independent check_index_freshness was consistent across the same 36 files, and read_source full-file hashes for _manager.py and test_pluginmanager.py match these entries. The official Git blobs for those two key files were independently checked; converting LF to CRLF makes their content match the checkout bytes represented by these hashes, so these are not raw Git blob hashes.",
+  "files": [
+    {
+      "path": "docs/conf.py",
+      "sha256": "2389834e5efdf8959231a9644913b50bc3fc51876f9b66cd8da7281194aa22f4"
+    },
+    {
+      "path": "docs/examples/eggsample-spam/eggsample_spam.py",
+      "sha256": "f2a33e6e827f48d16c1b3b0333e4db2de9fa677b02a3c0df801a5b29ebbd2eaa"
+    },
+    {
+      "path": "docs/examples/eggsample-spam/setup.py",
+      "sha256": "f8f185b727e411229d8f215f83739da11f4e7f7f9cd791cc312c06613ea8e51b"
+    },
+    {
+      "path": "docs/examples/eggsample/eggsample/__init__.py",
+      "sha256": "9673eac6e3a2b35769e550bc18068566176d5eaad2eb696193d8b0b6a59ccb75"
+    },
+    {
+      "path": "docs/examples/eggsample/eggsample/hookspecs.py",
+      "sha256": "614315f2073b0f639b57114d36de1a4287fd5f8fa48357bfdd67b02e81083149"
+    },
+    {
+      "path": "docs/examples/eggsample/eggsample/host.py",
+      "sha256": "9a9444ff0a5da767cad8cee7f36d51fa2412dce46542800a396b5f64b001f2e7"
+    },
+    {
+      "path": "docs/examples/eggsample/eggsample/lib.py",
+      "sha256": "0b01c5c5e33cbbaaf455a06c4b11686594cb95a79519b80c08b62f9b4efba3c7"
+    },
+    {
+      "path": "docs/examples/eggsample/setup.py",
+      "sha256": "4aaa7022c408c7274f2fd3af5d4a2653f1e590b5aa240b0001e24fc28223271a"
+    },
+    {
+      "path": "docs/examples/toy-example.py",
+      "sha256": "2f58b7194e9a882297e4ff02366d26625dcb98bc9b16bd8967e578567ac696fd"
+    },
+    {
+      "path": "downstream/run_downstream.py",
+      "sha256": "3348412d9585487f166434ae9e380ebdf23c6b0f3fc326b5c412882d33cf8d76"
+    },
+    {
+      "path": "scripts/release.py",
+      "sha256": "eb0c79cf534a3b447903aedfe3ba3b2012fe6a030402e0866f3af36f41147e25"
+    },
+    {
+      "path": "scripts/towncrier-draft-to-file.py",
+      "sha256": "664b11df97b4c79d3660ac242570c24dd50d389de4a943623efdd028f173cb7b"
+    },
+    {
+      "path": "src/pluggy/__init__.py",
+      "sha256": "d91946ab748c692505c3ac25436c61c16821b97637421ee5e2bb2bf613d32b85"
+    },
+    {
+      "path": "src/pluggy/_caller.py",
+      "sha256": "bcc532adc754aa370ffb80bd4dfb93ce6cc4cb1fb6a7924aa95e9dc2bfa703a9"
+    },
+    {
+      "path": "src/pluggy/_callers.py",
+      "sha256": "04037d43b608f141253da9ecc71eee7e1dce786174a76332e58521ccbc58370d"
+    },
+    {
+      "path": "src/pluggy/_compat.py",
+      "sha256": "9c95a49f1b75c0d140c2b28fb119bc397108ab00601f116e0d0e3baec1c25c39"
+    },
+    {
+      "path": "src/pluggy/_config.py",
+      "sha256": "f1b8cf64c4c52e06916bf9fc445d86c0596cf6c1dd6641b212bce3b8af7569ed"
+    },
+    {
+      "path": "src/pluggy/_decorators.py",
+      "sha256": "ee267c2c1cbd5fb3aac96e88fda6bd5ae612033177aba3debcac2a483444596a"
+    },
+    {
+      "path": "src/pluggy/_execution.py",
+      "sha256": "f690e5ad5131aecaa4e539dfafdd7dd9f9a05055d9c6a623677cdf11b9f9d60a"
+    },
+    {
+      "path": "src/pluggy/_hooks.py",
+      "sha256": "ddfa1ef0e1bad7a8b11b40c1fa9e413e3c487e61bc6b01d3c7e6ad57ad881a11"
+    },
+    {
+      "path": "src/pluggy/_impl.py",
+      "sha256": "702cf5e229f7504adae389c300e63a9a12961bb303a8523d332cbbd559e72d99"
+    },
+    {
+      "path": "src/pluggy/_manager.py",
+      "sha256": "c38e50d040fe64df3a3a6f17cc366cfa9008f61b9ed8f832871d52502a139e65"
+    },
+    {
+      "path": "src/pluggy/_result.py",
+      "sha256": "45fd75f59bb7bbbf00e3267ce51f3f116ff8e28f6641082eeb6399f62f62ddc9"
+    },
+    {
+      "path": "src/pluggy/_tracing.py",
+      "sha256": "d063ba052f05b6808aa0ad8ba3cebb468396c23d3d16b462cff0e12aba763670"
+    },
+    {
+      "path": "src/pluggy/_warnings.py",
+      "sha256": "83924f4cd71dcbce17fc801ecca3dd1b62472ad5da3208538dc2f05f3b664d1c"
+    },
+    {
+      "path": "testing/benchmark.py",
+      "sha256": "d910464b9913e29f2c27b6fde8bbb6228784337bb760641e3d15d8386e29869a"
+    },
+    {
+      "path": "testing/conftest.py",
+      "sha256": "42553852230359607c1d5089c746d30e860a5c446905e045736f8cea365322c5"
+    },
+    {
+      "path": "testing/test_details.py",
+      "sha256": "bfbec60b2de32259352edf6a7f15804eb2f9f2b821129324a6bdb56b0b15548b"
+    },
+    {
+      "path": "testing/test_helpers.py",
+      "sha256": "d0f12b4690083bf8031749ca6a57bcc96dfebd0d28ab90f459b11fb91e83016a"
+    },
+    {
+      "path": "testing/test_hookcaller.py",
+      "sha256": "1f92e0c511caf8b5389382d41d7e10db08c1498cda7b7303d936dbdf37e6c618"
+    },
+    {
+      "path": "testing/test_invocations.py",
+      "sha256": "cf26c7eab0f6545584bc86eea71f569b5729798c147df16013d132c9118eafe1"
+    },
+    {
+      "path": "testing/test_multicall.py",
+      "sha256": "2a4db84b990be3eb5786c77e628a64a4e1c1b9231fcb862213d5a55facb6eadd"
+    },
+    {
+      "path": "testing/test_pluginmanager.py",
+      "sha256": "abff1592a7dc5f0b52d90e2f1b10f41e6de92c4661fc66095da190976bce4776"
+    },
+    {
+      "path": "testing/test_result.py",
+      "sha256": "03891f6cf81560165423bae358f4609fa0827f4fed6c5a667f2413438aa22fe0"
+    },
+    {
+      "path": "testing/test_tracer.py",
+      "sha256": "47953d80c25d82179fa11ff94df9bec0a2013266748b16e51154828dc82f360e"
+    },
+    {
+      "path": "testing/test_warnings.py",
+      "sha256": "dcb3abd40ea09ffff6aac6b0e6757b6101259b7f548782a40d257ebc93b459b8"
+    }
+  ],
+  "capture_time_approximate_utc": "2026-10-07T05:35Z (after first Run report; before the source checkout recorded in freshness.json)"
+}

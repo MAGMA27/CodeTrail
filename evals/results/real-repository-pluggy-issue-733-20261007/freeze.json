@@ -1,0 +1,19 @@
+{
+  "repository": "pytest-dev/pluggy",
+  "issue_id": "733",
+  "issue_title": "PluginManager.register leaves partial state after validation failure",
+  "issue_body": "A failed PluginManager.register() call can leave a plugin partially registered when a later hook implementation fails validation. On main at 9836e545d68690b30accc1eeb4af408f80efa44, a plugin with a valid a_hook and invalid b_hook raises PluginValidationError but remains in the manager and leaves a_hook installed. Expected: registration failure leaves no plugin mapping or hook implementations, so callers can safely fix and retry. The register implementation currently contains a TODO noting that state should not change on failure.",
+  "issue_sha256": "9589a470593bdeb52dfaae09a37eae323c0497b9d2b6bcc211ef24cb1cdb510e",
+  "fixed_source_commit": "f91048bede722a546a0fc7e776231459b90af75b",
+  "independently_verified_tree": "bccf202865ecde768ae4be0400927af158b208ed",
+  "clean_worktree": true,
+  "product_project_id": "project-6bb41715c4ff4eedbff6d6bc2ae6508d",
+  "repository_id": "import-ad73b47ba9a2107435ad47460a97f969",
+  "index_id": "index-import-ad73b47ba9a2107435ad47460a97f969-relations-v13-5c7945218a427004",
+  "snapshot_hash": "5c7945218a427004d20df0008667baa113f121ec84b76ba65f6d3f66344c60a0",
+  "product_revision": "fixture-v1",
+  "source_method": "local path import after Product GitHub import returned HTTP 429",
+  "session_id": "session-84f84838ab0c479fb9b3008c20c2fec3",
+  "solver_run": "not started",
+  "status": "frozen; execution pending"
+}
