@@ -1,7 +1,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
-const compilerPath = path.resolve(__dirname, "../../web/node_modules/typescript/lib/typescript.js");
+const compilerPath = process.env.CODETRAIL_TYPESCRIPT_COMPILER || path.resolve(__dirname, "../../web/node_modules/typescript/lib/typescript.js");
 const ts = require(compilerPath);
 const compilerVersion = "5.9.3";
 const maxDefinitions = 20000;

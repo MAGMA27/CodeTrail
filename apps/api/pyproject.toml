@@ -10,8 +10,18 @@ dependencies = [
     "uvicorn[standard]==0.52.4",
 ]
 
-[tool.uv]
-package = false
+[project.scripts]
+codetrail = "app.cli:main"
+
+[build-system]
+requires = ["setuptools==80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.setuptools.package-data]
+app = ["*.cjs"]
 
 [dependency-groups]
 dev = [

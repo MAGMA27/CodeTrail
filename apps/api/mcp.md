@@ -16,20 +16,17 @@ HTTP 入口链路没有额外 MCP 工具：外部 Agent 从 `get_overview` 读�
 
 `submit_external_run` 的结论形状由 start 时选择的 `analysis_kind` 决定：`issue` Run 只能提交 `candidate_found` 或 `insufficient_evidence`，并且不能带 `explanation`；`understanding` Run 只能提交 `explanation`，不能带 Issue 的 `findings` 或 `candidate_links`。`candidate_found` 的 `candidate_links` 至少需要一个条目，`insufficient_evidence` 不允许 `candidate_links`。Issue 结论顶层 `evidence_ids` 必须包含所有 findings 与 candidate links 引用的 evidence ID；explanation 的顶层 `evidence_ids` 则必须与其有序步骤引用的 ID 集合完全相同。所有 evidence、symbol、candidate 和 index 引用必须来自本 Run 实际返回的工具结果，服务端会校验这些边界。报告带有公开限制，超时、取消和终态写入均不可伪造或重复。工作台通过 Session Run history 自动发现该 Run，并用同一 Run 的 SSE 展示公开事件。
 
-Codex 的本地 stdio 配置示例（Windows）如下；仓库映射必须使用服务数据目录中已存在的 repository ID，`CODETRAIL_DATA_DIR` 需与 API 共用：
+推荐使用 `pwsh -File .\scripts\setup-mcp.ps1` 安装 CLI、初始化共享用户配置并注册 Codex。已有配置保留；旧配置升级加 `-Replace`。注册后重连或重启宿主加载。
 
 ```toml
 [mcp_servers.codetrail]
-command = "uv"
-args = ["run", "--directory", "D:/Dev/CodeTrail/apps/api", "python", "-m", "app.mcp_server"]
-startup_timeout_sec = 120
-
-[mcp_servers.codetrail.env]
-CODETRAIL_DATA_DIR = "D:/Dev/CodeTrail/.codetrail-runtime"
-CODETRAIL_REPOSITORIES = "{}" # 使用 CODETRAIL_DATA_DIR 中已注册的 managed source
-CODETRAIL_WORKBENCH_URL = "http://localhost:3000"
-CODETRAIL_MCP_EXTERNAL_RUN_ENABLED = "1"
+command = "codetrail"
+args = ["mcp"]
 ```
+
+API (`codetrail api`) 与 MCP (`codetrail mcp`) 都读取 `~/.config/codetrail/settings.json`，不把业务配置复制进 Codex。配置包含 `data_dir`、`allowed_import_roots`、`workbench_url`、`web_origins`、`github_import_enabled`、`external_run_enabled` 和可选 `typescript_compiler`。路径必须是绝对路径，导入根目录必须存在；未识别字段拒绝启动。环境变量优先。自定义文件使用 `--config` 或 `CODETRAIL_CONFIG`；`codetrail --config C:/path/settings.json install` 注册时保存同一文件位置。修改配置后重启 API/MCP，已运行进程不会热加载。
+
+`codetrail install --print-config` 只预览注册内容；`status` 显示配置位置和宿主注册，`uninstall` 只移除 codetrail 注册，不删除项目数据或用户配置。安装后的包含 stdio 服务和 TypeScript parser，但 TypeScript 编译器仍为外部锁定依赖；设置 `typescript_compiler` 为其 typescript.js 路径。开发时 `uv run --directory apps/api codetrail ...` 使用相同入口。
 
 需要通过 MCP 显式更新索引时，再单独加入 `CODETRAIL_MCP_INDEX_WRITE_ENABLED = "1"`；默认不注册 `refresh_index`。修改 MCP 代码后对 `codetrail` 做一次 reload 或重启 Codex，服务端运行目录无需清理。
 

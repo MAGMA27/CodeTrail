@@ -1,5 +1,7 @@
 # 决策记录
 
+- [安装入口与共享运行配置分离](2026-10-07-installed-cli-config.md)
+
 库与插件架构分类的规则、证据和范围见[库与插件架构概览](2026-10-07-library-plugin-overview.md)。
 
 实例来源分离及独立条件记录见 [Python 实例字段条件调用](2026-10-07-python-contextual-instance-calls.md)。

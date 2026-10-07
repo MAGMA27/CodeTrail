@@ -30,3 +30,7 @@ evals/results/p4-e2a-fix-v1/raw-state.json
 # Local logs
 *.log
 .ruff_cache
+
+# Python package build outputs
+/apps/api/build/
+/apps/api/*.egg-info/

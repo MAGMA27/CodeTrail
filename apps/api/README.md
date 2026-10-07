@@ -37,6 +37,8 @@
 
 ## 使用与配置
 
+安装入口使用 `uv tool install ./apps/api`，得到独立 `codetrail` 命令。`codetrail init` 初始化用户设置，`codetrail api` 与 `codetrail mcp` 共用该设置；`install --print-config`、`install`、`status` 和 `uninstall` 管理 Codex 注册。完整配置和覆盖规则见 [mcp.md](mcp.md)。源码启动脚本调用同一 CLI；Web 仍从源码运行。
+
 从仓库根目录启动当前 API 与 Codex external 联合验收环境；脚本使用仓库根目录下的 `.codetrail-runtime`，从该服务数据目录读取已注册 managed source，不需要手工设置临时环境变量。完整步骤见 [MVP 操作说明](../../docs/mvp-operation.md)：
 
 ```powershell

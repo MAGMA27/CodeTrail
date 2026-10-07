@@ -1027,6 +1027,8 @@ def _extract_typescript_facts(
     if len(payload.encode("utf-8")) > _TYPESCRIPT_PARSER_MAX_INPUT_BYTES:
         return {}, [SnapshotIssue("__snapshot__", "parser_error", "TypeScript parser input exceeded its byte budget")]
     environment = {"PATH": os.environ.get("PATH", "")}
+    if compiler_path := os.environ.get("CODETRAIL_TYPESCRIPT_COMPILER"):
+        environment["CODETRAIL_TYPESCRIPT_COMPILER"] = compiler_path
     for key in ("SystemRoot", "WINDIR", "TEMP", "TMP"):
         if value := os.environ.get(key):
             environment[key] = value

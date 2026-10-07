@@ -4,7 +4,7 @@
 
 ## 启动 API 与工作台
 
-本地联合演示使用仓库根目录下被 Git 忽略的 `.codetrail-runtime` 作为服务管理目录（当前路径为 `D:/Dev/CodeTrail/.codetrail-runtime`）。该目录中的已注册 managed source、Project、Index、Session 和 Run 会被 API 与 Codex MCP 共同读取；启动脚本不会创建或清空数据，也不需要在当前 PowerShell 会话中手工设置临时环境变量。
+本地联合演示使用仓库根目录下被 Git 忽略的 `.codetrail-runtime` 作为服务管理目录（当前路径为 `D:/Dev/CodeTrail/.codetrail-runtime`）。该目录中的已注册 managed source、Project、Index、Session 和 Run 会被 API 与 Codex MCP 共同读取；首次启动初始化 `~/.config/codetrail/settings.json`（已有配置保留），并由 API 创建所配置的数据目录。默认导入根仅含本仓库；编辑共享配置即可更改允许路径，不清空既有数据。API/MCP 共用配置；环境变量优先。旧 startup.json 不再读取。
 
 从仓库根目录启动 API：
 
