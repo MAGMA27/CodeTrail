@@ -46,12 +46,7 @@ pwsh -File .\scripts\start-local.ps1 -Service web
 - **本地目录**：填写名称与服务端可见的绝对路径，例如 `D:/Dev/MyProject`，点击“导入并建立索引”。路径必须位于允许根目录内。来源只读，索引与运行数据写入服务管理目录。
 - **GitHub HTTPS**：填写公开仓库地址，例如 `https://github.com/pytest-dev/pluggy`，可指定 ref。服务先解析到固定 commit，再获取官方 archive 建立索引。
 
-GitHub 导入默认关闭。推荐把共享 settings.json 中的 `github_import_enabled` 改为 `true`，然后重启 API；也可在启动 API **之前**临时覆盖：
-
-```powershell
-$env:CODETRAIL_GITHUB_IMPORT_ENABLED = '1'
-# 可选：在本机设置 CODETRAIL_GITHUB_TOKEN，降低未认证请求限流的影响。
-```
+GitHub 导入默认开启，直接填写仓库地址即可。若需关闭，在共享 settings.json 中设 `github_import_enabled=false` 后重启 API，或用 `CODETRAIL_GITHUB_IMPORT_ENABLED=0` 覆盖。GitHub token 是可选的服务端环境变量 `CODETRAIL_GITHUB_TOKEN`，用于降低未认证限流影响。
 
 当前只支持公开 GitHub HTTPS 仓库。限流或下载失败会显示原因，失败不覆盖旧可用索引；也可自行取得源码后使用本地导入。
 

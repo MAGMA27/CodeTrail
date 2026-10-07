@@ -259,7 +259,7 @@ class RepositoryRegistry:
             else mcp_local_import_enabled
         )
         self._github_import_enabled = (
-            _env_flag("CODETRAIL_GITHUB_IMPORT_ENABLED")
+            _env_flag("CODETRAIL_GITHUB_IMPORT_ENABLED", default=True)
             if github_import_enabled is None
             else github_import_enabled
         )
@@ -4463,8 +4463,8 @@ def _feature_generation_summary(generation: FeatureGeneration) -> FeatureGenerat
     )
 
 
-def _env_flag(name: str) -> bool:
-    return os.getenv(name, "").strip().casefold() in {"1", "true", "yes", "on"}
+def _env_flag(name: str, *, default: bool = False) -> bool:
+    return os.getenv(name, "1" if default else "0").strip().casefold() in {"1", "true", "yes", "on"}
 
 
 def _configured_run_capacity(value: int | None) -> int:

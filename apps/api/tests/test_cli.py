@@ -7,6 +7,19 @@ import pytest
 from app import cli
 
 
+def test_github_import_defaults_enabled_and_can_be_disabled():
+    assert cli.Settings(data_dir="test").github_import_enabled is True
+    assert cli.Settings(data_dir="test", github_import_enabled=False).github_import_enabled is False
+
+
+def test_direct_service_github_default_and_override(tmp_path, monkeypatch):
+    from app.service import RepositoryRegistry
+    monkeypatch.delenv("CODETRAIL_GITHUB_IMPORT_ENABLED", raising=False)
+    assert RepositoryRegistry({}, data_root=tmp_path / "enabled").github_import_enabled
+    monkeypatch.setenv("CODETRAIL_GITHUB_IMPORT_ENABLED", "0")
+    assert not RepositoryRegistry({}, data_root=tmp_path / "disabled").github_import_enabled
+
+
 def test_shared_config_and_environment_precedence(tmp_path, monkeypatch):
     config = tmp_path / "settings.json"
     config.write_text(json.dumps({"data_dir": str(tmp_path / "data"), "allowed_import_roots": [str(tmp_path)]}))

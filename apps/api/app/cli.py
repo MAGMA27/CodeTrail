@@ -16,7 +16,7 @@ class Settings(BaseModel):
     allowed_import_roots: list[str] = Field(default_factory=list)
     workbench_url: str = "http://localhost:3000"
     web_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000", "http://127.0.0.1:3000"])
-    github_import_enabled: bool = False
+    github_import_enabled: bool = True
     external_run_enabled: bool = True
     typescript_compiler: str | None = None
 
