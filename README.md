@@ -21,7 +21,8 @@ TypeScript 项目索引需要 Node.js 和上述安装得到的 TypeScript 解析
 在 API 终端执行：
 
 ```powershell
-pwsh -File .\scripts\start-local.ps1 -Service api
+codetrail init --allow-root . --typescript-compiler .\apps\web\node_modules\typescript\lib\typescript.js
+codetrail api
 ```
 
 在另一个终端、同一仓库根目录执行：
@@ -32,7 +33,9 @@ pwsh -File .\scripts\start-local.ps1 -Service web
 
 打开 [工作台](http://localhost:3000)。[API 健康检查](http://127.0.0.1:8000/api/health) 应返回成功；[Swagger UI](http://127.0.0.1:8000/docs) 提供 HTTP 接口文档。默认端口为 8000/3000，若被占用，先在对应服务终端停止原实例。
 
-首次启动脚本初始化用户配置 `~/.config/codetrail/settings.json`（已有文件保留），使用 `.codetrail-runtime` 保存数据，默认只允许导入本项目。编辑该配置的 `allowed_import_roots`、`data_dir`、`workbench_url` 或 `github_import_enabled`，重启对应服务即可。API 和 MCP 共用它；旧 `startup.json` 不再读取。环境变量优先于文件配置，根 `.env.example` 是参考，不自动加载。
+`init` 创建用户配置 `~/.config/codetrail/settings.json`，已有文件保持不变。上述初始化允许导入本项目并保存锁定 TypeScript 编译器位置；API 自动创建配置的数据目录。默认数据目录是 `~/.local/share/codetrail`，以实际配置的 `data_dir` 为准。
+
+编辑配置可修改 `allowed_import_roots`、`data_dir`、`workbench_url`、`typescript_compiler` 和 `github_import_enabled`，重启相应服务即可。API/MCP 默认读取同一文件，环境变量优先于文件配置。根 `.env.example` 是参考，不自动加载。
 
 ## 导入项目
 
@@ -68,17 +71,18 @@ Python 公共 API 分类支持静态 `__all__`；插件扩展点支持有真实 
 
 HTTP 面向工作台，stdio MCP 面向 Codex，两者复用业务服务。**API 与 MCP 必须使用同一个数据目录**，网页才能看到 Codex 调查结果。
 
-从仓库根目录运行一次（需要 `codex` CLI 和 `uv` 在 PATH 中）：
+完成前面的 CLI 安装和初始化后，执行（需要 `codex` CLI 在 PATH 中）：
 
 ```powershell
-pwsh -File .\scripts\setup-mcp.ps1
+codetrail install --print-config   # 可选：预览注册内容
+codetrail install                  # 注册到 Codex
 ```
 
-脚本安装独立的 `codetrail` 命令、初始化共享用户配置，再注册 `command="codetrail"`、`args=["mcp"]`。MCP 注册不保存源码路径或业务环境变量。已有 codetrail 注册保留；从旧 uv/绝对路径配置升级时加 `-Replace`。普通运行不依赖源码目录；修改设置后重启服务，无需重新注册。TypeScript 解析仍需要配置中 `typescript_compiler` 指向安装了锁定版本的编译器文件。
+注册内容只有 `command="codetrail"`、`args=["mcp"]`，没有源码地址或业务环境变量。已有注册默认保留；需要更新时使用 `codetrail install --replace`。修改共享设置无需重新注册，只需重启相应服务。安装后的 API/MCP 无需从源码目录启动；前端及 TypeScript 编译器仍需要工作区提供。
 
 按 Codex 宿主支持的方式重连 MCP 或重启客户端，确认能调用 `list_projects`、`list_indexes`、`get_overview`。不需要清理数据或重建索引。完整工具与能力开关见 [MCP 配置](apps/api/mcp.md)。
 
-安装后的命令也可直接使用：
+其他管理命令：
 
 ```powershell
 codetrail init                         # 初始化默认配置；已有配置不覆盖
@@ -108,7 +112,7 @@ codetrail uninstall                    # 只移除 MCP 注册，保留配置、�
 
 Session 的“Issue 分析”支持选择 fixture 场景、点击“启动离线分析”，体验候选、证据不足和工具失败。它是固定演示响应，不是真实 AI 调查；匹配源码样本见 [fixtures 说明](fixtures/README.md)。
 
-也可选择 real 模式，由服务端模型调查。这需要在数据目录中配置 `config.json` 并启用 `CODETRAIL_REAL_RUN_ENABLED=1`，格式见 [模型配置](apps/api/mcp.md)。密钥只存服务端，不提交 Git。Codex external 模式无需该供应商配置。
+也可选择 real 模式，由服务端模型调查。这需要在配置的 data_dir 中设置 `config.json` 并启用 `CODETRAIL_REAL_RUN_ENABLED=1`，格式见 [模型配置](apps/api/mcp.md)。密钥只存服务端，不提交 Git。Codex external 模式无需该供应商配置。
 
 ## 更新索引与保留历史
 
@@ -116,7 +120,7 @@ Session 的“Issue 分析”支持选择 fixture 场景、点击“启动离线
 
 索引是不可变快照，不要求每次打开重建。更新产生或复用合适快照，失败保留旧版本；旧 Session、Run 和证据始终绑定旧索引。分析新代码时，在新索引上新建 Session。
 
-`.codetrail-runtime` 保存项目、索引、消息和报告，不是可随意删除的构建缓存。停止时只在 API/Web 终端按 `Ctrl+C`；再次启动后选择原项目和 Session 即可继续。
+配置的 `data_dir` 保存项目、索引、消息和报告，不是可随意删除的构建缓存。停止时只在 API/Web 终端按 `Ctrl+C`；再次启动后选择原项目和 Session 即可继续。
 
 ## 常见问题与范围
 
@@ -136,7 +140,7 @@ uv run --directory apps/api pytest -q
 pnpm docs:check
 ```
 
-- [本地联合操作说明](docs/mvp-operation.md)
+- [开发者本地联合操作说明](docs/mvp-operation.md)：开发环境可使用 `scripts/start-local.ps1`、`scripts/setup-mcp.ps1` 包装同一 CLI。
 - [API、索引、存储与 Run](apps/api/README.md) · [Web](apps/web/README.md) · [契约](contracts/README.md)
 - [样本](fixtures/README.md) · [评测](evals/README.md)
 - [开发约束](AGENTS.md) · [文档规范](docs/development.md) · [子系统导航](docs/subsystems/README.md)

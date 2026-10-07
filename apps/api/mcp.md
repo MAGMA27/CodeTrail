@@ -16,7 +16,7 @@ HTTP 入口链路没有额外 MCP 工具：外部 Agent 从 `get_overview` 读�
 
 `submit_external_run` 的结论形状由 start 时选择的 `analysis_kind` 决定：`issue` Run 只能提交 `candidate_found` 或 `insufficient_evidence`，并且不能带 `explanation`；`understanding` Run 只能提交 `explanation`，不能带 Issue 的 `findings` 或 `candidate_links`。`candidate_found` 的 `candidate_links` 至少需要一个条目，`insufficient_evidence` 不允许 `candidate_links`。Issue 结论顶层 `evidence_ids` 必须包含所有 findings 与 candidate links 引用的 evidence ID；explanation 的顶层 `evidence_ids` 则必须与其有序步骤引用的 ID 集合完全相同。所有 evidence、symbol、candidate 和 index 引用必须来自本 Run 实际返回的工具结果，服务端会校验这些边界。报告带有公开限制，超时、取消和终态写入均不可伪造或重复。工作台通过 Session Run history 自动发现该 Run，并用同一 Run 的 SSE 展示公开事件。
 
-推荐使用 `pwsh -File .\scripts\setup-mcp.ps1` 安装 CLI、初始化共享用户配置并注册 Codex。已有配置保留；旧配置升级加 `-Replace`。注册后重连或重启宿主加载。
+CLI 安装并初始化后，执行 `codetrail install` 注册 Codex；`codetrail install --print-config` 可先预览。已有注册保留，需要更新时使用 `codetrail install --replace`。注册后重连或重启宿主加载。源码开发环境可用 scripts/setup-mcp.ps1 包装安装与注册步骤。
 
 ```toml
 [mcp_servers.codetrail]
