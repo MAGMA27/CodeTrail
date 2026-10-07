@@ -64,3 +64,7 @@ external Run 只执行白名单代码搜索、源码读取和静态邻接查询�
 2. 从仓库根目录重新执行 `pwsh -File .\scripts\start-local.ps1 -Service api` 和 `pwsh -File .\scripts\start-local.ps1 -Service web`。
 3. 用 `GET http://127.0.0.1:8000/api/health` 检查 API；刷新工作台并选择目标项目。
 4. 确认新 Session 仍绑定刷新后创建的 ready index，旧 Session 仍绑定原 index，Run history、报告、事件、工具结果与 evidence 均可恢复。数据持久化验收不需要清空 runtime 或重载 MCP。
+
+## 已知 Issue 闭环复测记录
+
+2026-10-07 使用当前宿主 MCP 与本地 API/Web 共享的 `.codetrail-runtime`，对 pluggy 已知 Issue #733 的修复前固定快照完成一次 external Run。当前宿主工具实际返回新版架构分类；Run 报告、HTTP 读取、实时 UI、源码 evidence、bounded impact 与刷新恢复绑定同一个 Session/index。该结果只证明已知案例和修复前证据链，不是盲测，也不证明修复后行为或一般调查质量。没有运行来源代码或测试。CodeTrail 自用大索引的 API `max_modules=40` 请求返回 40/96 个模块；该服务端请求不验证 Web 画布自己的 40 模块投影上限。实际分类 excerpt 低于 40,000 字符，因此 UI 投影上限与字符预算触发边界仍待验证；本轮整体容量验收保持 partial。

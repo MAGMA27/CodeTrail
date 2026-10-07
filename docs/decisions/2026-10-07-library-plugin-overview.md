@@ -2,7 +2,7 @@
 
 Status: proposed
 
-实现状态：本轮约定的 Python 静态规则、契约、HTTP/MCP 引用与 Web 聚合已实现；TypeScript 导出事实未持久化，按未知处理。验收状态：定向自动检查通过，pluggy/CodeTrail PC 基础路径有实际证据；真人 UI 的 40 模块上限、40,000 字符预算在最终 API 进程上的运行验证，以及宿主 MCP 重载尚未完成。独立审查未发现当前阻断问题；因上述必要运行验收尚未完成，保留 proposed。详见本地阶段记录 `memory-bank/progress/2026-10-07-library-plugin-architecture.md`；该本地记录不属于干净克隆运行依赖。
+实现状态：本轮约定的 Python 静态规则、契约、HTTP/MCP 引用与 Web 聚合已实现；TypeScript 导出事实未持久化，按未知处理。验收状态：定向自动检查通过；pluggy 当前宿主 MCP 已实际返回新 schema，真实 Issue Run 的 HTTP/MCP 报告与 evidence 一致，PC 刷新恢复与 bounded impact 有证据。CodeTrail API 请求 `max_modules=40` 返回 40/96，实际分类 excerpt 4,356 字符/96 行；Web 画布 40 模块投影上限及 40,000 字符预算触发边界仍未验证。因此保留 proposed。执行证据见本地阶段记录 `memory-bank/progress/2026-10-07-mvp-final-closure.md` 与 `memory-bank/mvp-final-closure-acceptance.md`；这些本地记录不属于干净克隆运行依赖。
 
 ## 问题
 
@@ -27,7 +27,7 @@ Status: proposed
 
 ## 验收与证据
 
-固定 pluggy 索引实际显示 21 个 public API、2 个 hookspec 扩展点；PC 选中 `PluginManager` 公共 API 后打开了 `src/pluggy/__init__.py:L12` 导出声明证据，并打开 `docs/examples/eggsample/eggsample/hookspecs.py:L7` 的 `@hookspec` 证据。两项面板均显示同一固定 `index_id`、路径、行、片段 hash 与源码；目录默认摘要显示 API/扩展点/未知计数，eggsample 组展开和折叠均可操作。CodeTrail 自用索引的 PC 分类计数可读，覆盖为 152/152 但 `truncated=true`，不得解释成全量无截断。pluggy 当前只有 36 个模块，因此真人 PC 未触发 40 模块上限；字符预算修复后的当前 API 进程、宿主 MCP reload 也未在 PC 验证。定向 API、前端、Schema 与文档检查结果见本地阶段记录；来源仓库代码和测试未执行。
+固定 pluggy 索引实际显示 21 个 public API、2 个 hookspec 扩展点；PC 选中 `PluginManager` 公共 API 后打开了 `src/pluggy/__init__.py:L12` 导出声明证据，并打开 `docs/examples/eggsample/eggsample/hookspecs.py:L7` 的 `@hookspec` 证据。两项面板均显示同一固定 `index_id`、路径、行、片段 hash 与源码；目录默认摘要显示 API/扩展点/未知计数，eggsample 组展开和折叠均可操作。CodeTrail 自用索引的最终 API overview 以 `max_modules=40` 返回 40/96 模块；Web 画布自身 40 模块投影边界仍未触发。分类 excerpt 总计 4,356 字符/96 行，低于 40,000 字符预算，字符边界触发仍为 UNVERIFIED。当前宿主 MCP 已直接返回新分类 schema，不需要强制重载；真实 Run/HTTP-MCP evidence 对照与 PC 刷新恢复见本地闭环记录。CodeTrail 完整分类 coverage 仍显示 `truncated=true`，不能解释成全量无截断。来源仓库代码和测试未执行。
 
 ## 后果
 
