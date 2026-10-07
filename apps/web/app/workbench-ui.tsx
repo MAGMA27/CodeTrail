@@ -36,6 +36,8 @@ import type {
   IndexSnapshot,
   ModuleSymbolsPageResponse,
   NeighborDirection,
+  OverviewClassification,
+  OverviewClassificationCounts,
   OverviewEntryPoint,
   OverviewHttpAssociation,
   OverviewGroup,
@@ -989,6 +991,21 @@ type ArchitectureModuleNodeData = {
   onOpen: (module: OverviewModule) => void;
 };
 
+const classificationLabels = {
+  application_entry: "入口",
+  public_api: "API",
+  extension_point: "扩展点",
+  unknown: "未识别",
+} as const;
+
+function ClassificationCounts({ counts, prefix }: { counts: OverviewClassificationCounts; prefix?: string }) {
+  return (
+    <span className="ct-classification-counts" aria-label={`${prefix ? `${prefix}；` : ""}当前规则已识别：入口 ${counts.application_entry}、API ${counts.public_api}、扩展点 ${counts.extension_point}、未识别 ${counts.unknown}`}>
+      {`${prefix ? `${prefix} · ` : ""}入口 ${counts.application_entry} · API ${counts.public_api} · 扩展点 ${counts.extension_point} · 未识别 ${counts.unknown}`}
+    </span>
+  );
+}
+
 function ArchitectureDirectoryNode({ data }: NodeProps<Node<ArchitectureDirectoryNodeData, "architecture-directory">>) {
   const { directory } = data;
   return (
@@ -1006,6 +1023,7 @@ function ArchitectureDirectoryNode({ data }: NodeProps<Node<ArchitectureDirector
       </div>
       <div className="ct-architecture-directory-meta">
         <span>{directory.loadedModuleCount} modules</span>
+        <ClassificationCounts counts={directory.classificationCounts} prefix={`当前规则分类（${directory.loadedModuleCount} 个已返回模块）`} />
         {directory.internalRelationCount > 0 ? <span>{directory.internalRelationCount} 内部关系 · {directory.internalEdgeCount} 边</span> : null}
         {directory.internalHttpAssociationCount > 0 ? <span>{directory.internalHttpAssociationCount} 内部 HTTP 关联</span> : null}
         {directory.omittedIndexModuleCount > 0 ? <span>概览模块预算省略 {directory.omittedIndexModuleCount}</span> : null}
@@ -1022,7 +1040,8 @@ function ArchitectureModuleNode({ data }: NodeProps<Node<ArchitectureModuleNodeD
       <Handle type="source" position={Position.Right} />
       <strong>{data.module.symbol.qualified_name}</strong>
       <small>{data.module.symbol.path}:L{data.module.symbol.start_line}</small>
-      <span>{data.module.entry_reachable ? "入口可达" : "静态模块"} · 打开关系图 ↗</span>
+      <span title={data.module.entry_reachable ? "应用入口可达" : "未从已识别应用入口到达"}>{data.module.entry_reachable ? "应用入口可达" : "未从已识别应用入口到达"} · 打开关系图 ↗</span>
+      <ClassificationCounts counts={data.module.classification_counts} />
     </button>
   );
 }
@@ -1154,6 +1173,7 @@ function ArchitectureSection({ overview, knowledge }: { overview: ProjectOvervie
     overview.coverage.visible_groups < overview.coverage.total_groups ? `概览仅返回 ${overview.coverage.visible_groups}/${overview.coverage.total_groups} 组（含 HTTP 路由组）` : null,
     overview.coverage.visible_modules < overview.coverage.total_modules ? `概览仅返回 ${overview.coverage.visible_modules}/${overview.coverage.total_modules} 个模块` : null,
     overview.coverage.visible_module_relations < overview.coverage.total_module_relations ? `概览仅返回 ${overview.coverage.visible_module_relations}/${overview.coverage.total_module_relations} 条模块关系` : null,
+    overview.classification_coverage.truncated ? `当前规则分类覆盖不完整：返回 ${overview.classification_coverage.visible}/${overview.classification_coverage.total} 条分类记录` : null,
     overview.unresolved.length > 0 ? `${overview.unresolved.length} 条 unresolved 保留为未知，不绘制成确定依赖` : null,
     model.omittedRelationCount > 0 ? `${model.omittedRelationCount} 条关系（${model.omittedRelationEdgeCount} 边）因端点不在可见源码目录中未绘制` : null,
     model.unmatchedHttpModuleCount > 0 ? `所选 HTTP 路由有 ${model.unmatchedHttpModuleCount} 个模块未映射到可见源码目录` : null,
@@ -1317,8 +1337,8 @@ function OverviewSummary({ overview }: { overview: ProjectOverview }) {
         <p>只展示当前固定索引的静态事实；未识别不等于项目没有入口。</p>
       </div>
       <div className="ct-metric-grid">
-        <span><strong>{overview.coverage.reachable_modules}</strong><small>reachable modules</small></span>
-        <span><strong>{overview.coverage.unreachable_modules}</strong><small>other modules</small></span>
+        <span><strong>{overview.coverage.reachable_modules}</strong><small>应用入口可达模块</small></span>
+        <span><strong>{overview.coverage.unreachable_modules}</strong><small>未从已识别应用入口到达</small></span>
         <span><strong>{overview.paths.length}</strong><small>entry paths</small></span>
         <span><strong>{overview.unresolved.length}</strong><small>unresolved</small></span>
       </div>
@@ -1359,11 +1379,11 @@ function FeatureSection({ knowledge }: { knowledge: KnowledgeUi }) {
       </div>
       <div className="ct-feature-controls">
         <label>模式<select value={knowledge.featureMode} onChange={(event) => knowledge.onFeatureModeChange(event.target.value as FeatureGenerationMode)} disabled={knowledge.featureStatus === "loading"}><option value="fixture">fixture / 离线</option><option value="real">real / 服务端模型</option></select></label>
-        <label>源码范围<select value={knowledge.featureSourceScope} onChange={(event) => knowledge.onFeatureSourceScopeChange(event.target.value as FeatureSourceScope)} disabled={knowledge.featureStatus === "loading"}><option value="entry_reachable">入口可达模块</option><option value="visible_modules">当前可见模块</option></select></label>
+        <label>源码范围<select value={knowledge.featureSourceScope} onChange={(event) => knowledge.onFeatureSourceScopeChange(event.target.value as FeatureSourceScope)} disabled={knowledge.featureStatus === "loading"}><option value="entry_reachable">应用入口可达模块</option><option value="visible_modules">当前可见模块</option></select></label>
         <button type="button" className="ct-button ct-button-primary" onClick={() => void knowledge.onRunFeatureGeneration()} disabled={knowledge.featureStatus === "loading"}>{knowledge.featureStatus === "loading" ? "生成中…" : "识别主要功能"}</button>
         {generation ? <button type="button" className="ct-button ct-button-secondary" onClick={() => void knowledge.onReloadFeatureGeneration()} disabled={knowledge.featureStatus === "loading"}>重读已保存结果</button> : null}
       </div>
-      <div className="ct-feature-status"><span data-state={knowledge.featureStatus}>{featureStatusLabel(knowledge.featureStatus, generation)}</span><small>{knowledge.featureSourceScope === "entry_reachable" ? "只查询入口可达模块；未查询模块不会被当作不存在。" : "在当前可见模块内查询，仍受工具、源码、输入和输出预算限制。"}</small></div>
+      <div className="ct-feature-status"><span data-state={knowledge.featureStatus}>{featureStatusLabel(knowledge.featureStatus, generation)}</span><small>{knowledge.featureSourceScope === "entry_reachable" ? "只查询从已识别应用入口可达的模块；未查询模块不会被当作不存在。" : "在当前可见模块内查询，仍受工具、源码、输入和输出预算限制。"}</small></div>
       {knowledge.featureStatus === "loading" ? <LoadingNote>正在收集有界证据并生成语义摘要…</LoadingNote> : null}
       {knowledge.featureError && !generation ? <div className="ct-error-block compact" role="alert"><span>{knowledge.featureError}</span><button type="button" className="ct-link-button" onClick={() => void knowledge.onRunFeatureGeneration()}>重试</button></div> : null}
       {generation ? <FeatureGenerationResult generation={generation} knowledge={knowledge} /> : null}
@@ -1424,10 +1444,11 @@ function OverviewModuleRow({ module, knowledge }: { module: OverviewModule; know
   return (
     <div className="ct-module-row-container">
       <button type="button" className="ct-module-row" onClick={() => knowledge.onOpenOverviewModule(module)} title="打开模块关系图">
-        <span className={`ct-reachability${module.entry_reachable ? " is-reachable" : ""}`}>{module.entry_reachable ? "REACHABLE" : "OTHER"}</span>
+        <span className={`ct-reachability${module.entry_reachable ? " is-reachable" : ""}`}>{module.entry_reachable ? "应用入口可达" : "未从已识别应用入口到达"}</span>
         <span>
           <strong>{module.symbol.qualified_name}</strong>
-          <small>{module.symbol.path} · {module.entry_point_ids.length > 0 ? `${module.entry_point_ids.length} 个入口` : "未从入口路径到达"}</small>
+          <small>{module.symbol.path} · {module.entry_point_ids.length > 0 ? `${module.entry_point_ids.length} 个应用入口` : "未从已识别应用入口到达"}</small>
+          <ClassificationCounts counts={module.classification_counts} />
         </span>
         <span aria-hidden="true">↗</span>
       </button>
@@ -1440,6 +1461,64 @@ function OverviewModuleRow({ module, knowledge }: { module: OverviewModule; know
         定义
       </button>
     </div>
+  );
+}
+
+function OverviewClassificationList({
+  classifications,
+  entryById,
+  overview,
+  counts,
+  knowledge,
+}: {
+  classifications: OverviewClassification[];
+  entryById: Map<string, OverviewEntryPoint>;
+  overview: ProjectOverview;
+  counts: OverviewClassificationCounts;
+  knowledge: KnowledgeUi;
+}) {
+  const visible = classifications.slice(0, 12);
+  const evidenceFor = (classification: OverviewClassification) => classification.category === "application_entry"
+    ? (entryById.get(classification.entry_point_id ?? "")?.evidence ? [entryById.get(classification.entry_point_id ?? "")!.evidence!] : [])
+    : classification.evidence;
+  const evidenceErrorFor = (classification: OverviewClassification) => classification.category === "application_entry"
+    ? entryById.get(classification.entry_point_id ?? "")?.evidence_error ?? classification.evidence_error
+    : classification.evidence_error;
+  return (
+    <section className="ct-structure-classifications" aria-label="当前规则分类">
+      <div className="ct-structure-subheading"><strong>当前规则分类</strong><span>{visible.length}/{classifications.length} 条已返回分类</span></div>
+      <div className="ct-classification-summary"><ClassificationCounts counts={counts} /></div>
+      <p className="ct-muted">分类只表示当前规则已识别的源码声明；“未识别”表示本次规则没有归类。</p>
+      {overview.classification_coverage.truncated ? <p className="ct-warning">当前规则分类覆盖不完整：返回 {overview.classification_coverage.visible}/{overview.classification_coverage.total} 条，当前结构明细可能不完整。</p> : null}
+      {classifications.length > 0 ? (
+        <div className="ct-classification-list">
+          {visible.map((classification) => {
+            const evidenceItems = evidenceFor(classification);
+            const evidenceError = evidenceErrorFor(classification);
+            return (
+              <article className="ct-classification-item" key={classification.classification_id}>
+                <div className="ct-classification-item-heading">
+                  <span className="ct-kind-chip">{classificationLabels[classification.category]}</span>
+                  <strong>{classification.label}</strong>
+                </div>
+                <small>{classification.symbol_name} · {classification.rule_id}</small>
+                <div className="ct-evidence-links">
+                  {evidenceItems.map((evidence, index) => (
+                    <button type="button" key={`${evidence.evidence_id}:${index}`} onClick={() => knowledge.onOpenArchitectureSource({ indexId: overview.index.index_id, path: evidence.path, startLine: evidence.start_line, endLine: evidence.end_line, expectedContentHash: evidence.content_hash })}>
+                      {evidence.path}:L{evidence.start_line}–L{evidence.end_line}
+                    </button>
+                  ))}
+                  {evidenceItems.length === 0 ? <span>{evidenceError ?? "当前快照没有可展示的源码证据"}</span> : null}
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="ct-muted">{overview.classification_coverage.truncated ? "当前规则分类覆盖不完整，未返回明细不能据此判断没有分类。" : "当前规则未识别可展示分类。"}</p>
+      )}
+      {classifications.length > visible.length ? <p className="ct-muted">仅显示前 {visible.length} 项；当前结构收到 {classifications.length} 条分类。</p> : null}
+    </section>
   );
 }
 
@@ -1515,6 +1594,15 @@ function OverviewSections({ overview, knowledge }: { overview: ProjectOverview; 
   const selectedModules = selectedGroup
     ? selectedGroup.module_ids.map((moduleId) => moduleById.get(moduleId)).filter((module): module is OverviewModule => module !== undefined)
     : [];
+  const selectedClassifications = selectedGroup
+    ? overview.classifications.filter((classification) => selectedGroup.module_ids.includes(classification.module_id) || (classification.entry_point_id !== null && selectedGroup.entry_point_ids.includes(classification.entry_point_id)))
+    : [];
+  const selectedClassificationCounts = selectedModules.reduce<OverviewClassificationCounts>((counts, module) => ({
+    application_entry: counts.application_entry + module.classification_counts.application_entry,
+    public_api: counts.public_api + module.classification_counts.public_api,
+    extension_point: counts.extension_point + module.classification_counts.extension_point,
+    unknown: counts.unknown + module.classification_counts.unknown,
+  }), { application_entry: 0, public_api: 0, extension_point: 0, unknown: 0 });
   const relatedRelations = selectedGroup
     ? overview.module_relations.filter((relation) => selectedGroup.module_ids.includes(relation.source_module_id) || selectedGroup.module_ids.includes(relation.target_module_id))
     : overview.module_relations;
@@ -1536,6 +1624,7 @@ function OverviewSections({ overview, knowledge }: { overview: ProjectOverview; 
             ) : (
               selectedModules.length > 0 ? <div className="ct-module-list">{selectedModules.map((module) => <OverviewModuleRow module={module} knowledge={knowledge} key={module.module_id} />)}</div> : <p className="ct-muted">{selectedGroup.group_kind === "responsibility" && selectedGroup.module_ids.length === 0 ? "该职责的 owner 路径未匹配到已索引模块。" : selectedGroup.module_ids.length > 0 ? `该组 ${selectedGroup.module_ids.length} 个模块被当前概览模块预算省略。` : "该源码目录没有可见模块。"}</p>
             )}
+            <OverviewClassificationList classifications={selectedClassifications} entryById={entryById} overview={overview} counts={selectedClassificationCounts} knowledge={knowledge} />
             {selectedGroup.group_kind !== "http_path" ? <ModuleSymbolList knowledge={knowledge} /> : null}
             <div className="ct-structure-related">
               <div className="ct-structure-subheading"><strong>相关模块依赖</strong><span>{relatedRelations.length} 条可见关系</span></div>

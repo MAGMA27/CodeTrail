@@ -13,6 +13,9 @@ from typing import Callable
 from .contracts import (
     CodeEdge,
     Evidence,
+    OverviewClassification,
+    OverviewClassificationCounts,
+    OverviewClassificationCoverage,
     OverviewEntryPoint,
     OverviewGroup,
     OverviewHttpAssociation,
@@ -36,7 +39,7 @@ from .indexing import (
 from .relations import RelationIndex, relation_coverage_limitations
 
 
-RULES_VERSION = "python-entry-v5+http-shape-v2"
+RULES_VERSION = "python-entry-v6+http-shape-v2+architecture-v1"
 DEFAULT_MAX_DEPTH = 4
 DEFAULT_MAX_PATHS = 40
 DEFAULT_MAX_MODULES = 100
@@ -47,6 +50,10 @@ _MAX_EVIDENCE_LINES = 200
 _MAX_ENTRY_CANDIDATES = 200
 _MAX_RELATION_EDGE_SAMPLES = 8
 _MAX_HTTP_ASSOCIATIONS = 100
+_MAX_CLASSIFICATION_ITEMS = 200
+_MAX_CLASSIFICATION_SCAN = 2_000
+_MAX_CLASSIFICATION_EVIDENCE_LINES = 400
+_MAX_CLASSIFICATION_EVIDENCE_CHARS = 40_000
 _FASTAPI_ROUTE_METHODS = {
     "get": "GET",
     "post": "POST",
@@ -105,6 +112,18 @@ class _OverviewGroupSpec:
     module_ids: tuple[str, ...]
     entry_point_ids: tuple[str, ...]
     sort_key: tuple[object, ...]
+
+
+@dataclass(frozen=True)
+class _ArchitectureClassificationSpec:
+    category: str
+    module_id: str
+    symbol_id: str | None
+    symbol_name: str
+    label: str
+    rule_id: str
+    evidence_locations: tuple[tuple[str, int, int], ...] = ()
+    entry_point_id: str | None = None
 
 
 def build_project_overview(
@@ -310,7 +329,7 @@ def build_project_overview(
                 if has_fastapi_routes
                 else "FastAPI 入口仅接受已知 FastAPI 实例、字面量路径和静态方法；未识别路由不表示项目没有入口。"
             ),
-            "插件入口和 pyproject 脚本元数据尚未纳入规则。",
+            "插件运行时注册入口和 pyproject 脚本元数据尚未纳入入口规则。",
         ]
     if cycle_skipped:
         notes.append("循环调用只保留首次有界路径，未继续展开循环。")
@@ -359,6 +378,33 @@ def build_project_overview(
     if len(visible_modules) < total_modules:
         reasons.append("max_modules reached")
 
+    (
+        architecture_classifications,
+        architecture_classification_coverage,
+        classification_counts_by_module,
+        classification_incomplete,
+    ) = _build_architecture_classifications(
+        relation=relation,
+        entries=entries,
+        modules=modules,
+        visible_module_ids={module.symbol_id for module in visible_modules},
+        read_evidence=read_evidence,
+        deadline=deadline,
+        entry_candidates_truncated=entry_candidates_truncated,
+    )
+    notes.append(
+        "架构分类只说明当前固定规则识别到的入口、__all__ 公共 API 与 pluggy hookspec；"
+        "未识别不表示无用、未引用或运行时不可达。"
+    )
+    if any(module.path.lower().endswith((".ts", ".tsx")) for module in modules):
+        notes.append(
+            "此索引的持久化读取不包含 TypeScript export facts；TypeScript 导出保留为未知，本规则不额外解析。"
+        )
+    if classification_incomplete:
+        notes.append(
+            "架构分类结果受固定条目、证据、扫描或模块预算限制；coverage 区分观察到的总量和可见量。"
+        )
+
     visible_unresolved = [
         unresolved
         for unresolved in relation.unresolved
@@ -376,6 +422,9 @@ def build_project_overview(
             symbol=module,
             entry_point_ids=module_entry_ids.get(module.symbol_id, []),
             entry_reachable=module.symbol_id in reachable_module_ids,
+            classification_counts=classification_counts_by_module.get(
+                module.symbol_id, OverviewClassificationCounts()
+            ),
         )
         for module in visible_modules
     ]
@@ -497,6 +546,8 @@ def build_project_overview(
         entries=entries,
         groups=groups,
         modules=module_models,
+        classifications=architecture_classifications,
+        classification_coverage=architecture_classification_coverage,
         module_relations=module_relations,
         http_associations=http_associations,
         http_association_coverage=http_association_coverage,
@@ -896,6 +947,501 @@ def _build_overview_groups(
     )
     uncovered_modules = sum(1 for module in modules if module.symbol_id not in module_responsibility)
     return groups, len(specs), uncovered_modules, unmatched_owners
+
+
+def _build_architecture_classifications(
+    *,
+    relation: RelationIndex,
+    entries: list[OverviewEntryPoint],
+    modules: tuple[Symbol, ...],
+    visible_module_ids: set[str],
+    read_evidence: EvidenceReader,
+    deadline: float,
+    entry_candidates_truncated: bool,
+) -> tuple[
+    list[OverviewClassification],
+    OverviewClassificationCoverage,
+    dict[str, OverviewClassificationCounts],
+    bool,
+]:
+    index_id = relation.snapshot.index.index_id
+    module_by_path = {module.path: module for module in modules}
+    module_by_id = {module.symbol_id: module for module in modules}
+    symbols_by_id = {symbol.symbol_id: symbol for symbol in relation.symbols}
+    symbols_by_path: dict[str, list[Symbol]] = defaultdict(list)
+    functions_by_location: dict[tuple[str, int, int], list[Symbol]] = defaultdict(list)
+    for symbol in relation.symbols:
+        symbols_by_path[symbol.path].append(symbol)
+        if symbol.kind == "function":
+            functions_by_location[(symbol.path, symbol.start_line, symbol.end_line)].append(symbol)
+    for symbol_list in symbols_by_path.values():
+        symbol_list.sort(key=lambda item: (item.qualified_name, item.symbol_id))
+    for function_list in functions_by_location.values():
+        function_list.sort(key=lambda item: (item.qualified_name, item.symbol_id))
+
+    specs: list[_ArchitectureClassificationSpec] = []
+    incomplete = entry_candidates_truncated
+    for entry in entries:
+        target = entry.handler_symbol or symbols_by_id.get(entry.symbol_id or "")
+        module = module_by_path.get(target.path) if target is not None else module_by_path.get(entry.path)
+        if module is None:
+            continue
+        specs.append(
+            _ArchitectureClassificationSpec(
+                category="application_entry",
+                module_id=module.symbol_id,
+                symbol_id=target.symbol_id if target is not None else None,
+                symbol_name=target.qualified_name if target is not None else module.qualified_name,
+                label=entry.label,
+                rule_id=entry.rule_id,
+                entry_point_id=entry.entry_point_id,
+            )
+        )
+
+    import_edges: dict[tuple[str, int], list[Symbol]] = defaultdict(list)
+    for edge in relation.edges:
+        if edge.kind != "imports":
+            continue
+        target = symbols_by_id.get(edge.target_id)
+        if target is not None:
+            import_edges[(edge.source_id, edge.source_location.start_line)].append(target)
+
+    files_by_path = {source_file.path: source_file for source_file in relation.snapshot.files}
+    for source_file in sorted(relation.snapshot.files, key=lambda item: item.path):
+        if _deadline_reached(deadline) or len(specs) >= _MAX_CLASSIFICATION_SCAN:
+            incomplete = True
+            break
+        if not source_file.path.lower().endswith(".py"):
+            continue
+        module = module_by_path.get(source_file.path)
+        if module is None:
+            continue
+        try:
+            tree = ast.parse(source_file.text, filename=source_file.path, type_comments=True)
+        except SyntaxError:
+            incomplete = True
+            continue
+
+        exports = _static_all_exports(tree)
+        if exports is not None:
+            bound_names = _module_bound_names(tree)
+            direct_symbols: dict[str, list[Symbol]] = defaultdict(list)
+            module_prefix = f"{module.qualified_name}."
+            for symbol in symbols_by_path.get(source_file.path, []):
+                if symbol.kind not in {"function", "class", "module"}:
+                    continue
+                suffix = symbol.qualified_name.removeprefix(module_prefix)
+                if suffix and "." not in suffix:
+                    direct_symbols[suffix].append(symbol)
+            import_targets: dict[str, list[tuple[Symbol, int]]] = defaultdict(list)
+            for statement in tree.body:
+                if not isinstance(statement, ast.ImportFrom):
+                    continue
+                for alias in statement.names:
+                    if alias.name == "*":
+                        continue
+                    local_name = alias.asname or alias.name
+                    targets = [
+                        target
+                        for target in import_edges.get((module.symbol_id, statement.lineno), [])
+                        if target.qualified_name.rsplit(".", 1)[-1] == alias.name
+                    ]
+                    for target in targets:
+                        import_targets[local_name].append((target, statement.lineno))
+
+            for export_name, export_line in exports if not bound_names.get("*", 0) else ():
+                if _deadline_reached(deadline):
+                    incomplete = True
+                    break
+                if bound_names.get(export_name, 0) != 1:
+                    continue
+                direct = direct_symbols.get(export_name, [])
+                imported = import_targets.get(export_name, [])
+                if len(direct) == 1 and not imported:
+                    target = direct[0]
+                    locations = ((source_file.path, export_line, export_line),)
+                elif len(imported) == 1 and not direct:
+                    target, import_line = imported[0]
+                    locations = (
+                        (source_file.path, export_line, export_line),
+                        (source_file.path, import_line, import_line),
+                    )
+                else:
+                    continue
+                specs.append(
+                    _ArchitectureClassificationSpec(
+                        category="public_api",
+                        module_id=module.symbol_id,
+                        symbol_id=target.symbol_id,
+                        symbol_name=target.qualified_name,
+                        label=export_name,
+                        rule_id=(
+                            "python.module.__all__.direct"
+                            if len(direct) == 1
+                            else "python.module.__all__.import_alias"
+                        ),
+                        evidence_locations=locations,
+                    )
+                )
+                if len(specs) >= _MAX_CLASSIFICATION_SCAN:
+                    incomplete = True
+                    break
+
+        specs.extend(
+            _find_hookspec_classifications(
+                source_file.path,
+                module,
+                tree,
+                functions_by_location,
+                deadline,
+            )
+        )
+        if len(specs) >= _MAX_CLASSIFICATION_SCAN:
+            incomplete = True
+            break
+
+    known_module_ids = {
+        item.module_id
+        for item in specs
+        if item.category in {"application_entry", "public_api", "extension_point"}
+    }
+    for module in modules:
+        if _deadline_reached(deadline) or len(specs) >= _MAX_CLASSIFICATION_SCAN:
+            incomplete = True
+            break
+        if module.symbol_id in known_module_ids:
+            continue
+        source_file = files_by_path.get(module.path)
+        first_line = 1
+        if source_file is not None:
+            first_line = next(
+                (line_number for line_number, line in enumerate(source_file.text.splitlines(), start=1) if line.strip()),
+                1,
+            )
+        specs.append(
+            _ArchitectureClassificationSpec(
+                category="unknown",
+                module_id=module.symbol_id,
+                symbol_id=None,
+                symbol_name=module.qualified_name,
+                label="当前规则未识别公开 API 或扩展点",
+                rule_id="architecture.unmatched_module_rules",
+                evidence_locations=((module.path, first_line, first_line),),
+            )
+        )
+
+    category_order = {"extension_point": 0, "public_api": 1, "application_entry": 2, "unknown": 3}
+    specs.sort(
+        key=lambda item: (
+            category_order[item.category],
+            module_by_id[item.module_id].path,
+            item.label,
+            item.entry_point_id or "",
+            item.evidence_locations,
+        )
+    )
+    counts: dict[str, dict[str, int]] = defaultdict(
+        lambda: {"application_entry": 0, "public_api": 0, "extension_point": 0, "unknown": 0}
+    )
+    category_counts = {"application_entry": 0, "public_api": 0, "extension_point": 0, "unknown": 0}
+    for item in specs:
+        counts[item.module_id][item.category] += 1
+        category_counts[item.category] += 1
+    visible_specs = [item for item in specs if item.module_id in visible_module_ids]
+    if len(visible_specs) != len(specs):
+        incomplete = True
+    if len(visible_specs) > _MAX_CLASSIFICATION_ITEMS:
+        visible_specs = visible_specs[:_MAX_CLASSIFICATION_ITEMS]
+        incomplete = True
+
+    visible_category_counts = {"application_entry": 0, "public_api": 0, "extension_point": 0, "unknown": 0}
+    for item in visible_specs:
+        visible_category_counts[item.category] += 1
+    classification_counts_by_module = {
+        module_id: OverviewClassificationCounts(**values)
+        for module_id, values in counts.items()
+    }
+
+    result: list[OverviewClassification] = []
+    evidence_lines_used = 0
+    evidence_chars_used = 0
+    for item in visible_specs:
+        if _deadline_reached(deadline):
+            incomplete = True
+            break
+        evidence: list[Evidence] = []
+        evidence_error: str | None = None
+        for path, start_line, end_line in item.evidence_locations[:4]:
+            line_count = end_line - start_line + 1
+            if evidence_lines_used + line_count > _MAX_CLASSIFICATION_EVIDENCE_LINES:
+                evidence_error = "classification evidence line budget reached"
+                incomplete = True
+                break
+            try:
+                source_evidence = read_evidence(index_id, path, start_line, end_line)
+                if evidence_chars_used + len(source_evidence.excerpt) > _MAX_CLASSIFICATION_EVIDENCE_CHARS:
+                    evidence_error = "classification evidence character budget reached"
+                    incomplete = True
+                    break
+                evidence.append(source_evidence)
+                evidence_lines_used += line_count
+                evidence_chars_used += len(source_evidence.excerpt)
+            except Exception:
+                evidence_error = "classification source evidence is unavailable in the persisted snapshot"
+        if item.evidence_locations and not evidence and evidence_error is None:
+            evidence_error = "classification source evidence is unavailable in the persisted snapshot"
+        if evidence_error is not None:
+            incomplete = True
+        identity_parts = [
+            RULES_VERSION,
+            index_id,
+            item.category,
+            item.module_id,
+            item.symbol_id or "",
+            item.rule_id,
+            item.entry_point_id or "",
+            item.label,
+            *(f"{path}:{start}:{end}" for path, start, end in item.evidence_locations),
+        ]
+        classification_id = "classification-" + hashlib.sha256(
+            "\0".join(identity_parts).encode("utf-8")
+        ).hexdigest()[:32]
+        result.append(
+            OverviewClassification(
+                classification_id=classification_id,
+                index_id=index_id,
+                category=item.category,  # type: ignore[arg-type]
+                module_id=item.module_id,
+                symbol_id=item.symbol_id,
+                symbol_name=item.symbol_name,
+                label=item.label,
+                rule_id=item.rule_id,
+                entry_point_id=item.entry_point_id,
+                evidence=evidence,
+                evidence_error=evidence_error,
+            )
+        )
+    if len(result) != len(visible_specs):
+        incomplete = True
+
+    coverage = OverviewClassificationCoverage(
+        total=len(specs),
+        visible=len(result),
+        category_counts=OverviewClassificationCounts(**category_counts),
+        visible_category_counts=OverviewClassificationCounts(
+            **{
+                category: sum(1 for item in result if item.category == category)
+                for category in category_order
+            }
+        ),
+        truncated=incomplete,
+    )
+    return result, coverage, classification_counts_by_module, incomplete
+
+
+def _static_all_exports(tree: ast.Module) -> list[tuple[str, int]] | None:
+    class AllWrites(ast.NodeVisitor):
+        def __init__(self) -> None:
+            self.nodes: list[ast.Name] = []
+            self.loads: list[ast.Name] = []
+
+        def visit_Name(self, node: ast.Name) -> None:
+            if node.id == "__all__" and isinstance(node.ctx, (ast.Store, ast.Del)):
+                self.nodes.append(node)
+            elif node.id == "__all__" and isinstance(node.ctx, ast.Load):
+                self.loads.append(node)
+
+    writes = AllWrites()
+    writes.visit(tree)
+    assignments: list[tuple[ast.Name, ast.expr]] = []
+    for statement in tree.body:
+        if isinstance(statement, ast.Assign):
+            if len(statement.targets) == 1 and isinstance(statement.targets[0], ast.Name) and statement.targets[0].id == "__all__":
+                assignments.append((statement.targets[0], statement.value))
+        elif isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name) and statement.target.id == "__all__":
+            if statement.value is not None:
+                assignments.append((statement.target, statement.value))
+    if (
+        len(assignments) != 1
+        or len(writes.nodes) != 1
+        or writes.nodes[0] is not assignments[0][0]
+        or writes.loads
+    ):
+        return None
+    value = assignments[0][1]
+    if not isinstance(value, (ast.List, ast.Tuple)):
+        return None
+    names: list[tuple[str, int]] = []
+    seen: set[str] = set()
+    for element in value.elts:
+        if not isinstance(element, ast.Constant) or not isinstance(element.value, str) or not element.value:
+            return None
+        if element.value not in seen:
+            names.append((element.value, element.lineno))
+            seen.add(element.value)
+    return names
+
+
+def _module_bound_names(tree: ast.Module) -> dict[str, int]:
+    counts: dict[str, int] = defaultdict(int)
+    for statement in tree.body:
+        writes = _BindingWriteCollector()
+        writes.visit(statement)
+        for name, count in writes.write_counts.items():
+            counts[name] += count
+        if writes.invalidate_all:
+            counts["*"] += 1
+    return counts
+
+
+def _find_hookspec_classifications(
+    path: str,
+    module: Symbol,
+    tree: ast.Module,
+    functions_by_location: dict[tuple[str, int, int], list[Symbol]],
+    deadline: float,
+) -> list[_ArchitectureClassificationSpec]:
+    marker_classes: dict[str, tuple[tuple[str, int, int], ...]] = {}
+    marker_modules: dict[str, tuple[str, tuple[str, int, int]]] = {}
+    marker_instances: dict[str, tuple[tuple[str, int, int], ...]] = {}
+    result: list[_ArchitectureClassificationSpec] = []
+
+    def clear(name: str) -> None:
+        marker_classes.pop(name, None)
+        marker_modules.pop(name, None)
+        marker_instances.pop(name, None)
+
+    def clear_writes(statement: ast.stmt) -> None:
+        writes = _BindingWriteCollector()
+        writes.visit(statement)
+        if writes.invalidate_all:
+            marker_classes.clear()
+            marker_modules.clear()
+            marker_instances.clear()
+        for name in writes.names:
+            clear(name)
+
+    for statement in tree.body:
+        if _deadline_reached(deadline):
+            break
+        if isinstance(statement, ast.ImportFrom):
+            resolved_module = _resolved_python_import_module(module, path, statement.level, statement.module)
+            for alias in statement.names:
+                if alias.name == "*":
+                    marker_classes.clear()
+                    marker_modules.clear()
+                    marker_instances.clear()
+                    continue
+                local_name = alias.asname or alias.name
+                clear(local_name)
+                if resolved_module in {"pluggy", "pluggy._hooks"} and alias.name == "HookspecMarker":
+                    marker_classes[local_name] = ((path, statement.lineno, statement.lineno),)
+        elif isinstance(statement, ast.Import):
+            for alias in statement.names:
+                local_name = alias.asname or alias.name.split(".", 1)[0]
+                clear(local_name)
+                if alias.name in {"pluggy", "pluggy._hooks"}:
+                    marker_modules[local_name] = (alias.name, (path, statement.lineno, statement.lineno))
+        elif isinstance(statement, (ast.Assign, ast.AnnAssign)):
+            value = statement.value
+            target_nodes = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
+            simple_target = (
+                len(target_nodes) == 1 and isinstance(target_nodes[0], ast.Name)
+            )
+            writes = _BindingWriteCollector()
+            writes.visit(statement)
+            if writes.invalidate_all:
+                marker_classes.clear()
+                marker_modules.clear()
+                marker_instances.clear()
+            names = writes.names
+            binding_kind = "unknown"
+            trace: tuple[tuple[str, int, int], ...] = ()
+            value_name = value.id if isinstance(value, ast.Name) else None
+            if simple_target and value_name in marker_instances:
+                binding_kind = "instance"
+                trace = (*marker_instances[value_name], (path, statement.lineno, statement.lineno))
+            elif simple_target and value_name in marker_classes:
+                binding_kind = "class"
+                trace = (*marker_classes[value_name], (path, statement.lineno, statement.lineno))
+            elif simple_target and isinstance(value, ast.Call):
+                function_name = value.func.id if isinstance(value.func, ast.Name) else None
+                if function_name in marker_classes:
+                    binding_kind = "instance"
+                    trace = (*marker_classes[function_name], (path, statement.lineno, statement.lineno))
+                elif isinstance(value.func, ast.Attribute) and value.func.attr == "HookspecMarker":
+                    base_name = value.func.value.id if isinstance(value.func.value, ast.Name) else None
+                    module_binding = marker_modules.get(base_name or "")
+                    if module_binding is not None:
+                        binding_kind = "instance"
+                        trace = (module_binding[1], (path, statement.lineno, statement.lineno))
+            for name in names:
+                clear(name)
+                if binding_kind == "instance":
+                    marker_instances[name] = _compact_hookspec_trace(trace)
+                elif binding_kind == "class":
+                    marker_classes[name] = _compact_hookspec_trace(trace)
+        elif isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            end_line = getattr(statement, "end_lineno", None) or statement.lineno
+            symbols = functions_by_location.get((path, statement.lineno, end_line), [])
+            for decorator in statement.decorator_list:
+                decorated_name = (
+                    decorator.id
+                    if isinstance(decorator, ast.Name)
+                    else decorator.func.id
+                    if isinstance(decorator, ast.Call) and isinstance(decorator.func, ast.Name)
+                    else None
+                )
+                trace = marker_instances.get(decorated_name or "")
+                if trace is None or len(symbols) != 1:
+                    continue
+                locations = tuple(
+                    dict.fromkeys((*trace, (path, decorator.lineno, decorator.lineno)))
+                )
+                symbol = symbols[0]
+                result.append(
+                    _ArchitectureClassificationSpec(
+                        category="extension_point",
+                        module_id=module.symbol_id,
+                        symbol_id=symbol.symbol_id,
+                        symbol_name=symbol.qualified_name,
+                        label=symbol.qualified_name.rsplit(".", 1)[-1],
+                        rule_id="python.pluggy.hookspec_marker",
+                        evidence_locations=locations,
+                    )
+                )
+                break
+            clear_writes(statement)
+        elif isinstance(statement, ast.ClassDef):
+            clear_writes(statement)
+        else:
+            clear_writes(statement)
+    return result
+
+
+def _compact_hookspec_trace(
+    locations: tuple[tuple[str, int, int], ...],
+) -> tuple[tuple[str, int, int], ...]:
+    if len(locations) <= 3:
+        return locations
+    return (locations[0], *locations[-2:])
+
+
+def _resolved_python_import_module(
+    module: Symbol,
+    path: str,
+    level: int,
+    imported_module: str | None,
+) -> str | None:
+    if level == 0:
+        return imported_module
+    package = module.qualified_name if path.rsplit("/", 1)[-1] == "__init__.py" else module.qualified_name.rpartition(".")[0]
+    parts = package.split(".") if package else []
+    remove = level - 1
+    if remove > len(parts):
+        return None
+    base = ".".join(parts[: len(parts) - remove] if remove else parts)
+    return f"{base}.{imported_module}" if base and imported_module else base or imported_module
 
 
 def _owner_matches_module(owner: SubsystemOwner, module_path: str) -> bool:
@@ -1387,39 +1933,44 @@ class _BindingWriteCollector(ast.NodeVisitor):
     def __init__(self, *, include_definition_names: bool = True) -> None:
         self.include_definition_names = include_definition_names
         self.names: set[str] = set()
+        self.write_counts: dict[str, int] = defaultdict(int)
         self.invalidate_all = False
+
+    def _record(self, name: str) -> None:
+        self.names.add(name)
+        self.write_counts[name] += 1
 
     def visit_Name(self, node: ast.Name) -> None:
         if isinstance(node.ctx, (ast.Store, ast.Del)):
-            self.names.add(node.id)
+            self._record(node.id)
 
     def visit_Import(self, node: ast.Import) -> None:
         for alias in node.names:
             if alias.name == "*":
                 self.invalidate_all = True
             else:
-                self.names.add(alias.asname or alias.name.split(".", 1)[0])
+                self._record(alias.asname or alias.name.split(".", 1)[0])
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
         for alias in node.names:
             if alias.name == "*":
                 self.invalidate_all = True
             else:
-                self.names.add(alias.asname or alias.name)
+                self._record(alias.asname or alias.name)
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         if self.include_definition_names:
-            self.names.add(node.name)
+            self._record(node.name)
         self._visit_definition_time_expressions(node)
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
         if self.include_definition_names:
-            self.names.add(node.name)
+            self._record(node.name)
         self._visit_definition_time_expressions(node)
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         if self.include_definition_names:
-            self.names.add(node.name)
+            self._record(node.name)
         for decorator in node.decorator_list:
             self.visit(decorator)
         for base in node.bases:
@@ -1432,22 +1983,22 @@ class _BindingWriteCollector(ast.NodeVisitor):
 
     def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
         if isinstance(node.name, str):
-            self.names.add(node.name)
+            self._record(node.name)
         self.generic_visit(node)
 
     def visit_MatchAs(self, node: ast.MatchAs) -> None:
         if node.name is not None:
-            self.names.add(node.name)
+            self._record(node.name)
         self.generic_visit(node)
 
     def visit_MatchStar(self, node: ast.MatchStar) -> None:
         if node.name is not None:
-            self.names.add(node.name)
+            self._record(node.name)
         self.generic_visit(node)
 
     def visit_MatchMapping(self, node: ast.MatchMapping) -> None:
         if node.rest is not None:
-            self.names.add(node.rest)
+            self._record(node.rest)
         self.generic_visit(node)
 
     def _visit_definition_time_expressions(

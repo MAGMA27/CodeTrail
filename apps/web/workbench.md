@@ -2,9 +2,11 @@
 
 ## 状态
 
-已实现多项目真实工作台、Project/Index/Session/消息、索引新鲜度检查/显式更新、O1/O2/O3 浏览和 P2-R1/P2-R2 Session 内显式 fixture/real Run 面板。项目知识页默认展示当前固定快照的项目架构画布，再展示入口、功能和结构详情；Python/TypeScript 静态 imports/calls 可筛选，HTTP 客户端到 FastAPI 路由的 method/path shape association 以单独虚线边聚合显示，也可独立过滤；参数化模板只有完整同形且唯一时关联，列表标示字面量/模板并保留客户端与路由的同一 index 双端证据。点击模块进入既有符号关系图，点击代表静态边打开同一 index 的源码证据。HTTP 关联列表可打开客户端锚点→独立 HTTP 形状→对应 handler 的有界 calls 视图；HTTP shape association 自身不生成 TypeScript calls，可证明的客户端调用作为独立静态边显示。函数值变量（包括单函数参数包装中的 callback）可在既有关系图中定位；包装器执行 callback 的关系若不能证明仍保留 unresolved。概览版本为 `python-entry-v5+http-shape-v2`；无 TypeScript fact 标记的旧索引显示 `not_analyzed`；旧 v1 索引明确显示 `literal_only`，不把未做参数化分析解释为无调用。Run 面板支持模式选择、真实模式警告、启动、状态同步、持久化 SSE 事件流、有限重连/轮询回退、工具结果、Issue/代码理解报告 evidence、候选位置与有界静态影响、取消、历史选择和刷新/切换恢复；Codex external Run 会从 Session history 自动发现、选择并订阅，代码理解结果按顺序步骤和覆盖级别展示。
+已实现多项目真实工作台、Project/Index/Session/消息、索引新鲜度检查/显式更新、O1/O2/O3 浏览和 P2-R1/P2-R2 Session 内显式 fixture/real Run 面板。项目知识页默认展示当前固定快照的项目架构画布，再展示入口、功能和结构详情；Python/TypeScript 静态 imports/calls 可筛选，HTTP 客户端到 FastAPI 路由的 method/path shape association 以单独虚线边聚合显示，也可独立过滤；参数化模板只有完整同形且唯一时关联，列表标示字面量/模板并保留客户端与路由的同一 index 双端证据。点击模块进入既有符号关系图，点击代表静态边打开同一 index 的源码证据。HTTP 关联列表可打开客户端锚点→独立 HTTP 形状→对应 handler 的有界 calls 视图；HTTP shape association 自身不生成 TypeScript calls，可证明的客户端调用作为独立静态边显示。函数值变量（包括单函数参数包装中的 callback）可在既有关系图中定位；包装器执行 callback 的关系若不能证明仍保留 unresolved。概览版本为 `python-entry-v6+http-shape-v2+architecture-v1`；无 TypeScript fact 标记的旧索引显示 `not_analyzed`；旧 v1 索引明确显示 `literal_only`，不把未做参数化分析解释为无调用。Run 面板支持模式选择、真实模式警告、启动、状态同步、持久化 SSE 事件流、有限重连/轮询回退、工具结果、Issue/代码理解报告 evidence、候选位置与有界静态影响、取消、历史选择和刷新/切换恢复；Codex external Run 会从 Session history 自动发现、选择并订阅，代码理解结果按顺序步骤和覆盖级别展示。
 
 ## 职责与范围
+
+架构概览另在现有职责/目录模块卡片上显示应用入口、公共 API、插件扩展点与未知区域计数；选择现有模块可查看最多 200 条分类和同快照源码 evidence。分类说明当前规则识别到的锚点，不增加 calls 路径，也不把“未从已识别应用入口到达”解释为无用。Python 规则只从静态 `__all__` 与真实 pluggy hookspec marker 绑定确认；动态导出、复杂重绑定、其他插件框架和当前未持久化的 TypeScript exports 保留未知，详情中的 evidence 最多 4 条且整体有界。
 
 通过公开 HTTP API 创建/列出/切换项目、建立索引、读取概览/功能/图/源码证据，管理 Session 消息并显式启动 fixture 或 real Run；概览结构组按固定快照的声明路径/handler 模块和源码目录生成，imports/calls 样本与 HTTP 形状关联分别展示，不与语义功能混合。项目架构画布直接投影既有 `ProjectOverview`，没有第二套架构 API 或持久化编辑状态：源码目录组是规则生成的容器，静态 module relations 聚合 imports/calls；HTTP associations 保持独立数据结构和筛选，不转换为 CodeEdge。客户端模块到服务端模块按可见模块或折叠目录投影，点击关联边打开客户端证据，下方列表分别提供客户端与路由 evidence。关联 endpoint 未映射、40 模块画布上限摘要、服务端候选截断和旧索引未分析状态均显式提示；列表保留同一概览返回的关联与双端证据。职责聚焦是固定快照的本地视图：用户从已选职责显式进入后，按当前 imports/calls 类型过滤从完整已返回模块归属映射求双向一跳；HTTP 形状开关独立决定是否额外纳入 HTTP 相邻端点和边。只绘制保留职责/目录端点之间的真实关系，不生成传递边；邻接组初次折叠，可展开模块并沿用原 40 模块上限，当前职责优先。视图显示聚焦范围外的职责、静态关系和 HTTP 关联计数，并与概览/关系预算截断分开；返回项目总览会恢复进入聚焦前的展开组。展开、聚焦、缩放、平移和过滤均为本地视图状态，切换项目或 index 会重置。可从结构组中的 FastAPI 路由查看声明路径及处理函数的同快照证据，并从处理函数/模块打开既有关系图；HTTP 关联行的“查看链路”使用同一概览中的 `route_entry_point_id` 定位 handler，再调用项目级 neighbors 查询，显示客户端 evidence、非 CodeEdge 的方法/路径关联、handler evidence 与真实返回的静态 calls。链路模式固定为向下 `calls`，深度最多 2、节点最多 40；`overview.paths` 是所有入口共享的全局预算，链路不以缺少概览路径推断空邻接。面板常驻说明此深度边界，另显示 query/index/unresolved 截断和 unresolved；空结果明确不能证明没有服务/存储调用。源码面板提供返回当前链路的按钮；可退出并选择其他关联。切换项目/索引、选择其他概览组和新关系查询会中止旧链路请求，使过期结果无效，失败保留链上下文并可按原 handler 重试。关联映射失败会清除旧链状态而显示错误。也可从画布模块进入符号关系图、从代表静态边读取同一 index 的源码 evidence。已保存 Run 报告的 candidate/finding 可进入固定快照影响画布，Codex external Run 由工作台自动发现。影响画布在桌面占据工作区主区域并与 Run 报告并列；源码/普通关系仍使用可调侧栏。代码关系面板把查询截断与固定关系索引未完成分开显示；大目录分组默认收起，展开后可按目录边界聚焦，仍可通过平移/缩放查看已加载内容。前端负责当前视图、请求取消/过期响应、草稿和 Run 展示，不负责冻结消息、执行工具、鉴权、预算或组装报告；这些由 API 应用服务拥有。
 
@@ -66,6 +68,7 @@ API 离线、项目/Session/index 不属于当前范围、索引不在 latest、
 - [FastAPI 路由入口概览](../../docs/decisions/2026-09-14-fastapi-route-overview.md)
 - [项目结构总览](../../docs/decisions/2026-09-14-project-structure-overview.md)
 - [TypeScript 静态索引与 HTTP 形状关联](../../docs/decisions/2026-10-06-typescript-http-overview.md)
+- [库与插件架构概览](../../docs/decisions/2026-10-07-library-plugin-overview.md)
 - [本地项目索引新鲜度与显式更新](../../docs/decisions/2026-09-15-index-freshness.md)
 - [GitHub 远端 ref 新鲜度与显式更新](../../docs/decisions/2026-09-16-github-remote-freshness.md)
 - [本项目索引更新与缓存效果联合验收](../../docs/decisions/2026-09-16-project-index-cache-acceptance.md)

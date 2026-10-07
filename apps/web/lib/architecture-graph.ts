@@ -1,5 +1,6 @@
 import type {
   OverviewGroup,
+  OverviewClassificationCounts,
   OverviewHttpAssociation,
   OverviewModule,
   OverviewModuleRelation,
@@ -18,6 +19,7 @@ export type ArchitectureDirectory = {
   height: number;
   visibleModules: Array<{ module: OverviewModule; position: ArchitecturePosition; highlighted: boolean }>;
   loadedModuleCount: number;
+  classificationCounts: OverviewClassificationCounts;
   omittedIndexModuleCount: number;
   omittedByCanvasLimit: number;
   internalRelationCount: number;
@@ -364,6 +366,14 @@ export function buildArchitectureGraph(
       height: groupHeights[index],
       visibleModules: visibleModuleViews,
       loadedModuleCount: loadedModules.length,
+      classificationCounts: loadedModules.reduce((counts, moduleId) => {
+        const module = moduleById.get(moduleId)!;
+        counts.application_entry += module.classification_counts.application_entry;
+        counts.public_api += module.classification_counts.public_api;
+        counts.extension_point += module.classification_counts.extension_point;
+        counts.unknown += module.classification_counts.unknown;
+        return counts;
+      }, { application_entry: 0, public_api: 0, extension_point: 0, unknown: 0 }),
       omittedIndexModuleCount: moduleIds.length - loadedModules.length,
       omittedByCanvasLimit: expandedGroups.has(group.group_id) ? loadedModules.length - visibleModules.length : 0,
       internalRelationCount: internal.relationCount,

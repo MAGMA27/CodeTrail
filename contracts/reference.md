@@ -16,6 +16,8 @@ Run 的公共边界包括 `Run`、`RunInput`、`RunBudget`、`EventSequence` 中
 
 ## 数据与生命周期
 
+`ProjectOverview.classifications` 将应用入口、公共 API、插件扩展点与未知区域作为独立锚点返回，不增加静态 calls/path。Python 公共 API 只识别唯一绑定的顶层字面 `__all__` 以及可定位本地定义或直接 import alias；插件扩展点只识别可追溯到 `pluggy.HookspecMarker` / `pluggy._hooks.HookspecMarker` 的顶层函数装饰器。每条 evidence 限最多 4 条并绑定固定 index/path/line/hash；分类候选扫描最多 2,000 条、响应最多 200 条，所有证据行和 excerpt 共用 400 行与 40,000 字符固定预算。`classification_coverage.truncated` 表示覆盖未完整，可在 `visible == total` 时因 evidence/扫描失败而为 true。动态导出、复杂绑定、其他插件标记及未持久化的 TypeScript export facts 保留未知；未知不表示无用、未引用或运行时不可达。MCP overview references 同时包括分类 evidence IDs。
+
 ProjectOverview 新增职责状态 `not_configured`、`ready`、`partial`、`invalid` 和可空 manifest provenance evidence；`OverviewGroup.group_kind="responsibility"` 是同快照 owner metadata 映射出的模块容器，`source_directory` 继续承载未归属模块。无效或缺失配置回退目录分组，ready/partial 必须有职责组，not_configured/invalid 不得有职责组。`McpOverviewResponse` 通过 evidence ID 引用列表暴露同一个顶层 manifest evidence，HTTP/MCP 使用相同的 ProjectOverview 业务契约。职责组只承诺展开到模块，不承诺返回完整 symbol 列表；详细路径、预算与 invalid 行为见[职责分组决策](../docs/decisions/2026-10-06-subsystem-responsibility-manifest.md)。
 
 Index freshness 结果绑定 `project_id`/`baseline_index_id`，检查时间、规则/配置观察、扫描计数、变化计数和原因必须与 `consistent`/`changed`/`unknown` 语义一致；GitHub 的 `remote_status=consistent|changed` 必须携带来源 URL 和远端 commit，远端未知不能被 Schema 或服务层升级为一致；`IndexRefreshResponse` 的 freshness 必须仍指向基准 index，`reused` 返回基准，`created` 返回不同 index。Run contract 要求 project/session/index 同时出现，输入消息是从 1 到 cutoff 的完整连续已保存前缀，input hash/字符数与消息一致；Run budget 记录工具、模型调用/修复、输入/输出字符、可选 token、源码、事件和总时间限制及使用量。real 模型每轮只能返回一个 `IssueModelToolCall` 或 `IssueModelFinal`；external 由外部 Agent 触发同一白名单工具，Issue 结论或代码理解步骤的 symbols/evidence/candidate links 只能引用本 Run 实际返回的同一 index 结果，代码理解不生成 findings/candidate links，原始模型文本不属于持久化契约。事件 sequence 从 1 连续递增且最后只能是一个 terminal event；terminal status 与 report outcome 必须相互一致。Report graph、evidence、candidate links 和 findings 只能引用同一 index 及实际工具返回的 evidence，取消/中断使用对应终态 outcome。Run 影响结果是按报告 ID 临时派生的只读结果，不进入 Run 持久化；root 被排除在 reachable_node_count 外，重复节点/多路径去重，循环只保留可解释的静态边，dynamic/unresolved 保持未知。
@@ -40,5 +42,6 @@ Index freshness 结果绑定 `project_id`/`baseline_index_id`，检查时间、�
 - [关系扫描与 unresolved 覆盖语义](../docs/decisions/2026-09-13-relation-coverage.md)
 - [FastAPI 路由入口概览](../docs/decisions/2026-09-14-fastapi-route-overview.md)
 - [项目结构总览](../docs/decisions/2026-09-14-project-structure-overview.md)
+- [库与插件架构概览](../docs/decisions/2026-10-07-library-plugin-overview.md)
 - [本地项目索引新鲜度与显式更新](../docs/decisions/2026-09-15-index-freshness.md)
 - [GitHub 远端 ref 新鲜度与显式更新](../docs/decisions/2026-09-16-github-remote-freshness.md)

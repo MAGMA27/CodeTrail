@@ -3,6 +3,7 @@ import test from "node:test";
 
 import type {
   CodeEdge,
+  OverviewClassificationCounts,
   OverviewGroup,
   OverviewHttpAssociation,
   OverviewModule,
@@ -14,7 +15,7 @@ import { ARCHITECTURE_MODULE_LIMIT, buildArchitectureGraph } from "./architectur
 
 const indexId = "index-architecture-test";
 
-function moduleRecord(id: string, path: string, entryReachable = false): OverviewModule {
+function moduleRecord(id: string, path: string, entryReachable = false, classificationCounts: Partial<OverviewClassificationCounts> = {}): OverviewModule {
   const symbol: SymbolRecord = {
     symbol_id: id,
     index_id: indexId,
@@ -24,7 +25,14 @@ function moduleRecord(id: string, path: string, entryReachable = false): Overvie
     start_line: 1,
     end_line: 40,
   };
-  return { module_id: id, index_id: indexId, symbol, entry_point_ids: [], entry_reachable: entryReachable };
+  return {
+    module_id: id,
+    index_id: indexId,
+    symbol,
+    entry_point_ids: [],
+    entry_reachable: entryReachable,
+    classification_counts: { application_entry: 0, public_api: 0, extension_point: 0, unknown: 0, ...classificationCounts },
+  };
 }
 
 function directory(id: string, path: string, moduleIds: string[]): OverviewGroup {
@@ -132,6 +140,14 @@ function overview(
       kind: "source",
     } : null,
     entries: [],
+    classifications: [],
+    classification_coverage: {
+      total: 0,
+      visible: 0,
+      category_counts: { application_entry: 0, public_api: 0, extension_point: 0, unknown: 0 },
+      visible_category_counts: { application_entry: 0, public_api: 0, extension_point: 0, unknown: 0 },
+      truncated: false,
+    },
     groups,
     modules,
     module_relations: moduleRelations,
@@ -205,6 +221,29 @@ test("folded directories aggregate unique module-pair relations and internal edg
   assert.equal(external?.edgeCount, 2);
   assert.deepEqual(external?.relationKinds, ["calls", "imports"]);
   assert.equal(model.relations.every((item) => item.source !== item.target), true);
+});
+
+test("folded directories summarize returned module classifications without adding graph nodes", () => {
+  const first = moduleRecord("class-a", "src/a.py", false, { application_entry: 1, public_api: 2 });
+  const second = moduleRecord("class-b", "src/b.py", false, { extension_point: 1, unknown: 1 });
+  const value = overview([first, second], [directory("group-src", "src", [first.module_id, second.module_id])], []);
+
+  const folded = buildArchitectureGraph(value);
+  assert.deepEqual(folded.directories[0].classificationCounts, {
+    application_entry: 1,
+    public_api: 2,
+    extension_point: 1,
+    unknown: 1,
+  });
+  assert.equal(folded.directories.length, 1);
+  assert.equal(folded.visibleModuleCount, 0);
+  assert.deepEqual(folded.relations, []);
+
+  const expanded = buildArchitectureGraph(value, { expandedGroupIds: ["group-src"] });
+  assert.deepEqual(expanded.directories[0].visibleModules.map(({ module }) => module.classification_counts), [
+    { application_entry: 1, public_api: 2, extension_point: 0, unknown: 0 },
+    { application_entry: 0, public_api: 0, extension_point: 1, unknown: 1 },
+  ]);
 });
 
 test("responsibility containers preserve source-to-target dependency direction", () => {

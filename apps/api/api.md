@@ -2,7 +2,7 @@
 
 ## 状态
 
-已实现 Project/Index/Session、来源导入、O1 `python-entry-v5+http-shape-v2` 概览（入口、显式职责/HTTP/源码结构组、聚合模块关系及同快照 HTTP 客户端/路由方法路径形状关联）、O2/O3 功能生成与 P2-R1/P2-R2 fixture/real Run 的 HTTP 和本地 MCP 入口；索引支持本地 `.py`/`.ts`/`.tsx` 源码 freshness 与显式更新，Python 文件缓存和 TypeScript 有界冷 AST 解析隔离。Run 已覆盖冻结输入、受限工具执行、单 Agent 有界模型循环、公开事件、持久化 SSE 回放/续接、Issue/代码理解报告、取消和重启中断；P3-I1 已增加从保存报告候选/发现读取固定快照的有界静态影响查询；Codex external Agent 已能通过本地 MCP 创建并驱动同一持久化 Run。HTTP method/path association 仅表达静态形状一致，不声称运行时网络目标；真实供应商语义质量仍未验证。
+已实现 Project/Index/Session、来源导入、O1 `python-entry-v6+http-shape-v2+architecture-v1` 概览（入口、显式职责/HTTP/源码结构组、聚合模块关系及同快照 HTTP 客户端/路由方法路径形状关联）、O2/O3 功能生成与 P2-R1/P2-R2 fixture/real Run 的 HTTP 和本地 MCP 入口；索引支持本地 `.py`/`.ts`/`.tsx` 源码 freshness 与显式更新，Python 文件缓存和 TypeScript 有界冷 AST 解析隔离。Run 已覆盖冻结输入、受限工具执行、单 Agent 有界模型循环、公开事件、持久化 SSE 回放/续接、Issue/代码理解报告、取消和重启中断；P3-I1 已增加从保存报告候选/发现读取固定快照的有界静态影响查询；Codex external Agent 已能通过本地 MCP 创建并驱动同一持久化 Run。HTTP method/path association 仅表达静态形状一致，不声称运行时网络目标；真实供应商语义质量仍未验证。
 
 ## 职责与范围
 
@@ -25,6 +25,8 @@ GitHub 和本地索引更新先登记项目级持久化 update intent；expected
 ## 数据与生命周期
 
 `get_overview` 可读取快照根目录中的可选 `codetrail-subsystems.json`，按明确 owner 路径将已索引模块放进职责组；未覆盖模块继续保留在源码目录 fallback 组，未命中的声明组保持可见并使状态为 `partial`。无配置或无效配置分别返回 `not_configured` 或 `invalid` 并使用目录 fallback；无效配置携带同快照 `manifest_invalid` issue，不能静默读取 live worktree。职责容器展开到概览返回的模块；模块下的 class/function/test 定义通过项目级 `GET /api/projects/{project_id}/indexes/{index_id}/modules/{module_id}/symbols` 有界分页读取，返回同一 index 的 module root、定义页和绑定 project/index/module 的游标。该目录只表示固定索引捕获的定义，不保证解析完整；HTTP 与 MCP `list_module_symbols` 共用 WorkspaceService、稳定源码行/符号 ID 顺序及 40,000 字节响应预算，不遍历 FTS 或关系邻居。格式与 owner 边界见[职责分组决策](../../docs/decisions/2026-10-06-subsystem-responsibility-manifest.md)及[模块定义分页决策](../../docs/decisions/2026-10-06-module-symbol-pagination.md)。
+
+`get_overview` 的规则版本 `python-entry-v6+http-shape-v2+architecture-v1` 额外返回独立分类锚点：应用入口引用既有 entry ID；Python 公共 API 只由唯一绑定的字面 `__all__` 和本地定义/直接 import alias 确认；pluggy 扩展点只接受真实 `HookspecMarker`/`_hooks.HookspecMarker` 导入、实例/别名链装饰的顶层函数。每项最多 4 条同快照源码 evidence；分类不构造 calls/path。只读固定索引读取目前没有 TypeScript export facts，因此 TypeScript exports、动态绑定和未命中规则的模块保留 unknown；unknown 不表示无用、未引用或运行时不可达。分类扫描最多 2,000 条候选，响应最多 200 条；所有分类 evidence 共用 400 行与 40,000 字符预算。coverage 的 `truncated` 表示本次分类覆盖未完整，可能与 visible==total 并存。`McpOverviewResponse` references 包含所有返回分类 evidence IDs，HTTP/MCP 始终调用同一个 WorkspaceService overview。
 
 Run 的 `analysis_kind` 默认是 `issue`；只有 external Run 可声明 `understanding`。该类型提交 `CodeUnderstandingFinal`，包含最多 12 个有序 `ExplanationStep`、`complete/partial` 覆盖和同一 Run 返回的源码 evidence；confirmed 必须有 evidence，complete 不能含 unknown，服务端不生成 findings/candidate links。旧 Run JSON 缺少该字段时按 Issue 读取，不做存储迁移。
 
@@ -69,6 +71,7 @@ MCP 代码更新后由 Codex 宿主对 `codetrail` 做一次 reload（或按宿�
 - [FastAPI 路由入口概览](../../docs/decisions/2026-09-14-fastapi-route-overview.md)
 - [项目结构总览](../../docs/decisions/2026-09-14-project-structure-overview.md)
 - [TypeScript 静态索引与 HTTP 形状关联](../../docs/decisions/2026-10-06-typescript-http-overview.md)
+- [库与插件架构概览](../../docs/decisions/2026-10-07-library-plugin-overview.md)
 - [共享本地运行环境与 Codex 联合演示](../../docs/decisions/2026-09-14-shared-runtime-codex-demo.md)
 - [本地项目索引新鲜度与显式更新](../../docs/decisions/2026-09-15-index-freshness.md)
 - [文件级定义提取缓存](../../docs/decisions/2026-09-15-definition-extraction-cache.md)

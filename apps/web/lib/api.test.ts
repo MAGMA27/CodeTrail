@@ -126,8 +126,17 @@ function overview() {
         },
         entry_point_ids: [entryId],
         entry_reachable: true,
+        classification_counts: { application_entry: 0, public_api: 0, extension_point: 0, unknown: 0 },
       },
     ],
+    classifications: [],
+    classification_coverage: {
+      total: 0,
+      visible: 0,
+      category_counts: { application_entry: 0, public_api: 0, extension_point: 0, unknown: 0 },
+      visible_category_counts: { application_entry: 0, public_api: 0, extension_point: 0, unknown: 0 },
+      truncated: false,
+    },
     module_relations: [],
     http_associations: [],
     http_association_coverage: {
@@ -187,6 +196,81 @@ test("project overview validator accepts bounded snapshot-linked data", () => {
   assert.equal(isProjectOverviewResponse(overview()), true);
 });
 
+test("project overview classification validator enforces snapshot evidence and coverage counts", () => {
+  const value = structuredClone(overview()) as any;
+  value.modules[0].classification_counts = { application_entry: 1, public_api: 1, extension_point: 0, unknown: 1 };
+  value.classifications = [
+    {
+      classification_id: "class-entry",
+      index_id: indexId,
+      category: "application_entry",
+      module_id: moduleId,
+      symbol_id: moduleId,
+      symbol_name: "pkg.__main__",
+      label: "main guard",
+      rule_id: "python.ast.main_guard",
+      entry_point_id: entryId,
+      evidence: [],
+      evidence_error: null,
+    },
+    {
+      classification_id: "class-api",
+      index_id: indexId,
+      category: "public_api",
+      module_id: moduleId,
+      symbol_id: functionId,
+      symbol_name: "pkg.__main__.main",
+      label: "exported function",
+      rule_id: "python.exports.all",
+      entry_point_id: null,
+      evidence: Array.from({ length: 4 }, (_, index) => ({ ...overview().entries[0].evidence, evidence_id: `evidence-api-${index}` })),
+      evidence_error: null,
+    },
+    {
+      classification_id: "class-unknown",
+      index_id: indexId,
+      category: "unknown",
+      module_id: moduleId,
+      symbol_id: null,
+      symbol_name: "pkg.__main__",
+      label: "module-level unknown",
+      rule_id: "python.classification.unknown",
+      entry_point_id: null,
+      evidence: [],
+      evidence_error: "No source evidence",
+    },
+  ];
+  value.classification_coverage = {
+    total: 4,
+    visible: 3,
+    category_counts: { application_entry: 1, public_api: 1, extension_point: 1, unknown: 1 },
+    visible_category_counts: { application_entry: 1, public_api: 1, extension_point: 0, unknown: 1 },
+    truncated: true,
+  };
+  assert.equal(isProjectOverviewResponse(value), true);
+
+  const evidenceIncomplete = structuredClone(value);
+  evidenceIncomplete.classification_coverage.total = 3;
+  evidenceIncomplete.classification_coverage.category_counts = { application_entry: 1, public_api: 1, extension_point: 0, unknown: 1 };
+  assert.equal(isProjectOverviewResponse(evidenceIncomplete), true);
+
+  const wrongEvidenceIndex = structuredClone(value);
+  wrongEvidenceIndex.classifications[1].evidence[0].index_id = "index-other";
+  assert.equal(isProjectOverviewResponse(wrongEvidenceIndex), false);
+
+  const excessiveEvidence = structuredClone(value);
+  excessiveEvidence.classifications[1].evidence.push({ ...excessiveEvidence.classifications[1].evidence[0], evidence_id: "evidence-api-excess" });
+  assert.equal(isProjectOverviewResponse(excessiveEvidence), false);
+
+  const negativeModuleCount = structuredClone(value);
+  negativeModuleCount.modules[0].classification_counts.public_api = -1;
+  assert.equal(isProjectOverviewResponse(negativeModuleCount), false);
+
+  const inconsistentCoverage = structuredClone(value);
+  inconsistentCoverage.classification_coverage.visible_category_counts.unknown = 0;
+  assert.equal(isProjectOverviewResponse(inconsistentCoverage), false);
+});
+
 test("project overview responsibility status matches declared groups", () => {
   const group = {
     group_id: "group-api-responsibility",
@@ -238,6 +322,7 @@ test("project overview validator accepts aggregated module relations and rejects
     symbol: targetModule,
     entry_point_ids: [],
     entry_reachable: false,
+    classification_counts: { application_entry: 0, public_api: 0, extension_point: 0, unknown: 0 },
   });
   value.coverage.total_modules = 2;
   value.coverage.visible_modules = 2;

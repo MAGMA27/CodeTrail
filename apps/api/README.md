@@ -31,6 +31,8 @@
 
 ## 数据与生命周期
 
+项目概览分类在同一固定快照中将应用入口、由字面 `__all__` 支持的 Python 公共 API、由真实 pluggy marker 导入与别名链证明的 hookspec、以及当前规则未识别区域分开返回。条目、扫描和 evidence 行有界，分类不生成 `calls` 关系；TypeScript export facts 尚未持久化，相关区域保留未知。
+
 本目录的数据与生命周期由 [api.md](api.md) 维护；精确字段与行为约束以源码声明为准。
 
 ## 使用与配置
@@ -68,4 +70,5 @@ API 健康检查为 `GET /api/health`。前端或测试先创建 Project、建�
 - [FastAPI 路由入口概览](../../docs/decisions/2026-09-14-fastapi-route-overview.md)
 - [项目结构总览](../../docs/decisions/2026-09-14-project-structure-overview.md)
 - [TypeScript 静态索引与 HTTP 形状关联](../../docs/decisions/2026-10-06-typescript-http-overview.md)
+- [库与插件架构概览](../../docs/decisions/2026-10-07-library-plugin-overview.md)
 - [共享本地运行环境与 Codex 联合演示](../../docs/decisions/2026-09-14-shared-runtime-codex-demo.md)

@@ -196,7 +196,9 @@ code { font-family: var(--ct-mono); }
 .ct-architecture-module strong, .ct-architecture-module small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ct-architecture-module strong { font-family: var(--ct-mono); font-size: 10px; }
 .ct-architecture-module small { color: var(--ct-muted); font-family: var(--ct-mono); font-size: 9px; }
-.ct-architecture-module > span { color: var(--ct-blue); font-size: 9px; }
+.ct-architecture-module > span { display: block; overflow: hidden; color: var(--ct-blue); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.ct-architecture-module > .ct-classification-counts { color: var(--ct-muted); font-family: var(--ct-mono); font-size: 7px; }
+.ct-classification-counts { display: block; overflow: hidden; color: var(--ct-muted); font-family: var(--ct-mono); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
 .ct-architecture-directory .react-flow__handle, .ct-architecture-module .react-flow__handle { width: 6px; height: 6px; border: 1px solid #fff; background: #71809a; }
 .ct-architecture-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 17px; color: var(--ct-muted); font-size: 10px; }
 .ct-architecture-legend span { display: inline-flex; align-items: center; gap: 6px; }
@@ -330,7 +332,7 @@ code { font-family: var(--ct-mono); }
 .ct-entry-main strong, .ct-module-row strong { font-size: 12px; }
 .ct-entry-main small, .ct-module-row small { color: var(--ct-muted); font-size: 10px; }
 .ct-kind-chip, .ct-reachability { padding: 4px 6px; border: 1px solid #b9c7f2; border-radius: 4px; color: var(--ct-blue); font-family: var(--ct-mono); font-size: 8px; letter-spacing: .08em; }
-.ct-reachability { border-color: var(--ct-border-strong); color: var(--ct-muted); }
+.ct-reachability { border-color: var(--ct-border-strong); color: var(--ct-muted); max-width: 165px; letter-spacing: 0; line-height: 1.35; white-space: normal; }
 .ct-reachability.is-reachable { border-color: #afd4c0; color: var(--ct-success); }
 .ct-module-row-container { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 5px; border-bottom: 1px solid var(--ct-border); }
 .ct-module-row { width: 100%; }
@@ -355,6 +357,13 @@ code { font-family: var(--ct-mono); }
 .ct-structure-detail-heading, .ct-structure-subheading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 .ct-structure-detail-heading h4 { margin: 3px 0 0; overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .ct-structure-related { display: grid; gap: 7px; padding-top: 9px; border-top: 1px solid var(--ct-border); }
+.ct-structure-classifications { display: grid; gap: 6px; padding-top: 9px; border-top: 1px solid var(--ct-border); }
+.ct-classification-summary { overflow: hidden; }
+.ct-classification-list { display: grid; gap: 5px; }
+.ct-classification-item { display: grid; min-width: 0; gap: 4px; padding: 8px 9px; border: 1px solid var(--ct-border); border-radius: 6px; background: var(--ct-subtle); }
+.ct-classification-item-heading { display: flex; min-width: 0; align-items: center; gap: 7px; }
+.ct-classification-item-heading strong { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.ct-classification-item > small { color: var(--ct-muted); font-family: var(--ct-mono); font-size: 9px; overflow-wrap: anywhere; }
 .ct-structure-subheading strong { font-size: 11px; }
 .ct-structure-subheading span { color: var(--ct-muted); font-size: 9px; }
 .ct-structure-relation-list { display: grid; gap: 5px; }

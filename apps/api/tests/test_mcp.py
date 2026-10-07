@@ -1392,6 +1392,14 @@ async def _exercise_stdio(
         manifest_evidence = http_overview["responsibility_evidence"]
         assert manifest_evidence is not None
         assert any(reference["evidence_id"] == manifest_evidence["evidence_id"] for reference in references)
+        classification_evidence_ids = {
+            evidence["evidence_id"]
+            for classification in http_overview["classifications"]
+            for evidence in classification["evidence"]
+        }
+        assert classification_evidence_ids <= {
+            reference["evidence_id"] for reference in references
+        }
 
         wrong_project = await client.call_tool(
             "get_index",

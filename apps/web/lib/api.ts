@@ -630,6 +630,33 @@ export type OverviewModule = {
   symbol: SymbolRecord;
   entry_point_ids: string[];
   entry_reachable: boolean;
+  classification_counts: OverviewClassificationCounts;
+};
+
+export type OverviewClassificationCategory = "application_entry" | "public_api" | "extension_point" | "unknown";
+
+export type OverviewClassificationCounts = Record<OverviewClassificationCategory, number>;
+
+export type OverviewClassification = {
+  classification_id: string;
+  index_id: string;
+  category: OverviewClassificationCategory;
+  module_id: string;
+  symbol_id: string | null;
+  symbol_name: string;
+  label: string;
+  rule_id: string;
+  entry_point_id: string | null;
+  evidence: Evidence[];
+  evidence_error: string | null;
+};
+
+export type OverviewClassificationCoverage = {
+  total: number;
+  visible: number;
+  category_counts: OverviewClassificationCounts;
+  visible_category_counts: OverviewClassificationCounts;
+  truncated: boolean;
 };
 
 export type OverviewGroup = {
@@ -712,6 +739,8 @@ export type ProjectOverview = {
   responsibility_status: "not_configured" | "ready" | "partial" | "invalid";
   responsibility_evidence: Evidence | null;
   entries: OverviewEntryPoint[];
+  classifications: OverviewClassification[];
+  classification_coverage: OverviewClassificationCoverage;
   groups: OverviewGroup[];
   modules: OverviewModule[];
   module_relations: OverviewModuleRelation[];
@@ -2091,6 +2120,90 @@ function isOverviewEntryPoint(value: unknown): value is OverviewEntryPoint {
   );
 }
 
+const overviewClassificationCategories: OverviewClassificationCategory[] = ["application_entry", "public_api", "extension_point", "unknown"];
+
+function isOverviewClassificationCounts(value: unknown): value is OverviewClassificationCounts {
+  return isRecord(value) && overviewClassificationCategories.every((category) => isNonNegativeInteger(value[category]));
+}
+
+function isOverviewClassification(
+  value: unknown,
+  indexId: string,
+  modules: OverviewModule[],
+  entries: OverviewEntryPoint[],
+): value is OverviewClassification {
+  if (!isRecord(value) || value.index_id !== indexId || !isString(value.module_id)) return false;
+  const module = modules.find((item) => item.module_id === value.module_id);
+  if (!module || module.index_id !== indexId) return false;
+  if (!overviewClassificationCategories.includes(value.category as OverviewClassificationCategory)) return false;
+  const entry = isString(value.entry_point_id) ? entries.find((item) => item.entry_point_id === value.entry_point_id) ?? null : null;
+  const applicationEntryValid = value.category === "application_entry"
+    ? entry !== null && entry.index_id === indexId && Array.isArray(value.evidence) && value.evidence.length === 0
+    : value.entry_point_id === null;
+  const categoryFieldsValid = value.category === "unknown"
+    ? value.symbol_id === null
+    : value.category === "public_api" || value.category === "extension_point"
+      ? isString(value.symbol_id)
+      : true;
+  return (
+    isString(value.classification_id) &&
+    (value.symbol_id === null || isString(value.symbol_id)) &&
+    isString(value.symbol_name) &&
+    isString(value.label) &&
+    isString(value.rule_id) &&
+    (value.entry_point_id === null || entry !== null) &&
+    applicationEntryValid &&
+    categoryFieldsValid &&
+    Array.isArray(value.evidence) &&
+    value.evidence.length <= 4 &&
+    (value.category === "application_entry" || value.evidence.length > 0 || (value.evidence_error !== null && isString(value.evidence_error))) &&
+    value.evidence.every((evidence) => isEvidence(evidence) && evidence.index_id === indexId && evidence.kind === "source" && evidence.path === module.symbol.path) &&
+    (value.evidence_error === null || isString(value.evidence_error))
+  );
+}
+
+function isOverviewClassificationsConsistent(classifications: OverviewClassification[], modules: OverviewModule[]): boolean {
+  const ids = new Set<string>();
+  const countsByModule = new Map<string, OverviewClassificationCounts>();
+  for (const item of classifications) {
+    if (ids.has(item.classification_id)) return false;
+    ids.add(item.classification_id);
+    const counts = countsByModule.get(item.module_id) ?? { application_entry: 0, public_api: 0, extension_point: 0, unknown: 0 };
+    counts[item.category] += 1;
+    countsByModule.set(item.module_id, counts);
+  }
+  return modules.every((module) => {
+    const visible = countsByModule.get(module.module_id);
+    return !visible || overviewClassificationCategories.every((category) => visible[category] <= module.classification_counts[category]);
+  });
+}
+
+function isOverviewClassificationCoverage(value: unknown, classifications: OverviewClassification[]): value is OverviewClassificationCoverage {
+  if (
+    !isRecord(value) ||
+    !isNonNegativeInteger(value.total) ||
+    !isNonNegativeInteger(value.visible) ||
+    value.visible > value.total ||
+    value.visible !== classifications.length ||
+    (value.visible < value.total && value.truncated !== true) ||
+    typeof value.truncated !== "boolean" ||
+    !isOverviewClassificationCounts(value.category_counts) ||
+    !isOverviewClassificationCounts(value.visible_category_counts)
+  ) return false;
+  const categoryCounts = value.category_counts as OverviewClassificationCounts;
+  const visibleCategoryCounts = value.visible_category_counts as OverviewClassificationCounts;
+  const totalCount = overviewClassificationCategories.reduce((sum, category) => sum + categoryCounts[category], 0);
+  const visibleCount = overviewClassificationCategories.reduce((sum, category) => sum + visibleCategoryCounts[category], 0);
+  const visibleByCategory = Object.fromEntries(overviewClassificationCategories.map((category) => [
+    category,
+    classifications.filter((item) => item.category === category).length,
+  ])) as OverviewClassificationCounts;
+  return overviewClassificationCategories.every((category) =>
+    visibleCategoryCounts[category] === visibleByCategory[category] &&
+    visibleCategoryCounts[category] <= categoryCounts[category]
+  ) && totalCount === value.total && visibleCount === value.visible;
+}
+
 function isOverviewModule(value: unknown): value is OverviewModule {
   return (
     isRecord(value) &&
@@ -2101,7 +2214,8 @@ function isOverviewModule(value: unknown): value is OverviewModule {
     value.index_id === value.symbol.index_id &&
     value.symbol.kind === "module" &&
     isStringArray(value.entry_point_ids) &&
-    typeof value.entry_reachable === "boolean"
+    typeof value.entry_reachable === "boolean" &&
+    isOverviewClassificationCounts(value.classification_counts)
   );
 }
 
@@ -2258,6 +2372,10 @@ export function isProjectOverviewResponse(value: unknown): value is ProjectOverv
     validGroups &&
     Array.isArray(value.modules) &&
     value.modules.every(isOverviewModule) &&
+    Array.isArray(value.classifications) &&
+    value.classifications.every((classification) => isOverviewClassification(classification, (value.index as IndexSnapshot).index_id, value.modules as OverviewModule[], value.entries as OverviewEntryPoint[])) &&
+    isOverviewClassificationsConsistent(value.classifications as OverviewClassification[], value.modules as OverviewModule[]) &&
+    isOverviewClassificationCoverage(value.classification_coverage, value.classifications as OverviewClassification[]) &&
     Array.isArray(value.module_relations) &&
     value.module_relations.every(isOverviewModuleRelation) &&
     Array.isArray(value.http_associations) &&

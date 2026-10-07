@@ -107,7 +107,7 @@ def test_overview_identifies_main_rules_paths_and_stays_on_snapshot(tmp_path: Pa
     )
     assert status == 200
     assert overview["entry_status"] == "identified"
-    assert overview["rules_version"] == "python-entry-v5+http-shape-v2"
+    assert overview["rules_version"] == "python-entry-v6+http-shape-v2+architecture-v1"
     assert {entry["kind"] for entry in overview["entries"]} == {
         "python_main_module",
         "python_main_guard",
@@ -553,7 +553,7 @@ def test_overview_invalidates_skipped_bindings_without_cross_scope_pollution(tmp
         ("GET", "/outer"),
         ("GET", "/before-star"),
     }
-    assert overview["rules_version"] == "python-entry-v5+http-shape-v2"
+    assert overview["rules_version"] == "python-entry-v6+http-shape-v2+architecture-v1"
     assert overview["http_association_coverage"]["analysis_status"] == "complete"
 
 
@@ -592,6 +592,259 @@ def test_overview_does_not_promote_main_names_or_nested_guards(tmp_path: Path) -
     assert overview["entries"] == []
     assert overview["paths"] == []
     assert any("未识别入口" in note for note in overview["notes"])
+
+
+def test_overview_classifies_python_exports_and_pluggy_hooks_with_bounded_evidence(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "architecture-demo"
+    package = repository / "demo"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text(
+        "from .manager import PluginManager as PublicManager\n"
+        "__all__ = ('PublicManager',)\n",
+        encoding="utf-8",
+    )
+    (package / "manager.py").write_text(
+        "from pluggy import HookspecMarker as Marker\n"
+        "class PluginManager:\n"
+        "    pass\n"
+        "hookspec = Marker('demo')\n"
+        "specs = hookspec\n"
+        "@specs\n"
+        "def valid_extension():\n"
+        "    return None\n"
+        "ignored = (hookspec := lambda function: function)\n"
+        "@hookspec\n"
+        "def named_expression_rebound_is_not_a_hook():\n"
+        "    return None\n"
+        "hookspec = Marker('demo')\n"
+        "hookspec, other = (lambda function: function, 0)\n"
+        "@hookspec\n"
+        "def tuple_rebound_is_not_a_hook():\n"
+        "    return None\n"
+        "from fake import *\n"
+        "@specs\n"
+        "def wildcard_rebound_is_not_a_hook():\n"
+        "    return None\n",
+        encoding="utf-8",
+    )
+    (package / "bindings.py").write_text(
+        "def match_export():\n"
+        "    return None\n"
+        "match 1:\n"
+        "    case match_export:\n"
+        "        pass\n"
+        "def except_export():\n"
+        "    return None\n"
+        "try:\n"
+        "    pass\n"
+        "except ValueError as except_export:\n"
+        "    pass\n"
+        "__all__ = ['match_export', 'except_export']\n",
+        encoding="utf-8",
+    )
+    (package / "star_exports.py").write_text(
+        "def exported():\n"
+        "    return None\n"
+        "__all__ = ['exported']\n"
+        "from fake import *\n",
+        encoding="utf-8",
+    )
+    (package / "spoof.py").write_text(
+        "def hookspec(function):\n"
+        "    return function\n"
+        "@hookspec\n"
+        "def same_name_is_not_a_hook():\n"
+        "    return None\n"
+        "from fake import HookspecMarker as Marker\n"
+        "fake_marker = Marker('demo')\n"
+        "@fake_marker\n"
+        "def fake_import_is_not_a_hook():\n"
+        "    return None\n",
+        encoding="utf-8",
+    )
+    (package / "dynamic.py").write_text(
+        "__all__ = ['PublicThing', *DYNAMIC_EXPORTS]\n"
+        "class PublicThing:\n"
+        "    pass\n",
+        encoding="utf-8",
+    )
+    (package / "__main__.py").write_text(
+        "def main():\n"
+        "    return None\n"
+        "if __name__ == '__main__':\n"
+        "    main()\n",
+        encoding="utf-8",
+    )
+
+    application = create_app({"architecture-demo": repository})
+    project_id, index_id = _create_index(application, "Architecture demo", "architecture-demo")
+    status, overview = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/indexes/{index_id}/overview",
+    )
+
+    assert status == 200
+    classifications = overview["classifications"]
+    public_api = [item for item in classifications if item["category"] == "public_api"]
+    extension_points = [item for item in classifications if item["category"] == "extension_point"]
+    application_entries = [item for item in classifications if item["category"] == "application_entry"]
+    unknown = [item for item in classifications if item["category"] == "unknown"]
+
+    assert [(item["label"], item["symbol_name"]) for item in public_api] == [
+        ("PublicManager", "demo.manager.PluginManager")
+    ]
+    assert public_api[0]["rule_id"] == "python.module.__all__.import_alias"
+    assert [item["path"] for item in public_api[0]["evidence"]] == [
+        "demo/__init__.py",
+        "demo/__init__.py",
+    ]
+    assert [item["excerpt"] for item in public_api[0]["evidence"]] == [
+        "__all__ = ('PublicManager',)",
+        "from .manager import PluginManager as PublicManager",
+    ]
+    assert [(item["label"], item["rule_id"]) for item in extension_points] == [
+        ("valid_extension", "python.pluggy.hookspec_marker")
+    ]
+    assert [item["excerpt"] for item in extension_points[0]["evidence"]] == [
+        "from pluggy import HookspecMarker as Marker",
+        "hookspec = Marker('demo')",
+        "specs = hookspec",
+        "@specs",
+    ]
+    assert len(extension_points[0]["evidence"]) <= 4
+    assert application_entries
+    assert all(item["entry_point_id"] in {entry["entry_point_id"] for entry in overview["entries"]}
+               for item in application_entries)
+    assert any(item["symbol_name"] == "demo.dynamic" for item in unknown)
+    assert not any(item["symbol_name"] == "demo.dynamic.PublicThing" for item in public_api)
+    assert not any(
+        item["symbol_name"] in {
+            "demo.bindings.match_export",
+            "demo.bindings.except_export",
+            "demo.star_exports.exported",
+        }
+        for item in public_api
+    )
+    assert overview["classification_coverage"]["category_counts"]["public_api"] == 1
+    assert overview["classification_coverage"]["category_counts"]["extension_point"] == 1
+    assert all(
+        evidence["index_id"] == index_id
+        for item in classifications
+        for evidence in item["evidence"]
+    )
+
+
+def test_overview_classification_item_and_evidence_budgets_are_explicit(tmp_path: Path) -> None:
+    repository = tmp_path / "architecture-budget"
+    repository.mkdir()
+    exports = ", ".join(f"'Public{index:03d}'" for index in range(205))
+    definitions = "\n".join(
+        f"def Public{index:03d}():\n    return {index}"
+        for index in range(205)
+    )
+    (repository / "bulk.py").write_text(f"__all__ = [{exports}]\n{definitions}\n", encoding="utf-8")
+
+    application = create_app({"architecture-budget": repository})
+    project_id, index_id = _create_index(application, "Architecture budget", "architecture-budget")
+    status, overview = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/indexes/{index_id}/overview",
+    )
+
+    assert status == 200
+    coverage = overview["classification_coverage"]
+    assert coverage["total"] == 205
+    assert coverage["visible"] == 200
+    assert coverage["truncated"] is True
+    assert coverage["category_counts"]["public_api"] == 205
+    assert coverage["visible_category_counts"]["public_api"] == 200
+    assert len(overview["classifications"]) == 200
+    assert sum(
+        len(item["evidence"])
+        for item in overview["classifications"]
+    ) <= 400
+
+    evidence_repository = tmp_path / "architecture-evidence-budget"
+    evidence_repository.mkdir()
+    hooks = "\n".join(
+        f"@specs\ndef hook_{index:03d}():\n    return None"
+        for index in range(101)
+    )
+    (evidence_repository / "hooks.py").write_text(
+        "from pluggy import HookspecMarker as Marker\n"
+        "hookspec = Marker('demo')\n"
+        "specs = hookspec\n"
+        f"{hooks}\n",
+        encoding="utf-8",
+    )
+    evidence_application = create_app({"architecture-evidence-budget": evidence_repository})
+    evidence_project_id, evidence_index_id = _create_index(
+        evidence_application,
+        "Architecture evidence budget",
+        "architecture-evidence-budget",
+    )
+    status, evidence_overview = request(
+        evidence_application,
+        "GET",
+        f"/api/projects/{evidence_project_id}/indexes/{evidence_index_id}/overview",
+    )
+
+    assert status == 200
+    hookspecs = [
+        item
+        for item in evidence_overview["classifications"]
+        if item["category"] == "extension_point"
+    ]
+    assert len(hookspecs) == 101
+    assert sum(len(item["evidence"]) for item in hookspecs) == 400
+    assert all(item["evidence_error"] is None for item in hookspecs[:100])
+    assert hookspecs[-1]["evidence"] == []
+    assert hookspecs[-1]["evidence_error"] == "classification evidence line budget reached"
+    assert evidence_overview["classification_coverage"]["truncated"] is True
+
+    character_repository = tmp_path / "architecture-character-budget"
+    character_repository.mkdir()
+    long_export_line = "__all__ = ['PublicA', 'PublicB']  # " + ("x" * 25_000)
+    (character_repository / "public_api.py").write_text(
+        f"{long_export_line}\n"
+        "def PublicA():\n"
+        "    return None\n"
+        "def PublicB():\n"
+        "    return None\n",
+        encoding="utf-8",
+    )
+    character_application = create_app({"architecture-character-budget": character_repository})
+    character_project_id, character_index_id = _create_index(
+        character_application,
+        "Architecture character budget",
+        "architecture-character-budget",
+    )
+    status, character_overview = request(
+        character_application,
+        "GET",
+        f"/api/projects/{character_project_id}/indexes/{character_index_id}/overview",
+    )
+
+    assert status == 200
+    public_apis = [
+        item
+        for item in character_overview["classifications"]
+        if item["category"] == "public_api"
+    ]
+    assert len(public_apis) == 2
+    assert len(public_apis[0]["evidence"][0]["excerpt"]) > 20_000
+    assert public_apis[1]["evidence"] == []
+    assert public_apis[1]["evidence_error"] == "classification evidence character budget reached"
+    assert sum(
+        len(evidence["excerpt"])
+        for item in character_overview["classifications"]
+        for evidence in item["evidence"]
+    ) <= 40_000
+    assert character_overview["classification_coverage"]["truncated"] is True
 
 
 def test_overview_scope_and_budget_are_explicit(tmp_path: Path) -> None:

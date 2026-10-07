@@ -1536,6 +1536,75 @@ OverviewHttpMethod: TypeAlias = Literal[
 OverviewEntryStatus: TypeAlias = Literal["identified", "not_identified", "partial"]
 OverviewGroupKind: TypeAlias = Literal["http_path", "source_directory", "responsibility"]
 OverviewModuleRelationKind: TypeAlias = Literal["imports", "calls"]
+OverviewClassificationKind: TypeAlias = Literal[
+    "application_entry", "public_api", "extension_point", "unknown"
+]
+
+
+class OverviewClassificationCounts(ContractModel):
+    application_entry: NonNegativeInt = 0
+    public_api: NonNegativeInt = 0
+    extension_point: NonNegativeInt = 0
+    unknown: NonNegativeInt = 0
+
+    def total(self) -> int:
+        return self.application_entry + self.public_api + self.extension_point + self.unknown
+
+
+class OverviewClassificationCoverage(ContractModel):
+    total: NonNegativeInt
+    visible: NonNegativeInt
+    category_counts: OverviewClassificationCounts
+    visible_category_counts: OverviewClassificationCounts
+    truncated: bool
+
+    @model_validator(mode="after")
+    def validate_counts(self) -> OverviewClassificationCoverage:
+        if self.visible > self.total or self.category_counts.total() != self.total:
+            raise ValueError("architecture classification coverage counts are inconsistent")
+        if self.visible_category_counts.total() != self.visible:
+            raise ValueError("visible architecture classification counts are inconsistent")
+        if any(
+            getattr(self.visible_category_counts, name) > getattr(self.category_counts, name)
+            for name in ("application_entry", "public_api", "extension_point", "unknown")
+        ):
+            raise ValueError("visible architecture classification categories cannot exceed totals")
+        return self
+
+
+class OverviewClassification(ContractModel):
+    """One rule-confirmed architecture anchor, separate from static relations."""
+
+    classification_id: Identifier
+    index_id: Identifier
+    category: OverviewClassificationKind
+    module_id: Identifier
+    symbol_id: Identifier | None = None
+    symbol_name: str = Field(min_length=1, max_length=500)
+    label: str = Field(min_length=1, max_length=500)
+    rule_id: Identifier
+    entry_point_id: Identifier | None = None
+    evidence: list[Evidence] = Field(default_factory=list, max_length=4)
+    evidence_error: str | None = Field(default=None, max_length=1_000)
+
+    @model_validator(mode="after")
+    def validate_evidence(self) -> OverviewClassification:
+        if not self.evidence and self.evidence_error is None and self.entry_point_id is None:
+            raise ValueError("architecture classifications require evidence or an entry reference")
+        if any(evidence.index_id != self.index_id or evidence.kind != "source" for evidence in self.evidence):
+            raise ValueError("architecture classification evidence must belong to its source index")
+        if self.category == "application_entry":
+            if self.entry_point_id is None:
+                raise ValueError("application classifications must reference an overview entry")
+            if self.evidence:
+                raise ValueError("application classifications reuse entry evidence")
+        elif self.entry_point_id is not None:
+            raise ValueError("only application classifications can reference an overview entry")
+        if self.category == "unknown" and self.symbol_id is not None:
+            raise ValueError("unknown classifications identify a module region, not a symbol")
+        if self.category in {"public_api", "extension_point"} and self.symbol_id is None:
+            raise ValueError("identified API and extension points require a symbol")
+        return self
 
 
 class OverviewEntryPoint(LineRangeModel):
@@ -1602,6 +1671,7 @@ class OverviewModule(ContractModel):
     symbol: Symbol
     entry_point_ids: list[Identifier] = Field(default_factory=list)
     entry_reachable: bool = False
+    classification_counts: OverviewClassificationCounts = Field(default_factory=OverviewClassificationCounts)
 
     @model_validator(mode="after")
     def validate_module_identity(self) -> OverviewModule:
@@ -1824,6 +1894,16 @@ class ProjectOverview(VersionedModel):
     entries: list[OverviewEntryPoint] = Field(default_factory=list)
     groups: list[OverviewGroup] = Field(default_factory=list)
     modules: list[OverviewModule] = Field(default_factory=list)
+    classifications: list[OverviewClassification] = Field(default_factory=list)
+    classification_coverage: OverviewClassificationCoverage = Field(
+        default_factory=lambda: OverviewClassificationCoverage(
+            total=0,
+            visible=0,
+            category_counts=OverviewClassificationCounts(),
+            visible_category_counts=OverviewClassificationCounts(),
+            truncated=False,
+        )
+    )
     module_relations: list[OverviewModuleRelation] = Field(default_factory=list)
     http_associations: list[OverviewHttpAssociation] = Field(default_factory=list)
     http_association_coverage: OverviewHttpAssociationCoverage = Field(
@@ -1856,6 +1936,8 @@ class ProjectOverview(VersionedModel):
             raise ValueError("overview group IDs must be unique")
         if len({module.module_id for module in self.modules}) != len(self.modules):
             raise ValueError("overview module IDs must be unique")
+        if len({item.classification_id for item in self.classifications}) != len(self.classifications):
+            raise ValueError("overview classification IDs must be unique")
         if len({relation.relation_id for relation in self.module_relations}) != len(self.module_relations):
             raise ValueError("overview module relation IDs must be unique")
         if len({path.path_id for path in self.paths}) != len(self.paths):
@@ -1891,6 +1973,35 @@ class ProjectOverview(VersionedModel):
                 raise ValueError("overview module belongs to a different index_id")
             if not set(module.entry_point_ids).issubset(entry_ids):
                 raise ValueError("overview module references an unknown entry point")
+        entries_by_id = {entry.entry_point_id: entry for entry in self.entries}
+        modules_by_id = {module.module_id: module for module in self.modules}
+        visible_classifications_by_module: dict[str, dict[str, int]] = {}
+        for item in self.classifications:
+            if item.index_id != self.index.index_id:
+                raise ValueError("overview classification belongs to a different index_id")
+            module = modules_by_id.get(item.module_id)
+            if module is None:
+                raise ValueError("overview classification references a module outside the visible overview")
+            counts = visible_classifications_by_module.setdefault(
+                item.module_id,
+                {"application_entry": 0, "public_api": 0, "extension_point": 0, "unknown": 0},
+            )
+            counts[item.category] += 1
+            if any(evidence.path != module.symbol.path for evidence in item.evidence):
+                raise ValueError("overview classification evidence must identify its module source")
+            if item.entry_point_id is not None:
+                entry = entries_by_id.get(item.entry_point_id)
+                if entry is None or item.category != "application_entry":
+                    raise ValueError("application classification references an unknown entry")
+        if self.classification_coverage.visible != len(self.classifications):
+            raise ValueError("visible architecture classification count must match returned items")
+        for module in self.modules:
+            visible_counts = visible_classifications_by_module.get(module.module_id, {})
+            if any(
+                visible_counts.get(name, 0) > getattr(module.classification_counts, name)
+                for name in ("application_entry", "public_api", "extension_point", "unknown")
+            ):
+                raise ValueError("visible module classifications exceed module totals")
         for relation in self.module_relations:
             if relation.index_id != self.index.index_id:
                 raise ValueError("overview module relation belongs to a different index_id")
@@ -2559,6 +2670,11 @@ class McpOverviewResponse(McpResultBase):
                 for entry in self.overview.entries
                 if entry.evidence is not None
             }
+            evidence_ids.update(
+                evidence.evidence_id
+                for item in self.overview.classifications
+                for evidence in item.evidence
+            )
             if self.overview.responsibility_evidence is not None:
                 evidence_ids.add(self.overview.responsibility_evidence.evidence_id)
             for reference in self.references:

@@ -23174,6 +23174,183 @@
           "title": "McpError",
           "type": "object"
         },
+        "OverviewClassification": {
+          "additionalProperties": false,
+          "description": "One rule-confirmed architecture anchor, separate from static relations.",
+          "properties": {
+            "category": {
+              "enum": [
+                "application_entry",
+                "public_api",
+                "extension_point",
+                "unknown"
+              ],
+              "title": "Category",
+              "type": "string"
+            },
+            "classification_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Classification Id",
+              "type": "string"
+            },
+            "entry_point_id": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Entry Point Id"
+            },
+            "evidence": {
+              "items": {
+                "$ref": "#/$defs/Evidence"
+              },
+              "maxItems": 4,
+              "title": "Evidence",
+              "type": "array"
+            },
+            "evidence_error": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Evidence Error"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "label": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Label",
+              "type": "string"
+            },
+            "module_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Module Id",
+              "type": "string"
+            },
+            "rule_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Rule Id",
+              "type": "string"
+            },
+            "symbol_id": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Symbol Id"
+            },
+            "symbol_name": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Symbol Name",
+              "type": "string"
+            }
+          },
+          "required": [
+            "classification_id",
+            "index_id",
+            "category",
+            "module_id",
+            "symbol_name",
+            "label",
+            "rule_id"
+          ],
+          "title": "OverviewClassification",
+          "type": "object"
+        },
+        "OverviewClassificationCounts": {
+          "additionalProperties": false,
+          "properties": {
+            "application_entry": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Application Entry",
+              "type": "integer"
+            },
+            "extension_point": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Extension Point",
+              "type": "integer"
+            },
+            "public_api": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Public Api",
+              "type": "integer"
+            },
+            "unknown": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Unknown",
+              "type": "integer"
+            }
+          },
+          "title": "OverviewClassificationCounts",
+          "type": "object"
+        },
+        "OverviewClassificationCoverage": {
+          "additionalProperties": false,
+          "properties": {
+            "category_counts": {
+              "$ref": "#/$defs/OverviewClassificationCounts"
+            },
+            "total": {
+              "minimum": 0,
+              "title": "Total",
+              "type": "integer"
+            },
+            "truncated": {
+              "title": "Truncated",
+              "type": "boolean"
+            },
+            "visible": {
+              "minimum": 0,
+              "title": "Visible",
+              "type": "integer"
+            },
+            "visible_category_counts": {
+              "$ref": "#/$defs/OverviewClassificationCounts"
+            }
+          },
+          "required": [
+            "total",
+            "visible",
+            "category_counts",
+            "visible_category_counts",
+            "truncated"
+          ],
+          "title": "OverviewClassificationCoverage",
+          "type": "object"
+        },
         "OverviewCoverage": {
           "additionalProperties": false,
           "description": "Counts that distinguish the visible bounded result from the snapshot.",
@@ -23654,6 +23831,9 @@
           "additionalProperties": false,
           "description": "A Python module classified by entry reachability, not by business meaning.",
           "properties": {
+            "classification_counts": {
+              "$ref": "#/$defs/OverviewClassificationCounts"
+            },
             "entry_point_ids": {
               "items": {
                 "maxLength": 200,
@@ -23827,6 +24007,16 @@
           "additionalProperties": false,
           "description": "Deterministic, rule-only overview of one project index snapshot.",
           "properties": {
+            "classification_coverage": {
+              "$ref": "#/$defs/OverviewClassificationCoverage"
+            },
+            "classifications": {
+              "items": {
+                "$ref": "#/$defs/OverviewClassification"
+              },
+              "title": "Classifications",
+              "type": "array"
+            },
             "coverage": {
               "$ref": "#/$defs/OverviewCoverage"
             },
@@ -33343,6 +33533,37 @@
     },
     "OverviewModule": {
       "$defs": {
+        "OverviewClassificationCounts": {
+          "additionalProperties": false,
+          "properties": {
+            "application_entry": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Application Entry",
+              "type": "integer"
+            },
+            "extension_point": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Extension Point",
+              "type": "integer"
+            },
+            "public_api": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Public Api",
+              "type": "integer"
+            },
+            "unknown": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Unknown",
+              "type": "integer"
+            }
+          },
+          "title": "OverviewClassificationCounts",
+          "type": "object"
+        },
         "Symbol": {
           "additionalProperties": false,
           "properties": {
@@ -33408,6 +33629,9 @@
       "additionalProperties": false,
       "description": "A Python module classified by entry reachability, not by business meaning.",
       "properties": {
+        "classification_counts": {
+          "$ref": "#/$defs/OverviewClassificationCounts"
+        },
         "entry_point_ids": {
           "items": {
             "maxLength": 200,
@@ -33802,6 +34026,183 @@
             "status"
           ],
           "title": "IndexSnapshot",
+          "type": "object"
+        },
+        "OverviewClassification": {
+          "additionalProperties": false,
+          "description": "One rule-confirmed architecture anchor, separate from static relations.",
+          "properties": {
+            "category": {
+              "enum": [
+                "application_entry",
+                "public_api",
+                "extension_point",
+                "unknown"
+              ],
+              "title": "Category",
+              "type": "string"
+            },
+            "classification_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Classification Id",
+              "type": "string"
+            },
+            "entry_point_id": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Entry Point Id"
+            },
+            "evidence": {
+              "items": {
+                "$ref": "#/$defs/Evidence"
+              },
+              "maxItems": 4,
+              "title": "Evidence",
+              "type": "array"
+            },
+            "evidence_error": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Evidence Error"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "label": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Label",
+              "type": "string"
+            },
+            "module_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Module Id",
+              "type": "string"
+            },
+            "rule_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Rule Id",
+              "type": "string"
+            },
+            "symbol_id": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Symbol Id"
+            },
+            "symbol_name": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Symbol Name",
+              "type": "string"
+            }
+          },
+          "required": [
+            "classification_id",
+            "index_id",
+            "category",
+            "module_id",
+            "symbol_name",
+            "label",
+            "rule_id"
+          ],
+          "title": "OverviewClassification",
+          "type": "object"
+        },
+        "OverviewClassificationCounts": {
+          "additionalProperties": false,
+          "properties": {
+            "application_entry": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Application Entry",
+              "type": "integer"
+            },
+            "extension_point": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Extension Point",
+              "type": "integer"
+            },
+            "public_api": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Public Api",
+              "type": "integer"
+            },
+            "unknown": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Unknown",
+              "type": "integer"
+            }
+          },
+          "title": "OverviewClassificationCounts",
+          "type": "object"
+        },
+        "OverviewClassificationCoverage": {
+          "additionalProperties": false,
+          "properties": {
+            "category_counts": {
+              "$ref": "#/$defs/OverviewClassificationCounts"
+            },
+            "total": {
+              "minimum": 0,
+              "title": "Total",
+              "type": "integer"
+            },
+            "truncated": {
+              "title": "Truncated",
+              "type": "boolean"
+            },
+            "visible": {
+              "minimum": 0,
+              "title": "Visible",
+              "type": "integer"
+            },
+            "visible_category_counts": {
+              "$ref": "#/$defs/OverviewClassificationCounts"
+            }
+          },
+          "required": [
+            "total",
+            "visible",
+            "category_counts",
+            "visible_category_counts",
+            "truncated"
+          ],
+          "title": "OverviewClassificationCoverage",
           "type": "object"
         },
         "OverviewCoverage": {
@@ -34284,6 +34685,9 @@
           "additionalProperties": false,
           "description": "A Python module classified by entry reachability, not by business meaning.",
           "properties": {
+            "classification_counts": {
+              "$ref": "#/$defs/OverviewClassificationCounts"
+            },
             "entry_point_ids": {
               "items": {
                 "maxLength": 200,
@@ -34618,6 +35022,16 @@
       "additionalProperties": false,
       "description": "Deterministic, rule-only overview of one project index snapshot.",
       "properties": {
+        "classification_coverage": {
+          "$ref": "#/$defs/OverviewClassificationCoverage"
+        },
+        "classifications": {
+          "items": {
+            "$ref": "#/$defs/OverviewClassification"
+          },
+          "title": "Classifications",
+          "type": "array"
+        },
         "coverage": {
           "$ref": "#/$defs/OverviewCoverage"
         },
