@@ -680,7 +680,7 @@ class RunBudget(ContractModel):
     max_tool_calls: PositiveInt = Field(default=8, le=12)
     max_model_calls: PositiveInt = Field(default=4, le=6)
     max_repair_calls: NonNegativeInt = Field(default=1, le=2)
-    max_seconds: PositiveInt = Field(default=30, le=120)
+    max_seconds: PositiveInt = Field(default=600, le=600)
     max_source_lines: PositiveInt = Field(default=200, le=200)
     max_total_source_lines: PositiveInt = Field(default=800, le=2_000)
     max_input_chars: PositiveInt = Field(default=60_000, le=100_000)

@@ -1703,6 +1703,10 @@ def test_mcp_external_run_persists_actual_tools_and_report(tmp_path: Path) -> No
         async with Client(parameters, read_timeout_seconds=10) as client:
             listed_tools = (await client.list_tools()).tools
             tools = {tool.name for tool in listed_tools}
+            start_tool = next(tool for tool in listed_tools if tool.name == "start_external_run")
+            seconds = start_tool.input_schema["properties"]["max_seconds"]
+            assert seconds["default"] == 600
+            assert seconds["maximum"] == 600
             assert {
                 "start_external_run",
                 "run_search_code",
@@ -1958,6 +1962,7 @@ def test_mcp_external_run_persists_actual_tools_and_report(tmp_path: Path) -> No
         f"/api/projects/{project_id}/sessions/{session_id}/runs/{external_run_id}",
     )
     assert status == 200
+    assert http_status["run"]["budget"]["max_seconds"] == 600
     assert http_status["run"]["mode"] == "external"
     assert http_status["run"]["execution_source"] == "codex"
     status, http_report = request(

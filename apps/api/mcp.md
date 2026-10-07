@@ -47,3 +47,5 @@ CODETRAIL_MCP_EXTERNAL_RUN_ENABLED = "1"
 ```
 
 不要提交真实密钥；配置文件位于被 Git 忽略的服务数据目录。设计与验收见 [统一接口决策](../../docs/decisions/2026-09-11-agent-native-interfaces.md)、[Run 决策](../../docs/decisions/2026-09-12-run-execution.md)、[Codex 外部 Agent Run 决策](../../docs/decisions/2026-09-13-external-agent-run.md)、[代码理解流程与证据报告决策](../../docs/decisions/2026-09-14-code-understanding-explanation.md)、[本地项目索引新鲜度与显式更新](../../docs/decisions/2026-09-15-index-freshness.md)、[GitHub 远端 ref 新鲜度与显式更新](../../docs/decisions/2026-09-16-github-remote-freshness.md)、[GitHub 更新的跨进程提交一致性](../../docs/decisions/2026-09-16-github-update-commit-consistency.md) 和 [文件关系事实缓存与全快照目标解析](../../docs/decisions/2026-09-15-relation-facts-cache.md)。
+
+调查 Run 的 `max_seconds` 默认与上限均为 600 秒（10 分钟），HTTP 与 MCP 使用相同预算契约，可显式设置 1–600 秒。新默认只作用于新建 Run，已持久化 Run 保留冻结预算；external Run 在后续请求到来时检查总时长，不承诺到期立即强制终止。

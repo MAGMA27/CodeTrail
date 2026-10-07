@@ -607,9 +607,9 @@
               "type": "integer"
             },
             "max_seconds": {
-              "default": 30,
+              "default": 600,
               "exclusiveMinimum": 0,
-              "maximum": 120,
+              "maximum": 600,
               "title": "Max Seconds",
               "type": "integer"
             },
@@ -1917,9 +1917,9 @@
               "type": "integer"
             },
             "max_seconds": {
-              "default": 30,
+              "default": 600,
               "exclusiveMinimum": 0,
-              "maximum": 120,
+              "maximum": 600,
               "title": "Max Seconds",
               "type": "integer"
             },
@@ -4118,9 +4118,9 @@
               "type": "integer"
             },
             "max_seconds": {
-              "default": 30,
+              "default": 600,
               "exclusiveMinimum": 0,
-              "maximum": 120,
+              "maximum": 600,
               "title": "Max Seconds",
               "type": "integer"
             },
@@ -11590,9 +11590,9 @@
               "type": "integer"
             },
             "max_seconds": {
-              "default": 30,
+              "default": 600,
               "exclusiveMinimum": 0,
-              "maximum": 120,
+              "maximum": 600,
               "title": "Max Seconds",
               "type": "integer"
             },
@@ -25885,9 +25885,9 @@
               "type": "integer"
             },
             "max_seconds": {
-              "default": 30,
+              "default": 600,
               "exclusiveMinimum": 0,
-              "maximum": 120,
+              "maximum": 600,
               "title": "Max Seconds",
               "type": "integer"
             },
@@ -28237,9 +28237,9 @@
               "type": "integer"
             },
             "max_seconds": {
-              "default": 30,
+              "default": 600,
               "exclusiveMinimum": 0,
-              "maximum": 120,
+              "maximum": 600,
               "title": "Max Seconds",
               "type": "integer"
             },
@@ -29610,9 +29610,9 @@
               "type": "integer"
             },
             "max_seconds": {
-              "default": 30,
+              "default": 600,
               "exclusiveMinimum": 0,
-              "maximum": 120,
+              "maximum": 600,
               "title": "Max Seconds",
               "type": "integer"
             },
@@ -36321,9 +36321,9 @@
               "type": "integer"
             },
             "max_seconds": {
-              "default": 30,
+              "default": 600,
               "exclusiveMinimum": 0,
-              "maximum": 120,
+              "maximum": 600,
               "title": "Max Seconds",
               "type": "integer"
             },
@@ -37601,9 +37601,9 @@
               "type": "integer"
             },
             "max_seconds": {
-              "default": 30,
+              "default": 600,
               "exclusiveMinimum": 0,
-              "maximum": 120,
+              "maximum": 600,
               "title": "Max Seconds",
               "type": "integer"
             },
@@ -39930,9 +39930,9 @@
               "type": "integer"
             },
             "max_seconds": {
-              "default": 30,
+              "default": 600,
               "exclusiveMinimum": 0,
-              "maximum": 120,
+              "maximum": 600,
               "title": "Max Seconds",
               "type": "integer"
             },
@@ -40445,9 +40445,9 @@
               "type": "integer"
             },
             "max_seconds": {
-              "default": 30,
+              "default": 600,
               "exclusiveMinimum": 0,
-              "maximum": 120,
+              "maximum": 600,
               "title": "Max Seconds",
               "type": "integer"
             },
@@ -43458,9 +43458,9 @@
               "type": "integer"
             },
             "max_seconds": {
-              "default": 30,
+              "default": 600,
               "exclusiveMinimum": 0,
-              "maximum": 120,
+              "maximum": 600,
               "title": "Max Seconds",
               "type": "integer"
             },

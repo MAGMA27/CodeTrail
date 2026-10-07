@@ -48,3 +48,5 @@ Run 固定 `project_id/session_id/index_id`、Issue、模式、场景、版本�
 - [统一接口决策](../../docs/decisions/2026-09-11-agent-native-interfaces.md)
 - [Codex 外部 Agent Run 决策](../../docs/decisions/2026-09-13-external-agent-run.md)
 - [external Run 的代码理解流程与证据报告](../../docs/decisions/2026-09-14-code-understanding-explanation.md)
+
+调查 Run 的 `max_seconds` 默认与上限均为 600 秒（10 分钟），HTTP 与 MCP 使用相同预算契约，可显式设置 1–600 秒。新默认只作用于新建 Run，已持久化 Run 保留冻结预算；external Run 在后续请求到来时检查总时长，不承诺到期立即强制终止。
