@@ -46,3 +46,18 @@ API (`codetrail api`) 与 MCP (`codetrail mcp`) 都读取 `~/.config/codetrail/s
 不要提交真实密钥；配置文件位于被 Git 忽略的服务数据目录。设计与验收见 [统一接口决策](../../docs/decisions/2026-09-11-agent-native-interfaces.md)、[Run 决策](../../docs/decisions/2026-09-12-run-execution.md)、[Codex 外部 Agent Run 决策](../../docs/decisions/2026-09-13-external-agent-run.md)、[代码理解流程与证据报告决策](../../docs/decisions/2026-09-14-code-understanding-explanation.md)、[本地项目索引新鲜度与显式更新](../../docs/decisions/2026-09-15-index-freshness.md)、[GitHub 远端 ref 新鲜度与显式更新](../../docs/decisions/2026-09-16-github-remote-freshness.md)、[GitHub 更新的跨进程提交一致性](../../docs/decisions/2026-09-16-github-update-commit-consistency.md) 和 [文件关系事实缓存与全快照目标解析](../../docs/decisions/2026-09-15-relation-facts-cache.md)。
 
 调查 Run 的 `max_seconds` 默认与上限均为 600 秒（10 分钟），HTTP 与 MCP 使用相同预算契约，可显式设置 1–600 秒。新默认只作用于新建 Run，已持久化 Run 保留冻结预算；external Run 在后续请求到来时检查总时长，不承诺到期立即强制终止。
+
+## 本地路径配置与故障排查
+
+首次 `codetrail init` 默认允许当前目录。要导入其他项目，编辑 `~/.config/codetrail/settings.json` 的 `allowed_import_roots`，例如 `["D:/Dev"]`，保存后重启 API。既有 settings 不会被 init 参数覆盖；`--allow-root` 和 `--typescript-compiler` 仅用于首次创建设置。
+
+GitHub HTTP 导入默认开启，可通过 settings 的 `github_import_enabled=false` 或环境变量 `CODETRAIL_GITHUB_IMPORT_ENABLED=0` 关闭。可选的服务端 `CODETRAIL_GITHUB_TOKEN` 用于降低未认证请求限流影响；MCP GitHub 写能力仍独立开启。
+
+- 找不到 codetrail：执行 `uv tool update-shell` 并重新打开终端。
+- 本地导入被拒绝：核对允许根目录、绝对路径和符号链接边界；修改 settings 后重启 API。
+- Codex 看不到项目或网页看不到 Run：核对 API/MCP 使用同一配置文件及 data_dir，并选择同一个项目和 Session；CODETRAIL_DATA_DIR 环境变量优先于文件。
+- 没有 external Run 工具：核对 settings 的 external_run_enabled（默认 true），然后重连 MCP；CODETRAIL_MCP_EXTERNAL_RUN_ENABLED 环境变量优先于文件。
+- 初始化后仍缺编译器：先安装源码工作区依赖。已有 settings 不会自动补写发现的编译器地址；需要跨目录启动 MCP 时，在 settings 中设置 typescript_compiler。
+- 修改源码后行为未更新：执行 `uv tool install --force ./apps/api`，再重启 API/MCP；安装副本不会自动跟随源码变化。
+
+Web 仍从源码运行。Node.js 最低声明为 20.9，但需兼容根 package.json 指定的 pnpm 版本；具体依赖由锁文件维护。根 .env.example 是环境变量参考，CLI 和启动脚本不会自动加载它。
