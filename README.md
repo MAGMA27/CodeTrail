@@ -14,6 +14,8 @@ uv sync --project apps/api --locked
 uv tool install ./apps/api
 ```
 
+若安装后找不到 `codetrail`，执行 `uv tool update-shell` 并重新打开终端。修改源码不会自动更新已安装的副本；更新安装使用 `uv tool install --force ./apps/api`。
+
 TypeScript 项目索引需要 Node.js 和上述安装得到的 TypeScript 解析器。浏览结构和使用 Codex external Run 不需要额外配置模型供应商密钥。
 
 ## 首次启动
@@ -44,7 +46,7 @@ pwsh -File .\scripts\start-local.ps1 -Service web
 - **本地目录**：填写名称与服务端可见的绝对路径，例如 `D:/Dev/MyProject`，点击“导入并建立索引”。路径必须位于允许根目录内。来源只读，索引与运行数据写入服务管理目录。
 - **GitHub HTTPS**：填写公开仓库地址，例如 `https://github.com/pytest-dev/pluggy`，可指定 ref。服务先解析到固定 commit，再获取官方 archive 建立索引。
 
-GitHub 导入默认关闭，需要在启动 API **之前**设置：
+GitHub 导入默认关闭。推荐把共享 settings.json 中的 `github_import_enabled` 改为 `true`，然后重启 API；也可在启动 API **之前**临时覆盖：
 
 ```powershell
 $env:CODETRAIL_GITHUB_IMPORT_ENABLED = '1'
@@ -125,8 +127,8 @@ Session 的“Issue 分析”支持选择 fixture 场景、点击“启动离线
 ## 常见问题与范围
 
 - 本地路径被拒绝：核对允许根目录、绝对路径和符号链接边界，修改共享 settings.json 后重启 API。
-- Codex 看不到项目或网页看不到 Run：核对 API/MCP 的 `CODETRAIL_DATA_DIR` 及当前 project/Session。
-- 没有 external 工具：确认 MCP 配置启用了 `CODETRAIL_MCP_EXTERNAL_RUN_ENABLED=1`，然后重连。
+- Codex 看不到项目或网页看不到 Run：核对 API/MCP 使用同一 settings.json 和 data_dir，以及当前 project/Session；已有 CODETRAIL_DATA_DIR 环境变量会覆盖文件。
+- 没有 external 工具：确认共享配置的 external_run_enabled 为 true，再重连 MCP；该项默认开启。显式 CODETRAIL_MCP_EXTERNAL_RUN_ENABLED 环境变量会覆盖文件。
 - 图不完整：查看 `unresolved`、覆盖与截断提示；零邻居不证明无影响，动态调用不伪造确定边。
 - 主闭环已通过已知真实 Issue 复测，不代表普适分析质量或完整复现 CodeGraph/Archify。真人画布 40 模块与分类证据 40,000 字符预算的触发验收尚未完成；TypeScript 导出分类不属于当前 MVP 必需范围。
 
