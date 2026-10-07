@@ -26,7 +26,7 @@ args = ["mcp"]
 
 API (`codetrail api`) 与 MCP (`codetrail mcp`) 都读取 `~/.config/codetrail/settings.json`，不把业务配置复制进 Codex。配置包含 `data_dir`、`allowed_import_roots`、`workbench_url`、`web_origins`、`github_import_enabled`、`external_run_enabled` 和可选 `typescript_compiler`。路径必须是绝对路径，导入根目录必须存在；未识别字段拒绝启动。环境变量优先。自定义文件使用 `--config` 或 `CODETRAIL_CONFIG`；`codetrail --config C:/path/settings.json install` 注册时保存同一文件位置。修改配置后重启 API/MCP，已运行进程不会热加载。
 
-`codetrail install --print-config` 只预览注册内容；`status` 显示配置位置和宿主注册，`uninstall` 只移除 codetrail 注册，不删除项目数据或用户配置。安装后的包含 stdio 服务和 TypeScript parser，但 TypeScript 编译器仍为外部锁定依赖；设置 `typescript_compiler` 为其 typescript.js 路径。开发时 `uv run --directory apps/api codetrail ...` 使用相同入口。
+`codetrail install --print-config` 只预览注册内容；`status` 显示配置位置和宿主注册，`uninstall` 只移除 codetrail 注册，不删除项目数据或用户配置。安装后的包包含 stdio 服务和 TypeScript parser，但不包含 TypeScript 编译器。创建 settings 时，`codetrail init` 从 CodeTrail 源码工作区的 `apps/web/node_modules/typescript` 或根 `node_modules/typescript` 只读检查 package.json，只有版本为 5.9.3 时才记录路径；已有配置不改写。settings 未配置路径时，API/MCP 仅在从同一源码工作区启动时尝试发现；从其他目录启动需配置 `typescript_compiler` 或 `CODETRAIL_TYPESCRIPT_COMPILER`。没有编译器时 Python 可用，TypeScript/TSX 新索引会返回明确解析失败。可用 `--typescript-compiler` 或 `CODETRAIL_TYPESCRIPT_COMPILER` 指向锁定的 typescript.js。开发时 `uv run --directory apps/api codetrail ...` 使用相同入口。
 
 需要通过 MCP 显式更新索引时，再单独加入 `CODETRAIL_MCP_INDEX_WRITE_ENABLED = "1"`；默认不注册 `refresh_index`。修改 MCP 代码后对 `codetrail` 做一次 reload 或重启 Codex，服务端运行目录无需清理。
 

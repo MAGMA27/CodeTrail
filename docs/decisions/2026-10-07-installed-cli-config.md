@@ -10,9 +10,9 @@ Status: implemented
 
 Python 包提供 codetrail console entry point，使用 uv tool install 安装。Codex 默认只注册 codetrail mcp。API/MCP 共用用户目录下 .config/codetrail/settings.json；显式 --config 或 CODETRAIL_CONFIG 选择其他文件，业务环境变量优先于文件。配置修改需要重启服务，不实现热加载。
 
-init 只初始化缺失文件，保留已有配置；默认数据目录为用户目录下 .local/share/codetrail，默认导入根为空。源码便利脚本初始化到既有 .codetrail-runtime 并允许当前仓库，仍保留已有配置。旧 startup.json 不再读取且不删除，其他来源白名单需转入共享设置。既有索引与报告不迁移、不清理。
+init 只初始化缺失文件，保留已有配置；默认数据目录为用户目录下 .local/share/codetrail，默认导入根为调用者当前目录的绝对路径。`--allow-root` 显式给出时仅使用传入目录。源码便利脚本仍初始化到既有 .codetrail-runtime 并允许当前仓库，保留已有配置。旧 startup.json 不再读取且不删除，其他来源白名单需转入共享设置。既有索引与报告不迁移、不清理。
 
-install 默认保留既有 codetrail 注册，--replace 显式更新；--print-config 只预览，status 检查注册，uninstall 只移除指定注册。沿用 Codex CLI，不另写 TOML 编辑器。TypeScript parser 随包安装，编译器通过 settings 的 typescript_compiler 指定，仍校验锁定版本。Web 与离线演示样本仍需源码工作区，本轮不打包前端或演示仓库。
+install 默认保留既有 codetrail 注册，--replace 显式更新；--print-config 只预览，status 检查注册，uninstall 只移除指定注册。沿用 Codex CLI，不另写 TOML 编辑器。TypeScript parser 随包安装，编译器不随包分发；在可识别的 CodeTrail 源码工作区内，只读检查两个固定 node_modules 位置的 package.json 并接受锁定 5.9.3。settings 缺少路径时，只有从该源码工作区启动的运行时才使用此有界发现；不修改已有 settings。显式 settings 路径和环境变量优先，解析器仍验证编译器版本。Web 与离线演示样本仍需源码工作区，本轮不打包前端或演示仓库。
 
 ## 替代方案
 
@@ -20,8 +20,8 @@ install 默认保留既有 codetrail 注册，--replace 显式更新；--print-c
 
 ## 后果
 
-安装后的包独立于源码目录，但源码更新需重新安装；前端与 TypeScript 编译器不属于自包含发行包。只实现当前 Codex 适配，不增加多宿主安装框架。
+安装后的包独立于源码目录，但源码更新需重新安装；前端与 TypeScript 编译器不属于自包含发行包。若未发现编译器，Python 索引仍可用，TypeScript/TSX 索引明确失败。只实现当前 Codex 适配，不增加多宿主安装框架。
 
 ## 验收与证据
 
-CLI/TypeScript 定向测试 23 passed；实际 uv tool 安装后 API 健康接口返回 200，已停止测试 API。冷 stdio 客户端完成初始化、列出 28 项工具并成功读取项目。本机 codetrail 注册已变为稳定命令且无业务环境变量；当前宿主原进程未强制重载，需用户重连加载。配置与入口见 [API MCP 文档](../../apps/api/mcp.md)，测试见 [CLI 测试](../../apps/api/tests/test_cli.py)。
+原安装入口验收：CLI/TypeScript 定向测试 23 passed；实际 uv tool 安装后 API 健康接口返回 200，冷 stdio 客户端完成初始化、列出 28 项工具并成功读取项目。本机 codetrail 注册已变为稳定命令且无业务环境变量。后续 init 默认与编译器发现的定向验收见本阶段进度记录；配置与入口见 [API MCP 文档](../../apps/api/mcp.md)，测试见 [CLI 测试](../../apps/api/tests/test_cli.py)。

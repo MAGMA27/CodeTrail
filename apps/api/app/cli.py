@@ -6,8 +6,11 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from .indexing import TYPESCRIPT_COMPILER_VERSION
 
 
 class Settings(BaseModel):
@@ -37,6 +40,67 @@ def load_settings(path: Path) -> Settings:
     return settings
 
 
+def discover_typescript_compiler(cwd: Path | None = None) -> Path | None:
+    """Find the locked compiler only inside a recognizable CodeTrail workspace."""
+    directory = (cwd or Path.cwd()).resolve()
+    root = None
+    for candidate in (directory, *directory.parents):
+        try:
+            package = json.loads((candidate / "package.json").read_text(encoding="utf-8"))
+            web_package = json.loads((candidate / "apps/web/package.json").read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        if (
+            isinstance(package, dict)
+            and isinstance(web_package, dict)
+            and package.get("name") == "codetrail"
+            and web_package.get("name") == "@codetrail/web"
+            and (candidate / "apps/api/app/cli.py").is_file()
+        ):
+            root = candidate.resolve()
+            break
+    if root is None:
+        return None
+
+    for package_dir in (root / "apps/web/node_modules/typescript", root / "node_modules/typescript"):
+        try:
+            package_dir = package_dir.resolve(strict=True)
+            if not package_dir.is_relative_to(root):
+                continue
+            package = json.loads((package_dir / "package.json").read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        compiler = package_dir / "lib/typescript.js"
+        if not isinstance(package, dict) or package.get("name") != "typescript" or package.get("version") != TYPESCRIPT_COMPILER_VERSION:
+            continue
+        try:
+            compiler = compiler.resolve(strict=True)
+        except OSError:
+            continue
+        if compiler.is_file() and compiler.is_relative_to(root):
+            return compiler
+    return None
+
+
+def warn_typescript_unavailable(settings_preserved: bool = False) -> None:
+    message = (
+        f"codetrail: locked TypeScript {TYPESCRIPT_COMPILER_VERSION} compiler not found; Python indexing remains available, "
+        "but TypeScript/TSX indexing will fail. Run pnpm install --frozen-lockfile in the CodeTrail "
+        "workspace or configure typescript_compiler / CODETRAIL_TYPESCRIPT_COMPILER."
+    )
+    if settings_preserved:
+        message += " Existing settings were preserved; edit that file or use the environment variable."
+    print(message, file=sys.stderr)
+
+
+def warn_typescript_not_persisted() -> None:
+    print(
+        f"codetrail: TypeScript {TYPESCRIPT_COMPILER_VERSION} was found in this workspace, but existing settings were preserved; "
+        "API/MCP started from another directory need typescript_compiler or CODETRAIL_TYPESCRIPT_COMPILER configured.",
+        file=sys.stderr,
+    )
+
+
 def apply_settings(settings: Settings) -> None:
     values = {
         "CODETRAIL_DATA_DIR": settings.data_dir,
@@ -47,8 +111,9 @@ def apply_settings(settings: Settings) -> None:
         "CODETRAIL_GITHUB_IMPORT_ENABLED": str(int(settings.github_import_enabled)),
         "CODETRAIL_MCP_EXTERNAL_RUN_ENABLED": str(int(settings.external_run_enabled)),
     }
-    if settings.typescript_compiler:
-        values["CODETRAIL_TYPESCRIPT_COMPILER"] = settings.typescript_compiler
+    compiler = settings.typescript_compiler or discover_typescript_compiler()
+    if compiler:
+        values["CODETRAIL_TYPESCRIPT_COMPILER"] = str(compiler)
     for key, value in values.items():
         os.environ.setdefault(key, value)
 
@@ -73,16 +138,26 @@ def main() -> None:
     path = config_path(args.config)
     try:
         if args.command == "init":
-            if not path.exists():
+            created = not path.exists()
+            compiler = None
+            if created:
+                compiler = Path(args.typescript_compiler).resolve() if args.typescript_compiler else discover_typescript_compiler()
                 settings = Settings(data_dir=str(Path(args.data_dir).resolve()),
-                    allowed_import_roots=[str(Path(root).resolve()) for root in args.allow_root],
-                    typescript_compiler=str(Path(args.typescript_compiler).resolve()) if args.typescript_compiler else None)
+                    allowed_import_roots=[str(Path(root).resolve()) for root in (args.allow_root or [str(Path.cwd())])],
+                    typescript_compiler=str(compiler) if compiler else None)
                 if any(not Path(root).is_dir() for root in settings.allowed_import_roots):
                     raise ValueError("allowed import roots must be existing directories")
                 path.parent.mkdir(parents=True, exist_ok=True)
                 with path.open("x", encoding="utf-8") as file:
                     file.write(settings.model_dump_json(indent=2) + "\n")
-            load_settings(path)
+            settings = load_settings(path)
+            configured_compiler = settings.typescript_compiler or os.getenv("CODETRAIL_TYPESCRIPT_COMPILER")
+            if not compiler and not created:
+                compiler = discover_typescript_compiler()
+            if not (configured_compiler or compiler):
+                warn_typescript_unavailable(settings_preserved=not created)
+            elif not created and not configured_compiler:
+                warn_typescript_not_persisted()
             print(path)
             return
         if args.command in {"install", "status", "uninstall"}:

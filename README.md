@@ -23,7 +23,7 @@ TypeScript 项目索引需要 Node.js 和上述安装得到的 TypeScript 解析
 在 API 终端执行：
 
 ```powershell
-codetrail init --allow-root . --typescript-compiler .\apps\web\node_modules\typescript\lib\typescript.js
+codetrail init
 codetrail api
 ```
 
@@ -35,7 +35,9 @@ pwsh -File .\scripts\start-local.ps1 -Service web
 
 打开 [工作台](http://localhost:3000)。[API 健康检查](http://127.0.0.1:8000/api/health) 应返回成功；[Swagger UI](http://127.0.0.1:8000/docs) 提供 HTTP 接口文档。默认端口为 8000/3000，若被占用，先在对应服务终端停止原实例。
 
-`init` 创建用户配置 `~/.config/codetrail/settings.json`，已有文件保持不变。上述初始化允许导入本项目并保存锁定 TypeScript 编译器位置；API 自动创建配置的数据目录。默认数据目录是 `~/.local/share/codetrail`，以实际配置的 `data_dir` 为准。
+首次创建 settings 时，从 CodeTrail 仓库根目录运行的 `init` 默认只允许导入当前目录，并自动发现工作区中锁定的 TypeScript 5.9.3 编译器；已有 settings 文件保持不变。API 自动创建配置的数据目录。默认数据目录是 `~/.local/share/codetrail`，以实际配置的 `data_dir` 为准。
+
+TypeScript 编译器来自 CodeTrail 源码工作区，不包含在 `codetrail` 安装包中。若未发现，初始化会提示；Python 索引仍可用，含 TypeScript/TSX 的索引会明确失败。安装工作区依赖后重试，或显式设置 `--typescript-compiler` / `CODETRAIL_TYPESCRIPT_COMPILER`。已有 settings 未记录编译器时，API/MCP 仅在从该源码工作区启动时能自动发现；从其他目录启动需配置 `typescript_compiler` 或环境变量。
 
 编辑配置可修改 `allowed_import_roots`、`data_dir`、`workbench_url`、`typescript_compiler` 和 `github_import_enabled`，重启相应服务即可。API/MCP 默认读取同一文件，环境变量优先于文件配置。根 `.env.example` 是参考，不自动加载。
 
@@ -90,7 +92,7 @@ codetrail status                       # 显示配置位置与注册状态
 codetrail uninstall                    # 只移除 MCP 注册，保留配置、数据和程序
 ```
 
-使用其他配置文件：`codetrail --config C:/path/settings.json api`；MCP 注册时用同样的 `--config` 参数。默认配置位置也可由 `CODETRAIL_CONFIG` 指定。独立初始化可通过 `init --data-dir ... --allow-root ...` 设置路径，`--allow-root` 可重复。Web 仍从源码目录启动，尚未提供独立前端安装包。
+使用其他配置文件：`codetrail --config C:/path/settings.json api`；MCP 注册时用同样的 `--config` 参数。默认配置位置也可由 `CODETRAIL_CONFIG` 指定。独立初始化可通过 `init --data-dir ... --allow-root ...` 设置路径，`--allow-root` 可重复；显式指定时将只使用列出的目录。Web 仍从源码目录启动，尚未提供独立前端安装包。
 
 ## 调查 Issue
 
