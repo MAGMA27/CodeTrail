@@ -40,3 +40,11 @@ CodeTrail 的不可变索引原先只捕获 Python 源码，无法展示前端 T
 v2 matcher 按 segment 检查客户端路径和 FastAPI 声明路径的 overlap 与完整 shape。参数化客户端只在唯一完整同形路由关联；同一模板还有固定字面路径可匹配时记为 ambiguous，只有部分字面覆盖时记为 unknown；不相交的 path converter 不影响其它候选，相交的 converter 保守标 unknown。路由候选截断时不能用可见候选证明唯一性。Association 保留服务端声明 path，并额外给出客户端模板；它仍是 method/path shape 关联，不确认运行时请求目标。
 
 `path_analysis` 与原 `analysis_status` 分开：新 v2 index 为 `parameterized`，兼容 v1 immutable snapshot 为 `literal_only`，没有 TypeScript fact marker 的旧 snapshot 为 `not_analyzed`。SQLite 迁移只为旧 HTTP facts 加 literal 默认值，不重写旧 snapshot 或 request identity；同源规则升级通过 `relations-v7` 生成新的 index id。PC 画布与列表继续独立显示 HTTP 关系，参数模板有单独类型标签，双端源码证据保持 index/hash 校验。该扩展的自动化与自用项目验收证据追加在对应阶段记录中。
+
+## v3 静态调用扩展（2026-10-07）
+
+TypeScript facts 升级为 `typescript-facts-v3`，调用解析语义升级为 `relations-v8`，index identity namespace 为 `relations-v12`。编译器 AST 为每个调用记录 caller 与精确调用行；仅解析词法可见、未遮蔽/重赋值且唯一的直接具名函数目标，包括同文件函数/函数值，以及显式 named import（含别名）指向唯一 captured 相对模块导出。函数值变量接受直接 arrow/function initializer，或恰有一个函数参数的调用包装器，用于定位 callback 的符号；这不证明包装器调用该 callback，也不生成 callback 执行边。
+
+对象/元素方法、动态表达式、参数/局部遮蔽、重绑定、别名路径（例如 `@/lib/api`）、缺失或多义目标都保留既有 unresolved。HTTP method/path association 和 Python `ContextualCall` 不转换成 `calls`。调用 facts 不新增 API/数据库 schema 或持久化缓存；成功解析的边和 unresolved 仍绑定同一 immutable index。单次 TS 解析最多提取 5,000 个调用；合并关系边的默认预算为 6,000 条，以容纳两种语言的确定关系，超限仍按关系覆盖报告。
+
+离线回归覆盖同文件函数、函数值、单函数包装 callback、relative import alias、遮蔽、重赋值、对象方法、path alias 和调用预算断言。CodeTrail 自用整仓的新 index、HTTP/冷 stdio/当前宿主 MCP 一致性以及 PC 源码跳转验收记在当前阶段记录；未实际执行这些验收前不得据此宣称端到端完成。

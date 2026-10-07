@@ -354,6 +354,31 @@ class TypeScriptImportDescription:
 
 
 @dataclass(frozen=True)
+class TypeScriptCallDescription:
+    """One bounded call expression with a caller and a proven local/import binding when available."""
+
+    caller_qualified_name: str
+    caller_start_line: int
+    target_qualified_name: str | None
+    target_start_line: int | None
+    import_specifier: str | None
+    imported_name: str | None
+    expression: str
+    reason: str | None
+    start_line: int
+    end_line: int
+
+
+@dataclass(frozen=True)
+class TypeScriptExportDescription:
+    """One directly declared or explicitly re-exported named callable."""
+
+    exported_name: str
+    target_qualified_name: str
+    target_start_line: int
+
+
+@dataclass(frozen=True)
 class TypeScriptHttpRequestDescription:
     """A method/path pair forwarded by a structurally verified fetch wrapper."""
 
@@ -390,6 +415,10 @@ class DefinitionIndex:
         default=(), compare=False, repr=False
     )
     typescript_imports: tuple[tuple[str, TypeScriptImportDescription], ...] = ()
+    typescript_calls: tuple[tuple[str, TypeScriptCallDescription], ...] = ()
+    typescript_exports: tuple[tuple[str, TypeScriptExportDescription], ...] = ()
+    typescript_calls_truncated: bool = False
+    typescript_calls_truncation_reason: str | None = None
     typescript_http_requests: tuple[tuple[str, TypeScriptHttpRequestDescription], ...] = ()
     typescript_parse_file_count: int = field(default=0, compare=False)
 
@@ -474,7 +503,7 @@ def build_source_snapshot(
 SOURCE_CAPTURE_RULES_VERSION = "source-v4"
 DEFINITION_EXTRACTION_RULES_VERSION = "python-definitions-v1"
 TYPESCRIPT_COMPILER_VERSION = "5.9.3"
-TYPESCRIPT_FACT_RULES_VERSION = "typescript-facts-v2"
+TYPESCRIPT_FACT_RULES_VERSION = "typescript-facts-v3"
 _TYPESCRIPT_PARSER_TIMEOUT_SECONDS = 15
 _TYPESCRIPT_PARSER_MAX_INPUT_BYTES = 20 * 1024 * 1024
 _TYPESCRIPT_PARSER_MAX_OUTPUT_BYTES = 8 * 1024 * 1024
@@ -795,6 +824,10 @@ def extract_definitions(
         if source_file.path.lower().endswith((".ts", ".tsx"))
     )
     typescript_imports: list[tuple[str, TypeScriptImportDescription]] = []
+    typescript_calls: list[tuple[str, TypeScriptCallDescription]] = []
+    typescript_exports: list[tuple[str, TypeScriptExportDescription]] = []
+    typescript_calls_truncated = False
+    typescript_calls_truncation_reason: str | None = None
     typescript_http_requests: list[tuple[str, TypeScriptHttpRequestDescription]] = []
     typescript_parse_file_count = 0
     for source_file in snapshot.files:
@@ -847,6 +880,9 @@ def extract_definitions(
             file_facts = facts.get(source_file.path)
             if file_facts is None:
                 continue
+            if file_facts.get("calls_truncated") is True:
+                typescript_calls_truncated = True
+                typescript_calls_truncation_reason = str(file_facts.get("calls_truncation_reason") or "TypeScript call facts truncated")[:200]
             for definition in file_facts.get("definitions", []):
                 symbols.append(
                     _build_symbol(
@@ -870,6 +906,25 @@ def extract_definitions(
                         ),
                     )
                 )
+            for item in file_facts.get("calls", []):
+                typescript_calls.append((source_file.path, TypeScriptCallDescription(
+                    caller_qualified_name=str(item["caller_qualified_name"]),
+                    caller_start_line=int(item["caller_start_line"]),
+                    target_qualified_name=item.get("target_qualified_name"),
+                    target_start_line=item.get("target_start_line"),
+                    import_specifier=item.get("import_specifier"),
+                    imported_name=item.get("imported_name"),
+                    expression=str(item["expression"]),
+                    reason=item.get("reason"),
+                    start_line=int(item["start_line"]),
+                    end_line=int(item["end_line"]),
+                )))
+            for item in file_facts.get("exports", []):
+                typescript_exports.append((source_file.path, TypeScriptExportDescription(
+                    exported_name=str(item["exported_name"]),
+                    target_qualified_name=str(item["target_qualified_name"]),
+                    target_start_line=int(item["target_start_line"]),
+                )))
             for item in file_facts.get("http_requests", []):
                 path_kind = item.get("path_kind", "literal")
                 path = item.get("path")
@@ -937,6 +992,10 @@ def extract_definitions(
         cache_entries=tuple(cache_entries),
         parsed_trees=tuple(parsed_trees),
         typescript_imports=tuple(typescript_imports),
+        typescript_calls=tuple(typescript_calls),
+        typescript_exports=tuple(typescript_exports),
+        typescript_calls_truncated=typescript_calls_truncated,
+        typescript_calls_truncation_reason=typescript_calls_truncation_reason,
         typescript_http_requests=tuple(typescript_http_requests),
         typescript_parse_file_count=typescript_parse_file_count,
     )
@@ -944,7 +1003,7 @@ def extract_definitions(
 
 def _extract_typescript_facts(
     source_files: tuple[SnapshotFile, ...],
-) -> tuple[dict[str, dict[str, list[dict[str, object]]]], list[SnapshotIssue]]:
+) -> tuple[dict[str, dict[str, object]], list[SnapshotIssue]]:
     """Parse captured TS/TSX text with the repository's locked TypeScript compiler."""
 
     if not source_files:
@@ -1021,7 +1080,21 @@ def _extract_typescript_facts(
         definitions = item.get("definitions")
         imports = item.get("imports")
         requests = item.get("http_requests")
-        if not isinstance(definitions, list) or not isinstance(imports, list) or not isinstance(requests, list):
+        calls = item.get("calls")
+        exports = item.get("exports")
+        calls_truncated = item.get("calls_truncated")
+        calls_truncation_reason = item.get("calls_truncation_reason")
+        if (
+            not isinstance(definitions, list)
+            or not isinstance(imports, list)
+            or not isinstance(requests, list)
+            or not isinstance(calls, list)
+            or not isinstance(exports, list)
+            or not isinstance(calls_truncated, bool)
+            or calls_truncation_reason is not None and not isinstance(calls_truncation_reason, str)
+            or calls_truncated and (not isinstance(calls_truncation_reason, str) or not calls_truncation_reason)
+            or not calls_truncated and calls_truncation_reason is not None
+        ):
             return {}, [SnapshotIssue("__snapshot__", "parser_error", "TypeScript parser returned an invalid fact list")]
         for definition in definitions:
             if (
@@ -1040,6 +1113,69 @@ def _extract_typescript_facts(
                 or not _valid_parser_range(item_fact, line_count)
             ):
                 return {}, [SnapshotIssue("__snapshot__", "parser_error", "TypeScript parser returned an invalid import fact")]
+        for call in calls:
+            if (
+                not isinstance(call, dict)
+                or not isinstance(call.get("caller_qualified_name"), str)
+                or not call["caller_qualified_name"]
+                or len(call["caller_qualified_name"]) > 500
+                or not _valid_parser_range({"start_line": call.get("caller_start_line"), "end_line": call.get("caller_start_line")}, line_count)
+                or call.get("target_qualified_name") is not None and (
+                    not isinstance(call.get("target_qualified_name"), str)
+                    or not call["target_qualified_name"]
+                    or len(call["target_qualified_name"]) > 500
+                )
+                or call.get("target_start_line") is not None and (
+                    not isinstance(call.get("target_start_line"), int)
+                    or isinstance(call.get("target_start_line"), bool)
+                )
+                or call.get("import_specifier") is not None and (
+                    not isinstance(call.get("import_specifier"), str)
+                    or not call["import_specifier"]
+                    or len(call["import_specifier"]) > 1_000
+                )
+                or call.get("imported_name") is not None and (
+                    not isinstance(call.get("imported_name"), str)
+                    or not call["imported_name"]
+                    or len(call["imported_name"]) > 500
+                )
+                or not isinstance(call.get("expression"), str)
+                or not call["expression"]
+                or len(call["expression"]) > 500
+                or call.get("reason") is not None and (
+                    not isinstance(call.get("reason"), str)
+                    or not call["reason"]
+                    or len(call["reason"]) > 200
+                )
+                or not _valid_parser_range(call, line_count)
+                or (call.get("target_qualified_name") is None) != (call.get("target_start_line") is None)
+                or (call.get("import_specifier") is None) != (call.get("imported_name") is None)
+                or call.get("target_qualified_name") is not None and (
+                    call.get("import_specifier") is not None or call.get("reason") is not None
+                )
+                or call.get("import_specifier") is not None and (
+                    call.get("target_qualified_name") is not None or call.get("reason") is not None
+                )
+                or call.get("target_qualified_name") is None
+                and call.get("import_specifier") is None
+                and call.get("reason") is None
+            ):
+                return {}, [SnapshotIssue("__snapshot__", "parser_error", "TypeScript parser returned an invalid call fact")]
+        for exported in exports:
+            if (
+                not isinstance(exported, dict)
+                or not isinstance(exported.get("exported_name"), str)
+                or not exported["exported_name"]
+                or len(exported["exported_name"]) > 500
+                or not isinstance(exported.get("target_qualified_name"), str)
+                or not exported["target_qualified_name"]
+                or len(exported["target_qualified_name"]) > 500
+                or not _valid_parser_range(
+                    {"start_line": exported.get("target_start_line"), "end_line": exported.get("target_start_line")},
+                    line_count,
+                )
+            ):
+                return {}, [SnapshotIssue("__snapshot__", "parser_error", "TypeScript parser returned an invalid export fact")]
         for request in requests:
             if (
                 not isinstance(request, dict)

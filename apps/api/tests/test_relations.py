@@ -680,6 +680,13 @@ def test_code_trail_workspace_service_reader_stays_unresolved_after_new_bypass()
     }
 
     assert result.truncated is False
+    assert any(
+        names[edge.source_id].endswith("Workbench.openArchitectureSource")
+        and names[edge.target_id].endswith("api.readProjectSource")
+        and edge.source_location.path == "apps/web/app/workbench.tsx"
+        for edge in result.edges
+        if edge.kind == "calls" and edge.extraction_method == "ast"
+    )
     assert (
         "apps.api.app.service.WorkspaceService.read_source",
         "apps.api.app.service.IndexService.read_source",

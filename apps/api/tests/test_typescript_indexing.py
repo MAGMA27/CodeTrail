@@ -207,6 +207,83 @@ def test_unresolved_capacity_does_not_hide_later_typescript_import_edges(tmp_pat
     assert result.unresolved_truncated is True
 
 
+def test_typescript_calls_resolve_proven_bindings_and_keep_ambiguous_calls_unresolved(tmp_path: Path) -> None:
+    (tmp_path / "lib.ts").write_text(
+        "export function importedTarget() {}\n"
+        "function anotherTarget() {}\n"
+        "export { importedTarget as duplicated };\n"
+        "export { anotherTarget as duplicated };\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "main.ts").write_text(
+        'import { importedTarget as alias } from "./lib";\n'
+        'import { absent, duplicated } from "./lib";\n'
+        'import { readProjectSource } from "@/lib/api";\n'
+        "function localTarget() {}\n"
+        "const functionValue = () => {};\n"
+        "function withCallback(callback: () => void) { callback(); }\n"
+        "export function entry() {\n"
+        "  localTarget();\n"
+        "  functionValue();\n"
+        "  alias();\n"
+        "}\n"
+        "function missingExport() { absent(); }\n"
+        "function ambiguousExport() { duplicated(); }\n"
+        "function runWrapped() {\n"
+        "  const wrapped = withCallback(() => functionValue(), []);\n"
+        "  return wrapped;\n"
+        "}\n"
+        "export const openSource = withCallback(() => readProjectSource(), []);\n"
+        "function shadow(leaf: () => void) { leaf(); }\n"
+        "function rebound() {\n"
+        "  let changing = functionValue;\n"
+        "  changing();\n"
+        "  changing = () => {};\n"
+        "  changing();\n"
+        "}\n"
+        "function usesMethod(service: { run: () => void }) { service.run(); }\n"
+        "function catches() { try {} catch (localTarget) { localTarget(); } }\n",
+        encoding="utf-8",
+    )
+
+    definitions = extract_definitions(build_source_snapshot(tmp_path, repository_id="ts", revision="calls"))
+    result = extract_relations(definitions)
+    symbols = {symbol.symbol_id: symbol for symbol in result.symbols}
+    resolved = {
+        (symbols[edge.source_id].qualified_name, symbols[edge.target_id].qualified_name, edge.source_location.start_line)
+        for edge in result.edges
+        if edge.kind == "calls" and edge.extraction_method == "ast"
+    }
+    assert resolved == {
+        ("main.entry", "main.localTarget", 8),
+        ("main.entry", "main.functionValue", 9),
+        ("main.entry", "lib.importedTarget", 10),
+        ("main.runWrapped", "main.withCallback", 15),
+        ("main.runWrapped.wrapped", "main.functionValue", 15),
+    }
+    unresolved = {(item.expression, item.reason) for item in result.unresolved}
+    assert ("readProjectSource", "external_import_or_path_alias") in unresolved
+    assert ("leaf", "name_shadowed_in_scope") in unresolved
+    assert ("changing", "name_rebound_in_scope") in unresolved
+    assert ("service.run", "object_method_not_resolved") in unresolved
+    assert ("localTarget", "name_shadowed_in_scope") in unresolved
+    assert ("absent", "missing_named_export") in unresolved
+    assert ("duplicated", "ambiguous_named_import_target") in unresolved
+    assert not result.truncated
+
+
+def test_typescript_call_budget_marks_relation_coverage_truncated(tmp_path: Path) -> None:
+    calls = "\n".join("  target();" for _ in range(5_001))
+    (tmp_path / "many.ts").write_text(f"function target() {{}}\nfunction caller() {{\n{calls}\n}}\n", encoding="utf-8")
+
+    definitions = extract_definitions(build_source_snapshot(tmp_path, repository_id="ts", revision="budget"))
+    assert len(definitions.typescript_calls) == 5_000
+    assert definitions.typescript_calls_truncated
+    result = extract_relations(definitions, max_edges=6_000)
+    assert result.truncated
+    assert result.truncation_reason == "max_typescript_calls reached"
+
+
 def test_http_request_shape_rejects_shadowed_or_mutable_fetch_wrappers(tmp_path: Path) -> None:
     _write_http_project(tmp_path)
     (tmp_path / "web" / "api.ts").write_text("export const placeholder = 1;\n", encoding="utf-8")
@@ -527,7 +604,7 @@ def test_typescript_rule_upgrade_changes_index_identity_and_preserves_v1_snapsho
         ).fetchone()
         assert preserved["snapshot_hash"] == old_hash
         assert "typescript-facts-v1" in preserved["rules_version"]
-        assert "typescript-facts-v2" in current["rules_version"]
+        assert "typescript-facts-v3" in current["rules_version"]
         assert store.read_evidence(old_index_id, "web/api.ts", 1, 1).excerpt.startswith("const apiBaseUrl")
 
 

@@ -18,7 +18,7 @@
 - [run_execution.py](app/run_execution.py)：有界 daemon 线程中的 fixture/real Run 执行器，只调用白名单查询工具；external Run 不经过该内部 worker。
 - [run_sse.py](app/run_sse.py)：复用持久化事件表的有界 SSE 回放、断线游标和订阅容量管理。
 - [issue_analysis.py](app/issue_analysis.py)：real Run 的结构化模型输出、有限工具循环、预算和引用校验。
-- [indexing.py](app/indexing.py)、[typescript_parser.cjs](app/typescript_parser.cjs) 与 [relations.py](app/relations.py)：Python/TypeScript 快照、TypeScript AST 定义/相对导入、Python 文件级缓存、静态关系目标解析；TypeScript 每次有界冷解析，不伪装成 Python cache hit。
+- [indexing.py](app/indexing.py)、[typescript_parser.cjs](app/typescript_parser.cjs) 与 [relations.py](app/relations.py)：Python/TypeScript 快照、TypeScript AST 定义/导入/保守调用、Python 文件级缓存和静态关系目标解析；TypeScript 每次有界冷解析，不伪装成 Python cache hit。
 - [overview.py](app/overview.py)、[feature_generation.py](app/feature_generation.py) 与 [feature_graph.py](app/feature_graph.py)：同快照入口概览、唯一静态 HTTP method/path shape association、功能生成和功能图；HTTP 形状匹配不证明运行时请求目的地。
 - [mcp_server.py](app/mcp_server.py)：本地 MCP stdio 适配器，包含可选 Codex external Run 工具。
 - [config.py](app/config.py)：服务数据目录中的持久化模型供应商配置。

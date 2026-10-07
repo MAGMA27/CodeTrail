@@ -272,7 +272,8 @@ def test_real_stdio_client_matches_http_and_returns_evidence_link(tmp_path: Path
         encoding="utf-8",
     )
     roots = {"timeout-demo": repository}
-    application = create_app(roots)
+    data_root = tmp_path / "service-data"
+    application = create_app(roots, data_root=data_root)
 
     status, project = request(
         application,
@@ -339,6 +340,7 @@ def test_real_stdio_client_matches_http_and_returns_evidence_link(tmp_path: Path
 
     environment = {
         "CODETRAIL_REPOSITORIES": json.dumps({"timeout-demo": str(repository)}),
+        "CODETRAIL_DATA_DIR": str(data_root),
         "CODETRAIL_WORKBENCH_URL": "http://localhost:3000",
     }
     parameters = StdioServerParameters(
@@ -479,7 +481,8 @@ def test_constructor_attribute_calls_match_http_and_cold_stdio(tmp_path: Path) -
 def test_real_stdio_client_scopes_two_projects_with_same_named_symbols(tmp_path: Path) -> None:
     repository_one = copy_fixture(tmp_path, name="repo-one", default_timeout=30)
     repository_two = copy_fixture(tmp_path, name="repo-two", default_timeout=99)
-    application = create_app({"repo-one": repository_one, "repo-two": repository_two})
+    data_root = tmp_path / "service-data"
+    application = create_app({"repo-one": repository_one, "repo-two": repository_two}, data_root=data_root)
 
     project_ids: dict[str, str] = {}
     index_ids: dict[str, str] = {}
@@ -528,6 +531,7 @@ def test_real_stdio_client_scopes_two_projects_with_same_named_symbols(tmp_path:
             "CODETRAIL_REPOSITORIES": json.dumps(
                 {"repo-one": str(repository_one), "repo-two": str(repository_two)}
             ),
+            "CODETRAIL_DATA_DIR": str(data_root),
             "CODETRAIL_WORKBENCH_URL": "http://localhost:3000",
         },
         cwd=API_ROOT,
@@ -733,7 +737,8 @@ def test_mcp_local_import_is_opt_in_and_shares_http_state(tmp_path: Path) -> Non
 
 def test_mcp_index_refresh_is_separately_opt_in(tmp_path: Path) -> None:
     repository = copy_fixture(tmp_path, name="mcp-refresh")
-    application = create_app({"timeout-demo": repository})
+    data_root = tmp_path / "data"
+    application = create_app({"timeout-demo": repository}, data_root=data_root)
     status, project = request(
         application,
         "POST",
@@ -794,6 +799,7 @@ def test_mcp_index_refresh_is_separately_opt_in(tmp_path: Path) -> None:
 
     base_environment = {
         "CODETRAIL_REPOSITORIES": json.dumps({"timeout-demo": str(repository)}),
+        "CODETRAIL_DATA_DIR": str(data_root),
         "CODETRAIL_WORKBENCH_URL": "http://localhost:3000",
     }
 
@@ -979,7 +985,8 @@ def test_mcp_historical_refresh_reuses_snapshot_and_matches_http(tmp_path: Path)
 
 def test_mcp_feature_generation_is_separately_opt_in_and_returns_citations(tmp_path: Path) -> None:
     repository = copy_fixture(tmp_path)
-    application = create_app({"timeout-demo": repository})
+    data_root = tmp_path / "data"
+    application = create_app({"timeout-demo": repository}, data_root=data_root)
     status, project = request(
         application,
         "POST",
@@ -1002,6 +1009,7 @@ def test_mcp_feature_generation_is_separately_opt_in_and_returns_citations(tmp_p
         args=["-m", "app.mcp_server"],
         env={
             "CODETRAIL_REPOSITORIES": json.dumps({"timeout-demo": str(repository)}),
+            "CODETRAIL_DATA_DIR": str(data_root),
             "CODETRAIL_MCP_FEATURE_GENERATION_ENABLED": "1",
             "CODETRAIL_WORKBENCH_URL": "http://localhost:3000",
         },
@@ -1400,7 +1408,8 @@ async def _exercise_stdio(
 
 def test_mcp_run_reads_share_http_state_and_writes_are_separately_opt_in(tmp_path: Path) -> None:
     repository = copy_fixture(tmp_path)
-    application = create_app({"timeout-demo": repository})
+    data_root = tmp_path / "data"
+    application = create_app({"timeout-demo": repository}, data_root=data_root)
     status, project = request(
         application,
         "POST",
@@ -1435,6 +1444,7 @@ def test_mcp_run_reads_share_http_state_and_writes_are_separately_opt_in(tmp_pat
 
     environment = {
         "CODETRAIL_REPOSITORIES": json.dumps({"timeout-demo": str(repository)}),
+        "CODETRAIL_DATA_DIR": str(data_root),
         "CODETRAIL_WORKBENCH_URL": "http://localhost:3000",
     }
 

@@ -7,6 +7,7 @@ const compilerVersion = "5.9.3";
 const maxDefinitions = 20000;
 const maxImports = 20000;
 const maxRequests = 10000;
+const maxCalls = 5000;
 
 if (ts.version !== compilerVersion) throw new Error("locked TypeScript compiler version mismatch");
 
@@ -18,6 +19,8 @@ if (!input || !Array.isArray(input.files) || input.files.length > 2000) {
 let definitionCount = 0;
 let importCount = 0;
 let requestCount = 0;
+let callCount = 0;
+let callBudgetTruncated = false;
 const files = input.files.map(({ path: filePath, text }) => {
   if (typeof filePath !== "string" || typeof text !== "string") throw new Error("invalid source record");
   const source = ts.createSourceFile(
@@ -39,6 +42,8 @@ const files = input.files.map(({ path: filePath, text }) => {
   const definitions = [];
   const imports = [];
   const http_requests = [];
+  const calls = [];
+  const exports = [];
   const range = (node) => {
     const start = source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
     const end = source.getLineAndCharacterOfPosition(Math.max(node.getStart(source), node.end - 1)).line + 1;
@@ -54,8 +59,19 @@ const files = input.files.map(({ path: filePath, text }) => {
     if (node.name && (ts.isIdentifier(node.name) || ts.isPrivateIdentifier(node.name))) return node.name.text;
     return null;
   };
-  const visitDefinitions = (node, parentNames) => {
+  const isFunctionValue = (node) => ts.isArrowFunction(node) || ts.isFunctionExpression(node);
+  const functionValueFor = (declaration) => {
+    const initializer = declaration.initializer;
+    if (initializer && isFunctionValue(initializer)) return initializer;
+    if (!initializer || !ts.isCallExpression(initializer)) return null;
+    const values = initializer.arguments.filter(isFunctionValue);
+    return values.length === 1 ? values[0] : null;
+  };
+  const functionInfos = [];
+  const moduleName = filePath.replace(/\\/g, "/").replace(/\.(tsx?|mts|cts)$/i, "").replaceAll("/", ".");
+  const visitDefinitions = (node, parentNames, scopeNode = source) => {
     let nextNames = parentNames;
+    let nextScopeNode = scopeNode;
     let kind = null;
     if (ts.isClassDeclaration(node)) kind = "class";
     else if (
@@ -64,8 +80,7 @@ const files = input.files.map(({ path: filePath, text }) => {
       ts.isConstructorDeclaration(node) ||
       ts.isGetAccessorDeclaration(node) ||
       ts.isSetAccessorDeclaration(node) ||
-      ts.isVariableDeclaration(node) && node.initializer &&
-        (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer))
+      ts.isVariableDeclaration(node) && functionValueFor(node)
     ) kind = "function";
     if (kind) {
       const name = declarationName(node);
@@ -76,11 +91,32 @@ const files = input.files.map(({ path: filePath, text }) => {
         }
         definitions.push({ qualified_name, kind, ...range(node) });
         nextNames = [...parentNames, name];
+        if (kind === "function") {
+          const functionNode = ts.isVariableDeclaration(node) ? functionValueFor(node) : node;
+          const statementNode = ts.isVariableDeclaration(node) ? node.parent.parent : node;
+          const directBinding = scopeNode === source
+            ? statementNode.parent === source
+            : Boolean(scopeNode.body && statementNode.parent === scopeNode.body);
+          const info = {
+            qualified_name,
+            parent_names: parentNames,
+            start_line: range(node).start_line,
+            declaration: node,
+            function_node: functionNode,
+            direct_binding: directBinding,
+            named_binding: ts.isFunctionDeclaration(node) || ts.isVariableDeclaration(node),
+            immutable_binding: ts.isFunctionDeclaration(node) ||
+              ts.isVariableDeclaration(node) && Boolean(node.parent.flags & ts.NodeFlags.Const),
+          };
+          functionInfos.push(info);
+          nextScopeNode = functionNode;
+        }
       }
     }
-    ts.forEachChild(node, (child) => visitDefinitions(child, nextNames));
+    if (ts.isClassDeclaration(node)) nextScopeNode = node;
+    ts.forEachChild(node, (child) => visitDefinitions(child, nextNames, nextScopeNode));
   };
-  visitDefinitions(source, [filePath.replace(/\\/g, "/").replace(/\.(tsx?|mts|cts)$/i, "").replaceAll("/", ".")]);
+  visitDefinitions(source, [moduleName]);
 
   const topLevel = source.statements;
   const requestWrappers = topLevel.filter(
@@ -102,6 +138,207 @@ const files = input.files.map(({ path: filePath, text }) => {
     collect(binding);
     return names;
   };
+  const isCallableNode = (node) => ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node) ||
+    ts.isArrowFunction(node) || ts.isMethodDeclaration(node) || ts.isConstructorDeclaration(node) ||
+    ts.isGetAccessorDeclaration(node) || ts.isSetAccessorDeclaration(node);
+  const isExported = (node) => Boolean(ts.canHaveModifiers(node) &&
+    ts.getModifiers(node)?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword));
+  const moduleBindings = new Map();
+  const importBindings = new Map();
+  const addModuleBinding = (name, binding) => {
+    const values = moduleBindings.get(name) ?? [];
+    values.push(binding);
+    moduleBindings.set(name, values);
+  };
+  for (const statement of topLevel) {
+    if (ts.isImportDeclaration(statement) && ts.isStringLiteral(statement.moduleSpecifier) && statement.importClause) {
+      const clause = statement.importClause;
+      const addImportBinding = (name, binding) => {
+        addModuleBinding(name, binding);
+        importBindings.set(name, [...(importBindings.get(name) ?? []), binding]);
+      };
+      if (clause.name) addImportBinding(clause.name.text, {
+        kind: "unsupported_import", specifier: statement.moduleSpecifier.text, imported_name: "default",
+      });
+      const named = clause.namedBindings;
+      if (named && ts.isNamespaceImport(named)) addImportBinding(named.name.text, {
+        kind: "unsupported_import", specifier: statement.moduleSpecifier.text, imported_name: "*",
+      });
+      else if (named && ts.isNamedImports(named)) for (const element of named.elements) {
+        addImportBinding(element.name.text, {
+          kind: element.isTypeOnly || clause.isTypeOnly ? "type_import" : "named_import",
+          specifier: statement.moduleSpecifier.text,
+          imported_name: (element.propertyName ?? element.name).text,
+        });
+      }
+    } else if (ts.isFunctionDeclaration(statement) && statement.name) {
+      addModuleBinding(statement.name.text, { kind: "declaration" });
+    } else if (ts.isClassDeclaration(statement) && statement.name) {
+      addModuleBinding(statement.name.text, { kind: "declaration" });
+    } else if (ts.isVariableStatement(statement)) {
+      for (const declaration of statement.declarationList.declarations) {
+        for (const name of bindingNames(declaration.name)) addModuleBinding(name, { kind: "declaration" });
+      }
+    }
+  }
+  const topLevelFunctions = functionInfos.filter((info) => info.direct_binding &&
+    info.immutable_binding && info.parent_names.length === 1 && info.named_binding);
+  const addExport = (exportedName, localName) => {
+    const matches = topLevelFunctions.filter((info) => info.qualified_name === `${moduleName}.${localName}`);
+    if (matches.length === 1) exports.push({
+      exported_name: exportedName,
+      target_qualified_name: matches[0].qualified_name,
+      target_start_line: matches[0].start_line,
+    });
+  };
+  for (const statement of topLevel) {
+    if (isExported(statement)) {
+      if (ts.isFunctionDeclaration(statement) && statement.name) addExport(statement.name.text, statement.name.text);
+      else if (ts.isVariableStatement(statement)) for (const declaration of statement.declarationList.declarations) {
+        if (ts.isIdentifier(declaration.name) && functionValueFor(declaration)) addExport(declaration.name.text, declaration.name.text);
+      }
+    } else if (ts.isExportDeclaration(statement) && !statement.moduleSpecifier &&
+      statement.exportClause && ts.isNamedExports(statement.exportClause)) {
+      for (const element of statement.exportClause.elements) {
+        if (!element.isTypeOnly) addExport(element.name.text, (element.propertyName ?? element.name).text);
+      }
+    }
+  }
+  const collectScopeFacts = (info) => {
+    const body = info.function_node.body;
+    const names = new Set(info.function_node.parameters.flatMap((parameter) => bindingNames(parameter.name)));
+    const assigned = new Set();
+    const assignTarget = (target) => {
+      if (ts.isIdentifier(target)) assigned.add(target.text);
+      else if (ts.isArrayLiteralExpression(target) || ts.isObjectLiteralExpression(target)) {
+        for (const element of target.elements ?? target.properties) {
+          if (ts.isSpreadElement(element)) assignTarget(element.expression);
+          else if (ts.isShorthandPropertyAssignment(element)) assignTarget(element.name);
+          else if (ts.isPropertyAssignment(element)) assignTarget(element.initializer);
+          else if (element.name) assignTarget(element.name);
+        }
+      }
+    };
+    const inspect = (node, isRoot = false) => {
+      if (!isRoot && isCallableNode(node)) {
+        if (ts.isFunctionDeclaration(node) && node.name) names.add(node.name.text);
+        return;
+      }
+      if (ts.isVariableDeclaration(node)) for (const name of bindingNames(node.name)) names.add(name);
+      if (ts.isClassDeclaration(node) && node.name) names.add(node.name.text);
+      if (ts.isCatchClause(node) && node.variableDeclaration) {
+        for (const name of bindingNames(node.variableDeclaration.name)) names.add(name);
+      }
+      if (ts.isBinaryExpression(node) && node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+        node.operatorToken.kind <= ts.SyntaxKind.LastAssignment) assignTarget(node.left);
+      if ((ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) &&
+        [ts.SyntaxKind.PlusPlusToken, ts.SyntaxKind.MinusMinusToken].includes(node.operator)) assignTarget(node.operand);
+      ts.forEachChild(node, (child) => inspect(child));
+    };
+    if (body) inspect(body, true);
+    return { names, assigned };
+  };
+  const callerScopePaths = (info) => {
+    const paths = new Set([moduleName]);
+    let current = moduleName;
+    for (const name of info.parent_names.slice(1)) {
+      current = `${current}.${name}`;
+      paths.add(current);
+    }
+    paths.add(info.qualified_name);
+    return paths;
+  };
+  const localTarget = (name, allowedScopes) => {
+    const visible = functionInfos.filter((info) => info.direct_binding && info.immutable_binding &&
+      info.named_binding && declarationName(info.declaration) === name &&
+      allowedScopes.has(info.parent_names.join(".")));
+    if (!visible.length) return { target: null, reason: "call_target_not_in_snapshot" };
+    const nearest = Math.max(...visible.map((info) => info.parent_names.length));
+    const matches = visible.filter((info) => info.parent_names.length === nearest);
+    return matches.length === 1
+      ? { target: matches[0], reason: null }
+      : { target: null, reason: "ambiguous_call_target" };
+  };
+  const scopeFacts = new Map(functionInfos.map((info) => [info, collectScopeFacts(info)]));
+  for (const info of functionInfos) {
+    if (callBudgetTruncated) break;
+    const body = info.function_node.body;
+    if (!body) continue;
+    const local = scopeFacts.get(info);
+    const inspect = (node, isRoot = false) => {
+      if (callBudgetTruncated || !isRoot && isCallableNode(node)) return;
+      if (ts.isCallExpression(node)) {
+        const callRange = range(node);
+        const expression = node.expression.getText(source).slice(0, 500);
+        let targetQualifiedName = null;
+        let targetStartLine = null;
+        let importSpecifier = null;
+        let importedName = null;
+        let reason = null;
+        if (ts.isIdentifier(node.expression)) {
+          const name = node.expression.text;
+          if (local.names.has(name)) {
+            if (local.assigned.has(name)) reason = "name_rebound_in_scope";
+            else {
+              const target = localTarget(name, new Set([info.qualified_name]));
+              if (target.target) {
+                targetQualifiedName = target.target.qualified_name;
+                targetStartLine = target.target.start_line;
+              } else reason = "name_shadowed_in_scope";
+            }
+          } else {
+            const bindings = moduleBindings.get(name) ?? [];
+            const imported = importBindings.get(name) ?? [];
+            if (bindings.length > 1 || imported.length > 1) reason = "ambiguous_call_target";
+            else if (imported.length === 1) {
+              if (hasWrites(source, new Set([name]))) reason = "name_rebound_in_scope";
+              else if (imported[0].kind !== "named_import") reason = "unsupported_import_binding";
+              else {
+                importSpecifier = imported[0].specifier;
+                importedName = imported[0].imported_name;
+              }
+            } else if (bindings.length === 1) {
+              if (hasWrites(source, new Set([name]))) reason = "name_rebound_in_scope";
+              else {
+                const target = localTarget(name, callerScopePaths(info));
+                if (target.target) {
+                  targetQualifiedName = target.target.qualified_name;
+                  targetStartLine = target.target.start_line;
+                } else reason = target.reason;
+              }
+            } else {
+              const target = localTarget(name, callerScopePaths(info));
+              if (target.target) {
+                targetQualifiedName = target.target.qualified_name;
+                targetStartLine = target.target.start_line;
+              } else reason = target.reason;
+            }
+          }
+        } else if (ts.isPropertyAccessExpression(node.expression) || ts.isElementAccessExpression(node.expression)) {
+          reason = "object_method_not_resolved";
+        } else {
+          reason = "dynamic_call_target";
+        }
+        if (++callCount > maxCalls) {
+          callBudgetTruncated = true;
+          return;
+        }
+        calls.push({
+          caller_qualified_name: info.qualified_name,
+          caller_start_line: info.start_line,
+          target_qualified_name: targetQualifiedName,
+          target_start_line: targetStartLine,
+          import_specifier: importSpecifier,
+          imported_name: importedName,
+          expression,
+          reason,
+          ...callRange,
+        });
+      }
+      ts.forEachChild(node, (child) => inspect(child));
+    };
+    inspect(body, true);
+  }
   const hasLocalBinding = (root, name) => {
     let found = false;
     const inspect = (node, isRoot = false) => {
@@ -413,9 +650,21 @@ const files = input.files.map(({ path: filePath, text }) => {
     ts.forEachChild(node, visitModuleReferences);
   };
   visitModuleReferences(source);
-  return { path: filePath, definitions, imports, http_requests };
+  return {
+    path: filePath,
+    definitions,
+    imports,
+    http_requests,
+    calls,
+    exports,
+    calls_truncated: callBudgetTruncated,
+    calls_truncation_reason: callBudgetTruncated ? "max_typescript_calls reached" : null,
+  };
 });
 
-const output = JSON.stringify({ compiler_version: compilerVersion, files });
+const output = JSON.stringify({
+  compiler_version: compilerVersion,
+  files,
+});
 if (Buffer.byteLength(output, "utf8") > 8 * 1024 * 1024) throw new Error("TypeScript parser output budget exceeded");
 process.stdout.write(output);

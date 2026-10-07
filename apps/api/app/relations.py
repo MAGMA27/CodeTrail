@@ -17,6 +17,7 @@ from .indexing import (
     SnapshotIssue,
     SourceSnapshot,
     SnapshotFile,
+    TypeScriptCallDescription,
     TypeScriptImportDescription,
     _module_name,
 )
@@ -26,13 +27,13 @@ RelationKind = Literal["imports", "calls"]
 BindingKind = Literal["module", "symbol"]
 RelationScopeKind = Literal["module", "class", "function"]
 # The semantic version changes when the graph/unresolved meaning changes.
-RELATION_SEMANTICS_VERSION = "relations-v7"
+RELATION_SEMANTICS_VERSION = "relations-v8"
 # This version only governs the persisted, index-independent facts payload.
 RELATION_FACT_EXTRACTION_RULES_VERSION = "python-relation-facts-v4"
 _RELATION_FACTS_FORMAT_VERSION = "relation-facts-v4"
 # This namespace is part of generated immutable index IDs. Bump it when source
 # boundaries or build rules can change an index with the same content hash.
-INDEX_BUILD_IDENTITY_VERSION = "relations-v11"
+INDEX_BUILD_IDENTITY_VERSION = "relations-v12"
 
 
 def relation_coverage_limitations(
@@ -351,11 +352,48 @@ class _RelationBudget:
         self.reason = reason
 
 
+def _resolve_typescript_module_target(
+    path: str,
+    specifier: str,
+    target_files: set[str],
+) -> tuple[str | None, str | None, list[str]]:
+    if not specifier.startswith("."):
+        return None, "external_import_or_path_alias", []
+    if any(mark in specifier for mark in ("\\", "?", "#", "%")):
+        return None, "unsupported_relative_import_shape", []
+    normalized = posixpath.normpath(posixpath.join(posixpath.dirname(path), specifier))
+    if normalized in {".", ".."} or normalized.startswith("../") or normalized.startswith("/"):
+        return None, "relative_import_outside_snapshot", []
+    suffix = posixpath.splitext(normalized)[1].lower()
+    if suffix in {".ts", ".tsx"}:
+        candidates = [normalized]
+    elif suffix in {".js", ".jsx", ".mjs", ".cjs"}:
+        stem = normalized[: -len(suffix)]
+        candidates = [f"{stem}.ts", f"{stem}.tsx", f"{stem}.d.ts"]
+    elif not suffix:
+        candidates = [
+            f"{normalized}.ts",
+            f"{normalized}.tsx",
+            f"{normalized}.d.ts",
+            f"{normalized}/index.ts",
+            f"{normalized}/index.tsx",
+            f"{normalized}/index.d.ts",
+        ]
+    else:
+        candidates = []
+    matches = sorted(set(candidate for candidate in candidates if candidate in target_files))
+    if len(matches) == 1:
+        return matches[0], None, matches
+    if len(matches) > 1:
+        return None, "ambiguous_relative_import", matches
+    return None, "missing_relative_import_target", []
+
+
 def extract_relations(
     definitions: DefinitionIndex,
     *,
     cached: Mapping[str, RelationFileFacts] | None = None,
-    max_edges: int = 5_000,
+    max_edges: int = 6_000,
     max_unresolved: int = 5_000,
     max_seconds: float = 5.0,
 ) -> RelationIndex:
@@ -513,37 +551,12 @@ def extract_relations(
         candidates: list[str] = []
         if fact.kind == "dynamic":
             reason = "dynamic_import"
-        elif not fact.specifier.startswith("."):
-            reason = "external_import_or_path_alias"
-        elif any(mark in fact.specifier for mark in ("\\", "?", "#", "%")):
-            reason = "unsupported_relative_import_shape"
         else:
-            normalized = posixpath.normpath(posixpath.join(posixpath.dirname(path), fact.specifier))
-            if normalized in {".", ".."} or normalized.startswith("../") or normalized.startswith("/"):
-                reason = "relative_import_outside_snapshot"
-            else:
-                suffix = posixpath.splitext(normalized)[1].lower()
-                if suffix in {".ts", ".tsx"}:
-                    candidates = [normalized]
-                elif suffix in {".js", ".jsx", ".mjs", ".cjs"}:
-                    stem = normalized[: -len(suffix)]
-                    candidates = [f"{stem}.ts", f"{stem}.tsx", f"{stem}.d.ts"]
-                elif not suffix:
-                    candidates = [
-                        f"{normalized}.ts",
-                        f"{normalized}.tsx",
-                        f"{normalized}.d.ts",
-                        f"{normalized}/index.ts",
-                        f"{normalized}/index.tsx",
-                        f"{normalized}/index.d.ts",
-                    ]
-                candidates = sorted(set(candidate for candidate in candidates if candidate in target_files))
-                if len(candidates) == 1:
-                    target_path = candidates[0]
-                elif len(candidates) > 1:
-                    reason = "ambiguous_relative_import"
-                else:
-                    reason = "missing_relative_import_target"
+            target_path, reason, candidates = _resolve_typescript_module_target(
+                path,
+                fact.specifier,
+                target_files,
+            )
         if target_path is not None:
             if not budget.reserve("edges"):
                 break
@@ -670,6 +683,95 @@ def extract_relations(
         budget,
     )
 
+    export_targets: dict[tuple[str, str], list[tuple[str, int]]] = {}
+    for path, fact in definitions.typescript_exports:
+        export_targets.setdefault((path, fact.exported_name), []).append(
+            (fact.target_qualified_name, fact.target_start_line)
+        )
+    typescript_call_occurrences: dict[tuple[str, str, int, int], int] = {}
+    for path, fact in definitions.typescript_calls:
+        if budget.truncated:
+            break
+        if time.monotonic() >= budget.deadline:
+            budget._stop("max_seconds exceeded")
+            break
+        source_module = modules_by_path.get(path)
+        caller = maps.by_key.get((path, fact.caller_qualified_name, "function", fact.caller_start_line))
+        if source_module is None:
+            continue
+        caller_symbol = caller or source_module
+        target: Symbol | None = None
+        reason = fact.reason
+        if reason is None and fact.target_qualified_name is not None and fact.target_start_line is not None:
+            target = maps.by_key.get((path, fact.target_qualified_name, "function", fact.target_start_line))
+            if target is None:
+                reason = "call_target_not_in_snapshot"
+        elif reason is None and fact.import_specifier is not None and fact.imported_name is not None:
+            target_path, reason, _candidates = _resolve_typescript_module_target(
+                path,
+                fact.import_specifier,
+                target_files,
+            )
+            if target_path is not None:
+                exports = sorted(set(export_targets.get((target_path, fact.imported_name), [])))
+                if len(exports) == 1:
+                    target_name, target_line = exports[0]
+                    target = maps.by_key.get((target_path, target_name, "function", target_line))
+                    if target is None:
+                        reason = "named_import_target_not_in_snapshot"
+                elif len(exports) > 1:
+                    reason = "ambiguous_named_import_target"
+                else:
+                    reason = "missing_named_export"
+        if target is not None and caller is not None:
+            if not budget.reserve("edges"):
+                break
+            key = (caller.symbol_id, target.symbol_id, fact.start_line, fact.end_line)
+            occurrence = typescript_call_occurrences.get(key, 0)
+            typescript_call_occurrences[key] = occurrence + 1
+            identity = "\0".join(
+                [snapshot.index.index_id, "calls", caller.symbol_id, target.symbol_id,
+                 path, str(fact.start_line), str(fact.end_line), str(occurrence), "typescript"]
+            )
+            edges.append(CodeEdge(
+                edge_id=f"edge-{hashlib.sha256(identity.encode('utf-8')).hexdigest()[:32]}",
+                index_id=snapshot.index.index_id,
+                source_id=caller.symbol_id,
+                target_id=target.symbol_id,
+                kind="calls",
+                extraction_method="ast",
+                source_location=SourceLocation(path=path, start_line=fact.start_line, end_line=fact.end_line),
+            ))
+        else:
+            unresolved_reason = reason or ("caller_scope_not_indexed" if caller is None else "call_target_not_in_snapshot")
+            if not budget.reserve("unresolved"):
+                continue
+            expression = fact.expression[:500] or "unknown call"
+            key = (caller_symbol.symbol_id, expression, fact.start_line, fact.end_line)
+            occurrence = typescript_call_occurrences.get(key, 0)
+            typescript_call_occurrences[key] = occurrence + 1
+            identity = "\0".join(
+                [snapshot.index.index_id, caller_symbol.symbol_id, path, expression, unresolved_reason,
+                 str(fact.start_line), str(fact.end_line), str(occurrence)]
+            )
+            candidates = maps.candidates(expression.rsplit(".", 1)[-1]) if reason in {
+                "call_target_not_in_snapshot", "name_shadowed_in_scope", "ambiguous_call_target",
+            } else []
+            unresolved.append(UnresolvedReference(
+                unresolved_id=f"unresolved-{hashlib.sha256(identity.encode('utf-8')).hexdigest()[:32]}",
+                index_id=snapshot.index.index_id,
+                source_symbol_id=caller_symbol.symbol_id,
+                path=path,
+                expression=expression,
+                reason=unresolved_reason,
+                possible_target_ids=[candidate.symbol_id for candidate in candidates],
+                start_line=fact.start_line,
+                end_line=fact.end_line,
+            ))
+
+    if definitions.typescript_calls_truncated and not budget.truncated:
+        budget._stop(definitions.typescript_calls_truncation_reason or "TypeScript call facts truncated")
+
     edges.sort(key=lambda edge: (edge.source_location.path, edge.source_location.start_line, edge.kind, edge.edge_id))
     unresolved.sort(key=lambda item: (item.path, item.start_line, item.expression, item.unresolved_id))
     return RelationIndex(
@@ -694,7 +796,7 @@ def build_relation_index(
     definitions: DefinitionIndex,
     *,
     cached: Mapping[str, RelationFileFacts] | None = None,
-    max_edges: int = 5_000,
+    max_edges: int = 6_000,
     max_unresolved: int = 5_000,
     max_seconds: float = 5.0,
 ) -> RelationIndex:
