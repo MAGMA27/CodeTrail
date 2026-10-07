@@ -28,31 +28,31 @@ pwsh -File .\scripts\start-local.ps1 -Service web
 
 ## 从结构总览进入源码
 
-项目概览默认先显示 `python-entry-v4` 的结构组：HTTP 入口按声明路径首个 `{parameter}` 之前的静态前缀及处理函数模块分组，源码模块按相对目录分组。组名明确带有 `HTTP` 或 `SOURCE`，只表示固定索引中的路径/目录组织，不是业务功能；同一模块可以同时出现在 HTTP 组和源码目录组。
+项目知识页在当前固定索引中显示职责、HTTP 路径和源码目录容器。职责来自 `codetrail-subsystems.json` manifest，不是模型推断；职责覆盖不完整时，未归属模块仍按源码目录显示。容器用于浏览索引结构，不代表运行时业务边界。
 
-选择一个结构组后，HTTP 组会列出真实路由方法、声明路径和 handler 模块，源码组会列出当前概览预算内的模块。点击入口查看同快照 evidence，点击“关系图”查看 handler 的局部静态图；点击模块进入模块的局部关系图。结构页的“静态模块依赖”展示跨模块 `imports`/`calls` 聚合，每条关系保留总 `edge_count` 和最多 8 个实际源码位置，不把 unresolved、无法映射或自模块边解释成依赖。页面上的 `可见/总量` 和预算告警表示结果可能被 `max_modules`、`max_groups` 或 `max_module_relations` 截断；源码组若包含未载入的模块，会明确提示后再要求提高预算/重载概览。
+展开容器可继续进入模块；模块与入口都可钻取到同一固定索引上的源码或局部静态关系图。画布中的 `imports`/`calls` 保留 `source → target` 方向；HTTP 客户端与 FastAPI 路由按 method/path 形状单独关联，不混入静态调用边。形状匹配不证明请求实际发往本地服务。`可见/总量` 与告警会说明覆盖和预算边界；`unresolved` 始终表示未知，不能解读为无依赖。概览可能受到 `max_paths`、`max_unresolved` 和模块关系边样本预算限制。
 
-MCP `get_overview` 使用同一 `project_id`、`index_id`、结构规则和预算，可核对 `groups`、`module_relations` 的成员、`relation_kinds`、`edge_count`、代表边的 `source_location` 以及固定 `index_id`。HTTP、浏览器与本地 stdio MCP 不各自推断结构，也不会把结构结果写回静态 `CodeEdge`。
+MCP `get_overview` 使用显式 `project_id`/`index_id` 和有界结果，可核对职责状态、容器、入口、HTTP 形状关联、模块关系与固定索引。HTTP、浏览器与本地 stdio MCP 读取同一快照事实，不会把结构结果写回静态 `CodeEdge`。
 
 ## 加载 Codex MCP
 
-当前 Codex 主机的 `codetrail` stdio 配置已经使用与 API 相同的代码目录、`D:/Dev/CodeTrail/.codetrail-runtime` 和 `CODETRAIL_MCP_EXTERNAL_RUN_ENABLED=1`；配置示例和完整字段见 [API README](../apps/api/README.md)。MCP 进程在启动时加载代码和工具契约，因此代码更新后只需对 `codetrail` MCP 做一次 reload（如果宿主没有单独的 reload，则重启 Codex 一次）。不要通过清空数据或手工填写项目/索引 ID 来修复版本不一致。external Run 不需要真实模型供应商密钥。
-
-2026-09-14 reload 前曾发现宿主旧 MCP 进程返回 `python-entry-v1`；本轮重载后已由实际 Codex MCP 重新通过 `list_projects`/`get_overview` 发现目标，并返回 `python-entry-v4`、结构组和模块关系。当前联合验收结果以本节停止后复现步骤和本轮实际 HTTP/MCP/工作台对照为准，不把旧响应当作当前状态。
+当前 Codex 主机的 `codetrail` stdio 配置应使用与 API 相同的代码目录、`.codetrail-runtime` 和 `CODETRAIL_MCP_EXTERNAL_RUN_ENABLED=1`；配置示例和完整字段见 [API README](../apps/api/README.md)。索引刷新和 Session/Run 持久化由共享 runtime 提供，数据变化通常不需要重载 MCP。只有 MCP 服务代码或工具契约更新后，才按宿主支持的方式 reload 并重新核对 `list_projects`、`list_indexes`、`get_overview`。不要清空 runtime 或手工编造项目/索引 ID。external Run 不需要真实模型供应商密钥。
 
 ## 进行调查
 
-打开 `http://localhost:3000`，选择目标项目和一个已有消息的 Session；当前自用验收使用项目 `CodeTrail 自用验收`、Session `已知费用结算问题自用验收`，项目和索引 ID 由 API/MCP 列表发现，不手工编造。结构总览选择该项目由列表返回的最新 ready index；历史示例中的 `relations-v2` 不代表当前关系语义或索引身份。
+先用 API 的 `/api/projects`、`/api/projects/{project_id}/indexes` 或 MCP 的 `list_projects`、`list_indexes` 发现目标项目和 ready index。若 freshness 检查报告源码、规则或配置已变化，对现有 index 调用 `POST /api/projects/{project_id}/indexes/{index_id}/refresh` 创建新的固定快照；确认新 index ready，并保留旧 index 及其 Session。项目知识页可浏览最新索引，但旧 Session 始终固定在创建时的 index。
+
+打开 `http://localhost:3000`，选择目标项目，在该项目下新建一个独立 Session，并确认 Session 标题区显示新快照的 revision/hash。不要复用旧 Session 来证明新快照行为；切换项目后回到目标项目时，也要确认选中的 `project_id` 和 Session。
 
 在 Codex 中只描述现象，不预先提供候选文件、函数或行号，例如：“批量评测时供应商返回明确 token 用量，但费用高于请求前预留时最终累计费用可能仍停留在预留值，请检查是否存在导致低估的逻辑，给出源码证据、触发条件与可能影响；证据不足时明确说明。”
 
-Codex 应从 MCP 项目发现开始，使用同一 Run 的 `start_external_run`、`run_search_code`、`run_read_source`、`run_get_neighbors` 和 `submit_external_run`；工作台不创建 external Run，只从当前 Session history 自动发现并展示。
+先在工作台打开这个新 Session，让其 Run history 已加载；保存问题消息后，由 Codex 主机 MCP 用该 Session 返回的固定 `index_id` 与 `session_id` 显式调用 `start_external_run`。随后使用同一 Run 的 `run_search_code`、`run_read_source`、`run_get_neighbors` 和 `submit_external_run`。若外部调查预计超过 Run 默认总时限，可显式设置合法、有界的 `max_seconds`；这不会增加单次搜索、输出或工具预算，也不会改变默认值。工作台不创建 external Run，而是自动发现并实时展示当前 Session 的事件与工具结果。
 
-该 Session 已有完成的 external Run，可直接读取并核对报告恢复、公开事件、工具结果和同快照 evidence；本轮不需要为了重复验收新建 Run。已有报告绑定自己的旧 ready index，不能与结构总览的最新 index 混用或互相覆盖。
+验收新快照时应启动一条新的 external Run，避免用旧报告代替当前快照的执行证据。Run 会冻结这条 Session 的已保存消息与固定 index；现有历史报告仍绑定原 Session/index，不会被新 Run 覆盖。
 
 ## 查看结果
 
-在工作台的 Run history 打开完成的 `CODEX / 外部 Agent` Run，确认公开事件、工具结果、候选结论、源码 evidence 和限制均属于同一个 project/session/index；从证据按钮打开源码，从影响范围按钮查看固定快照上的有界静态 calls。刷新或切换 Session 后回到原 Session，页面应恢复同一 Run，不创建重复 Run。
+在工作台 Run history 打开完成的 `CODEX / 外部 Agent` Run，核对公开事件、实际工具结果、报告、证据和限制都绑定同一个 project/session/index。通过证据按钮查看源码与 hash；候选报告可以打开固定快照上的有界静态影响范围，并保留 unresolved 边界。切到另一个项目或旧 Session 再切回来、刷新页面后，应恢复原 Session 与 Run，不创建重复 Run。
 
 ## 边界
 
@@ -60,7 +60,7 @@ external Run 只执行白名单代码搜索、源码读取和静态邻接查询�
 
 ## 停止后复现
 
-1. 在 API 终端按 `Ctrl+C`，等待进程退出。
-2. 从仓库根目录重新执行 `pwsh -File .\scripts\start-local.ps1 -Service api`。
-3. 用 `GET http://127.0.0.1:8000/api/health` 检查服务，再打开工作台确认 `CodeTrail 自用验收` 和 `python-entry-v4` 结构总览。
-4. 如 Codex MCP 也需要加载当前代码，对 `codetrail` MCP 做一次 reload，然后用 `list_projects`/`get_overview` 重新发现并对照；不要重复 reload，也不要清理运行目录。
+1. 只在自己启动的 API 与 Web 终端按 `Ctrl+C`，等待两个服务退出；不要终止其他服务或宿主 MCP 进程。
+2. 从仓库根目录重新执行 `pwsh -File .\scripts\start-local.ps1 -Service api` 和 `pwsh -File .\scripts\start-local.ps1 -Service web`。
+3. 用 `GET http://127.0.0.1:8000/api/health` 检查 API；刷新工作台并选择目标项目。
+4. 确认新 Session 仍绑定刷新后创建的 ready index，旧 Session 仍绑定原 index，Run history、报告、事件、工具结果与 evidence 均可恢复。数据持久化验收不需要清空 runtime 或重载 MCP。
