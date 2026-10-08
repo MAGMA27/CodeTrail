@@ -11,6 +11,7 @@ import os
 import shutil
 import threading
 import time
+from collections import OrderedDict
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -185,6 +186,7 @@ _WINDOWS_WAIT_TIMEOUT = 0x00000102
 _WINDOWS_WAIT_FAILED = 0xFFFFFFFF
 _WINDOWS_ERROR_INVALID_PARAMETER = 87
 _WINDOWS_ERROR_NOT_FOUND = 1168
+_OVERVIEW_CACHE_MAX_ENTRIES = 8
 
 
 @dataclass(frozen=True)
@@ -1437,6 +1439,10 @@ class WorkspaceService:
         self._index_mutation_lock = threading.RLock()
         self._active_feature_projects: set[str] = set()
         self._active_feature_lock = threading.Lock()
+        self._overview_cache: OrderedDict[
+            tuple[str, str, int, int, int, int, int], ProjectOverview
+        ] = OrderedDict()
+        self._overview_cache_lock = threading.RLock()
         self._recover_interrupted_builds()
         self._recover_interrupted_runs()
         self.run_executor = RunExecutor(
@@ -3438,12 +3444,25 @@ class WorkspaceService:
     ) -> ProjectOverview:
         """Build a deterministic entry/module overview from one persisted snapshot."""
 
-        project = self._find_project(project_id)
-        self._require_project_index(project_id, index_id)
+        project = self._require_project_index(project_id, index_id)
+        cache_key = (
+            project_id,
+            index_id,
+            max_depth,
+            max_paths,
+            max_modules,
+            max_groups,
+            max_module_relations,
+        )
+        with self._overview_cache_lock:
+            cached = self._overview_cache.get(cache_key)
+            if cached is not None:
+                self._overview_cache.move_to_end(cache_key)
+                return cached.model_copy(deep=True)
         try:
             with self.registry.store_for_repository(project.repository_id) as store:
                 relation = store.load_index(index_id)
-                return build_project_overview(
+                response = build_project_overview(
                     project_id,
                     relation,
                     store.read_evidence,
@@ -3453,6 +3472,16 @@ class WorkspaceService:
                     max_groups=max_groups,
                     max_module_relations=max_module_relations,
                 )
+            with self._overview_cache_lock:
+                cached = self._overview_cache.get(cache_key)
+                if cached is None:
+                    self._overview_cache[cache_key] = response.model_copy(deep=True)
+                    while len(self._overview_cache) > _OVERVIEW_CACHE_MAX_ENTRIES:
+                        self._overview_cache.popitem(last=False)
+                else:
+                    self._overview_cache.move_to_end(cache_key)
+                    response = cached.model_copy(deep=True)
+            return response
         except ServiceError:
             raise
         except ValueError as exc:

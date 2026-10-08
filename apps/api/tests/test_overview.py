@@ -9,6 +9,7 @@ import shutil
 from pathlib import Path
 from urllib.parse import urlsplit
 
+import app.service as service_module
 from app.main import create_app
 
 
@@ -152,6 +153,120 @@ def test_overview_identifies_main_rules_paths_and_stays_on_snapshot(tmp_path: Pa
     )
     assert status == 200
     assert old_snapshot == overview
+
+
+def test_overview_cache_is_bounded_keyed_and_scoped(tmp_path: Path, monkeypatch) -> None:
+    repository = _copy_fixture(tmp_path)
+    application = create_app(
+        {"timeout-demo": repository},
+        data_root=tmp_path / "service-data",
+    )
+    project_id, index_id = _create_index(application)
+    service = application.state.workspace_service
+    build_count = 0
+    build_overview = service_module.build_project_overview
+
+    def count_builds(*args, **kwargs):
+        nonlocal build_count
+        build_count += 1
+        return build_overview(*args, **kwargs)
+
+    monkeypatch.setattr(service_module, "build_project_overview", count_builds)
+
+    first = service.get_overview(project_id, index_id)
+    second = service.get_overview(project_id, index_id)
+    assert first == second
+    assert first is not second
+    second.notes.append("caller mutation")
+    assert "caller mutation" not in service.get_overview(project_id, index_id).notes
+    assert build_count == 1
+
+    budget_variants = (
+        {"max_depth": 3},
+        {"max_paths": 39},
+        {"max_modules": 99},
+        {"max_groups": 79},
+        {"max_module_relations": 199},
+    )
+    for budgets in budget_variants:
+        service.get_overview(project_id, index_id, **budgets)
+    assert build_count == 6
+
+    source_file = repository / "timeout_demo" / "__main__.py"
+    source_file.write_text(
+        source_file.read_text(encoding="utf-8") + "\n# new snapshot\n",
+        encoding="utf-8",
+    )
+    status, created = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/indexes",
+        {"revision": "overview-cache-v2", "dirty": False},
+    )
+    assert status == 200
+    new_index_id = created["index"]["index_id"]
+    assert new_index_id != index_id
+    assert service.get_overview(project_id, new_index_id).index.index_id == new_index_id
+    assert build_count == 7
+
+    for relation_limit in (201, 202):
+        service.get_overview(project_id, index_id, max_module_relations=relation_limit)
+    assert len(service._overview_cache) == service_module._OVERVIEW_CACHE_MAX_ENTRIES
+    service.get_overview(project_id, index_id)
+    assert build_count == 10
+
+    status, _ = request(application, "DELETE", f"/api/projects/{project_id}")
+    assert status == 200
+    status, _ = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/indexes/{index_id}/overview",
+    )
+    assert status == 404
+    assert build_count == 10
+
+
+def test_overview_cache_rejects_index_from_another_project(tmp_path: Path, monkeypatch) -> None:
+    source_root_one = tmp_path / "project-one"
+    source_root_two = tmp_path / "project-two"
+    source_root_one.mkdir()
+    source_root_two.mkdir()
+    repository_one = _copy_fixture(source_root_one)
+    repository_two = _copy_fixture(source_root_two)
+    application = create_app(
+        {"one": repository_one, "two": repository_two},
+        data_root=tmp_path / "service-data",
+    )
+    project_one, index_one = _create_index(application, "One", "one")
+    project_two, index_two = _create_index(application, "Two", "two")
+    service = application.state.workspace_service
+    build_count = 0
+    build_overview = service_module.build_project_overview
+
+    def count_builds(*args, **kwargs):
+        nonlocal build_count
+        build_count += 1
+        return build_overview(*args, **kwargs)
+
+    monkeypatch.setattr(service_module, "build_project_overview", count_builds)
+
+    first = service.get_overview(project_one, index_one)
+    assert first.index.index_id == index_one
+    assert build_count == 1
+
+    status, rejected = request(
+        application,
+        "GET",
+        f"/api/projects/{project_two}/indexes/{index_one}/overview",
+    )
+    assert status == 404
+    assert rejected["code"] == "not_found"
+    assert build_count == 1
+
+    second = service.get_overview(project_two, index_two)
+    assert second.project_id == project_two
+    assert second.index.index_id == index_two
+    assert build_count == 2
 
 
 def test_overview_identifies_confirmed_fastapi_routes_and_rejects_ambiguous_bindings(
