@@ -126,14 +126,8 @@ type IndexUi = {
   freshnessStatus: "idle" | "checking" | "refreshing";
   freshnessError: string | null;
   refreshMode: IndexRefreshMode | null;
-  revision: string;
-  dirty: boolean;
-  indexIdInput: string;
-  onRevisionChange: (value: string) => void;
-  onDirtyChange: (value: boolean) => void;
-  onIndexIdChange: (value: string) => void;
-  onCreate: FormHandler;
-  onOpen: FormHandler;
+  onCreate: Action;
+  onOpenIndex: (indexId: string) => void | Promise<void>;
   onCheckFreshness: Action;
   onRefresh: Action;
   onUpdateGitHub: Action;
@@ -325,6 +319,7 @@ export type WorkbenchUiProps = {
   graph: GraphUi;
   viewMode: "overview" | "session";
   onViewModeChange: (mode: "overview" | "session") => void;
+  onImportFlowLeave: Action;
   panelMode: UiPanelMode;
   onPanelModeChange: (mode: UiPanelMode) => void;
 };
@@ -744,8 +739,15 @@ function OperationPanel({
               </div>
               <div className="ct-index-list">
                 {index.indexes.length > 0 ? index.indexes.map((item) => (
-                  <button type="button" key={item.index_id} className={`ct-index-item${index.response?.index.index_id === item.index_id ? " is-selected" : ""}`} onClick={() => index.onIndexIdChange(item.index_id)}>
-                    <span><strong>{item.revision}</strong><small>{formatDate(item.index_id.split("-").at(-1) ?? "")}</small></span>
+                  <button
+                    type="button"
+                    key={item.index_id}
+                    className={`ct-index-item${index.response?.index.index_id === item.index_id ? " is-selected" : ""}`}
+                    onClick={() => void index.onOpenIndex(item.index_id)}
+                    disabled={index.status === "loading"}
+                    aria-current={index.response?.index.index_id === item.index_id ? "true" : undefined}
+                  >
+                    <span><strong>{item.index_id === selectedProject.latest_index_id ? "当前版本" : "历史版本"}</strong><small>{item.status === "ready" ? "固定快照" : item.status === "building" ? "建立中" : "建立失败"}</small></span>
                     <code>{shortHash(item.snapshot_hash)}</code>
                     <span className={`ct-index-state is-${item.status}`}>{item.status === "ready" ? "可用" : item.status === "building" ? "建立中" : "失败"}</span>
                   </button>
@@ -753,20 +755,11 @@ function OperationPanel({
               </div>
               {index.error ? <p className="ct-inline-error" role="alert">{index.error}</p> : null}
               <div className="ct-index-forms">
-                <form className="ct-operation-form" onSubmit={(event) => void index.onCreate(event)}>
+                <div className="ct-operation-form">
                   <div className="ct-form-heading"><strong>创建新快照</strong><span>{index.status === "creating" ? "建立中" : indexStatusLabel(index.status)}</span></div>
-                  <label htmlFor="operation-index-revision">revision</label>
-                  <input id="operation-index-revision" value={index.revision} onChange={(event) => index.onRevisionChange(event.target.value)} placeholder="working-tree" spellCheck={false} />
-                  <label className="ct-check-field"><input type="checkbox" checked={index.dirty} onChange={(event) => index.onDirtyChange(event.target.checked)} /><span>标记为 dirty</span></label>
-                  <button type="submit" className="ct-button ct-button-primary" disabled={index.status === "creating"}>{index.status === "creating" ? "建立中…" : "创建索引"}</button>
-                </form>
-                <form className="ct-operation-form" onSubmit={(event) => void index.onOpen(event)}>
-                  <div className="ct-form-heading"><strong>打开已有快照</strong><span>固定读取</span></div>
-                  <label htmlFor="operation-index-id">index_id</label>
-                  <input id="operation-index-id" value={index.indexIdInput} onChange={(event) => index.onIndexIdChange(event.target.value)} placeholder="index-timeout-demo-…" spellCheck={false} />
-                  <p className="ct-form-help">打开后知识页、图和证据都绑定该 index_id。</p>
-                  <button type="submit" className="ct-button ct-button-secondary" disabled={index.status === "loading"}>{index.status === "loading" ? "载入中…" : "打开固定版本"}</button>
-                </form>
+                  <p className="ct-form-help">使用当前项目来源建立固定快照；版本列表可直接打开历史快照。</p>
+                  <button type="button" className="ct-button ct-button-primary" onClick={() => void index.onCreate()} disabled={index.status === "creating"}>{index.status === "creating" ? "建立中…" : "创建索引"}</button>
+                </div>
               </div>
               <div className="ct-index-freshness">
                 <div className="ct-form-heading">
@@ -2041,17 +2034,23 @@ export default function WorkbenchUi(props: WorkbenchUiProps) {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [operationPanel, setOperationPanel] = useState<OperationPanelState | null>(null);
   const [panelWidth, setPanelWidth] = useState(360);
-  const closeOperation = () => setOperationPanel(null);
+  const closeOperation = () => {
+    props.onImportFlowLeave();
+    setOperationPanel(null);
+  };
   const openOperation = (mode: OperationPanel, tab: OperationTab = "source") => {
+    props.onImportFlowLeave();
     setOperationPanel({ mode, tab });
     setMobileSidebarOpen(false);
   };
   const selectProject = (projectId: string) => {
+    props.onImportFlowLeave();
     props.project.onSelectProject(projectId);
     setMobileSidebarOpen(false);
     setOperationPanel(null);
   };
   const selectSession = (sessionId: string) => {
+    props.onImportFlowLeave();
     if (!sessionId) {
       props.onViewModeChange("overview");
       props.onPanelModeChange("none");
@@ -2063,6 +2062,7 @@ export default function WorkbenchUi(props: WorkbenchUiProps) {
     props.onViewModeChange("session");
   };
   const openKnowledge = () => {
+    props.onImportFlowLeave();
     props.onViewModeChange("overview");
     props.onPanelModeChange("none");
   };

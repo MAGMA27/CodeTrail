@@ -34,7 +34,7 @@
 pwsh -File .\scripts\start-local.ps1 -Service web
 ```
 
-打开 `http://localhost:3000`，从本地目录或 GitHub HTTPS 导入项目，或打开已有项目；导入 ready 后会选中项目和索引并打开架构页。API 返回非终态时会查询进度，超出约 30 秒仍未结束可手动刷新；本地目录未开放时按页面提示更新 API 设置并重启。然后创建 Session 并保存至少一条消息，在 Session 的“Issue 分析”面板选择 fixture 场景后点击“启动离线分析”，或选择 real 后点击“启动真实分析”。`success-timeout-missing` 展示候选结论和同快照 evidence；`insufficient-external-service` 展示证据不足；`tool-failure-read-source` 展示工具失败及失败前保留的 evidence。real 还要求 API 设置 `CODETRAIL_REAL_RUN_ENABLED=1` 并在服务数据目录配置 `config.json`。
+打开 `http://localhost:3000`，从本地目录或 GitHub HTTPS 导入项目，或打开已有项目；导入 ready 后会选中项目和索引并打开架构页。导入状态轮询最多 40 次且总等待不超过 35 秒，初次导入及重试请求最多等待 60 秒；超时会保留“服务端可能仍在处理”的状态，可刷新已有 attempt，或用相同表单重新连接初次请求。项目级 URL 刷新保持架构视图，只有完整 Session URL 恢复 Session；固定索引列表可直接打开版本。本地目录未开放时按页面提示更新 API 设置并重启。然后创建 Session 并保存至少一条消息，在 Session 的“Issue 分析”面板选择 fixture 场景后点击“启动离线分析”，或选择 real 后点击“启动真实分析”。`success-timeout-missing` 展示候选结论和同快照 evidence；`insufficient-external-service` 展示证据不足；`tool-failure-read-source` 展示工具失败及失败前保留的 evidence。real 还要求 API 设置 `CODETRAIL_REAL_RUN_ENABLED=1` 并在服务数据目录配置 `config.json`。
 
 CodeTrail 作为自身仓库的 Codex external 验收流程见 [MVP 操作说明](../../docs/mvp-operation.md)；external Run 使用本地 MCP 和固定项目/Session，不需要真实供应商配置。
 

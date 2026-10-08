@@ -970,6 +970,13 @@ export class ApiRequestError extends Error {
   }
 }
 
+export class RequestTimeoutError extends Error {
+  constructor() {
+    super("请求超时，服务端操作可能仍在处理；请刷新导入状态确认，或使用相同内容重新连接。");
+    this.name = "TimeoutError";
+  }
+}
+
 const apiBaseUrl = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000").replace(
   /\/$/,
   "",
@@ -2817,26 +2824,69 @@ async function parseJson(response: Response): Promise<unknown> {
 export async function requestJson<T>(
   path: string,
   validator: (value: unknown) => value is T,
-  init: RequestInit = {},
+  init: RequestInit & { timeoutMs?: number } = {},
 ): Promise<T> {
-  const headers = new Headers(init.headers);
+  const { timeoutMs, ...requestInit } = init;
+  if (timeoutMs !== undefined && (!Number.isFinite(timeoutMs) || timeoutMs <= 0)) {
+    throw new Error("request timeout must be a positive finite number");
+  }
+  const headers = new Headers(requestInit.headers);
   headers.set("Accept", "application/json");
-  if (init.body && !headers.has("Content-Type")) {
+  if (requestInit.body && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
-  const response = await fetch(`${apiBaseUrl}${path}`, { ...init, headers, cache: "no-store" });
-  const payload = await parseJson(response);
-  if (!response.ok) {
-    if (isApiErrorResponse(payload)) {
-      throw new ApiRequestError(payload.message, response.status, payload.code);
+  let timeoutController: AbortController | null = null;
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  let onAbort: (() => void) | null = null;
+  if (timeoutMs !== undefined) {
+    timeoutController = new AbortController();
+    if (requestInit.signal?.aborted) {
+      timeoutController.abort(requestInit.signal.reason);
+    } else if (requestInit.signal) {
+      onAbort = () => timeoutController?.abort(requestInit.signal?.reason);
+      requestInit.signal.addEventListener("abort", onAbort, { once: true });
     }
-    throw new ApiRequestError(`请求失败（HTTP ${response.status}）`, response.status, "internal_error");
+    timeoutId = setTimeout(() => {
+      timeoutController?.abort(new RequestTimeoutError());
+    }, timeoutMs);
   }
-  if (!validator(payload)) {
-    throw new Error("后端返回了无法识别的响应");
+  try {
+    const response = await fetch(`${apiBaseUrl}${path}`, {
+      ...requestInit,
+      signal: timeoutController?.signal ?? requestInit.signal,
+      headers,
+      cache: "no-store",
+    });
+    const payload = await parseJson(response);
+    const activeSignal = timeoutController?.signal ?? requestInit.signal;
+    if (activeSignal?.aborted) {
+      if (activeSignal.reason instanceof Error) {
+        throw activeSignal.reason;
+      }
+      throw new DOMException("The operation was aborted", "AbortError");
+    }
+    if (!response.ok) {
+      if (isApiErrorResponse(payload)) {
+        throw new ApiRequestError(payload.message, response.status, payload.code);
+      }
+      throw new ApiRequestError(`请求失败（HTTP ${response.status}）`, response.status, "internal_error");
+    }
+    if (!validator(payload)) {
+      throw new Error("后端返回了无法识别的响应");
+    }
+    return payload;
+  } finally {
+    if (timeoutId !== null) {
+      clearTimeout(timeoutId);
+    }
+    if (onAbort && requestInit.signal) {
+      requestInit.signal.removeEventListener("abort", onAbort);
+    }
   }
-  return payload;
 }
+
+export const IMPORT_REQUEST_TIMEOUT_MS = 60_000;
+export const IMPORT_STATUS_REQUEST_TIMEOUT_MS = 10_000;
 
 export function createIndex(
   repositoryId: string,
@@ -2894,6 +2944,7 @@ export function importLocalPath(
     {
       method: "POST",
       signal,
+      timeoutMs: IMPORT_REQUEST_TIMEOUT_MS,
       body: JSON.stringify({
         schema_version: SCHEMA_VERSION,
         name,
@@ -2919,6 +2970,7 @@ export function importGitHubRepository(
     {
       method: "POST",
       signal,
+      timeoutMs: IMPORT_REQUEST_TIMEOUT_MS,
       body: JSON.stringify({
         schema_version: SCHEMA_VERSION,
         name,
@@ -2937,7 +2989,7 @@ export function getImportStatus(
   return requestJson(
     `/api/imports/${encodeURIComponent(attemptId)}`,
     isImportAttemptResponse,
-    { signal },
+    { signal, timeoutMs: IMPORT_STATUS_REQUEST_TIMEOUT_MS },
   );
 }
 
@@ -2948,7 +3000,7 @@ export function retryLocalImport(
   return requestJson(
     `/api/imports/${encodeURIComponent(attemptId)}/retry`,
     isLocalImportResponse,
-    { method: "POST", signal },
+    { method: "POST", signal, timeoutMs: IMPORT_REQUEST_TIMEOUT_MS },
   );
 }
 
@@ -2959,7 +3011,7 @@ export function retryGitHubImport(
   return requestJson(
     `/api/imports/${encodeURIComponent(attemptId)}/retry-github`,
     isGitHubImportResponse,
-    { method: "POST", signal },
+    { method: "POST", signal, timeoutMs: IMPORT_REQUEST_TIMEOUT_MS },
   );
 }
 
@@ -2970,7 +3022,7 @@ export function retryImportCleanup(
   return requestJson(
     `/api/imports/${encodeURIComponent(attemptId)}/cleanup`,
     isGitHubImportResponse,
-    { method: "POST", signal },
+    { method: "POST", signal, timeoutMs: IMPORT_STATUS_REQUEST_TIMEOUT_MS },
   );
 }
 
@@ -3283,11 +3335,12 @@ export function openProjectIndex(
   projectId: string,
   indexId: string,
   signal?: AbortSignal,
+  timeoutMs?: number,
 ): Promise<IndexResponse> {
   return requestJson(
     `/api/projects/${encodeURIComponent(projectId)}/indexes/${encodeURIComponent(indexId)}`,
     isIndexResponse,
-    { signal },
+    { signal, timeoutMs },
   );
 }
 

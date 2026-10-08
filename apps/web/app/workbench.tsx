@@ -17,6 +17,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   ApiRequestError,
+  IMPORT_STATUS_REQUEST_TIMEOUT_MS,
+  RequestTimeoutError,
   createProjectIndex,
   checkProjectIndexFreshness,
   generateProjectFeatures,
@@ -106,7 +108,12 @@ import {
   type RunEventStreamController,
   type RunStreamStatus,
 } from "../lib/run-event-stream";
-import { isImportStatusTerminal, waitForImportStatus } from "../lib/import-status";
+import {
+  finishImportSubmissionKey,
+  isImportStatusTerminal,
+  nextImportSubmissionKey,
+  waitForImportStatus,
+} from "../lib/import-status";
 import {
   emptyGraphState,
   edgeKindLabel,
@@ -124,6 +131,7 @@ import {
   shouldClearSubmittedSessionDraft,
   type SessionDraftSubmission,
 } from "../lib/session-draft";
+import { readWorkbenchRoute, resolveWorkbenchProject, workbenchLocation } from "../lib/workbench-navigation";
 import WorkbenchUi from "./workbench-ui";
 
 type IndexUiStatus = "unindexed" | "creating" | "loading" | "ready" | "partial" | "error";
@@ -276,6 +284,16 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "请求失败，请稍后重试。";
 }
 
+function isUncertainImportRequestError(error: unknown): boolean {
+  return error instanceof RequestTimeoutError || error instanceof TypeError;
+}
+
+function importRequestErrorMessage(error: unknown): string {
+  return isUncertainImportRequestError(error)
+    ? "连接中断，服务端导入可能仍在处理。已有 attempt 可刷新状态；初次请求可用相同内容重新连接。"
+    : errorMessage(error);
+}
+
 function localImportErrorMessage(message: string): string {
   return message.includes("local import path is outside allowed roots")
     ? "API 当前未开放这个目录。请在 API 设置中加入本地可导入目录，重启 API 后再试。"
@@ -293,7 +311,7 @@ async function importIndexFromStatus(
   if (status.latest_index?.index.index_id === indexId) {
     return status.latest_index;
   }
-  return openProjectIndex(status.project.project_id, indexId, signal);
+  return openProjectIndex(status.project.project_id, indexId, signal, IMPORT_STATUS_REQUEST_TIMEOUT_MS);
 }
 
 async function localImportResponseFromStatus(
@@ -446,10 +464,6 @@ function featureSelectionStorageKey(projectId: string, indexId: string): string 
   return `codetrail.selectedFeatureGenerationId:${projectId}:${indexId}`;
 }
 
-function sessionSelectionStorageKey(projectId: string): string {
-  return `codetrail.selectedSessionId:${projectId}`;
-}
-
 function sessionDraftStorageKey(projectId: string, sessionId: string): string {
   return `${projectId}:${sessionId}`;
 }
@@ -518,20 +532,11 @@ type SessionLink = {
   sessionId: string;
 };
 
-function readSessionLink(): { link: SessionLink | null; error: string | null } {
-  const params = new URLSearchParams(window.location.search);
-  const projectId = params.get("project_id");
-  const sessionId = params.get("session_id");
-  if (projectId === null && sessionId === null) {
-    return { link: null, error: null };
+function newImportIdempotencyKey(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `import-${crypto.randomUUID()}`;
   }
-  if (sessionId === null) {
-    return { link: null, error: null };
-  }
-  if (!projectId || !sessionId) {
-    return { link: null, error: "工作台会话引用缺少必要的项目或会话参数。" };
-  }
-  return { link: { projectId, sessionId }, error: null };
+  return `import-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 export default function Workbench() {
@@ -554,9 +559,6 @@ export default function Workbench() {
   const [githubImportAttempt, setGithubImportAttempt] = useState<ImportAttempt | null>(null);
   const [githubImportError, setGithubImportError] = useState<string | null>(null);
   const [projectIndexes, setProjectIndexes] = useState<IndexResponse["index"][]>([]);
-  const [revision, setRevision] = useState("working-tree");
-  const [dirty, setDirty] = useState(false);
-  const [indexIdInput, setIndexIdInput] = useState("");
   const [indexResponse, setIndexResponse] = useState<IndexResponse | null>(null);
   const [indexStatus, setIndexStatus] = useState<IndexUiStatus>("unindexed");
   const [indexError, setIndexError] = useState<string | null>(null);
@@ -679,6 +681,9 @@ export default function Workbench() {
   const projectController = useRef<AbortController | null>(null);
   const importController = useRef<AbortController | null>(null);
   const importActionInFlight = useRef(false);
+  const importNavigationId = useRef(0);
+  const localImportIdempotency = useRef<{ signature: string; key: string } | null>(null);
+  const githubImportIdempotency = useRef<{ signature: string; key: string } | null>(null);
   const indexController = useRef<AbortController | null>(null);
   const searchController = useRef<AbortController | null>(null);
   const graphController = useRef<AbortController | null>(null);
@@ -745,6 +750,23 @@ export default function Workbench() {
   const sessionLink = useRef<SessionLink | null>(null);
   const sessionLinkApplied = useRef(false);
   const skipSessionRestoreProjectId = useRef<string | null>(null);
+
+  const invalidateImportNavigation = useCallback(() => {
+    importNavigationId.current += 1;
+  }, []);
+  const replaceWorkbenchLocation = useCallback((projectId: string, sessionId?: string) => {
+    window.history.replaceState(null, "", workbenchLocation(window.location.href, projectId, sessionId));
+  }, []);
+  const changeWorkbenchView = useCallback((mode: WorkbenchView) => {
+    setViewMode(mode);
+    if (mode === "overview") {
+      sessionLink.current = null;
+      sessionLinkApplied.current = true;
+      if (selectedProjectId) {
+        replaceWorkbenchLocation(selectedProjectId);
+      }
+    }
+  }, [replaceWorkbenchLocation, selectedProjectId]);
 
   const resetModuleSymbolSource = useCallback(() => {
     sourceController.current?.abort();
@@ -832,27 +854,32 @@ export default function Workbench() {
       setProjects(response.projects);
       setProjectStatus(response.projects.length > 0 ? "success" : "empty");
       const parsedEvidenceLink = readEvidenceLink();
-      const parsedSessionLink = readSessionLink();
+      const route = readWorkbenchRoute(window.location.search);
       evidenceLink.current = parsedEvidenceLink.link;
       evidenceLinkApplied.current = false;
-      sessionLink.current = parsedSessionLink.link;
-      sessionLinkApplied.current = false;
-      const linkError = parsedEvidenceLink.error ?? parsedSessionLink.error;
-      if (parsedEvidenceLink.link && parsedSessionLink.link) {
+      sessionLink.current = route.error || parsedEvidenceLink.error || !route.projectId || !route.sessionId
+        ? null
+        : { projectId: route.projectId, sessionId: route.sessionId };
+      sessionLinkApplied.current = sessionLink.current === null;
+      const linkError = parsedEvidenceLink.error ?? route.error;
+      const conflictingLinks = parsedEvidenceLink.link && route.sessionId !== null;
+      const resolution = resolveWorkbenchProject(
+        route,
+        parsedEvidenceLink.link?.projectId ?? null,
+        response.projects.map((project) => project.project_id),
+        window.localStorage.getItem("codetrail.selectedProjectId"),
+      );
+      if (conflictingLinks) {
         setProjectStatus("error");
         setProjectError("工作台链接同时包含源码证据和会话引用，已拒绝打开。请只保留一种引用。");
       } else if (linkError) {
         setProjectStatus("error");
         setProjectError(linkError);
       }
-      const savedProjectId = window.localStorage.getItem("codetrail.selectedProjectId");
-      const requestedProjectId = parsedEvidenceLink.link?.projectId ?? parsedSessionLink.link?.projectId;
-      const nextProject = linkError || (parsedEvidenceLink.link && parsedSessionLink.link)
+      const nextProject = linkError || conflictingLinks
         ? null
-        : requestedProjectId
-          ? response.projects.find((project) => project.project_id === requestedProjectId) ?? null
-          : response.projects.find((project) => project.project_id === savedProjectId) ?? response.projects[0] ?? null;
-      if (requestedProjectId && !nextProject) {
+        : response.projects.find((project) => project.project_id === resolution.projectId) ?? null;
+      if (resolution.requestedProjectId && !nextProject) {
         setProjectStatus("error");
         setProjectError("引用的 project_id 不存在，已拒绝打开。");
       }
@@ -1993,15 +2020,9 @@ export default function Workbench() {
         setSessionWriteStatus("idle");
         setSessionWriteError(null);
         sessionMessageRequest.current = null;
-        window.localStorage.setItem(sessionSelectionStorageKey(projectId), sessionId);
-        const url = new URL(window.location.href);
-        url.search = "";
-        url.searchParams.set("project_id", projectId);
-        url.searchParams.set("session_id", sessionId);
-        window.history.replaceState(null, "", `${url.pathname}?${url.searchParams.toString()}${url.hash}`);
-        if (sessionLink.current?.projectId === projectId && sessionLink.current.sessionId === sessionId) {
-          sessionLinkApplied.current = true;
-        }
+        replaceWorkbenchLocation(projectId, sessionId);
+        sessionLink.current = { projectId, sessionId };
+        sessionLinkApplied.current = true;
         setSessionMessages([]);
         setSessionMessagesCursor(null);
         setSessionMessagesHasMore(false);
@@ -2031,7 +2052,7 @@ export default function Workbench() {
         setSessionError(errorMessage(error));
       }
     },
-    [closeRunEventStream, loadRunHistory, loadSessionMessages, resetRunImpact, stopExternalRunDiscovery],
+    [closeRunEventStream, loadRunHistory, loadSessionMessages, replaceWorkbenchLocation, resetRunImpact, stopExternalRunDiscovery],
   );
 
   const selectSession = useCallback(
@@ -2096,6 +2117,7 @@ export default function Workbench() {
         setSessionError("请输入本次 Issue 或排查主题。");
         return;
       }
+      invalidateImportNavigation();
       const previous = sessionCreateRequest.current;
       const key = previous?.projectId === selectedProjectId && previous.topic === topic
         ? previous.key
@@ -2137,7 +2159,7 @@ export default function Workbench() {
         setSessionWriteError(errorMessage(error));
       }
     },
-    [openSession, selectedProjectId, sessionTopic],
+    [invalidateImportNavigation, openSession, selectedProjectId, sessionTopic],
   );
 
   const sendSessionMessage = useCallback(
@@ -2256,7 +2278,6 @@ export default function Workbench() {
   const applyIndexResponse = useCallback(
     (response: IndexResponse) => {
       setIndexResponse(response);
-      setIndexIdInput(response.index.index_id);
       setIndexError(null);
       setIndexFreshness(null);
       setIndexFreshnessError(null);
@@ -2280,7 +2301,6 @@ export default function Workbench() {
       indexController.current = controller;
       const requestId = ++indexRequestId.current;
       setIndexResponse(null);
-      setIndexIdInput("");
       setIndexError(null);
       setIndexFreshness(null);
       setIndexFreshnessError(null);
@@ -2350,16 +2370,12 @@ export default function Workbench() {
     if (!selectedProjectId || sessionStatus !== "success") {
       return;
     }
-    const requested = sessionLink.current?.projectId === selectedProjectId
-      ? sessionLink.current.sessionId
-      : null;
-    const saved = requested ? null : window.localStorage.getItem(sessionSelectionStorageKey(selectedProjectId));
-    const target = requested ?? saved;
-    if (!target) {
+    const requested = sessionLink.current?.projectId === selectedProjectId ? sessionLink.current.sessionId : null;
+    if (!requested) {
       sessionLinkApplied.current = true;
       return;
     }
-    if (selectedSessionId === target) {
+    if (selectedSessionId === requested) {
       sessionLinkApplied.current = true;
       setViewMode("session");
       return;
@@ -2368,8 +2384,8 @@ export default function Workbench() {
       return;
     }
     sessionLinkApplied.current = true;
-    const knownSession = sessions.find((session) => session.session_id === target);
-    void openSession(selectedProjectId, target, knownSession);
+    const knownSession = sessions.find((session) => session.session_id === requested);
+    void openSession(selectedProjectId, requested, knownSession);
   }, [indexResponse?.index.index_id, openSession, selectedProjectId, selectedSessionId, sessionStatus, sessions]);
 
   useEffect(() => {
@@ -2379,7 +2395,6 @@ export default function Workbench() {
       resetSessions();
       setProjectIndexes([]);
       setIndexResponse(null);
-      setIndexIdInput("");
       setIndexStatus("unindexed");
       setIndexError(null);
       clearExploration();
@@ -2394,7 +2409,7 @@ export default function Workbench() {
     if (skipSessionRestore) {
       skipSessionRestoreProjectId.current = null;
     }
-    sessionLinkApplied.current = skipSessionRestore;
+    sessionLinkApplied.current = skipSessionRestore || sessionLink.current?.projectId !== project.project_id;
     resetSessions();
     void loadSessions(project.project_id);
     void loadSelectedProject(project.project_id);
@@ -2440,15 +2455,18 @@ export default function Workbench() {
     project: ProjectRecord,
     index: IndexResponse | null,
     isReady: boolean,
+    mayNavigate: boolean,
     keepOperationPanel = false,
   ) => {
     setProjects((previous) => [
       ...previous.filter((item) => item.project_id !== project.project_id),
       project,
     ]);
-    setSelectedProjectId(project.project_id);
-    setProjectStatus("success");
-    if (isReady && index) {
+    if (mayNavigate) {
+      setSelectedProjectId(project.project_id);
+      setProjectStatus("success");
+    }
+    if (mayNavigate && isReady && index) {
       skipSessionRestoreProjectId.current = project.project_id;
       sessionLink.current = null;
       sessionLinkApplied.current = true;
@@ -2456,12 +2474,9 @@ export default function Workbench() {
       evidenceLinkApplied.current = false;
       resetSessions();
       setViewMode("overview");
-      const url = new URL(window.location.href);
-      url.search = "";
-      url.searchParams.set("project_id", project.project_id);
-      window.history.replaceState(null, "", `${url.pathname}?${url.searchParams.toString()}${url.hash}`);
+      replaceWorkbenchLocation(project.project_id);
     }
-    if (index) {
+    if (mayNavigate && index) {
       if (selectedProjectId === project.project_id) {
         setProjectIndexes((previous) => [
           index.index,
@@ -2473,9 +2488,9 @@ export default function Workbench() {
         setPanelMode(panelMode);
       }
     }
-  }, [applyIndexResponse, panelMode, resetSessions, selectedProjectId]);
+  }, [applyIndexResponse, panelMode, replaceWorkbenchLocation, resetSessions, selectedProjectId]);
 
-  const applyImportResponse = useCallback((response: LocalImportResponse) => {
+  const applyImportResponse = useCallback((response: LocalImportResponse, navigationId: number) => {
     setImportAttempt(response.attempt);
     setImportStatus(response.attempt.status);
     setImportError(
@@ -2484,11 +2499,11 @@ export default function Workbench() {
         : localImportErrorMessage(response.attempt.error_message ?? "本地导入未完成。"),
     );
     if (response.attempt.status === "ready") {
-      applyImportedProject(response.project, response.index, true);
+      applyImportedProject(response.project, response.index, true, navigationId === importNavigationId.current);
     }
   }, [applyImportedProject]);
 
-  const applyGitHubImportResponse = useCallback((response: GitHubImportResponse) => {
+  const applyGitHubImportResponse = useCallback((response: GitHubImportResponse, navigationId: number) => {
     setGithubImportAttempt(response.attempt);
     setGithubImportStatus(response.attempt.status);
     setGithubImportError(
@@ -2499,7 +2514,13 @@ export default function Workbench() {
       : response.attempt.error_message ?? "GitHub 导入未完成。",
     );
     if (response.attempt.status === "ready") {
-      applyImportedProject(response.project, response.index, true, response.cleanup_status === "failed");
+      applyImportedProject(
+        response.project,
+        response.index,
+        true,
+        navigationId === importNavigationId.current,
+        response.cleanup_status === "failed",
+      );
     }
   }, [applyImportedProject]);
 
@@ -2507,18 +2528,25 @@ export default function Workbench() {
     initial: LocalImportResponse,
     signal: AbortSignal,
     requestId: number,
+    navigationId: number,
   ) => {
-    applyImportResponse(initial);
+    applyImportResponse(initial, navigationId);
     const response = await waitForImportStatus(
       initial,
-      async () => localImportResponseFromStatus(await getImportStatus(initial.attempt.attempt_id, signal), signal),
+      async (statusSignal) => localImportResponseFromStatus(
+        await getImportStatus(initial.attempt.attempt_id, statusSignal),
+        statusSignal,
+      ),
       signal,
     );
     if (!isLatestRequest(requestId, importRequestId.current)) {
       return false;
     }
     if (response !== initial) {
-      applyImportResponse(response);
+      applyImportResponse(response, navigationId);
+    }
+    if (navigationId !== importNavigationId.current) {
+      return false;
     }
     if (!isImportStatusTerminal(response.attempt.status)) {
       setImportStatus(null);
@@ -2532,18 +2560,25 @@ export default function Workbench() {
     initial: GitHubImportResponse,
     signal: AbortSignal,
     requestId: number,
+    navigationId: number,
   ) => {
-    applyGitHubImportResponse(initial);
+    applyGitHubImportResponse(initial, navigationId);
     const response = await waitForImportStatus(
       initial,
-      async () => githubImportResponseFromStatus(await getImportStatus(initial.attempt.attempt_id, signal), signal),
+      async (statusSignal) => githubImportResponseFromStatus(
+        await getImportStatus(initial.attempt.attempt_id, statusSignal),
+        statusSignal,
+      ),
       signal,
     );
     if (!isLatestRequest(requestId, importRequestId.current)) {
       return false;
     }
     if (response !== initial) {
-      applyGitHubImportResponse(response);
+      applyGitHubImportResponse(response, navigationId);
+    }
+    if (navigationId !== importNavigationId.current) {
+      return false;
     }
     if (!isImportStatusTerminal(response.attempt.status)) {
       setGithubImportStatus(null);
@@ -2562,6 +2597,7 @@ export default function Workbench() {
     const controller = new AbortController();
     importController.current = controller;
     const requestId = ++importRequestId.current;
+    const navigationId = importNavigationId.current;
     setImportStatus(importAttempt.status);
     setImportError(null);
     try {
@@ -2570,13 +2606,13 @@ export default function Workbench() {
         return false;
       }
       const response = await localImportResponseFromStatus(status, controller.signal);
-      return await settleLocalImportResponse(response, controller.signal, requestId);
+      return await settleLocalImportResponse(response, controller.signal, requestId, navigationId);
     } catch (error) {
       if (isAbortError(error) || !isLatestRequest(requestId, importRequestId.current)) {
         return false;
       }
       setImportStatus(null);
-      setImportError(localImportErrorMessage(errorMessage(error)));
+      setImportError(localImportErrorMessage(importRequestErrorMessage(error)));
       return false;
     } finally {
       importActionInFlight.current = false;
@@ -2592,6 +2628,7 @@ export default function Workbench() {
     const controller = new AbortController();
     importController.current = controller;
     const requestId = ++importRequestId.current;
+    const navigationId = importNavigationId.current;
     setGithubImportStatus(githubImportAttempt.status);
     setGithubImportError(null);
     try {
@@ -2600,13 +2637,13 @@ export default function Workbench() {
         return false;
       }
       const response = await githubImportResponseFromStatus(status, controller.signal);
-      return await settleGitHubImportResponse(response, controller.signal, requestId);
+      return await settleGitHubImportResponse(response, controller.signal, requestId, navigationId);
     } catch (error) {
       if (isAbortError(error) || !isLatestRequest(requestId, importRequestId.current)) {
         return false;
       }
       setGithubImportStatus(null);
-      setGithubImportError(errorMessage(error));
+      setGithubImportError(importRequestErrorMessage(error));
       return false;
     } finally {
       importActionInFlight.current = false;
@@ -2631,6 +2668,13 @@ export default function Workbench() {
       const controller = new AbortController();
       importController.current = controller;
       const requestId = ++importRequestId.current;
+      const navigationId = importNavigationId.current;
+      const submissionKey = nextImportSubmissionKey(
+        localImportIdempotency.current,
+        JSON.stringify([name, path]),
+        newImportIdempotencyKey,
+      );
+      localImportIdempotency.current = submissionKey;
       setImportStatus("queued");
       setImportAttempt(null);
       setImportError(null);
@@ -2638,27 +2682,32 @@ export default function Workbench() {
         const response = await importLocalPath(
           name,
           path,
-          revision.trim() || "working-tree",
-          dirty,
-          undefined,
+          "working-tree",
+          false,
+          submissionKey.key,
           controller.signal,
         );
+        localImportIdempotency.current = finishImportSubmissionKey(localImportIdempotency.current, false);
         if (!isLatestRequest(requestId, importRequestId.current)) {
           return false;
         }
-        return await settleLocalImportResponse(response, controller.signal, requestId);
+        return await settleLocalImportResponse(response, controller.signal, requestId, navigationId);
       } catch (error) {
+        localImportIdempotency.current = finishImportSubmissionKey(
+          localImportIdempotency.current,
+          isUncertainImportRequestError(error),
+        );
         if (isAbortError(error) || !isLatestRequest(requestId, importRequestId.current)) {
           return false;
         }
-        setImportStatus("failed");
-        setImportError(localImportErrorMessage(errorMessage(error)));
+        setImportStatus(isUncertainImportRequestError(error) ? null : "failed");
+        setImportError(localImportErrorMessage(importRequestErrorMessage(error)));
         return false;
       } finally {
         importActionInFlight.current = false;
       }
     },
-    [dirty, importName, localPath, revision, settleLocalImportResponse],
+    [importName, localPath, settleLocalImportResponse],
   );
 
   const retryLocalProjectImport = useCallback(async () => {
@@ -2674,6 +2723,7 @@ export default function Workbench() {
     const controller = new AbortController();
     importController.current = controller;
     const requestId = ++importRequestId.current;
+    const navigationId = importNavigationId.current;
     setImportStatus("queued");
     setImportError(null);
     try {
@@ -2681,13 +2731,13 @@ export default function Workbench() {
       if (!isLatestRequest(requestId, importRequestId.current)) {
         return false;
       }
-      return await settleLocalImportResponse(response, controller.signal, requestId);
+      return await settleLocalImportResponse(response, controller.signal, requestId, navigationId);
     } catch (error) {
       if (isAbortError(error) || !isLatestRequest(requestId, importRequestId.current)) {
         return false;
       }
-      setImportStatus("failed");
-      setImportError(localImportErrorMessage(errorMessage(error)));
+      setImportStatus(isUncertainImportRequestError(error) ? null : "failed");
+      setImportError(localImportErrorMessage(importRequestErrorMessage(error)));
       return false;
     } finally {
       importActionInFlight.current = false;
@@ -2713,6 +2763,13 @@ export default function Workbench() {
       const controller = new AbortController();
       importController.current = controller;
       const requestId = ++importRequestId.current;
+      const navigationId = importNavigationId.current;
+      const submissionKey = nextImportSubmissionKey(
+        githubImportIdempotency.current,
+        JSON.stringify([name, url, ref]),
+        newImportIdempotencyKey,
+      );
+      githubImportIdempotency.current = submissionKey;
       setGithubImportStatus("queued");
       setGithubImportAttempt(null);
       setGithubImportError(null);
@@ -2721,19 +2778,24 @@ export default function Workbench() {
           name,
           url,
           ref || undefined,
-          undefined,
+          submissionKey.key,
           controller.signal,
         );
+        githubImportIdempotency.current = finishImportSubmissionKey(githubImportIdempotency.current, false);
         if (!isLatestRequest(requestId, importRequestId.current)) {
           return false;
         }
-        return await settleGitHubImportResponse(response, controller.signal, requestId);
+        return await settleGitHubImportResponse(response, controller.signal, requestId, navigationId);
       } catch (error) {
+        githubImportIdempotency.current = finishImportSubmissionKey(
+          githubImportIdempotency.current,
+          isUncertainImportRequestError(error),
+        );
         if (isAbortError(error) || !isLatestRequest(requestId, importRequestId.current)) {
           return false;
         }
-        setGithubImportStatus("failed");
-        setGithubImportError(errorMessage(error));
+        setGithubImportStatus(isUncertainImportRequestError(error) ? null : "failed");
+        setGithubImportError(importRequestErrorMessage(error));
         return false;
       } finally {
         importActionInFlight.current = false;
@@ -2754,6 +2816,7 @@ export default function Workbench() {
     const controller = new AbortController();
     importController.current = controller;
     const requestId = ++importRequestId.current;
+    const navigationId = importNavigationId.current;
     setGithubImportStatus("queued");
     setGithubImportError(null);
     try {
@@ -2761,13 +2824,13 @@ export default function Workbench() {
       if (!isLatestRequest(requestId, importRequestId.current)) {
         return false;
       }
-      return await settleGitHubImportResponse(response, controller.signal, requestId);
+      return await settleGitHubImportResponse(response, controller.signal, requestId, navigationId);
     } catch (error) {
       if (isAbortError(error) || !isLatestRequest(requestId, importRequestId.current)) {
         return false;
       }
-      setGithubImportStatus("failed");
-      setGithubImportError(errorMessage(error));
+      setGithubImportStatus(isUncertainImportRequestError(error) ? null : "failed");
+      setGithubImportError(importRequestErrorMessage(error));
       return false;
     } finally {
       importActionInFlight.current = false;
@@ -2783,6 +2846,7 @@ export default function Workbench() {
     const controller = new AbortController();
     importController.current = controller;
     const requestId = ++importRequestId.current;
+    const navigationId = importNavigationId.current;
     setGithubImportStatus("queued");
     setGithubImportError(null);
     try {
@@ -2790,7 +2854,7 @@ export default function Workbench() {
       if (!isLatestRequest(requestId, importRequestId.current)) {
         return;
       }
-      applyGitHubImportResponse(response);
+      applyGitHubImportResponse(response, navigationId);
     } catch (error) {
       if (isAbortError(error) || !isLatestRequest(requestId, importRequestId.current)) {
         return;
@@ -2803,8 +2867,7 @@ export default function Workbench() {
   }, [applyGitHubImportResponse, githubImportAttempt]);
 
   const createNewIndex = useCallback(
-    async (event: React.FormEvent<HTMLFormElement>) => {
-      event.preventDefault();
+    async () => {
       if (!selectedProjectId) {
         setIndexError("请先创建或切换到一个项目。");
         return;
@@ -2818,8 +2881,8 @@ export default function Workbench() {
       try {
         const response = await createProjectIndex(
           selectedProjectId,
-          revision.trim() || "working-tree",
-          dirty,
+          "working-tree",
+          false,
           controller.signal,
         );
         if (!isLatestRequest(requestId, indexRequestId.current)) {
@@ -2851,19 +2914,16 @@ export default function Workbench() {
         setIndexError(errorMessage(error));
       }
     },
-    [applyIndexResponse, dirty, revision, selectedProjectId],
+    [applyIndexResponse, selectedProjectId],
   );
 
   const openExistingIndex = useCallback(
-    async (event: React.FormEvent<HTMLFormElement>) => {
-      event.preventDefault();
+    async (indexId: string) => {
       if (!selectedProjectId) {
         setIndexError("请先创建或切换到一个项目。");
         return;
       }
-      const indexId = indexIdInput.trim();
       if (!indexId) {
-        setIndexError("请输入已有 index_id。");
         return;
       }
       indexController.current?.abort();
@@ -2886,7 +2946,7 @@ export default function Workbench() {
         setIndexError(errorMessage(error));
       }
     },
-    [applyIndexResponse, indexIdInput, selectedProjectId],
+    [applyIndexResponse, selectedProjectId],
   );
 
   const checkCurrentIndexFreshness = useCallback(async () => {
@@ -2938,8 +2998,8 @@ export default function Workbench() {
       const result = await refreshProjectIndex(
         selectedProjectId,
         indexResponse.index.index_id,
-        revision.trim() || "working-tree",
-        dirty,
+        "working-tree",
+        false,
         controller.signal,
       );
       if (!isLatestRequest(requestId, indexRequestId.current)) {
@@ -2975,7 +3035,7 @@ export default function Workbench() {
         setIndexFreshnessStatus("idle");
       }
     }
-  }, [applyIndexResponse, dirty, indexResponse, revision, selectedProjectId]);
+  }, [applyIndexResponse, indexResponse, selectedProjectId]);
 
   const refreshCurrentGitHubSource = useCallback(async () => {
     if (!selectedProjectId || !indexResponse || !indexFreshness?.remote_source_url) {
@@ -3894,10 +3954,7 @@ export default function Workbench() {
           setViewMode("overview");
           setPanelMode("none");
           setSelectedProjectId(projectId);
-          const url = new URL(window.location.href);
-          url.search = "";
-          url.searchParams.set("project_id", projectId);
-          window.history.replaceState(null, "", `${url.pathname}?${url.searchParams.toString()}${url.hash}`);
+          replaceWorkbenchLocation(projectId);
         },
       }}
       localImport={{
@@ -3937,14 +3994,8 @@ export default function Workbench() {
         freshnessStatus: indexFreshnessStatus,
         freshnessError: indexFreshnessError,
         refreshMode: indexRefreshMode,
-        revision,
-        dirty,
-        indexIdInput,
-        onRevisionChange: setRevision,
-        onDirtyChange: setDirty,
-        onIndexIdChange: setIndexIdInput,
         onCreate: createNewIndex,
-        onOpen: openExistingIndex,
+        onOpenIndex: openExistingIndex,
         onCheckFreshness: checkCurrentIndexFreshness,
         onRefresh: refreshCurrentIndex,
         onUpdateGitHub: refreshCurrentGitHubSource,
@@ -4197,7 +4248,8 @@ export default function Workbench() {
         },
       }}
       viewMode={viewMode}
-      onViewModeChange={setViewMode}
+      onViewModeChange={changeWorkbenchView}
+      onImportFlowLeave={invalidateImportNavigation}
       panelMode={panelMode}
       onPanelModeChange={setPanelMode}
     />

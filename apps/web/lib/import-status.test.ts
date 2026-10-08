@@ -1,11 +1,36 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { isImportStatusTerminal, waitForImportStatus } from "./import-status.ts";
+import {
+  finishImportSubmissionKey,
+  isImportStatusTerminal,
+  nextImportSubmissionKey,
+  waitForImportStatus,
+} from "./import-status.ts";
 
 type AttemptResult = { attempt: { status: "queued" | "acquiring" | "indexing" | "ready" | "failed" } };
 
 const pending: AttemptResult = { attempt: { status: "queued" } };
+
+test("reuses an import key only while the submission outcome is uncertain", () => {
+  let created = 0;
+  const createKey = () => `key-${++created}`;
+  const signature = JSON.stringify(["project", "https://github.com/org/repo", "main"]);
+
+  const first = nextImportSubmissionKey(null, signature, createKey);
+  const uncertain = finishImportSubmissionKey(first, true);
+  const reconnect = nextImportSubmissionKey(uncertain, signature, createKey);
+  assert.equal(reconnect.key, first.key);
+
+  const changedRef = nextImportSubmissionKey(reconnect, JSON.stringify(["project", "https://github.com/org/repo", "next"]), createKey);
+  assert.notEqual(changedRef.key, first.key);
+
+  const afterKnownResponse = finishImportSubmissionKey(changedRef, false);
+  assert.equal(afterKnownResponse, null);
+  const deliberateRepeat = nextImportSubmissionKey(afterKnownResponse, JSON.stringify(["project", "https://github.com/org/repo", "next"]), createKey);
+  assert.notEqual(deliberateRepeat.key, changedRef.key);
+  assert.equal(created, 3);
+});
 
 test("polls a pending import until it reaches ready", async () => {
   const signal = new AbortController().signal;
@@ -74,4 +99,22 @@ test("aborts the poll wait without reading another status", async () => {
 
   await assert.rejects(pendingPoll, { name: "AbortError" });
   assert.equal(reads, 0);
+});
+
+test("bounds a status request that never settles and keeps its last attempt status", async () => {
+  let reads = 0;
+  const result = await waitForImportStatus(
+    pending,
+    (signal) => {
+      reads += 1;
+      return new Promise((resolve) => {
+        signal.addEventListener("abort", () => resolve({ attempt: { status: "indexing" } }), { once: true });
+      });
+    },
+    new AbortController().signal,
+    { intervalMs: 0, maxPolls: 40, timeoutMs: 250 },
+  );
+
+  assert.equal(reads, 1);
+  assert.equal(result.attempt.status, "indexing");
 });

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  RequestTimeoutError,
   isFeatureGenerationListResponse,
   isFeatureGenerationResponse,
   isFeatureGraphResponse,
@@ -16,6 +17,8 @@ import {
   isSessionListResponse,
   isSessionMessagesResponse,
   isSessionResponse,
+  openProjectIndex,
+  requestJson,
   SCHEMA_VERSION,
 } from "./api.ts";
 
@@ -1080,4 +1083,56 @@ test("session validators keep project, snapshot, and sequence boundaries explici
   const reverseSequence = structuredClone(payload.messages);
   reverseSequence.messages.push({ ...payload.message, message_id: "message-two", sequence: 0 });
   assert.equal(isSessionMessagesResponse(reverseSequence), false);
+});
+
+test("requestJson applies an explicit timeout to import-specific callers", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = ((_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+    init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+  })) as typeof fetch;
+
+  try {
+    await assert.rejects(
+      requestJson("/api/imports/local", (value): value is object => Boolean(value), { timeoutMs: 5 }),
+      (error: unknown) => error instanceof RequestTimeoutError,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("requestJson preserves a timeout when response headers arrive before the body", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    const response = new Response("{}", { status: 200 });
+    response.json = () => new Promise<unknown>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+    });
+    return response;
+  }) as typeof fetch;
+
+  try {
+    await assert.rejects(
+      requestJson("/api/imports/local", (value): value is object => Boolean(value), { timeoutMs: 5 }),
+      (error: unknown) => error instanceof RequestTimeoutError,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("import recovery can bound opening a ready snapshot without changing default index reads", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = ((_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+    init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+  })) as typeof fetch;
+
+  try {
+    await assert.rejects(
+      openProjectIndex("project-a", "index-a", undefined, 5),
+      (error: unknown) => error instanceof RequestTimeoutError,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
