@@ -749,7 +749,6 @@ export default function Workbench() {
   const evidenceLinkApplied = useRef(false);
   const sessionLink = useRef<SessionLink | null>(null);
   const sessionLinkApplied = useRef(false);
-  const skipSessionRestoreProjectId = useRef<string | null>(null);
 
   const invalidateImportNavigation = useCallback(() => {
     importNavigationId.current += 1;
@@ -2405,11 +2404,7 @@ export default function Workbench() {
       return;
     }
     window.localStorage.setItem("codetrail.selectedProjectId", project.project_id);
-    const skipSessionRestore = skipSessionRestoreProjectId.current === project.project_id;
-    if (skipSessionRestore) {
-      skipSessionRestoreProjectId.current = null;
-    }
-    sessionLinkApplied.current = skipSessionRestore || sessionLink.current?.projectId !== project.project_id;
+    sessionLinkApplied.current = sessionLink.current?.projectId !== project.project_id;
     resetSessions();
     void loadSessions(project.project_id);
     void loadSelectedProject(project.project_id);
@@ -2454,7 +2449,6 @@ export default function Workbench() {
   const applyImportedProject = useCallback((
     project: ProjectRecord,
     index: IndexResponse | null,
-    isReady: boolean,
     mayNavigate: boolean,
     keepOperationPanel = false,
   ) => {
@@ -2466,8 +2460,7 @@ export default function Workbench() {
       setSelectedProjectId(project.project_id);
       setProjectStatus("success");
     }
-    if (mayNavigate && isReady && index) {
-      skipSessionRestoreProjectId.current = project.project_id;
+    if (mayNavigate && index) {
       sessionLink.current = null;
       sessionLinkApplied.current = true;
       evidenceLink.current = null;
@@ -2499,7 +2492,7 @@ export default function Workbench() {
         : localImportErrorMessage(response.attempt.error_message ?? "本地导入未完成。"),
     );
     if (response.attempt.status === "ready") {
-      applyImportedProject(response.project, response.index, true, navigationId === importNavigationId.current);
+      applyImportedProject(response.project, response.index, navigationId === importNavigationId.current);
     }
   }, [applyImportedProject]);
 
@@ -2517,7 +2510,6 @@ export default function Workbench() {
       applyImportedProject(
         response.project,
         response.index,
-        true,
         navigationId === importNavigationId.current,
         response.cleanup_status === "failed",
       );
