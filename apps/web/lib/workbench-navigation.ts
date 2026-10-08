@@ -8,6 +8,10 @@ export type WorkbenchRoute = {
 export type GraphPanelMode = "graph" | "feature_graph" | "impact";
 type WorkbenchPanelMode = GraphPanelMode | "source" | "none";
 
+export function canShowKnowledgeInspector(panel: WorkbenchPanelMode, inlineArchitectureGraph: boolean): boolean {
+  return panel === "none" || (panel === "graph" && inlineArchitectureGraph);
+}
+
 export function resolveGraphReturnPanel(
   currentPanel: WorkbenchPanelMode,
   previousPanel: WorkbenchPanelMode,

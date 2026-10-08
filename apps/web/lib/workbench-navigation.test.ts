@@ -1,7 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { readWorkbenchRoute, resolveGraphReturnPanel, resolveWorkbenchProject, workbenchLocation } from "./workbench-navigation.ts";
+import { canShowKnowledgeInspector, readWorkbenchRoute, resolveGraphReturnPanel, resolveWorkbenchProject, workbenchLocation } from "./workbench-navigation.ts";
+
+test("knowledge details yield to evidence and external graphs, then resume on return", () => {
+  assert.equal(canShowKnowledgeInspector("none", false), true);
+  assert.equal(canShowKnowledgeInspector("graph", true), true);
+  for (const panel of ["source", "feature_graph", "impact", "graph"] as const) {
+    assert.equal(canShowKnowledgeInspector(panel, false), false);
+  }
+  assert.equal(canShowKnowledgeInspector("source", true), false);
+  assert.equal(canShowKnowledgeInspector("graph", true), true);
+});
 
 test("an explicit project URL wins over another tab's saved project and opens architecture", () => {
   const route = readWorkbenchRoute("?project_id=project-url");

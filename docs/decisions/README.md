@@ -1,5 +1,7 @@
 # 决策记录
 
+- [项目知识采用画布与按需详情工作区](2026-10-08-project-knowledge-workspace.md)
+
 - [固定快照架构画布的可读层级](2026-10-08-architecture-view-readability.md)
 - [安装入口与共享运行配置分离](2026-10-07-installed-cli-config.md)
 
