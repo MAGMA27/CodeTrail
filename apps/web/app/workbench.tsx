@@ -120,6 +120,7 @@ import {
 import {
   emptyGraphState,
   edgeKindLabel,
+  directImportTargets,
   groupSymbolsByDirectory,
   hasDirectedCallCycle,
   isHttpCallChainResponse,
@@ -128,6 +129,7 @@ import {
   mergeContextualCalls,
   mergeNeighborGraph,
   unresolvedForSymbol,
+  type DirectImportTarget,
   type GraphState,
 } from "../lib/graph";
 import {
@@ -3213,6 +3215,55 @@ export default function Workbench() {
     [direction, edgeKinds, graphIndexId, selectedProjectId],
   );
 
+  const loadArchitectureRelations = useCallback(
+    async (root: SymbolRecord, requestedDirection: NeighborDirection, requestedEdgeKinds: EdgeKind[]) => {
+      if (!selectedProjectId || !indexResponse || root.index_id !== indexResponse.index.index_id) {
+        return;
+      }
+      graphController.current?.abort();
+      const controller = new AbortController();
+      graphController.current = controller;
+      const requestId = ++graphRequestId.current;
+      const indexId = indexResponse.index.index_id;
+      setGraphIndexId(indexId);
+      setSelectedId(root.symbol_id);
+      setGraphStatus("loading");
+      setGraphError(null);
+      setGraph(emptyGraphState);
+      setContextualCalls([]);
+      setExpandedGroups(new Set());
+      knownGroupKeys.current.clear();
+      try {
+        // ponytail: the existing neighbor endpoint caps each query at 40 edges; add paging if larger modules need full inventories.
+        const response = await getProjectNeighbors(
+          selectedProjectId,
+          indexId,
+          root.symbol_id,
+          requestedDirection,
+          requestedEdgeKinds,
+          controller.signal,
+          1,
+        );
+        if (!isLatestRequest(requestId, graphRequestId.current)) return;
+        if (
+          response.index_id !== indexId ||
+          response.root.index_id !== indexId ||
+          response.root.symbol_id !== root.symbol_id ||
+          response.root.path !== root.path
+        ) {
+          throw new Error("关系响应与当前固定索引、模块或符号不匹配。");
+        }
+        setGraph(mergeNeighborGraph(emptyGraphState, response));
+        setGraphStatus(response.truncated ? "success" : response.neighbors.length === 0 ? "empty" : "success");
+      } catch (error) {
+        if (isAbortError(error) || !isLatestRequest(requestId, graphRequestId.current)) return;
+        setGraphStatus("error");
+        setGraphError(errorMessage(error));
+      }
+    },
+    [indexResponse, selectedProjectId],
+  );
+
   const selectRunSymbol = useCallback(
     (symbolId: string) => {
       if (!runReport || !selectedProjectId) {
@@ -3370,19 +3421,42 @@ export default function Workbench() {
 
   const openOverviewModule = useCallback(
     (module: OverviewModule) => {
-      if (!indexResponse) {
+      if (!indexResponse || module.index_id !== indexResponse.index.index_id) {
         return;
       }
+      graphController.current?.abort();
+      graphRequestId.current += 1;
+      setGraphIndexId(module.index_id);
+      setGraph(emptyGraphState);
+      setGraphStatus("idle");
+      setGraphError(null);
+      setContextualCalls([]);
+      setHttpEntryChain(null);
+      setExpandedGroups(new Set());
+      knownGroupKeys.current.clear();
+      openModuleSymbols(module);
+      setLinkedSymbol(module.symbol);
       selectSymbol(module.symbol);
       setArchitectureGraphRootId(module.symbol.symbol_id);
       setViewMode("overview");
       setPanelMode("graph");
-      void loadNeighborhood(indexResponse.index.index_id, module.symbol.symbol_id, true);
     },
-    [indexResponse, loadNeighborhood, selectSymbol],
+    [indexResponse, openModuleSymbols, selectSymbol],
   );
 
+  const openModuleImports = useCallback((module: OverviewModule) => {
+    void loadArchitectureRelations(module.symbol, "callees", ["imports"]);
+  }, [loadArchitectureRelations]);
+
+  const openSymbolCalls = useCallback((symbol: SymbolRecord) => {
+    selectSymbol(symbol);
+    setPanelMode("graph");
+    void loadArchitectureRelations(symbol, "both", ["calls"]);
+  }, [loadArchitectureRelations, selectSymbol]);
+
   const closeArchitectureGraph = useCallback(() => {
+    graphController.current?.abort();
+    graphRequestId.current += 1;
     setArchitectureGraphRootId(null);
     setPanelMode("none");
   }, []);
@@ -3497,6 +3571,10 @@ export default function Workbench() {
   }, []);
 
   const groups = useMemo(() => groupSymbolsByDirectory(graph.symbols), [graph.symbols]);
+  const architectureImportTargets = useMemo(
+    () => moduleSymbolsRoot ? directImportTargets(graph, moduleSymbolsRoot) : [],
+    [graph, moduleSymbolsRoot],
+  );
 
   useEffect(() => {
     if (groups.length === 0) {
@@ -4188,6 +4266,8 @@ export default function Workbench() {
         onOpenHttpChain: openHttpEntryChain,
         onOpenOverviewModule: openOverviewModule,
         onOpenModuleSymbols: openModuleSymbols,
+        onOpenModuleImports: openModuleImports,
+        onOpenSymbolCalls: openSymbolCalls,
         onLoadMoreModuleSymbols: loadMoreModuleSymbols,
         onRetryModuleSymbols: retryModuleSymbols,
         onSelectModuleSymbol: selectModuleSymbol,
@@ -4267,6 +4347,8 @@ export default function Workbench() {
       graph={{
         panelMode: panelMode === "feature_graph" ? "feature_graph" : panelMode === "impact" ? "impact" : "graph",
         codeModel: flowModel,
+        codeEdges: graph.edges,
+        directImportTargets: architectureImportTargets,
         codeStatus: graphStatus,
         codeError: graphError,
         codeTruncated: graph.truncated,

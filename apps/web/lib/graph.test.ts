@@ -4,6 +4,7 @@ import test from "node:test";
 import type { CodeEdge, ContextualCall, NeighborsResponse, SymbolRecord } from "./api.ts";
 import {
   emptyGraphState,
+  directImportTargets,
   groupSymbolsByDirectory,
   hasDirectedCallCycle,
   isHttpCallChainResponse,
@@ -11,6 +12,7 @@ import {
   layoutSymbolGroups,
   mergeContextualCalls,
   mergeNeighborGraph,
+  moduleDefinitionRows,
   unresolvedForSymbol,
 } from "./graph.ts";
 
@@ -121,6 +123,59 @@ test("groupSymbolsByDirectory keeps a deterministic directory/file hierarchy", (
   assert.deepEqual(groups.map((group) => group.key), [".", "timeout_demo"]);
   assert.equal(groups[1].symbols[0].path, "timeout_demo/app.py");
   assert.equal(groups[1].label, "timeout_demo");
+});
+
+test("module definitions nest only when names and source ranges confirm a class parent", () => {
+  const definitions = [
+    { ...symbol("class-a", "pkg/mod.py", "pkg.mod.Service", 2), kind: "class" as const, end_line: 40 },
+    { ...symbol("method-a", "pkg/mod.py", "pkg.mod.Service.run", 8), end_line: 12 },
+    { ...symbol("nested-class", "pkg/mod.py", "pkg.mod.Service.Client", 15), kind: "class" as const, end_line: 30 },
+    { ...symbol("nested-method", "pkg/mod.py", "pkg.mod.Service.Client.send", 18), end_line: 20 },
+    { ...symbol("lookalike", "pkg/mod.py", "pkg.mod.Services.start", 22), end_line: 24 },
+    { ...symbol("outside-range", "pkg/mod.py", "pkg.mod.Service.late", 45), end_line: 47 },
+  ];
+
+  assert.deepEqual(
+    moduleDefinitionRows(definitions).map(({ symbol: item, depth }) => [item.symbol_id, depth]),
+    [
+      ["class-a", 0],
+      ["method-a", 1],
+      ["nested-class", 1],
+      ["nested-method", 2],
+      ["lookalike", 0],
+      ["outside-range", 0],
+    ],
+  );
+});
+
+test("direct imports aggregate by target file and retain every source edge", () => {
+  const module = { ...root, kind: "module" as const };
+  const firstTarget = { ...child, kind: "module" as const };
+  const secondTarget = { ...symbol("symbol-other", "timeout_demo/config.py", "timeout_demo.config", 1), kind: "module" as const };
+  const otherFile = { ...symbol("symbol-third", "timeout_demo/store.py", "timeout_demo.store", 1), kind: "module" as const };
+  const importEdge = (edgeId: string, targetId: string, line: number, sourceId = module.symbol_id): CodeEdge => ({
+    ...edge(edgeId, sourceId, targetId),
+    kind: "imports",
+    source_location: { path: module.path, start_line: line, end_line: line },
+  });
+  const state = mergeNeighborGraph(emptyGraphState, {
+    ...response,
+    root: module,
+    nodes: [module, firstTarget, secondTarget, otherFile],
+    neighbors: [
+      { symbol: firstTarget, edge: importEdge("import-one", firstTarget.symbol_id, 4) },
+      { symbol: secondTarget, edge: importEdge("import-two", secondTarget.symbol_id, 9) },
+      { symbol: otherFile, edge: importEdge("import-three", otherFile.symbol_id, 14) },
+      { symbol: otherFile, edge: importEdge("import-other-source", otherFile.symbol_id, 20, firstTarget.symbol_id) },
+    ],
+  });
+
+  const targets = directImportTargets(state, module);
+  assert.deepEqual(targets.map(({ path, edges }) => [path, edges.map((item) => item.edge_id)]), [
+    ["timeout_demo/config.py", ["import-one", "import-two"]],
+    ["timeout_demo/store.py", ["import-three"]],
+  ]);
+  assert.deepEqual(targets[0]?.edges.map(({ source_location }) => source_location.start_line), [4, 9]);
 });
 
 test("symbol directory containers grow with their children and stay disjoint", () => {

@@ -3494,11 +3494,12 @@ export function getProjectNeighbors(
   direction: NeighborDirection,
   edgeKinds: EdgeKind[],
   signal?: AbortSignal,
+  depth = 2,
 ): Promise<NeighborsResponse> {
   const params = new URLSearchParams({
     symbol_id: symbolId,
     direction,
-    depth: "2",
+    depth: String(depth),
     limit: "40",
   });
   for (const edgeKind of edgeKinds) {

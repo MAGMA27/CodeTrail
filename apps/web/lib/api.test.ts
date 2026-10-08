@@ -18,6 +18,7 @@ import {
   isSessionMessagesResponse,
   isSessionResponse,
   isTrashListResponse,
+  getProjectNeighbors,
   openProjectIndex,
   requestJson,
   SCHEMA_VERSION,
@@ -1101,6 +1102,46 @@ test("trash validator accepts recoverable projects and sessions only", () => {
   const trash = { schema_version: SCHEMA_VERSION, projects: [project], sessions: [payload.session] };
   assert.equal(isTrashListResponse(trash), true);
   assert.equal(isTrashListResponse({ ...trash, sessions: [{ ...payload.session, message_count: "1" }] }), false);
+});
+
+test("project neighbor requests support a direct one-hop depth and retain the default", async () => {
+  const originalFetch = globalThis.fetch;
+  const depths: string[] = [];
+  const root = {
+    symbol_id: moduleId,
+    index_id: indexId,
+    path: "pkg/mod.py",
+    qualified_name: "pkg.mod",
+    kind: "module",
+    start_line: 1,
+    end_line: 20,
+  };
+  const payload = {
+    schema_version: SCHEMA_VERSION,
+    index_id: indexId,
+    root,
+    nodes: [root],
+    neighbors: [],
+    unresolved: [],
+    truncated: false,
+    truncation_reason: null,
+    index_truncated: false,
+    index_truncation_reason: null,
+    index_unresolved_truncated: false,
+    index_unresolved_truncation_reason: null,
+  };
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    depths.push(new URL(String(input), "http://localhost").searchParams.get("depth") ?? "");
+    return new Response(JSON.stringify(payload), { status: 200 });
+  }) as typeof fetch;
+
+  try {
+    await getProjectNeighbors("project-a", indexId, moduleId, "callees", ["imports"], undefined, 1);
+    await getProjectNeighbors("project-a", indexId, moduleId, "both", ["calls"]);
+    assert.deepEqual(depths, ["1", "2"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("requestJson applies an explicit timeout to import-specific callers", async () => {

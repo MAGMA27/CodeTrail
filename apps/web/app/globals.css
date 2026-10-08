@@ -302,6 +302,23 @@ code { font-family: var(--ct-mono); }
 .ct-architecture-drilldown .ct-graph-canvas { height: clamp(320px, calc(100dvh - 470px), 760px); min-height: 320px; border: 1px solid var(--ct-border-strong); border-radius: 9px; }
 .ct-architecture-drilldown-unresolved { display: grid; gap: 4px; padding: 7px 10px; border-left: 3px solid var(--ct-warning); background: var(--ct-warning-soft); color: var(--ct-warning); font-size: 10px; }
 .ct-architecture-drilldown-unresolved summary { cursor: pointer; font-weight: 600; }
+.ct-architecture-drilldown-modes { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.ct-architecture-drilldown-modes .is-selected { border-color: var(--ct-blue); background: var(--ct-blue-soft); color: var(--ct-blue); }
+.ct-architecture-module-definitions, .ct-architecture-module-relations { display: grid; min-width: 0; min-height: 0; flex: 1; align-content: start; gap: 8px; overflow: auto; padding: 12px; border: 1px solid var(--ct-border-strong); border-radius: 9px; background: var(--ct-surface); }
+.ct-architecture-module-definitions > p, .ct-architecture-module-relations > p { margin: 0; }
+.ct-architecture-definition-list { display: grid; align-content: start; gap: 4px; }
+.ct-architecture-definition-row { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 8px; padding: 5px 7px; border-bottom: 1px solid var(--ct-border); }
+.ct-architecture-definition-symbol { display: flex; min-width: 0; align-items: center; gap: 8px; padding: 0; border: 0; background: transparent; color: var(--ct-text); text-align: left; }
+.ct-architecture-definition-symbol > span:last-child { display: grid; min-width: 0; gap: 2px; }
+.ct-architecture-definition-symbol strong, .ct-architecture-definition-symbol small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ct-architecture-definition-symbol strong { font-size: 11px; }
+.ct-architecture-definition-symbol small { color: var(--ct-muted); font-size: 9px; }
+.ct-architecture-definition-symbol:hover strong { color: var(--ct-blue); }
+.ct-architecture-import-target { display: grid; gap: 5px; padding: 8px 10px; border: 1px solid var(--ct-border); border-radius: 6px; background: var(--ct-bg); }
+.ct-architecture-import-target > strong { display: flex; min-width: 0; align-items: center; gap: 9px; font-size: 10px; }
+.ct-architecture-import-target code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ct-architecture-import-target details { display: grid; gap: 3px; color: var(--ct-muted); font-size: 10px; }
+.ct-architecture-import-target summary { cursor: pointer; }
 .ct-http-associations { display: grid; gap: 9px; padding: 13px; border: 1px solid var(--ct-border-strong); border-radius: 8px; background: var(--ct-surface); }
 .ct-http-associations-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
 .ct-http-associations-heading > div { display: grid; gap: 3px; }

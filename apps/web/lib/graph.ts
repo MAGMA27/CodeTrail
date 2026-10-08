@@ -24,6 +24,16 @@ export type SymbolGroup = {
   symbols: SymbolRecord[];
 };
 
+export type ModuleDefinitionRow = {
+  symbol: SymbolRecord;
+  depth: number;
+};
+
+export type DirectImportTarget = {
+  path: string;
+  edges: CodeEdge[];
+};
+
 export const emptyGraphState: GraphState = {
   symbols: [],
   edges: [],
@@ -171,6 +181,64 @@ export function groupSymbolsByDirectory(symbols: SymbolRecord[]): SymbolGroup[] 
           left.start_line - right.start_line || left.qualified_name.localeCompare(right.qualified_name),
       ),
     }));
+}
+
+// ponytail: until symbols expose stable parent IDs, indent only same-file class scopes proven by names and ranges.
+export function moduleDefinitionRows(symbols: SymbolRecord[]): ModuleDefinitionRow[] {
+  const classes = symbols.filter((symbol) => symbol.kind === "class");
+  const parentById = new Map<string, SymbolRecord>();
+  for (const symbol of symbols) {
+    const parent = classes
+      .filter((candidate) =>
+        candidate.symbol_id !== symbol.symbol_id &&
+        candidate.path === symbol.path &&
+        symbol.qualified_name.startsWith(`${candidate.qualified_name}.`) &&
+        candidate.start_line <= symbol.start_line &&
+        candidate.end_line >= symbol.end_line,
+      )
+      .sort((left, right) =>
+        left.end_line - left.start_line - (right.end_line - right.start_line) ||
+        right.qualified_name.length - left.qualified_name.length,
+      )[0];
+    if (parent) parentById.set(symbol.symbol_id, parent);
+  }
+
+  const children = new Map<string, SymbolRecord[]>();
+  for (const symbol of symbols) {
+    const parent = parentById.get(symbol.symbol_id);
+    if (!parent) continue;
+    const siblings = children.get(parent.symbol_id) ?? [];
+    siblings.push(symbol);
+    children.set(parent.symbol_id, siblings);
+  }
+  const ordered = (items: SymbolRecord[]) => items.sort(
+    (left, right) => left.start_line - right.start_line || left.end_line - right.end_line || left.qualified_name.localeCompare(right.qualified_name),
+  );
+  const rows: ModuleDefinitionRow[] = [];
+  const append = (items: SymbolRecord[], depth: number) => {
+    for (const symbol of ordered(items)) {
+      rows.push({ symbol, depth });
+      append(children.get(symbol.symbol_id) ?? [], depth + 1);
+    }
+  };
+  append(symbols.filter((symbol) => !parentById.has(symbol.symbol_id)), 0);
+  return rows;
+}
+
+export function directImportTargets(state: GraphState, module: SymbolRecord): DirectImportTarget[] {
+  const symbols = new Map(state.symbols.map((symbol) => [symbol.symbol_id, symbol]));
+  const targets = new Map<string, CodeEdge[]>();
+  for (const edge of state.edges) {
+    if (edge.kind !== "imports" || edge.index_id !== module.index_id || edge.source_id !== module.symbol_id) continue;
+    const target = symbols.get(edge.target_id);
+    if (!target || target.index_id !== module.index_id) continue;
+    const edges = targets.get(target.path) ?? [];
+    if (!edges.some((item) => item.edge_id === edge.edge_id)) edges.push(edge);
+    targets.set(target.path, edges);
+  }
+  return [...targets.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([path, edges]) => ({ path, edges }));
 }
 
 export function layoutSymbolGroups(groups: SymbolGroup[], expandedKeys: Set<string>): Array<{ position: { x: number; y: number }; height: number }> {
