@@ -4,6 +4,26 @@ import { readFileSync } from "node:fs";
 import ts from "typescript";
 
 import { canShowKnowledgeInspector, readWorkbenchRoute, resolveGraphReturnPanel, resolveWorkbenchProject, workbenchLocation } from "./workbench-navigation.ts";
+import { clampSidebarWidth, normalizeSidebarWidth, readSidebarWidth, resolveSidebarWidthRange } from "./sidebar-width.ts";
+
+test("sidebar width preferences reject invalid values and stay within the saved range", () => {
+  assert.equal(readSidebarWidth(null), null);
+  assert.equal(readSidebarWidth(" "), null);
+  assert.equal(readSidebarWidth("Infinity"), null);
+  assert.equal(readSidebarWidth("180"), 220);
+  assert.equal(readSidebarWidth("500"), 480);
+  assert.equal(readSidebarWidth("316.4"), 316);
+  assert.equal(normalizeSidebarWidth(Number.NaN), 264);
+});
+
+test("sidebar width range preserves central space when the workspace is constrained", () => {
+  assert.deepEqual(resolveSidebarWidthRange(1_600, 480), { min: 220, max: 480 });
+  assert.deepEqual(resolveSidebarWidthRange(900, 680), { min: 220, max: 220 });
+  const narrow = resolveSidebarWidthRange(768, 680);
+  assert.deepEqual(narrow, { min: 88, max: 88 });
+  assert.equal(clampSidebarWidth(220, narrow), 88);
+  assert.equal(clampSidebarWidth(Number.NaN, narrow), 88);
+});
 
 test("knowledge details yield to evidence and external graphs, then resume on return", () => {
   assert.equal(canShowKnowledgeInspector("none", false), true);

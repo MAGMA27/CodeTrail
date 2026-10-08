@@ -13,7 +13,7 @@ import {
   type NodeTypes,
   type ReactFlowInstance,
 } from "@xyflow/react";
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 
 import type {
   CodeEdge,
@@ -61,7 +61,16 @@ import type {
   UnresolvedReference,
 } from "../lib/api";
 import { canShowKnowledgeInspector, resolveGraphReturnPanel, type GraphPanelMode } from "../lib/workbench-navigation";
-import type { GraphState } from "../lib/graph";
+import {
+  clampSidebarWidth,
+  DEFAULT_SIDEBAR_WIDTH,
+  normalizeSidebarWidth,
+  readSidebarWidth,
+  resolveSidebarWidthRange,
+  SIDEBAR_WIDTH_STORAGE_KEY,
+  type SidebarWidthRange,
+} from "../lib/sidebar-width";
+import type { GraphState} from "../lib/graph";
 import { architectureOverviewEdgeVisible, architectureEdgeSides, buildArchitectureGraph, visibleArchitectureRelations, type ArchitectureDirectory, type ArchitecturePosition } from "../lib/architecture-graph";
 
 export type UiAsyncStatus = "idle" | "loading" | "success" | "empty" | "error";
@@ -2368,9 +2377,15 @@ function GraphFitController({
 }
 
 export default function WorkbenchUi(props: WorkbenchUiProps) {
+  const appRef = useRef<HTMLElement>(null);
+  const workspaceFrameRef = useRef<HTMLDivElement>(null);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [operationPanel, setOperationPanel] = useState<OperationPanelState | null>(null);
   const [panelWidth, setPanelWidth] = useState(360);
+  const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH);
+  const [sidebarRange, setSidebarRange] = useState<SidebarWidthRange>({ min: 220, max: 480 });
+  const sidebarRangeRef = useRef(sidebarRange);
+  const sidebarDragRef = useRef<{ pointerId: number; startX: number; startWidth: number; width: number } | null>(null);
   const [returnPanel, setReturnPanel] = useState<GraphPanelMode | null>(null);
   const graphScopeKey = `${props.project.selectedProject?.project_id ?? ""}:${props.index.response?.index.index_id ?? ""}`;
   const previousGraphScopeKey = useRef(graphScopeKey);
@@ -2388,6 +2403,91 @@ export default function WorkbenchUi(props: WorkbenchUiProps) {
     previousGraphScopeKey.current = graphScopeKey;
     previousPanelMode.current = props.panelMode;
   }, [graphScopeKey, props.panelMode]);
+  const effectiveSidebarWidth = clampSidebarWidth(sidebarWidth, sidebarRange);
+  sidebarRangeRef.current = sidebarRange;
+  useEffect(() => {
+    try {
+      const savedWidth = readSidebarWidth(window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY));
+      if (savedWidth !== null) setSidebarWidth(savedWidth);
+    } catch {
+      // Storage can be unavailable in restricted browser contexts.
+    }
+  }, []);
+  useEffect(() => {
+    const frame = workspaceFrameRef.current;
+    if (!frame) return;
+    const updateRange = () => {
+      const root = appRef.current;
+      const hasFixedSidePanel = root?.classList.contains("has-side-panel") && !root.classList.contains("has-main-graph-panel");
+      const sidePanel = hasFixedSidePanel ? frame.lastElementChild as HTMLElement | null : null;
+      const reservedContentWidth = hasFixedSidePanel
+        ? 360 + (sidePanel?.getBoundingClientRect().width || panelWidth)
+        : 480;
+      const next = resolveSidebarWidthRange(frame.clientWidth, reservedContentWidth);
+      sidebarRangeRef.current = next;
+      setSidebarRange((current) => current.min === next.min && current.max === next.max ? current : next);
+    };
+    updateRange();
+    const observer = new ResizeObserver(updateRange);
+    observer.observe(frame);
+    const root = appRef.current;
+    if (root?.classList.contains("has-side-panel") && !root.classList.contains("has-main-graph-panel") && frame.lastElementChild) {
+      observer.observe(frame.lastElementChild);
+    }
+    return () => observer.disconnect();
+  }, [panelWidth, props.panelMode, showSideGraphPanel]);
+  const saveSidebarWidth = (width: number) => {
+    const preferredWidth = normalizeSidebarWidth(width);
+    setSidebarWidth(preferredWidth);
+    try {
+      window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(preferredWidth));
+    } catch {
+      // Resizing remains available when storage is unavailable.
+    }
+  };
+  const finishSidebarResize = () => {
+    const drag = sidebarDragRef.current;
+    if (!drag) return;
+    sidebarDragRef.current = null;
+    appRef.current?.classList.remove("is-resizing-sidebar");
+    saveSidebarWidth(drag.width);
+  };
+  const onSidebarKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const range = sidebarRangeRef.current;
+    if (range.max <= range.min) return;
+    let next: number | null = null;
+    if (event.key === "ArrowLeft") next = effectiveSidebarWidth - 16;
+    else if (event.key === "ArrowRight") next = effectiveSidebarWidth + 16;
+    else if (event.key === "Home") next = range.min;
+    else if (event.key === "End") next = range.max;
+    if (next === null) return;
+    event.preventDefault();
+    saveSidebarWidth(clampSidebarWidth(next, range));
+  };
+  const onSidebarPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || !event.isPrimary || sidebarRangeRef.current.max <= sidebarRangeRef.current.min) return;
+    event.preventDefault();
+    event.stopPropagation();
+    sidebarDragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startWidth: effectiveSidebarWidth,
+      width: effectiveSidebarWidth,
+    };
+    appRef.current?.classList.add("is-resizing-sidebar");
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+  const onSidebarPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = sidebarDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const width = clampSidebarWidth(drag.startWidth + event.clientX - drag.startX, sidebarRangeRef.current);
+    drag.width = width;
+    appRef.current?.style.setProperty("--ct-sidebar-width", `${width}px`);
+    event.currentTarget.setAttribute("aria-valuenow", String(width));
+    event.currentTarget.setAttribute("aria-valuetext", `${width} 像素`);
+  };
   const closeOperation = () => {
     props.onImportFlowLeave();
     setOperationPanel(null);
@@ -2424,18 +2524,38 @@ export default function WorkbenchUi(props: WorkbenchUiProps) {
     props.onPanelModeChange("none");
   };
   const alert = props.index.error ?? props.project.error ?? props.session.error ?? props.localImport.error ?? props.githubImport.error ?? props.connection.error;
-  const style = { "--ct-panel-width": `${panelWidth}px` } as CSSProperties;
+  const style = { "--ct-panel-width": `${panelWidth}px`, "--ct-sidebar-width": `${effectiveSidebarWidth}px` } as CSSProperties;
   return (
-    <main className={`ct-app${props.panelMode === "source" || showSideGraphPanel ? " has-side-panel" : ""}${showSideGraphPanel ? " has-main-graph-panel" : ""}`} style={style}>
+    <main ref={appRef} className={`ct-app${props.panelMode === "source" || showSideGraphPanel ? " has-side-panel" : ""}${showSideGraphPanel ? " has-main-graph-panel" : ""}`} style={style}>
       <header className="ct-topbar">
         <button type="button" className="ct-mobile-menu" onClick={() => setMobileSidebarOpen(true)}>项目</button>
         <div className="ct-brand"><span className="ct-brand-mark">CT</span><span><strong>CODETRAIL</strong><small>CODE INTELLIGENCE WORKSPACE</small></span></div>
         <div className="ct-topbar-project"><span>当前项目</span><strong>{props.project.selectedProject?.name ?? "未选择项目"}</strong></div>
         <div className="ct-connection" data-state={props.connection.state}><span className="ct-status-dot" aria-hidden="true" /><span>{props.connection.state === "connected" ? "API ONLINE" : props.connection.state === "checking" ? "API CHECKING" : "API OFFLINE"}</span>{props.connection.health ? <small>v{props.connection.health.version}</small> : null}<button type="button" onClick={() => void props.connection.onCheck()} disabled={props.connection.state === "checking"}>{props.connection.state === "checking" ? "检查中" : "重试"}</button></div>
       </header>
-      <div className="ct-workspace-frame">
+      <div className="ct-workspace-frame" ref={workspaceFrameRef}>
         {mobileSidebarOpen ? <button type="button" className="ct-mobile-scrim" aria-label="关闭项目导航" onClick={() => setMobileSidebarOpen(false)} /> : null}
-        <div className={`ct-sidebar-slot${mobileSidebarOpen ? " is-open" : ""}`}><ProjectRail project={{ ...props.project, onSelectProject: selectProject }} session={{ ...props.session, onSelectSession: selectSession }} viewMode={props.viewMode} onOpenOperation={openOperation} onViewKnowledge={openKnowledge} /></div>
+        <div className={`ct-sidebar-slot${mobileSidebarOpen ? " is-open" : ""}`} id="workspace-sidebar"><ProjectRail project={{ ...props.project, onSelectProject: selectProject }} session={{ ...props.session, onSelectSession: selectSession }} viewMode={props.viewMode} onOpenOperation={openOperation} onViewKnowledge={openKnowledge} />
+          <div
+            className="ct-sidebar-resize-handle"
+            role="separator"
+            aria-label="调整左侧导航宽度"
+            aria-controls="workspace-sidebar"
+            aria-orientation="vertical"
+            aria-valuemin={sidebarRange.min}
+            aria-valuemax={sidebarRange.max}
+            aria-valuenow={effectiveSidebarWidth}
+            aria-valuetext={`${effectiveSidebarWidth} 像素`}
+            aria-disabled={sidebarRange.max <= sidebarRange.min}
+            tabIndex={0}
+            onKeyDown={onSidebarKeyDown}
+            onPointerDown={onSidebarPointerDown}
+            onPointerMove={onSidebarPointerMove}
+            onPointerUp={finishSidebarResize}
+            onPointerCancel={finishSidebarResize}
+            onLostPointerCapture={finishSidebarResize}
+          />
+        </div>
         <section className="ct-center-column" aria-label={props.viewMode === "session" ? "Issue 会话" : "项目知识页"}>
           <ContextHeader project={props.project} index={props.index} viewMode={props.viewMode} />
           {alert ? <div className="ct-global-alert" role="alert"><span>{alert}</span>{props.connection.state === "error" ? <button type="button" className="ct-link-button" onClick={() => void props.connection.onCheck()}>重新检查</button> : null}</div> : null}
