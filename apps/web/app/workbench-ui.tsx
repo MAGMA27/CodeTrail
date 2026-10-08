@@ -75,6 +75,8 @@ type OperationPanelState = { mode: OperationPanel; tab: OperationTab };
 
 type FormHandler = (event: FormEvent<HTMLFormElement>) => void | Promise<void>;
 type Action = () => void | Promise<void>;
+type ImportFormHandler = (event: FormEvent<HTMLFormElement>) => Promise<boolean>;
+type ImportAction = () => Promise<boolean>;
 
 type ProjectUi = {
   projects: ProjectRecord[];
@@ -82,12 +84,7 @@ type ProjectUi = {
   selectedProject: ProjectRecord | null;
   status: UiAsyncStatus;
   error: string | null;
-  name: string;
-  repositoryId: string;
-  onNameChange: (value: string) => void;
-  onRepositoryIdChange: (value: string) => void;
   onSelectProject: (projectId: string) => void;
-  onCreate: FormHandler;
 };
 
 type LocalImportUi = {
@@ -98,8 +95,9 @@ type LocalImportUi = {
   error: string | null;
   onNameChange: (value: string) => void;
   onPathChange: (value: string) => void;
-  onSubmit: FormHandler;
-  onRetry: Action;
+  onSubmit: ImportFormHandler;
+  onRetry: ImportAction;
+  onRefresh: ImportAction;
 };
 
 type GitHubImportUi = {
@@ -112,8 +110,9 @@ type GitHubImportUi = {
   onNameChange: (value: string) => void;
   onUrlChange: (value: string) => void;
   onRefChange: (value: string) => void;
-  onSubmit: FormHandler;
-  onRetry: Action;
+  onSubmit: ImportFormHandler;
+  onRetry: ImportAction;
+  onRefresh: ImportAction;
   onRetryCleanup: Action;
 };
 
@@ -531,7 +530,6 @@ function ProjectRail({
                   <span className="ct-project-initial" aria-hidden="true">{item.name.slice(0, 1).toUpperCase()}</span>
                   <span className="ct-project-copy">
                     <strong>{item.name}</strong>
-                    <small>{item.repository_id}</small>
                     <span>{status}</span>
                   </span>
                   <span className="ct-project-chevron" aria-hidden="true">{selected ? "·" : "›"}</span>
@@ -542,7 +540,7 @@ function ProjectRail({
         ) : project.status === "loading" ? (
           <div className="ct-sidebar-loading"><span /><span /><span /></div>
         ) : (
-          <div className="ct-sidebar-empty"><strong>还没有项目</strong><span>创建或导入一个服务端可见的仓库。</span></div>
+          <div className="ct-sidebar-empty"><strong>还没有项目</strong><span>导入本地目录或 GitHub 仓库，建立一个固定快照。</span></div>
         )}
 
         {selectedProject ? (
@@ -661,64 +659,60 @@ function OperationPanel({
   useEffect(() => {
     setActiveTab(initialTab);
   }, [initialTab]);
+  const finishImport = async (submit: () => Promise<boolean>) => {
+    if (await submit() && mode === "create-project") {
+      onClose();
+    }
+  };
   return (
     <section className="ct-operation-panel" aria-label="项目操作">
       <div className="ct-operation-header">
         <div>
           <p className="ct-overline">PROJECT OPERATIONS</p>
           <h2>{mode === "create-project" ? "创建项目" : "源代码与索引"}</h2>
-          <p>{mode === "create-project" ? "注册一个服务端 allow-list 中的仓库。" : "在同一处管理项目来源和固定快照；两者保持独立的生命周期。"}</p>
+          <p>{mode === "create-project" ? "导入本地目录或 GitHub HTTPS 仓库，并建立固定索引。" : "在同一处管理项目来源和固定快照；两者保持独立的生命周期。"}</p>
         </div>
         <button type="button" className="ct-close-button" onClick={onClose} aria-label="关闭项目操作">关闭</button>
       </div>
 
-      {mode === "create-project" ? (
-        <form className="ct-operation-form ct-operation-form-narrow" onSubmit={(event) => void project.onCreate(event)}>
-          <label htmlFor="operation-project-name">项目名称</label>
-          <input id="operation-project-name" value={project.name} onChange={(event) => project.onNameChange(event.target.value)} placeholder="Timeout Demo" />
-          <label htmlFor="operation-project-repository">来源 repository_id</label>
-          <input id="operation-project-repository" value={project.repositoryId} onChange={(event) => project.onRepositoryIdChange(event.target.value)} placeholder="timeout-demo" spellCheck={false} />
-          <p className="ct-form-help">必须是 API 服务端配置的 repository_id；创建项目不会自动建立索引。</p>
-          {project.error ? <p className="ct-inline-error" role="alert">{project.error}</p> : null}
-          <button type="submit" className="ct-button ct-button-primary" disabled={project.status === "loading"}>{project.status === "loading" ? "保存中…" : "创建项目"}</button>
-        </form>
-      ) : (
-        <div className="ct-operation-body">
+      <div className="ct-operation-body">
+        {mode === "project-management" ? (
           <div className="ct-segmented" role="tablist" aria-label="项目管理">
             <button type="button" role="tab" aria-selected={activeTab === "source"} className={activeTab === "source" ? "is-active" : ""} onClick={() => setActiveTab("source")}>源代码来源</button>
             <button type="button" role="tab" aria-selected={activeTab === "index"} className={activeTab === "index" ? "is-active" : ""} onClick={() => setActiveTab("index")} disabled={!selectedProject}>固定索引</button>
           </div>
-          {activeTab === "source" ? (
+        ) : null}
+          {mode === "create-project" || activeTab === "source" ? (
             <>
               <div className="ct-segmented" role="tablist" aria-label="导入来源">
                 <button type="button" role="tab" aria-selected={importMode === "local"} className={importMode === "local" ? "is-active" : ""} onClick={() => setImportMode("local")}>本地目录</button>
                 <button type="button" role="tab" aria-selected={importMode === "github"} className={importMode === "github" ? "is-active" : ""} onClick={() => setImportMode("github")}>GitHub HTTPS</button>
               </div>
               {importMode === "local" ? (
-                <form className="ct-operation-form" onSubmit={(event) => void localImport.onSubmit(event)}>
+                <form className="ct-operation-form" onSubmit={(event) => void finishImport(() => localImport.onSubmit(event))}>
               <div className="ct-form-grid">
                 <div>
                   <label htmlFor="operation-local-name">项目名称</label>
-                  <input id="operation-local-name" value={localImport.name} onChange={(event) => localImport.onNameChange(event.target.value)} placeholder="Local project" spellCheck={false} />
+                  <input id="operation-local-name" value={localImport.name} onChange={(event) => localImport.onNameChange(event.target.value)} placeholder="例如：我的项目" spellCheck={false} />
                 </div>
                 <div className="ct-form-wide">
-                  <label htmlFor="operation-local-path">API 服务端绝对路径</label>
+                  <label htmlFor="operation-local-path">API 运行电脑上的本地目录路径</label>
                   <input id="operation-local-path" value={localImport.path} onChange={(event) => localImport.onPathChange(event.target.value)} placeholder="D:\\projects\\my-repo" spellCheck={false} />
                 </div>
               </div>
-              <p className="ct-form-help">服务端会校验允许根目录、符号链接和 loopback 边界；来源目录保持只读。导入完成后会注册项目并建立固定快照。</p>
+              <p className="ct-form-help">请输入 API 所在电脑上的仓库目录。来源只读扫描，导入完成后会打开固定索引；若目录未开放，页面会说明配置方法。</p>
               {localImport.error ? <p className="ct-inline-error" role="alert">{localImport.error}</p> : null}
               <div className="ct-form-actions">
-                <button type="submit" className="ct-button ct-button-primary" disabled={importBusy(localImport.status)}>{localImport.status === "indexing" ? "建立中…" : "导入并建立索引"}</button>
-                {localImport.attempt ? <ImportAttemptStatus attempt={localImport.attempt} onRetry={localImport.onRetry} /> : null}
+                <button type="submit" className="ct-button ct-button-primary" disabled={importBusy(localImport.status) || importBusy(localImport.attempt?.status ?? null)}>{localImport.status === "indexing" ? "建立中…" : "导入并建立索引"}</button>
+                {localImport.attempt ? <ImportAttemptStatus attempt={localImport.attempt} busy={importBusy(localImport.status)} onRetry={() => void finishImport(localImport.onRetry)} onRefresh={localImport.onRefresh} /> : null}
               </div>
                 </form>
               ) : (
-                <form className="ct-operation-form" onSubmit={(event) => void githubImport.onSubmit(event)}>
+                <form className="ct-operation-form" onSubmit={(event) => void finishImport(() => githubImport.onSubmit(event))}>
               <div className="ct-form-grid">
                 <div>
                   <label htmlFor="operation-github-name">项目名称</label>
-                  <input id="operation-github-name" value={githubImport.name} onChange={(event) => githubImport.onNameChange(event.target.value)} placeholder="GitHub Python project" spellCheck={false} />
+                  <input id="operation-github-name" value={githubImport.name} onChange={(event) => githubImport.onNameChange(event.target.value)} placeholder="例如：我的项目" spellCheck={false} />
                 </div>
                 <div>
                   <label htmlFor="operation-github-ref">分支 / tag / commit</label>
@@ -732,8 +726,8 @@ function OperationPanel({
               <p className="ct-form-help">仅获取 GitHub 官方 archive，先固定到解析出的 commit；索引 Python、TypeScript 和 TSX 文件。当前环境公网限流时会显示失败原因。</p>
               {githubImport.error ? <p className="ct-inline-error" role="alert">{githubImport.error}</p> : null}
               <div className="ct-form-actions">
-                <button type="submit" className="ct-button ct-button-primary" disabled={importBusy(githubImport.status)}>{githubImport.status === "acquiring" ? "获取中…" : githubImport.status === "indexing" ? "建立中…" : "导入 GitHub 仓库"}</button>
-                {githubImport.attempt ? <ImportAttemptStatus attempt={githubImport.attempt} onRetry={githubImport.onRetry} onRetryCleanup={githubImport.onRetryCleanup} /> : null}
+                <button type="submit" className="ct-button ct-button-primary" disabled={importBusy(githubImport.status) || importBusy(githubImport.attempt?.status ?? null)}>{githubImport.status === "acquiring" ? "获取中…" : githubImport.status === "indexing" ? "建立中…" : "导入 GitHub 仓库"}</button>
+                {githubImport.attempt ? <ImportAttemptStatus attempt={githubImport.attempt} busy={importBusy(githubImport.status)} onRetry={() => void finishImport(githubImport.onRetry)} onRefresh={githubImport.onRefresh} onRetryCleanup={githubImport.onRetryCleanup} /> : null}
               </div>
                 </form>
               )}
@@ -746,7 +740,6 @@ function OperationPanel({
             <>
               <div className="ct-operation-context">
                 <span><small>PROJECT</small><strong>{selectedProject.name}</strong></span>
-                <code>{selectedProject.repository_id}</code>
                 <span><small>AVAILABLE</small><strong>{index.indexes.length} 个快照</strong></span>
               </div>
               <div className="ct-index-list">
@@ -846,19 +839,26 @@ function OperationPanel({
           )}
             </>
           )}
-        </div>
-      )}
+      </div>
     </section>
   );
 }
 
-function ImportAttemptStatus({ attempt, onRetry, onRetryCleanup }: { attempt: ImportAttempt; onRetry: Action; onRetryCleanup?: Action }) {
+function ImportAttemptStatus({ attempt, busy, onRetry, onRefresh, onRetryCleanup }: {
+  attempt: ImportAttempt;
+  busy: boolean;
+  onRetry: Action;
+  onRefresh: ImportAction;
+  onRetryCleanup?: Action;
+}) {
+  const pending = attempt.status === "queued" || attempt.status === "acquiring" || attempt.status === "indexing";
   return (
     <div className="ct-import-attempt" data-state={attempt.status}>
       <span>{importStatusLabel(attempt.status)}</span>
       <code>{attempt.source_kind === "github" ? shortHash(attempt.resolved_commit ?? attempt.attempt_id) : shortHash(attempt.attempt_id)}</code>
-      {attempt.status === "failed" || attempt.status === "interrupted" ? <button type="button" className="ct-link-button" onClick={() => void onRetry()}>重试</button> : null}
-      {attempt.cleanup_status === "failed" && onRetryCleanup ? <button type="button" className="ct-link-button" onClick={() => void onRetryCleanup()}>重试清理</button> : null}
+      {pending ? <button type="button" className="ct-link-button" onClick={() => void onRefresh()} disabled={busy}>{busy ? "查询中…" : "刷新状态"}</button> : null}
+      {(attempt.status === "failed" || attempt.status === "interrupted") ? <button type="button" className="ct-link-button" onClick={() => void onRetry()} disabled={busy}>{busy ? "重试中…" : "重试"}</button> : null}
+      {attempt.cleanup_status === "failed" && onRetryCleanup ? <button type="button" className="ct-link-button" onClick={() => void onRetryCleanup()} disabled={busy}>{busy ? "处理中…" : "重试清理"}</button> : null}
       {attempt.status === "ready" ? <small>{attempt.resolved_commit ? `commit ${shortHash(attempt.resolved_commit)} · ` : ""}snapshot {shortHash(attempt.content_hash)}{attempt.cleanup_status === "failed" ? " · 清理待重试" : ""}</small> : null}
     </div>
   );
@@ -878,7 +878,7 @@ function ContextHeader({
       <div className="ct-context-copy">
         <p className="ct-overline">{viewMode === "session" ? "ISSUE SESSION" : "PROJECT KNOWLEDGE"}</p>
         <h1>{project.selectedProject?.name ?? "建立一个代码理解工作区"}</h1>
-        <p>{project.selectedProject ? <><code>{project.selectedProject.project_id}</code><span className="ct-context-separator">/</span><code>{project.selectedProject.repository_id}</code></> : "从服务端项目开始，浏览固定快照、入口和代码关系。"}</p>
+        <p>{project.selectedProject ? "浏览固定快照、入口和代码关系。" : "导入本地目录或 GitHub 仓库，开始代码理解工作区。"}</p>
       </div>
       {project.selectedProject ? (
         <div className="ct-context-actions">

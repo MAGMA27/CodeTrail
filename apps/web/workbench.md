@@ -20,7 +20,7 @@ Neighbors 查询返回的 `contextual_calls` 在代码关系面板单独列出�
 
 架构画布只消费 `ProjectOverview` 中 `project_id/index_id` 一致的源码目录、模块和关系；折叠目录汇总内部静态关系，展开后最多显示 40 个模块。职责聚焦只选择 manifest 职责及与之有一跳真实关联的可用职责/目录；邻接范围先从固定 overview 的完整已返回模块关系与归属映射计算，再独立执行画布折叠/模块预算。HTTP method/path shape associations 以独立虚线有向边从客户端指向服务路由，不进入静态 imports/calls 聚合；关联边点击打开客户端 evidence，关联列表可分别打开客户端和路由 evidence。TypeScript calls 只来自可证明的直接具名绑定；路径别名、方法属性、动态调用和未确认的 callback 执行仍是 unresolved，且与 HTTP shape association 分开。概览截断、模块超限、聚焦隐藏计数、关联端点映射失败、画布限额摘要和 unresolved 均分别显示为覆盖提示，不把未返回数据解释成“无依赖”。模块打开现有固定索引符号图；代表静态边读取其同一 index/path/line 的源码 evidence，不回退到 latest。TypeScript 快照使用 API 主机可用的 Node.js 和工作区锁定 TypeScript 5.9.3 解析器；无运行依赖或有语法错误时索引显式 failed。
 
-工作台只保留一个稳定的“源代码与索引”项目操作入口。入口页内分为“源代码来源”和“固定索引”两个页签：前者承载本地/GitHub 导入及 ImportAttempt 状态，后者承载固定版本、检查更新和显式更新。两者共享项目上下文，但仍分别调用导入和项目索引接口；前端不直接访问来源路径或 SQLite。
+侧栏和空项目页的创建入口统一打开名称与来源表单，支持本地目录和 GitHub HTTPS 导入；ready 后选中项目及其 ready 索引、清除旧 Session 链接并返回架构页，刷新仍恢复到该项目。来源路径必须位于 API 配置的本地可导入目录内；拒绝时提示更新 API 设置并重启。导入返回非终态时每 750 ms 查询状态一次，最多 40 次；仍在运行的 attempt 保留在表单中，可手动刷新。重试和清理请求进行时会禁用对应按钮；取消、失败和过期响应不会关闭创建表单或覆盖较新的请求。GitHub 导入保留 API 返回的失败原因；如公网限流发生在 attempt 创建前，表单维持可再次提交。源代码与索引管理页继续分为“源代码来源”和“固定索引”两个页签：前者复用同一导入表单和 ImportAttempt 状态，后者承载固定版本、检查更新和显式更新。两者共享项目上下文，但仍分别调用导入和项目索引接口；前端不直接访问来源路径或 SQLite。
 
 固定索引页签的本地检查结果由服务端读取源码 manifest，按内容 hash 区分 `consistent`、`changed`、`unknown`；GitHub 检查只做跟踪 ref→commit 的 bounded metadata 请求，远端状态与本地规则/配置状态分别显示，远端 commit 一致不代表索引规则一致。前端同时显示变化统计、扫描预算、路径列表和扫描不完整告警，完整安全扫描且仅为旧 metadata/源码/规则/配置变化时提示可全量重建。更新成功显示复用或新建快照，GitHub ref 在检查与下载之间移动时以实际导入 commit 为准，失败不替换旧 latest。
 

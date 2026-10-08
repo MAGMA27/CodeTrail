@@ -17,11 +17,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   ApiRequestError,
-  createProject,
   createProjectIndex,
   checkProjectIndexFreshness,
   generateProjectFeatures,
   getHealth,
+  getImportStatus,
   getProjectNeighbors,
   getProjectOverview,
   getProjectFeatureGraph,
@@ -70,6 +70,7 @@ import {
   type HealthResponse,
   type ImpactDirection,
   type ImportStatus,
+  type ImportAttemptResponse,
   type IndexFreshness,
   type IndexRefreshMode,
   type IndexResponse,
@@ -105,6 +106,7 @@ import {
   type RunEventStreamController,
   type RunStreamStatus,
 } from "../lib/run-event-stream";
+import { isImportStatusTerminal, waitForImportStatus } from "../lib/import-status";
 import {
   emptyGraphState,
   edgeKindLabel,
@@ -272,6 +274,59 @@ function errorMessage(error: unknown): string {
     return error.message;
   }
   return error instanceof Error ? error.message : "请求失败，请稍后重试。";
+}
+
+function localImportErrorMessage(message: string): string {
+  return message.includes("local import path is outside allowed roots")
+    ? "API 当前未开放这个目录。请在 API 设置中加入本地可导入目录，重启 API 后再试。"
+    : message;
+}
+
+async function importIndexFromStatus(
+  status: ImportAttemptResponse,
+  signal: AbortSignal,
+): Promise<IndexResponse | null> {
+  const indexId = status.attempt.index_id;
+  if (status.attempt.status !== "ready" || !indexId) {
+    return null;
+  }
+  if (status.latest_index?.index.index_id === indexId) {
+    return status.latest_index;
+  }
+  return openProjectIndex(status.project.project_id, indexId, signal);
+}
+
+async function localImportResponseFromStatus(
+  status: ImportAttemptResponse,
+  signal: AbortSignal,
+): Promise<LocalImportResponse> {
+  return {
+    schema_version: status.schema_version,
+    source_path: status.source_path,
+    project: status.project,
+    attempt: status.attempt,
+    index: await importIndexFromStatus(status, signal),
+  };
+}
+
+async function githubImportResponseFromStatus(
+  status: ImportAttemptResponse,
+  signal: AbortSignal,
+): Promise<GitHubImportResponse> {
+  const { attempt } = status;
+  return {
+    schema_version: status.schema_version,
+    source_url: attempt.source_url ?? status.source_path,
+    requested_ref: attempt.requested_ref,
+    resolved_ref: attempt.resolved_ref,
+    resolved_commit: attempt.resolved_commit,
+    content_hash: attempt.content_hash,
+    cleanup_status: attempt.cleanup_status,
+    cleanup_error: attempt.cleanup_error,
+    project: status.project,
+    attempt,
+    index: await importIndexFromStatus(status, signal),
+  };
 }
 
 function indexStatusLabel(status: IndexUiStatus): string {
@@ -485,23 +540,21 @@ export default function Workbench() {
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
-  const [projectName, setProjectName] = useState("Timeout Demo");
   const [projectStatus, setProjectStatus] = useState<AsyncStatus>("idle");
   const [projectError, setProjectError] = useState<string | null>(null);
-  const [importName, setImportName] = useState("Local project");
+  const [importName, setImportName] = useState("");
   const [localPath, setLocalPath] = useState("");
   const [importStatus, setImportStatus] = useState<ImportStatus | null>(null);
   const [importAttempt, setImportAttempt] = useState<ImportAttempt | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
-  const [githubImportName, setGithubImportName] = useState("GitHub Python project");
+  const [githubImportName, setGithubImportName] = useState("");
   const [githubUrl, setGithubUrl] = useState("");
   const [githubRef, setGithubRef] = useState("");
   const [githubImportStatus, setGithubImportStatus] = useState<ImportStatus | null>(null);
   const [githubImportAttempt, setGithubImportAttempt] = useState<ImportAttempt | null>(null);
   const [githubImportError, setGithubImportError] = useState<string | null>(null);
   const [projectIndexes, setProjectIndexes] = useState<IndexResponse["index"][]>([]);
-  const [repositoryId, setRepositoryId] = useState("timeout-demo");
-  const [revision, setRevision] = useState("fixture-v1");
+  const [revision, setRevision] = useState("working-tree");
   const [dirty, setDirty] = useState(false);
   const [indexIdInput, setIndexIdInput] = useState("");
   const [indexResponse, setIndexResponse] = useState<IndexResponse | null>(null);
@@ -625,6 +678,7 @@ export default function Workbench() {
   const healthController = useRef<AbortController | null>(null);
   const projectController = useRef<AbortController | null>(null);
   const importController = useRef<AbortController | null>(null);
+  const importActionInFlight = useRef(false);
   const indexController = useRef<AbortController | null>(null);
   const searchController = useRef<AbortController | null>(null);
   const graphController = useRef<AbortController | null>(null);
@@ -690,6 +744,7 @@ export default function Workbench() {
   const evidenceLinkApplied = useRef(false);
   const sessionLink = useRef<SessionLink | null>(null);
   const sessionLinkApplied = useRef(false);
+  const skipSessionRestoreProjectId = useRef<string | null>(null);
 
   const resetModuleSymbolSource = useCallback(() => {
     sourceController.current?.abort();
@@ -2334,10 +2389,12 @@ export default function Workbench() {
     if (!project) {
       return;
     }
-    setProjectName(project.name);
-    setRepositoryId(project.repository_id);
     window.localStorage.setItem("codetrail.selectedProjectId", project.project_id);
-    sessionLinkApplied.current = false;
+    const skipSessionRestore = skipSessionRestoreProjectId.current === project.project_id;
+    if (skipSessionRestore) {
+      skipSessionRestoreProjectId.current = null;
+    }
+    sessionLinkApplied.current = skipSessionRestore;
     resetSessions();
     void loadSessions(project.project_id);
     void loadSelectedProject(project.project_id);
@@ -2379,39 +2436,44 @@ export default function Workbench() {
     void loadFeatureGraph(selectedProjectId, indexId, generationId);
   }, [featureGeneration, indexResponse?.index.index_id, loadFeatureGraph, selectedProjectId]);
 
-  const createNewProject = useCallback(
-    async (event: React.FormEvent<HTMLFormElement>) => {
-      event.preventDefault();
-      const name = projectName.trim();
-      const repository = repositoryId.trim();
-      if (!name || !repository) {
-        setProjectError("请输入项目名称和服务端 allow-list 中的 repository_id。");
-        return;
+  const applyImportedProject = useCallback((
+    project: ProjectRecord,
+    index: IndexResponse | null,
+    isReady: boolean,
+    keepOperationPanel = false,
+  ) => {
+    setProjects((previous) => [
+      ...previous.filter((item) => item.project_id !== project.project_id),
+      project,
+    ]);
+    setSelectedProjectId(project.project_id);
+    setProjectStatus("success");
+    if (isReady && index) {
+      skipSessionRestoreProjectId.current = project.project_id;
+      sessionLink.current = null;
+      sessionLinkApplied.current = true;
+      evidenceLink.current = null;
+      evidenceLinkApplied.current = false;
+      resetSessions();
+      setViewMode("overview");
+      const url = new URL(window.location.href);
+      url.search = "";
+      url.searchParams.set("project_id", project.project_id);
+      window.history.replaceState(null, "", `${url.pathname}?${url.searchParams.toString()}${url.hash}`);
+    }
+    if (index) {
+      if (selectedProjectId === project.project_id) {
+        setProjectIndexes((previous) => [
+          index.index,
+          ...previous.filter((item) => item.index_id !== index.index.index_id),
+        ]);
       }
-      projectController.current?.abort();
-      const controller = new AbortController();
-      projectController.current = controller;
-      const requestId = ++projectRequestId.current;
-      setProjectStatus("loading");
-      setProjectError(null);
-      try {
-        const project = await createProject(name, repository, controller.signal);
-        if (!isLatestRequest(requestId, projectRequestId.current)) {
-          return;
-        }
-        setProjects((previous) => [...previous, project]);
-        setSelectedProjectId(project.project_id);
-        setProjectStatus("success");
-      } catch (error) {
-        if (isAbortError(error) || !isLatestRequest(requestId, projectRequestId.current)) {
-          return;
-        }
-        setProjectStatus("error");
-        setProjectError(errorMessage(error));
+      applyIndexResponse(index);
+      if (keepOperationPanel) {
+        setPanelMode(panelMode);
       }
-    },
-    [projectName, repositoryId],
-  );
+    }
+  }, [applyIndexResponse, panelMode, resetSessions, selectedProjectId]);
 
   const applyImportResponse = useCallback((response: LocalImportResponse) => {
     setImportAttempt(response.attempt);
@@ -2419,15 +2481,12 @@ export default function Workbench() {
     setImportError(
       response.attempt.status === "ready"
         ? null
-        : response.attempt.error_message ?? "本地导入未完成。",
+        : localImportErrorMessage(response.attempt.error_message ?? "本地导入未完成。"),
     );
-    setProjects((previous) => [
-      ...previous.filter((project) => project.project_id !== response.project.project_id),
-      response.project,
-    ]);
-    setSelectedProjectId(response.project.project_id);
-    setProjectStatus("success");
-  }, []);
+    if (response.attempt.status === "ready") {
+      applyImportedProject(response.project, response.index, true);
+    }
+  }, [applyImportedProject]);
 
   const applyGitHubImportResponse = useCallback((response: GitHubImportResponse) => {
     setGithubImportAttempt(response.attempt);
@@ -2437,18 +2496,122 @@ export default function Workbench() {
         ? response.cleanup_status === "failed"
           ? response.cleanup_error ?? "索引已完成，但临时目录清理失败。"
           : null
-        : response.attempt.error_message ?? "GitHub 导入未完成。",
+      : response.attempt.error_message ?? "GitHub 导入未完成。",
     );
-    setProjects((previous) => [
-      ...previous.filter((project) => project.project_id !== response.project.project_id),
-      response.project,
-    ]);
-    setSelectedProjectId(response.project.project_id);
-    setProjectStatus("success");
-    if (response.index) {
-      applyIndexResponse(response.index);
+    if (response.attempt.status === "ready") {
+      applyImportedProject(response.project, response.index, true, response.cleanup_status === "failed");
     }
-  }, [applyIndexResponse]);
+  }, [applyImportedProject]);
+
+  const settleLocalImportResponse = useCallback(async (
+    initial: LocalImportResponse,
+    signal: AbortSignal,
+    requestId: number,
+  ) => {
+    applyImportResponse(initial);
+    const response = await waitForImportStatus(
+      initial,
+      async () => localImportResponseFromStatus(await getImportStatus(initial.attempt.attempt_id, signal), signal),
+      signal,
+    );
+    if (!isLatestRequest(requestId, importRequestId.current)) {
+      return false;
+    }
+    if (response !== initial) {
+      applyImportResponse(response);
+    }
+    if (!isImportStatusTerminal(response.attempt.status)) {
+      setImportStatus(null);
+      setImportError("本地导入仍在处理中。点击“刷新状态”继续查看。");
+      return false;
+    }
+    return response.attempt.status === "ready";
+  }, [applyImportResponse]);
+
+  const settleGitHubImportResponse = useCallback(async (
+    initial: GitHubImportResponse,
+    signal: AbortSignal,
+    requestId: number,
+  ) => {
+    applyGitHubImportResponse(initial);
+    const response = await waitForImportStatus(
+      initial,
+      async () => githubImportResponseFromStatus(await getImportStatus(initial.attempt.attempt_id, signal), signal),
+      signal,
+    );
+    if (!isLatestRequest(requestId, importRequestId.current)) {
+      return false;
+    }
+    if (response !== initial) {
+      applyGitHubImportResponse(response);
+    }
+    if (!isImportStatusTerminal(response.attempt.status)) {
+      setGithubImportStatus(null);
+      setGithubImportError("GitHub 导入仍在处理中。点击“刷新状态”继续查看。");
+      return false;
+    }
+    return response.attempt.status === "ready" && response.cleanup_status !== "failed";
+  }, [applyGitHubImportResponse]);
+
+  const refreshLocalProjectImportStatus = useCallback(async () => {
+    if (!importAttempt || isImportStatusTerminal(importAttempt.status) || importActionInFlight.current) {
+      return false;
+    }
+    importActionInFlight.current = true;
+    importController.current?.abort();
+    const controller = new AbortController();
+    importController.current = controller;
+    const requestId = ++importRequestId.current;
+    setImportStatus(importAttempt.status);
+    setImportError(null);
+    try {
+      const status = await getImportStatus(importAttempt.attempt_id, controller.signal);
+      if (!isLatestRequest(requestId, importRequestId.current)) {
+        return false;
+      }
+      const response = await localImportResponseFromStatus(status, controller.signal);
+      return await settleLocalImportResponse(response, controller.signal, requestId);
+    } catch (error) {
+      if (isAbortError(error) || !isLatestRequest(requestId, importRequestId.current)) {
+        return false;
+      }
+      setImportStatus(null);
+      setImportError(localImportErrorMessage(errorMessage(error)));
+      return false;
+    } finally {
+      importActionInFlight.current = false;
+    }
+  }, [importAttempt, settleLocalImportResponse]);
+
+  const refreshGitHubProjectImportStatus = useCallback(async () => {
+    if (!githubImportAttempt || isImportStatusTerminal(githubImportAttempt.status) || importActionInFlight.current) {
+      return false;
+    }
+    importActionInFlight.current = true;
+    importController.current?.abort();
+    const controller = new AbortController();
+    importController.current = controller;
+    const requestId = ++importRequestId.current;
+    setGithubImportStatus(githubImportAttempt.status);
+    setGithubImportError(null);
+    try {
+      const status = await getImportStatus(githubImportAttempt.attempt_id, controller.signal);
+      if (!isLatestRequest(requestId, importRequestId.current)) {
+        return false;
+      }
+      const response = await githubImportResponseFromStatus(status, controller.signal);
+      return await settleGitHubImportResponse(response, controller.signal, requestId);
+    } catch (error) {
+      if (isAbortError(error) || !isLatestRequest(requestId, importRequestId.current)) {
+        return false;
+      }
+      setGithubImportStatus(null);
+      setGithubImportError(errorMessage(error));
+      return false;
+    } finally {
+      importActionInFlight.current = false;
+    }
+  }, [githubImportAttempt, settleGitHubImportResponse]);
 
   const importLocalProject = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
@@ -2456,10 +2619,14 @@ export default function Workbench() {
       const name = importName.trim();
       const path = localPath.trim();
       if (!name || !path) {
-        setImportError("请输入项目名称和 API 服务端可见的绝对路径。");
+        setImportError("请填写项目名称和 API 所在电脑上的绝对目录路径。");
         setImportStatus("failed");
-        return;
+        return false;
       }
+      if (importActionInFlight.current) {
+        return false;
+      }
+      importActionInFlight.current = true;
       importController.current?.abort();
       const controller = new AbortController();
       importController.current = controller;
@@ -2477,24 +2644,32 @@ export default function Workbench() {
           controller.signal,
         );
         if (!isLatestRequest(requestId, importRequestId.current)) {
-          return;
+          return false;
         }
-        applyImportResponse(response);
+        return await settleLocalImportResponse(response, controller.signal, requestId);
       } catch (error) {
         if (isAbortError(error) || !isLatestRequest(requestId, importRequestId.current)) {
-          return;
+          return false;
         }
         setImportStatus("failed");
-        setImportError(errorMessage(error));
+        setImportError(localImportErrorMessage(errorMessage(error)));
+        return false;
+      } finally {
+        importActionInFlight.current = false;
       }
     },
-    [applyImportResponse, dirty, importName, localPath, revision],
+    [dirty, importName, localPath, revision, settleLocalImportResponse],
   );
 
   const retryLocalProjectImport = useCallback(async () => {
-    if (!importAttempt) {
-      return;
+    if (
+      !importAttempt ||
+      (importAttempt.status !== "failed" && importAttempt.status !== "interrupted") ||
+      importActionInFlight.current
+    ) {
+      return false;
     }
+    importActionInFlight.current = true;
     importController.current?.abort();
     const controller = new AbortController();
     importController.current = controller;
@@ -2504,17 +2679,20 @@ export default function Workbench() {
     try {
       const response = await retryLocalImport(importAttempt.attempt_id, controller.signal);
       if (!isLatestRequest(requestId, importRequestId.current)) {
-        return;
+        return false;
       }
-      applyImportResponse(response);
+      return await settleLocalImportResponse(response, controller.signal, requestId);
     } catch (error) {
       if (isAbortError(error) || !isLatestRequest(requestId, importRequestId.current)) {
-        return;
+        return false;
       }
       setImportStatus("failed");
-      setImportError(errorMessage(error));
+      setImportError(localImportErrorMessage(errorMessage(error)));
+      return false;
+    } finally {
+      importActionInFlight.current = false;
     }
-  }, [applyImportResponse, importAttempt]);
+  }, [importAttempt, settleLocalImportResponse]);
 
   const importGitHubProject = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
@@ -2525,8 +2703,12 @@ export default function Workbench() {
       if (!name || !url) {
         setGithubImportError("请输入项目名称和标准 GitHub HTTPS 仓库地址。" );
         setGithubImportStatus("failed");
-        return;
+        return false;
       }
+      if (importActionInFlight.current) {
+        return false;
+      }
+      importActionInFlight.current = true;
       importController.current?.abort();
       const controller = new AbortController();
       importController.current = controller;
@@ -2543,23 +2725,31 @@ export default function Workbench() {
           controller.signal,
         );
         if (!isLatestRequest(requestId, importRequestId.current)) {
-          return;
+          return false;
         }
-        applyGitHubImportResponse(response);
+        return await settleGitHubImportResponse(response, controller.signal, requestId);
       } catch (error) {
         if (isAbortError(error) || !isLatestRequest(requestId, importRequestId.current)) {
-          return;
+          return false;
         }
         setGithubImportStatus("failed");
         setGithubImportError(errorMessage(error));
+        return false;
+      } finally {
+        importActionInFlight.current = false;
       }
-    }, [applyGitHubImportResponse, githubImportName, githubRef, githubUrl],
+    }, [githubImportName, githubRef, githubUrl, settleGitHubImportResponse],
   );
 
   const retryGitHubProjectImport = useCallback(async () => {
-    if (!githubImportAttempt) {
-      return;
+    if (
+      !githubImportAttempt ||
+      (githubImportAttempt.status !== "failed" && githubImportAttempt.status !== "interrupted") ||
+      importActionInFlight.current
+    ) {
+      return false;
     }
+    importActionInFlight.current = true;
     importController.current?.abort();
     const controller = new AbortController();
     importController.current = controller;
@@ -2569,26 +2759,31 @@ export default function Workbench() {
     try {
       const response = await retryGitHubImport(githubImportAttempt.attempt_id, controller.signal);
       if (!isLatestRequest(requestId, importRequestId.current)) {
-        return;
+        return false;
       }
-      applyGitHubImportResponse(response);
+      return await settleGitHubImportResponse(response, controller.signal, requestId);
     } catch (error) {
       if (isAbortError(error) || !isLatestRequest(requestId, importRequestId.current)) {
-        return;
+        return false;
       }
       setGithubImportStatus("failed");
       setGithubImportError(errorMessage(error));
+      return false;
+    } finally {
+      importActionInFlight.current = false;
     }
-  }, [applyGitHubImportResponse, githubImportAttempt]);
+  }, [githubImportAttempt, settleGitHubImportResponse]);
 
   const retryGitHubCleanup = useCallback(async () => {
-    if (!githubImportAttempt) {
+    if (!githubImportAttempt || githubImportAttempt.cleanup_status !== "failed" || importActionInFlight.current) {
       return;
     }
+    importActionInFlight.current = true;
     importController.current?.abort();
     const controller = new AbortController();
     importController.current = controller;
     const requestId = ++importRequestId.current;
+    setGithubImportStatus("queued");
     setGithubImportError(null);
     try {
       const response = await retryImportCleanup(githubImportAttempt.attempt_id, controller.signal);
@@ -2600,7 +2795,10 @@ export default function Workbench() {
       if (isAbortError(error) || !isLatestRequest(requestId, importRequestId.current)) {
         return;
       }
+      setGithubImportStatus("ready");
       setGithubImportError(errorMessage(error));
+    } finally {
+      importActionInFlight.current = false;
     }
   }, [applyGitHubImportResponse, githubImportAttempt]);
 
@@ -3682,10 +3880,6 @@ export default function Workbench() {
         selectedProject,
         status: projectStatus,
         error: projectError,
-        name: projectName,
-        repositoryId,
-        onNameChange: setProjectName,
-        onRepositoryIdChange: setRepositoryId,
         onSelectProject: (projectId) => {
           if (projectId === selectedProjectId) return;
           graphController.current?.abort();
@@ -3705,7 +3899,6 @@ export default function Workbench() {
           url.searchParams.set("project_id", projectId);
           window.history.replaceState(null, "", `${url.pathname}?${url.searchParams.toString()}${url.hash}`);
         },
-        onCreate: createNewProject,
       }}
       localImport={{
         name: importName,
@@ -3717,6 +3910,7 @@ export default function Workbench() {
         onPathChange: setLocalPath,
         onSubmit: importLocalProject,
         onRetry: retryLocalProjectImport,
+        onRefresh: refreshLocalProjectImportStatus,
       }}
       githubImport={{
         name: githubImportName,
@@ -3730,6 +3924,7 @@ export default function Workbench() {
         onRefChange: setGithubRef,
         onSubmit: importGitHubProject,
         onRetry: retryGitHubProjectImport,
+        onRefresh: refreshGitHubProjectImportStatus,
         onRetryCleanup: retryGitHubCleanup,
       }}
       index={{
