@@ -651,3 +651,17 @@ test("overview folds obstructed edges without deleting graph relations", () => {
   assert.equal(model.relations.length, 1);
   assert.equal(model.relations[0].edgeCount, 1);
 });
+
+
+test("directory focus restores related dependencies without a responsibility manifest", () => {
+  const unrelated = moduleRecord("unrelated", "other/unused.py");
+  const value = overview([a1, b1, unrelated], [directory("a", "api", [a1.module_id]), directory("b", "web", [b1.module_id]), directory("other", "other", [unrelated.module_id])], [relation("ab", a1, b1, ["calls"], [codeEdge("ab-call", a1.module_id, b1.module_id, "calls", a1.symbol.path)])]);
+  const model = buildArchitectureGraph(value, { focusedGroupId: "a", expandedGroupIds: ["a"], selectedGroupId: "a" });
+  assert.deepEqual(model.directories.map(({ group }) => group.group_id), ["a", "b"]);
+  assert.equal(model.focusHiddenGroupCount, 1);
+  assert.equal(model.directories.find(({ group }) => group.group_id === "a")?.expanded, true);
+  assert.equal(model.relations.length, 1);
+  assert.equal(model.relations[0].source, "a");
+  assert.equal(model.relations[0].target, "b");
+  assert.equal(model.relations[0].edgeCount, 1);
+});

@@ -343,7 +343,7 @@ export function buildArchitectureGraph(
   ) ?? null;
   const httpModuleIds = new Set(selectedHttpGroup?.module_ids ?? []);
   const relationKinds = new Set(options.relationKinds ?? ["imports", "calls"]);
-  const focusedGroup = allDirectoryGroups.find((group) => group.group_id === options.focusedGroupId && group.group_kind === "responsibility") ?? null;
+  const focusedGroup = directoryGroups.find((group) => group.group_id === options.focusedGroupId) ?? null;
   const retainedGroupIds = new Set<string>();
   let focusHiddenRelationCount = 0;
   let focusHiddenHttpAssociationCount = 0;

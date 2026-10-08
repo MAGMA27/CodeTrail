@@ -1035,11 +1035,11 @@ function ArchitectureDirectoryNode({ data }: NodeProps<Node<ArchitectureDirector
       <Handle id="source-right" type="source" position={Position.Right} className="ct-architecture-handle" />
       <Handle id="source-left" type="source" position={Position.Left} className="ct-architecture-handle" />
       <div className="ct-architecture-directory-heading">
-        <button type="button" className="ct-architecture-directory-title" onClick={() => data.onSelect(directory.group)} title={directory.group.group_key}>
+        <button type="button" className="ct-architecture-directory-title nodrag nopan" onClick={() => data.onSelect(directory.group)} title={directory.group.group_key}>
           <span>{directory.group.group_kind === "responsibility" ? "RESPONSIBILITY" : "SOURCE DIRECTORY"}</span>
           <strong title={detail}>{directory.group.group_kind === "responsibility" ? directory.group.label : directory.group.group_key}</strong>
         </button>
-        <button type="button" className="ct-architecture-expand" onClick={() => data.onToggle(directory.group)} aria-label={`${directory.expanded ? "折叠" : "展开"} ${directory.group.group_key}`} aria-expanded={directory.expanded}>
+        <button type="button" className="ct-architecture-expand nodrag nopan" onClick={() => data.onToggle(directory.group)} aria-label={`${directory.expanded ? "折叠" : "展开"} ${directory.group.group_key}`} aria-expanded={directory.expanded}>
           {directory.expanded ? "−" : "+"}
         </button>
       </div>
@@ -1060,7 +1060,7 @@ function ArchitectureModuleNode({ data }: NodeProps<Node<ArchitectureModuleNodeD
   return (
     <button
       type="button"
-      className={`ct-architecture-module${data.highlighted ? " is-highlighted" : " is-dimmed"}`}
+      className={`ct-architecture-module nodrag nopan${data.highlighted ? " is-highlighted" : " is-dimmed"}`}
       onClick={() => { data.onInspect(null); data.onOpen(data.module); }}
       onMouseEnter={() => data.onInspect(module.module_id)}
       onMouseLeave={(event) => { if (document.activeElement !== event.currentTarget) data.onInspect(null); }}
@@ -1107,17 +1107,8 @@ function ArchitectureSection({ overview, knowledge, graph, panelMode, onPanelMod
     partial: "覆盖不完整；保留目录 fallback",
     invalid: "无效；按源码目录回退",
   }[overview.responsibility_status];
-  const focusedGroup = overview.groups.find((group) => group.group_id === focusedGroupId && group.group_kind === "responsibility" && group.index_id === overview.index.index_id) ?? null;
-  const selectedResponsibility = overview.groups.find((group) => group.group_id === knowledge.selectedOverviewGroupId && group.group_kind === "responsibility" && group.index_id === overview.index.index_id) ?? null;
   const architectureRoot = overview.modules.find((module) => module.symbol.symbol_id === knowledge.architectureGraphRootId) ?? null;
   const isModuleDrilldown = Boolean(architectureRoot);
-  useEffect(() => {
-    if (focusedGroupId && !focusedGroup) {
-      setFocusedGroupId(null);
-      setExpandedGroupIds(expandedBeforeFocus.current ?? []);
-      expandedBeforeFocus.current = null;
-    }
-  }, [focusedGroup, focusedGroupId]);
   useEffect(() => {
     if (knowledge.architectureGraphRootId && !architectureRoot) knowledge.onCloseArchitectureGraph();
   }, [architectureRoot, knowledge.architectureGraphRootId, knowledge.onCloseArchitectureGraph]);
@@ -1130,19 +1121,20 @@ function ArchitectureSection({ overview, knowledge, graph, panelMode, onPanelMod
     relationKinds,
     showHttpAssociations,
   }), [expandedGroupIds, focusedGroupId, knowledge.selectedOverviewGroupId, overview, relationKinds, selectedHttpGroupId, showHttpAssociations, showSupportingDirectories]);
+  const focusedGroup = model.directories.find((directory) => directory.group.group_id === focusedGroupId)?.group ?? null;
+  const selectedArchitectureGroup = model.directories.find((directory) => directory.group.group_id === knowledge.selectedOverviewGroupId)?.group ?? null;
+  useEffect(() => {
+    if (focusedGroupId && !focusedGroup) {
+      setFocusedGroupId(null);
+      setExpandedGroupIds(expandedBeforeFocus.current ?? []);
+      expandedBeforeFocus.current = null;
+    }
+  }, [focusedGroup, focusedGroupId]);
   const visibleModuleIds = useMemo(() => new Set(model.directories.flatMap((directory) => directory.visibleModules.map(({ module }) => module.module_id))), [model]);
   const displayedArchitectureRelations = useMemo(
     () => visibleArchitectureRelations(model.relations, visibleModuleIds, activeArchitectureModuleId),
     [activeArchitectureModuleId, model, visibleModuleIds],
   );
-  const activeArchitectureModule = model.directories.flatMap((directory) => directory.visibleModules).find(({ module }) => module.module_id === activeArchitectureModuleId)?.module ?? null;
-  const activeModuleDirectory = activeArchitectureModule
-    ? model.directories.find((directory) => directory.visibleModules.some(({ module }) => module.module_id === activeArchitectureModule.module_id)) ?? null
-    : null;
-  const activeModuleRelations = activeArchitectureModule
-    ? model.relations.filter((relation) => (relation.source === activeArchitectureModule.module_id || relation.target === activeArchitectureModule.module_id)
-      && visibleModuleIds.has(relation.source) && visibleModuleIds.has(relation.target))
-    : [];
   useEffect(() => {
     if (activeArchitectureModuleId && !visibleModuleIds.has(activeArchitectureModuleId)) setActiveArchitectureModuleId(null);
   }, [activeArchitectureModuleId, model, visibleModuleIds]);
@@ -1311,7 +1303,7 @@ function ArchitectureSection({ overview, knowledge, graph, panelMode, onPanelMod
     const nodeIds = focusedDirectoryNodeIds.length > 0 ? focusedDirectoryNodeIds : model.directories.map((directory) => directory.group.group_id);
     void flow.fitView({ nodes: nodeIds.map((id) => ({ id })), padding: 0.18, duration: 240 });
   };
-  const focusResponsibility = (group: OverviewGroup) => {
+  const focusArchitectureGroup = (group: OverviewGroup) => {
     if (expandedBeforeFocus.current === null) {
       expandedBeforeFocus.current = expandedGroupIds;
     }
@@ -1353,9 +1345,9 @@ function ArchitectureSection({ overview, knowledge, graph, panelMode, onPanelMod
         <label className="ct-architecture-kind ct-architecture-http-kind"><input type="checkbox" checked={showHttpAssociations} onChange={() => setShowHttpAssociations((current) => !current)} /><span>HTTP 形状</span></label>
         <button type="button" className="ct-button ct-button-secondary" onClick={focusGraph} disabled={reactFlowModel.nodes.length === 0}>聚焦画布</button>
         {model.supportingDirectoryCount > 0 ? <button type="button" className="ct-link-button" aria-expanded={showSupportingDirectories} onClick={() => setShowSupportingDirectories((current) => !current)}>{showSupportingDirectories ? "隐藏辅助源码目录" : "查看辅助源码目录"} · {model.supportingDirectoryCount}</button> : null}
-        {focusedGroup ? <span>职责聚焦 · {focusedGroup.label}</span> : null}
-        {!focusedGroup && selectedResponsibility ? <button type="button" className="ct-button ct-button-secondary" onClick={() => focusResponsibility(selectedResponsibility)}>聚焦此职责</button> : null}
-        {focusedGroup && selectedResponsibility && selectedResponsibility.group_id !== focusedGroup.group_id ? <button type="button" className="ct-button ct-button-secondary" onClick={() => focusResponsibility(selectedResponsibility)}>切换到所选职责</button> : null}
+        {focusedGroup ? <span>{focusedGroup.group_kind === "responsibility" ? "职责聚焦" : "目录聚焦"} · {focusedGroup.label}</span> : null}
+        {!focusedGroup && selectedArchitectureGroup ? <button type="button" className="ct-button ct-button-secondary" onClick={() => focusArchitectureGroup(selectedArchitectureGroup)}>{selectedArchitectureGroup.group_kind === "responsibility" ? "聚焦此职责" : "聚焦此目录"}</button> : null}
+        {focusedGroup && selectedArchitectureGroup && selectedArchitectureGroup.group_id !== focusedGroup.group_id ? <button type="button" className="ct-button ct-button-secondary" onClick={() => focusArchitectureGroup(selectedArchitectureGroup)}>切换到所选分组</button> : null}
         {focusedGroup ? <button type="button" className="ct-link-button" onClick={returnToOverview}>返回项目总览</button> : null}
         <button type="button" className="ct-link-button" onClick={() => {
           setFocusedGroupId(null);
@@ -1368,10 +1360,7 @@ function ArchitectureSection({ overview, knowledge, graph, panelMode, onPanelMod
       }}>重置画布</button>
       </div>
       <p className="ct-architecture-filter-note">类型筛选只影响静态 imports/calls 画布。HTTP method/path shape 关联单独列示，不混入静态调用边，也不证明请求实际发送到本地服务。职责聚焦按当前筛选保留一跳双向邻接；邻接职责初始折叠，聚焦范围外事实计数与服务端截断分开显示。{model.directories.some((directory) => directory.expanded && directory.internalRelationCount > 0) ? " 容器显示组内已返回关系计数；模块间边在悬停或键盘聚焦模块时显示其相邻关系。" : ""}</p>
-      {reactFlowModel.foldedEdgeCount > 0 ? <p className="ct-architecture-filter-note" role="status">为保持总览清晰，折叠了 {reactFlowModel.foldedEdgeCount} 条跨越其他卡片的聚合依赖。选中职责后点击“聚焦此职责”查看相关依赖；模块可打开关系图查看详情。此显示折叠不改变索引。</p> : null}
-      {activeArchitectureModule && activeModuleDirectory ? <p className="ct-architecture-filter-note" role="status">
-        {activeArchitectureModule.symbol.qualified_name}：当前画布返回 {activeModuleRelations.reduce((total, relation) => total + relation.relationCount, 0)} 组相邻模块关系、{activeModuleRelations.reduce((total, relation) => total + relation.edgeCount, 0)} 条静态边；所属容器已返回 {activeModuleDirectory.internalRelationCount} 组内部关系、{activeModuleDirectory.internalEdgeCount} 条边。计数受上方概览覆盖提示约束。
-      </p> : null}
+      {reactFlowModel.foldedEdgeCount > 0 ? <p className="ct-architecture-filter-note" role="status">为保持总览清晰，折叠了 {reactFlowModel.foldedEdgeCount} 条跨越其他卡片的聚合依赖。选中职责或目录后点击聚焦按钮查看相关依赖；模块可打开关系图查看详情。此显示折叠不改变索引。</p> : null}
       </> : <div className="ct-architecture-drilldown-toolbar">
         <button type="button" className="ct-link-button" onClick={knowledge.onCloseArchitectureGraph}>← 返回项目架构</button>
         <span>项目架构 <b>›</b> 模块关系 · <code title={architectureRoot?.symbol.qualified_name}>{architectureRoot?.symbol.qualified_name}</code></span>
