@@ -2,6 +2,8 @@
 
 - [项目知识采用画布与按需详情工作区](2026-10-08-project-knowledge-workspace.md)
 
+- [Project 与 Session 可恢复回收站](2026-10-08-workspace-trash.md)
+
 - [固定快照架构画布的可读层级](2026-10-08-architecture-view-readability.md)
 - [安装入口与共享运行配置分离](2026-10-07-installed-cli-config.md)
 

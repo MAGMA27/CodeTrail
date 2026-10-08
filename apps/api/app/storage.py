@@ -304,6 +304,7 @@ class ProjectRecord:
     available_index_ids: tuple[str, ...]
     latest_index_id: str | None
     building_index_id: str | None
+    removed_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -339,6 +340,7 @@ class SessionRecord:
     message_count: int
     idempotency_key: str | None
     request_fingerprint: str
+    removed_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -502,6 +504,7 @@ CREATE TABLE IF NOT EXISTS projects (
     created_at TEXT NOT NULL,
     latest_index_id TEXT,
     building_index_id TEXT,
+    removed_at TEXT,
     FOREIGN KEY (latest_index_id) REFERENCES index_snapshots(index_id) ON DELETE SET NULL
 );
 
@@ -715,6 +718,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     message_count INTEGER NOT NULL DEFAULT 0 CHECK (message_count >= 0),
     idempotency_key TEXT,
     request_fingerprint TEXT NOT NULL,
+    removed_at TEXT,
     FOREIGN KEY (project_id, index_id) REFERENCES project_indexes(project_id, index_id) ON DELETE CASCADE,
     FOREIGN KEY (feature_generation_id) REFERENCES feature_generations(generation_id) ON DELETE RESTRICT
 );
@@ -1238,6 +1242,15 @@ class ManagementStore:
             ).fetchall()
         return tuple(_project_update_from_row(row) for row in rows)
 
+    def project_has_active_work(self, project_id: str) -> bool:
+        with self._connect() as connection:
+            return connection.execute(
+                "SELECT 1 FROM project_updates WHERE project_id = ? "
+                "UNION ALL SELECT 1 FROM import_attempts WHERE project_id = ? "
+                "AND status IN ('queued', 'acquiring', 'indexing') LIMIT 1",
+                (project_id, project_id),
+            ).fetchone() is not None
+
     def update_project_update(
         self,
         operation_id: str,
@@ -1640,6 +1653,10 @@ class IndexStore:
         }.items():
             if column not in request_columns:
                 self._connection.execute(f"ALTER TABLE http_client_requests ADD COLUMN {column} {definition}")
+        for table in ("projects", "sessions"):
+            columns = {row[1] for row in self._connection.execute(f"PRAGMA table_info({table})").fetchall()}
+            if "removed_at" not in columns:
+                self._connection.execute(f"ALTER TABLE {table} ADD COLUMN removed_at TEXT")
 
     def __enter__(self) -> IndexStore:
         return self
@@ -1655,6 +1672,20 @@ class IndexStore:
 
     def has_any_index(self) -> bool:
         return self._connection.execute("SELECT 1 FROM index_snapshots LIMIT 1").fetchone() is not None
+
+    def index_has_active_project_or_is_unowned(self, index_id: str) -> bool:
+        row = self._connection.execute(
+            "SELECT i.repository_id, COUNT(pi.index_id) AS association_count, "
+            "SUM(CASE WHEN p.removed_at IS NULL THEN 1 ELSE 0 END) AS active_count "
+            "FROM index_snapshots AS i LEFT JOIN project_indexes AS pi ON pi.index_id = i.index_id "
+            "LEFT JOIN projects AS p ON p.project_id = pi.project_id WHERE i.index_id = ?",
+            (index_id,),
+        ).fetchone()
+        if row is None:
+            return False
+        if int(row["association_count"] or 0) > 0:
+            return int(row["active_count"] or 0) > 0
+        return not self.repository_is_only_trashed(row["repository_id"])
 
     def create_project(
         self,
@@ -1688,20 +1719,113 @@ class IndexStore:
 
     def list_projects(self) -> tuple[ProjectRecord, ...]:
         rows = self._connection.execute(
-            "SELECT project_id, name, repository_id, created_at, latest_index_id, building_index_id "
-            "FROM projects ORDER BY created_at COLLATE BINARY, project_id COLLATE BINARY"
+            "SELECT project_id, name, repository_id, created_at, latest_index_id, building_index_id, removed_at "
+            "FROM projects WHERE removed_at IS NULL ORDER BY created_at COLLATE BINARY, project_id COLLATE BINARY"
         ).fetchall()
         return tuple(self._project_from_row(row) for row in rows)
 
     def load_project(self, project_id: str) -> ProjectRecord:
         row = self._connection.execute(
-            "SELECT project_id, name, repository_id, created_at, latest_index_id, building_index_id "
+            "SELECT project_id, name, repository_id, created_at, latest_index_id, building_index_id, removed_at "
+            "FROM projects WHERE project_id = ? AND removed_at IS NULL",
+            (project_id,),
+        ).fetchone()
+        if row is None:
+            raise StorageNotFoundError(f"project {project_id!r} was not found")
+        return self._project_from_row(row)
+
+    def load_project_any(self, project_id: str) -> ProjectRecord:
+        row = self._connection.execute(
+            "SELECT project_id, name, repository_id, created_at, latest_index_id, building_index_id, removed_at "
             "FROM projects WHERE project_id = ?",
             (project_id,),
         ).fetchone()
         if row is None:
             raise StorageNotFoundError(f"project {project_id!r} was not found")
         return self._project_from_row(row)
+
+    def list_removed_projects(self) -> tuple[ProjectRecord, ...]:
+        rows = self._connection.execute(
+            "SELECT project_id, name, repository_id, created_at, latest_index_id, building_index_id, removed_at "
+            "FROM projects WHERE removed_at IS NOT NULL ORDER BY removed_at DESC, project_id COLLATE BINARY"
+        ).fetchall()
+        return tuple(self._project_from_row(row) for row in rows)
+
+    def move_project_to_trash(self, project_id: str, removed_at: datetime) -> ProjectRecord:
+        """Hide a project while retaining its indexes and investigation data."""
+
+        try:
+            self._connection.execute("BEGIN IMMEDIATE")
+            row = self._connection.execute(
+                "SELECT removed_at, building_index_id FROM projects WHERE project_id = ?",
+                (project_id,),
+            ).fetchone()
+            if row is None:
+                raise StorageNotFoundError(f"project {project_id!r} was not found")
+            if row["removed_at"] is not None:
+                self._connection.execute("COMMIT")
+                return self.load_project_any(project_id)
+            if row["building_index_id"] is not None:
+                raise StorageConflictError("project has an index operation in progress")
+            active_run = self._connection.execute(
+                "SELECT 1 FROM runs WHERE project_id = ? AND status IN ('queued', 'running') LIMIT 1",
+                (project_id,),
+            ).fetchone()
+            if active_run is not None:
+                raise StorageConflictError("project has an active Run")
+            self._connection.execute(
+                "UPDATE projects SET removed_at = ? WHERE project_id = ?",
+                (_datetime_text(removed_at), project_id),
+            )
+            self._connection.execute("COMMIT")
+        except (StorageConflictError, StorageNotFoundError):
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise
+        except sqlite3.Error as exc:
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise StorageError(f"could not move project to trash: {exc}") from exc
+        return self.load_project_any(project_id)
+
+    def restore_project(self, project_id: str) -> ProjectRecord:
+        """Restore only the project marker; individually removed sessions stay removed."""
+
+        try:
+            self._connection.execute("BEGIN IMMEDIATE")
+            cursor = self._connection.execute(
+                "UPDATE projects SET removed_at = NULL WHERE project_id = ?",
+                (project_id,),
+            )
+            if cursor.rowcount == 0 and self._connection.execute(
+                "SELECT 1 FROM projects WHERE project_id = ?", (project_id,)
+            ).fetchone() is None:
+                raise StorageNotFoundError(f"project {project_id!r} was not found")
+            self._connection.execute("COMMIT")
+        except StorageNotFoundError:
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise
+        except sqlite3.Error as exc:
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise StorageError(f"could not restore project: {exc}") from exc
+        return self.load_project_any(project_id)
+
+    def repository_is_only_trashed(self, repository_id: str) -> bool:
+        return self._connection.execute(
+            "SELECT 1 FROM projects WHERE repository_id = ? LIMIT 1", (repository_id,)
+        ).fetchone() is not None and self._connection.execute(
+            "SELECT 1 FROM projects WHERE repository_id = ? AND removed_at IS NULL LIMIT 1", (repository_id,)
+        ).fetchone() is None
 
     def ensure_legacy_project(
         self,
@@ -1715,9 +1839,11 @@ class IndexStore:
         if not self.has_any_index():
             return None
         existing = self._connection.execute(
-            "SELECT 1 FROM projects WHERE project_id = ?",
+            "SELECT removed_at FROM projects WHERE project_id = ?",
             (project_id,),
         ).fetchone()
+        if existing is not None and existing["removed_at"] is not None:
+            return self.load_project_any(project_id)
         unowned = self._connection.execute(
             "SELECT 1 FROM index_snapshots AS i "
             "LEFT JOIN project_indexes AS pi ON pi.index_id = i.index_id "
@@ -1728,7 +1854,14 @@ class IndexStore:
             return None
         try:
             self._connection.execute("BEGIN IMMEDIATE")
-            if existing is None:
+            current_project = self._connection.execute(
+                "SELECT removed_at FROM projects WHERE project_id = ?",
+                (project_id,),
+            ).fetchone()
+            if current_project is not None and current_project["removed_at"] is not None:
+                self._connection.execute("COMMIT")
+                return self.load_project_any(project_id)
+            if current_project is None:
                 self._connection.execute(
                     "INSERT INTO projects (project_id, name, repository_id, created_at) VALUES (?, ?, ?, ?)",
                     (project_id, name, repository_id, _datetime_text(created_at)),
@@ -1810,9 +1943,8 @@ class IndexStore:
         ).fetchone() is not None
 
     def set_project_building(self, project_id: str, building_index_id: str) -> None:
-        self.load_project(project_id)
         cursor = self._connection.execute(
-            "UPDATE projects SET building_index_id = ? WHERE project_id = ?",
+            "UPDATE projects SET building_index_id = ? WHERE project_id = ? AND removed_at IS NULL",
             (building_index_id, project_id),
         )
         if cursor.rowcount != 1:
@@ -1840,7 +1972,7 @@ class IndexStore:
         try:
             self._connection.execute("BEGIN IMMEDIATE")
             current_latest = self._connection.execute(
-                "SELECT latest_index_id FROM projects WHERE project_id = ?",
+                "SELECT latest_index_id FROM projects WHERE project_id = ? AND removed_at IS NULL",
                 (project_id,),
             ).fetchone()
             if current_latest is None:
@@ -1912,19 +2044,10 @@ class IndexStore:
         self._validate_relation(relation)
         index = relation.snapshot.index
         payload_hash = _payload_hash(relation)
-        existing = self._connection.execute(
-            "SELECT payload_hash FROM index_snapshots WHERE index_id = ?",
-            (index.index_id,),
-        ).fetchone()
-        if existing is not None:
-            if existing["payload_hash"] == payload_hash:
-                return
-            raise StorageConflictError(
-                f"index_id {index.index_id!r} already contains a different payload"
-            )
-
         try:
             self._connection.execute("BEGIN IMMEDIATE")
+            if self.repository_is_only_trashed(index.repository_id):
+                raise StorageNotFoundError("repository project is in trash")
             existing = self._connection.execute(
                 "SELECT payload_hash FROM index_snapshots WHERE index_id = ?",
                 (index.index_id,),
@@ -2487,7 +2610,6 @@ class IndexStore:
     ) -> FeatureGeneration:
         """Persist one validated feature result without replacing another result."""
 
-        self._require_index(generation.index.index_id)
         if generation.cache_key != cache_key:
             raise StorageInputError("feature generation cache key does not match the persisted result")
         serialized = json.dumps(
@@ -2497,6 +2619,14 @@ class IndexStore:
             separators=(",", ":"),
         )
         try:
+            self._connection.execute("BEGIN IMMEDIATE")
+            active_project = self._connection.execute(
+                "SELECT 1 FROM projects AS p JOIN project_indexes AS pi ON pi.project_id = p.project_id "
+                "WHERE p.project_id = ? AND p.removed_at IS NULL AND pi.index_id = ?",
+                (generation.project_id, generation.index.index_id),
+            ).fetchone()
+            if active_project is None:
+                raise StorageNotFoundError("feature generation project or index is not active")
             self._connection.execute(
                 "INSERT INTO feature_generations "
                 "(generation_id, project_id, index_id, cache_key, idempotency_key, mode, model, "
@@ -2517,9 +2647,24 @@ class IndexStore:
                     serialized,
                 ),
             )
+            self._connection.execute("COMMIT")
+        except StorageNotFoundError:
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise
         except sqlite3.IntegrityError as exc:
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
             raise StorageConflictError("feature generation conflicts with existing data") from exc
         except sqlite3.Error as exc:
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
             raise StorageError(f"could not save feature generation: {exc}") from exc
         return generation
 
@@ -2685,6 +2830,7 @@ class IndexStore:
         self._require_index(session.index.index_id)
         try:
             self._connection.execute("BEGIN IMMEDIATE")
+            self.load_project(session.project_id)
             self._connection.execute(
                 "INSERT INTO sessions "
                 "(session_id, project_id, index_id, feature_generation_id, topic, created_at, updated_at, "
@@ -2729,7 +2875,18 @@ class IndexStore:
 
         row = self._connection.execute(
             "SELECT session_id, project_id, index_id, feature_generation_id, topic, created_at, updated_at, "
-            "message_count, idempotency_key, request_fingerprint FROM sessions WHERE session_id = ?",
+            "message_count, idempotency_key, request_fingerprint, removed_at FROM sessions "
+            "WHERE session_id = ? AND removed_at IS NULL",
+            (session_id,),
+        ).fetchone()
+        if row is None:
+            raise StorageNotFoundError(f"session {session_id!r} was not found")
+        return _session_from_row(row)
+
+    def load_session_any(self, session_id: str) -> SessionRecord:
+        row = self._connection.execute(
+            "SELECT session_id, project_id, index_id, feature_generation_id, topic, created_at, updated_at, "
+            "message_count, idempotency_key, request_fingerprint, removed_at FROM sessions WHERE session_id = ?",
             (session_id,),
         ).fetchone()
         if row is None:
@@ -2743,8 +2900,8 @@ class IndexStore:
     ) -> SessionRecord | None:
         row = self._connection.execute(
             "SELECT session_id, project_id, index_id, feature_generation_id, topic, created_at, updated_at, "
-            "message_count, idempotency_key, request_fingerprint FROM sessions "
-            "WHERE project_id = ? AND idempotency_key = ?",
+            "message_count, idempotency_key, request_fingerprint, removed_at FROM sessions "
+            "WHERE project_id = ? AND idempotency_key = ? AND removed_at IS NULL",
             (project_id, idempotency_key),
         ).fetchone()
         return None if row is None else _session_from_row(row)
@@ -2763,6 +2920,7 @@ class IndexStore:
             raise StorageInputError("session list limit is outside the allowed range")
         cursor_values = _decode_session_cursor(cursor, project_id=project_id)
         where = ["project_id = ?"]
+        where.append("removed_at IS NULL")
         parameters: list[object] = [project_id]
         if cursor_values is not None:
             updated_at, session_id = cursor_values
@@ -2770,7 +2928,7 @@ class IndexStore:
             parameters.extend([updated_at, updated_at, session_id])
         rows = self._connection.execute(
             "SELECT session_id, project_id, index_id, feature_generation_id, topic, created_at, updated_at, "
-            "message_count, idempotency_key, request_fingerprint FROM sessions "
+            "message_count, idempotency_key, request_fingerprint, removed_at FROM sessions "
             f"WHERE {' AND '.join(where)} "
             "ORDER BY updated_at DESC, session_id DESC LIMIT ?",
             (*parameters, limit + 1),
@@ -2789,6 +2947,86 @@ class IndexStore:
         )
         return SessionPage(sessions=records, next_cursor=next_cursor, has_more=has_more)
 
+    def list_removed_sessions(self) -> tuple[SessionRecord, ...]:
+        rows = self._connection.execute(
+            "SELECT s.session_id, s.project_id, s.index_id, s.feature_generation_id, s.topic, s.created_at, "
+            "s.updated_at, s.message_count, s.idempotency_key, s.request_fingerprint, s.removed_at "
+            "FROM sessions AS s JOIN projects AS p ON p.project_id = s.project_id "
+            "WHERE s.removed_at IS NOT NULL AND p.removed_at IS NULL "
+            "ORDER BY s.removed_at DESC, s.session_id COLLATE BINARY"
+        ).fetchall()
+        return tuple(_session_from_row(row) for row in rows)
+
+    def move_session_to_trash(self, project_id: str, session_id: str, removed_at: datetime) -> SessionRecord:
+        try:
+            self._connection.execute("BEGIN IMMEDIATE")
+            row = self._connection.execute(
+                "SELECT s.removed_at, s.project_id, p.removed_at AS project_removed_at "
+                "FROM sessions AS s JOIN projects AS p ON p.project_id = s.project_id "
+                "WHERE s.session_id = ?",
+                (session_id,),
+            ).fetchone()
+            if row is None or row["project_id"] != project_id or row["project_removed_at"] is not None:
+                raise StorageNotFoundError(f"session {session_id!r} was not found")
+            if row["removed_at"] is not None:
+                self._connection.execute("COMMIT")
+                return self.load_session_any(session_id)
+            active_run = self._connection.execute(
+                "SELECT 1 FROM runs WHERE session_id = ? AND status IN ('queued', 'running') LIMIT 1",
+                (session_id,),
+            ).fetchone()
+            if active_run is not None:
+                raise StorageConflictError("session has an active Run")
+            self._connection.execute(
+                "UPDATE sessions SET removed_at = ? WHERE session_id = ?",
+                (_datetime_text(removed_at), session_id),
+            )
+            self._connection.execute("COMMIT")
+        except (StorageConflictError, StorageNotFoundError):
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise
+        except sqlite3.Error as exc:
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise StorageError(f"could not move session to trash: {exc}") from exc
+        return self.load_session_any(session_id)
+
+    def restore_session(self, project_id: str, session_id: str) -> SessionRecord:
+        try:
+            self._connection.execute("BEGIN IMMEDIATE")
+            project = self._connection.execute(
+                "SELECT 1 FROM projects WHERE project_id = ? AND removed_at IS NULL", (project_id,)
+            ).fetchone()
+            cursor = self._connection.execute(
+                "UPDATE sessions SET removed_at = NULL WHERE project_id = ? AND session_id = ?",
+                (project_id, session_id),
+            )
+            if project is None or cursor.rowcount == 0:
+                exists = self._connection.execute(
+                    "SELECT 1 FROM sessions WHERE project_id = ? AND session_id = ?", (project_id, session_id)
+                ).fetchone()
+                if exists is None or project is None:
+                    raise StorageNotFoundError(f"session {session_id!r} was not found")
+            self._connection.execute("COMMIT")
+        except StorageNotFoundError:
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise
+        except sqlite3.Error as exc:
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise StorageError(f"could not restore session: {exc}") from exc
+        return self.load_session(session_id)
+
     def append_session_message(
         self,
         session_id: str,
@@ -2805,7 +3043,8 @@ class IndexStore:
         try:
             self._connection.execute("BEGIN IMMEDIATE")
             session_row = self._connection.execute(
-                "SELECT session_id FROM sessions WHERE session_id = ?",
+                "SELECT s.session_id FROM sessions AS s JOIN projects AS p ON p.project_id = s.project_id "
+                "WHERE s.session_id = ? AND s.removed_at IS NULL AND p.removed_at IS NULL",
                 (session_id,),
             ).fetchone()
             if session_row is None:
@@ -2890,7 +3129,8 @@ class IndexStore:
 
         self.load_project(project_id)
         session_row = self._connection.execute(
-            "SELECT session_id FROM sessions WHERE session_id = ? AND project_id = ?",
+            "SELECT s.session_id FROM sessions AS s JOIN projects AS p ON p.project_id = s.project_id "
+            "WHERE s.session_id = ? AND s.project_id = ? AND s.removed_at IS NULL AND p.removed_at IS NULL",
             (session_id, project_id),
         ).fetchone()
         if session_row is None:
@@ -2939,7 +3179,8 @@ class IndexStore:
         if message_end_sequence < 1 or message_end_sequence > 1_000:
             raise StorageInputError("Run message cutoff is outside the allowed range")
         session_row = self._connection.execute(
-            "SELECT session_id FROM sessions WHERE session_id = ? AND project_id = ?",
+            "SELECT s.session_id FROM sessions AS s JOIN projects AS p ON p.project_id = s.project_id "
+            "WHERE s.session_id = ? AND s.project_id = ? AND s.removed_at IS NULL AND p.removed_at IS NULL",
             (session_id, project_id),
         ).fetchone()
         if session_row is None:
@@ -2979,7 +3220,9 @@ class IndexStore:
         try:
             self._connection.execute("BEGIN IMMEDIATE")
             session_row = self._connection.execute(
-                "SELECT project_id, index_id FROM sessions WHERE session_id = ?",
+                "SELECT s.project_id, s.index_id FROM sessions AS s JOIN projects AS p "
+                "ON p.project_id = s.project_id WHERE s.session_id = ? "
+                "AND s.removed_at IS NULL AND p.removed_at IS NULL",
                 (run.session_id,),
             ).fetchone()
             if session_row is None or session_row["project_id"] != run.project_id:
@@ -3095,7 +3338,10 @@ class IndexStore:
         idempotency_key: str,
     ) -> RunRecord | None:
         row = self._connection.execute(
-            "SELECT run_id FROM runs WHERE project_id = ? AND session_id = ? AND idempotency_key = ?",
+            "SELECT r.run_id FROM runs AS r JOIN sessions AS s ON s.session_id = r.session_id "
+            "JOIN projects AS p ON p.project_id = s.project_id "
+            "WHERE r.project_id = ? AND r.session_id = ? AND r.idempotency_key = ? "
+            "AND s.removed_at IS NULL AND p.removed_at IS NULL",
             (project_id, session_id, idempotency_key),
         ).fetchone()
         return None if row is None else self.load_run_record(row["run_id"])
@@ -3111,7 +3357,8 @@ class IndexStore:
         """List one Session's Runs by stable creation order."""
 
         session_row = self._connection.execute(
-            "SELECT project_id FROM sessions WHERE session_id = ?",
+            "SELECT s.project_id FROM sessions AS s JOIN projects AS p ON p.project_id = s.project_id "
+            "WHERE s.session_id = ? AND s.removed_at IS NULL AND p.removed_at IS NULL",
             (session_id,),
         ).fetchone()
         if session_row is None or session_row["project_id"] != project_id:
@@ -3784,6 +4031,13 @@ class IndexStore:
         record = self.load_run_record(run_id)
         if record.run.project_id != project_id or record.run.session_id != session_id:
             raise StorageNotFoundError("Run is outside the requested project/session")
+        active_session = self._connection.execute(
+            "SELECT 1 FROM sessions AS s JOIN projects AS p ON p.project_id = s.project_id "
+            "WHERE s.session_id = ? AND s.project_id = ? AND s.removed_at IS NULL AND p.removed_at IS NULL",
+            (session_id, project_id),
+        ).fetchone()
+        if active_session is None:
+            raise StorageNotFoundError("Run is outside an active project/session")
         return record
 
     def _next_run_sequence(self, run_id: str) -> int:
@@ -4706,6 +4960,7 @@ class IndexStore:
             available_index_ids=tuple(item["index_id"] for item in available_rows),
             latest_index_id=row["latest_index_id"],
             building_index_id=row["building_index_id"],
+            removed_at=(None if row["removed_at"] is None else _datetime_value(row["removed_at"])),
         )
 
     def _check_fts5(self) -> None:
@@ -5566,6 +5821,7 @@ def _session_from_row(row: sqlite3.Row) -> SessionRecord:
         message_count=int(row["message_count"]),
         idempotency_key=row["idempotency_key"],
         request_fingerprint=row["request_fingerprint"],
+        removed_at=(None if row["removed_at"] is None else _datetime_value(row["removed_at"])),
     )
 
 

@@ -17,6 +17,7 @@ import {
   isSessionListResponse,
   isSessionMessagesResponse,
   isSessionResponse,
+  isTrashListResponse,
   openProjectIndex,
   requestJson,
   SCHEMA_VERSION,
@@ -1083,6 +1084,23 @@ test("session validators keep project, snapshot, and sequence boundaries explici
   const reverseSequence = structuredClone(payload.messages);
   reverseSequence.messages.push({ ...payload.message, message_id: "message-two", sequence: 0 });
   assert.equal(isSessionMessagesResponse(reverseSequence), false);
+});
+
+test("trash validator accepts recoverable projects and sessions only", () => {
+  const payload = sessionPayload();
+  const project = {
+    schema_version: SCHEMA_VERSION,
+    project_id: "project-removed",
+    name: "Recoverable project",
+    repository_id: "repo-one",
+    created_at: "2026-09-12T00:00:00Z",
+    available_index_ids: [indexId],
+    latest_index_id: indexId,
+    building_index_id: null,
+  };
+  const trash = { schema_version: SCHEMA_VERSION, projects: [project], sessions: [payload.session] };
+  assert.equal(isTrashListResponse(trash), true);
+  assert.equal(isTrashListResponse({ ...trash, sessions: [{ ...payload.session, message_count: "1" }] }), false);
 });
 
 test("requestJson applies an explicit timeout to import-specific callers", async () => {

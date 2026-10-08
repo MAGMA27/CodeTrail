@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from pathlib import Path
+import sqlite3
 
 import pytest
 
@@ -55,6 +56,39 @@ def relation_for_repository(
         index_id=index_id,
     )
     return extract_relations(extract_definitions(snapshot))
+
+
+def test_project_and_session_trash_columns_migrate_existing_database(tmp_path: Path) -> None:
+    database = tmp_path / "legacy.sqlite3"
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "CREATE TABLE projects (project_id TEXT PRIMARY KEY, name TEXT NOT NULL, repository_id TEXT NOT NULL, "
+            "created_at TEXT NOT NULL, latest_index_id TEXT, building_index_id TEXT)"
+        )
+        connection.execute(
+            "CREATE TABLE sessions (session_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, index_id TEXT NOT NULL, "
+            "feature_generation_id TEXT, topic TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, "
+            "message_count INTEGER NOT NULL DEFAULT 0, idempotency_key TEXT, request_fingerprint TEXT NOT NULL)"
+        )
+        connection.execute(
+            "INSERT INTO projects VALUES (?, ?, ?, ?, ?, ?)",
+            ("project-old", "Old project", "repo-old", "2026-01-01T00:00:00+00:00", None, None),
+        )
+        connection.execute(
+            "INSERT INTO sessions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "session-old", "project-old", "index-old", None, "Old session",
+                "2026-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00", 0, None, "fingerprint",
+            ),
+        )
+
+    with IndexStore(database) as store:
+        project_columns = {row[1] for row in store._connection.execute("PRAGMA table_info(projects)")}
+        session_columns = {row[1] for row in store._connection.execute("PRAGMA table_info(sessions)")}
+        assert "removed_at" in project_columns
+        assert "removed_at" in session_columns
+        assert store.load_project("project-old").removed_at is None
+        assert store.load_session("session-old").removed_at is None
 
 
 def with_contextual_call(

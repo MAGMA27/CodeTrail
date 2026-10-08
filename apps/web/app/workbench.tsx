@@ -48,6 +48,11 @@ import {
   listProjectSessionRuns,
   listProjectSessions,
   listProjects,
+  listTrash,
+  moveProjectToTrash,
+  moveSessionToTrash,
+  restoreProject,
+  restoreSession,
   isHealthResponse,
   openProjectIndex,
   readProjectSource,
@@ -86,6 +91,7 @@ import {
   type ModuleSymbolsPageResponse,
   type ProjectOverview,
   type ProjectRecord,
+  type TrashListResponse,
   type RunEvent,
   type RunReport,
   type RunImpactResponse,
@@ -456,6 +462,10 @@ export default function Workbench() {
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [projectStatus, setProjectStatus] = useState<AsyncStatus>("idle");
   const [projectError, setProjectError] = useState<string | null>(null);
+  const [trash, setTrash] = useState<TrashListResponse | null>(null);
+  const [trashStatus, setTrashStatus] = useState<AsyncStatus>("idle");
+  const [trashError, setTrashError] = useState<string | null>(null);
+  const [trashMutationBusy, setTrashMutationBusy] = useState(false);
   const [importName, setImportName] = useState("");
   const [localPath, setLocalPath] = useState("");
   const [importStatus, setImportStatus] = useState<ImportStatus | null>(null);
@@ -562,6 +572,10 @@ export default function Workbench() {
   const activeSessionDraftKey = selectedProjectId && selectedSessionId
     ? sessionDraftStorageKey(selectedProjectId, selectedSessionId)
     : null;
+  const selectedProjectIdRef = useRef(selectedProjectId);
+  selectedProjectIdRef.current = selectedProjectId;
+  const selectedSessionIdRef = useRef(selectedSessionId);
+  selectedSessionIdRef.current = selectedSessionId;
   const sessionDraftRevisions = useRef<Record<string, number>>({});
   const sessionDraft = activeSessionDraftKey ? sessionDrafts[activeSessionDraftKey] ?? "" : "";
   const updateSessionDraft = useCallback((value: string) => {
@@ -588,6 +602,8 @@ export default function Workbench() {
 
   const healthController = useRef<AbortController | null>(null);
   const projectController = useRef<AbortController | null>(null);
+  const trashController = useRef<AbortController | null>(null);
+  const trashMutationInFlight = useRef(false);
   const importController = useRef<AbortController | null>(null);
   const importActionInFlight = useRef(false);
   const importNavigationId = useRef(0);
@@ -613,6 +629,7 @@ export default function Workbench() {
   const runImpactController = useRef<AbortController | null>(null);
   const indexRequestId = useRef(0);
   const projectRequestId = useRef(0);
+  const trashRequestId = useRef(0);
   const importRequestId = useRef(0);
   const searchRequestId = useRef(0);
   const graphRequestId = useRef(0);
@@ -799,11 +816,35 @@ export default function Workbench() {
     }
   }, []);
 
+  const loadTrash = useCallback(async () => {
+    trashController.current?.abort();
+    const controller = new AbortController();
+    trashController.current = controller;
+    const requestId = ++trashRequestId.current;
+    setTrashStatus("loading");
+    setTrashError(null);
+    try {
+      const response = await listTrash(controller.signal);
+      if (!isLatestRequest(requestId, trashRequestId.current)) {
+        return;
+      }
+      setTrash(response);
+      setTrashStatus(response.projects.length + response.sessions.length > 0 ? "success" : "empty");
+    } catch (error) {
+      if (isAbortError(error) || !isLatestRequest(requestId, trashRequestId.current)) {
+        return;
+      }
+      setTrashStatus("error");
+      setTrashError(errorMessage(error));
+    }
+  }, []);
+
   useEffect(() => {
     void checkHealth();
     return () => {
       healthController.current?.abort();
       projectController.current?.abort();
+      trashController.current?.abort();
       importController.current?.abort();
       indexController.current?.abort();
       searchController.current?.abort();
@@ -3832,6 +3873,143 @@ export default function Workbench() {
     }
   };
 
+  const handleMoveProjectToTrash = useCallback(async (projectId: string) => {
+    if (trashMutationInFlight.current) return;
+    trashMutationInFlight.current = true;
+    setTrashMutationBusy(true);
+    setTrashError(null);
+    try {
+      await moveProjectToTrash(projectId);
+      projectController.current?.abort();
+      projectRequestId.current += 1;
+      setProjects((previous) => previous.filter((project) => project.project_id !== projectId));
+      setSessionDrafts((previous) => Object.fromEntries(
+        Object.entries(previous).filter(([key]) => !key.startsWith(`${projectId}:`)),
+      ));
+      if (selectedProjectIdRef.current === projectId) {
+        indexController.current?.abort();
+        indexRequestId.current += 1;
+        resetSessions();
+        clearExploration();
+        setProjectIndexes([]);
+        setIndexResponse(null);
+        setIndexStatus("unindexed");
+        setIndexError(null);
+        setSelectedSessionId(null);
+        setSelectedProjectId(null);
+        const route = readWorkbenchRoute(window.location.search);
+        if (route.projectId === projectId || !route.projectId) {
+          window.history.replaceState(null, "", window.location.pathname);
+        }
+        if (window.localStorage.getItem("codetrail.selectedProjectId") === projectId) {
+          window.localStorage.removeItem("codetrail.selectedProjectId");
+        }
+        if (sessionLink.current?.projectId === projectId) {
+          sessionLink.current = null;
+          sessionLinkApplied.current = true;
+        }
+        if (evidenceLink.current?.projectId === projectId) {
+          evidenceLink.current = null;
+          evidenceLinkApplied.current = true;
+        }
+      }
+      await loadTrash();
+    } catch (error) {
+      setTrashError(errorMessage(error));
+      setTrashStatus("error");
+    } finally {
+      trashMutationInFlight.current = false;
+      setTrashMutationBusy(false);
+    }
+  }, [clearExploration, loadTrash, resetSessions]);
+
+  const handleMoveSessionToTrash = useCallback(async (projectId: string, sessionId: string) => {
+    if (trashMutationInFlight.current) return;
+    trashMutationInFlight.current = true;
+    setTrashMutationBusy(true);
+    setTrashError(null);
+    try {
+      await moveSessionToTrash(projectId, sessionId);
+      setSessionDrafts((previous) => {
+        const next = { ...previous };
+        delete next[sessionDraftStorageKey(projectId, sessionId)];
+        return next;
+      });
+      if (selectedProjectIdRef.current === projectId) {
+        sessionController.current?.abort();
+        sessionRequestId.current += 1;
+        setSessions((previous) => previous.filter((session) => session.session_id !== sessionId));
+        if (selectedSessionIdRef.current === sessionId) {
+          resetSessions();
+          setViewMode("overview");
+          const route = readWorkbenchRoute(window.location.search);
+          if (route.projectId === projectId && route.sessionId === sessionId) {
+            replaceWorkbenchLocation(projectId);
+          }
+          if (sessionLink.current?.projectId === projectId && sessionLink.current.sessionId === sessionId) {
+            sessionLink.current = null;
+            sessionLinkApplied.current = true;
+          }
+          void loadSessions(projectId);
+        }
+      }
+      await loadTrash();
+    } catch (error) {
+      setTrashError(errorMessage(error));
+      setTrashStatus("error");
+    } finally {
+      trashMutationInFlight.current = false;
+      setTrashMutationBusy(false);
+    }
+  }, [loadSessions, loadTrash, replaceWorkbenchLocation, resetSessions]);
+
+  const handleRestoreProject = useCallback(async (projectId: string) => {
+    if (trashMutationInFlight.current) return;
+    trashMutationInFlight.current = true;
+    setTrashMutationBusy(true);
+    setTrashError(null);
+    try {
+      const project = await restoreProject(projectId);
+      projectController.current?.abort();
+      projectRequestId.current += 1;
+      setProjects((previous) => [project, ...previous.filter((item) => item.project_id !== projectId)]);
+      setProjectStatus("success");
+      await loadTrash();
+    } catch (error) {
+      setTrashError(errorMessage(error));
+      setTrashStatus("error");
+    } finally {
+      trashMutationInFlight.current = false;
+      setTrashMutationBusy(false);
+    }
+  }, [loadTrash]);
+
+  const handleRestoreSession = useCallback(async (projectId: string, sessionId: string) => {
+    if (trashMutationInFlight.current) return;
+    trashMutationInFlight.current = true;
+    setTrashMutationBusy(true);
+    setTrashError(null);
+    try {
+      const response = await restoreSession(projectId, sessionId);
+      if (selectedProjectIdRef.current === projectId) {
+        sessionController.current?.abort();
+        sessionRequestId.current += 1;
+        setSessions((previous) => [
+          response.session,
+          ...previous.filter((item) => item.session_id !== sessionId),
+        ].sort((left, right) => right.updated_at.localeCompare(left.updated_at)));
+        setSessionStatus("success");
+      }
+      await loadTrash();
+    } catch (error) {
+      setTrashError(errorMessage(error));
+      setTrashStatus("error");
+    } finally {
+      trashMutationInFlight.current = false;
+      setTrashMutationBusy(false);
+    }
+  }, [loadTrash]);
+
   return (
     <WorkbenchUi
       connection={{
@@ -3846,6 +4024,15 @@ export default function Workbench() {
         selectedProject,
         status: projectStatus,
         error: projectError,
+        trash,
+        trashStatus,
+        trashError,
+        trashMutationBusy,
+        onLoadTrash: loadTrash,
+        onMoveProjectToTrash: handleMoveProjectToTrash,
+        onMoveSessionToTrash: handleMoveSessionToTrash,
+        onRestoreProject: handleRestoreProject,
+        onRestoreSession: handleRestoreSession,
         onSelectProject: (projectId) => {
           if (projectId === selectedProjectId) return;
           graphController.current?.abort();

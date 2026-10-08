@@ -222,8 +222,6 @@ def test_http_run_freezes_saved_input_and_returns_same_snapshot_evidence(tmp_pat
     assert all(item["index_id"] == index_id for item in report["report"]["evidence"])
     assert report["report"]["graph"]["index_id"] == index_id
     assert appended["message"]["sequence"] == 2
-
-
     source_root = application.state.workspace_service.registry.root_for("timeout-demo")
     config_path = source_root / "timeout_demo" / "config.py"
     config_path.write_text(
@@ -249,6 +247,21 @@ def test_http_run_freezes_saved_input_and_returns_same_snapshot_evidence(tmp_pat
     status, health = request(application, "GET", "/api/health")
     assert status == 200
     assert health["status"] == "ok"
+
+
+def test_trash_rejects_active_fixture_run_without_running_its_worker(tmp_path: Path) -> None:
+    application, project_id, index_id = setup_workspace(tmp_path)
+    session_id = create_session(application, project_id, index_id)
+    application.state.workspace_service.run_executor.submit = lambda *_args, **_kwargs: None
+    run_id = start_run(application, project_id, session_id, run_payload(index_id))
+
+    status, session_conflict = request(application, "DELETE", f"/api/projects/{project_id}/sessions/{session_id}")
+    assert status == 409
+    assert session_conflict["code"] == "conflict"
+    status, project_conflict = request(application, "DELETE", f"/api/projects/{project_id}")
+    assert status == 409
+    assert project_conflict["code"] == "conflict"
+    assert run_id
 
 def test_internal_run_neighbors_bounds_unresolved_without_losing_graph_or_evidence(
     tmp_path: Path,

@@ -152,6 +152,12 @@ export type ProjectListResponse = {
   projects: ProjectRecord[];
 };
 
+export type TrashListResponse = {
+  schema_version: typeof SCHEMA_VERSION;
+  projects: ProjectRecord[];
+  sessions: Session[];
+};
+
 export type ImportStatus =
   | "queued"
   | "acquiring"
@@ -1140,6 +1146,17 @@ export function isProjectListResponse(value: unknown): value is ProjectListRespo
     value.schema_version === SCHEMA_VERSION &&
     Array.isArray(value.projects) &&
     value.projects.every(isProjectRecord)
+  );
+}
+
+export function isTrashListResponse(value: unknown): value is TrashListResponse {
+  return (
+    isRecord(value) &&
+    value.schema_version === SCHEMA_VERSION &&
+    Array.isArray(value.projects) &&
+    value.projects.every(isProjectRecord) &&
+    Array.isArray(value.sessions) &&
+    value.sessions.every(isSession)
   );
 }
 
@@ -2986,6 +3003,48 @@ export function retryImportCleanup(
 
 export function listProjects(signal?: AbortSignal): Promise<ProjectListResponse> {
   return requestJson("/api/projects", isProjectListResponse, { signal });
+}
+
+export function listTrash(signal?: AbortSignal): Promise<TrashListResponse> {
+  return requestJson("/api/trash", isTrashListResponse, { signal });
+}
+
+export function moveProjectToTrash(projectId: string, signal?: AbortSignal): Promise<ProjectRecord> {
+  return requestJson(`/api/projects/${encodeURIComponent(projectId)}`, isProjectRecord, {
+    method: "DELETE",
+    signal,
+  });
+}
+
+export function restoreProject(projectId: string, signal?: AbortSignal): Promise<ProjectRecord> {
+  return requestJson(`/api/projects/${encodeURIComponent(projectId)}/restore`, isProjectRecord, {
+    method: "POST",
+    signal,
+  });
+}
+
+export function moveSessionToTrash(
+  projectId: string,
+  sessionId: string,
+  signal?: AbortSignal,
+): Promise<SessionResponse> {
+  return requestJson(
+    `/api/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}`,
+    isSessionResponse,
+    { method: "DELETE", signal },
+  );
+}
+
+export function restoreSession(
+  projectId: string,
+  sessionId: string,
+  signal?: AbortSignal,
+): Promise<SessionResponse> {
+  return requestJson(
+    `/api/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/restore`,
+    isSessionResponse,
+    { method: "POST", signal },
+  );
 }
 
 export function getProject(projectId: string, signal?: AbortSignal): Promise<ProjectRecord> {

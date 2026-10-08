@@ -109,6 +109,7 @@ from .contracts import (
     SessionMessagesResponse,
     SessionReference,
     SessionResponse,
+    TrashListResponse,
     SseEventFrame,
     SseStreamEnd,
     SseStreamEndFrame,
@@ -231,6 +232,7 @@ def build_schema_document() -> dict[str, Any]:
         "Symbol": Symbol.model_json_schema(),
         "ToolRequest": ToolRequest.model_json_schema(),
         "ToolResult": TypeAdapter(ToolResult).json_schema(),
+        "TrashListResponse": TrashListResponse.model_json_schema(),
         "UnresolvedReference": UnresolvedReference.model_json_schema(),
     }
     return {

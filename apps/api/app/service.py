@@ -65,6 +65,7 @@ from .contracts import (
     Project,
     ProjectIndexListResponse,
     ProjectListResponse,
+    TrashListResponse,
     Report,
     RunImpactResponse,
     ReportResponse,
@@ -552,7 +553,7 @@ class RepositoryRegistry:
             store: IndexStore | None = None
             try:
                 store = IndexStore(database_path)
-                found = store.has_index(index_id)
+                found = store.has_index(index_id) and store.index_has_active_project_or_is_unowned(index_id)
             except StorageError:
                 storage_error = True
                 found = False
@@ -756,6 +757,9 @@ class IndexService:
         cache_scope_id: str | None = None,
     ) -> IndexResponse:
         root = self.registry.root_for(request.repository_id)
+        with self.registry.store_for_repository(request.repository_id) as store:
+            if store.repository_is_only_trashed(request.repository_id):
+                raise ServiceError("not_found", 404, "repository project is in trash")
         build_identity_version = identity_version or INDEX_BUILD_IDENTITY_VERSION
         # The rebuild identity is only a namespace for legacy immutable rows;
         # it must not make an otherwise current source configuration stale.
@@ -1431,6 +1435,8 @@ class WorkspaceService:
         self.feature_adapter_factory = feature_adapter_factory
         self.run_model_adapter_factory = run_model_adapter_factory
         self._index_mutation_lock = threading.RLock()
+        self._active_feature_projects: set[str] = set()
+        self._active_feature_lock = threading.Lock()
         self._recover_interrupted_builds()
         self._recover_interrupted_runs()
         self.run_executor = RunExecutor(
@@ -1470,6 +1476,98 @@ class WorkspaceService:
                 records.extend(store.list_projects())
         records.sort(key=lambda record: (record.created_at, record.project_id))
         return ProjectListResponse(projects=[_project_response(record) for record in records])
+
+    def list_trash(self) -> TrashListResponse:
+        self._ensure_legacy_projects()
+        self._ensure_managed_projects()
+        projects: list[Project] = []
+        sessions: list[Session] = []
+        for repository_id in self.registry.repository_ids:
+            database_path = self.registry.storage_root_for(repository_id) / ".codetrail" / "index.sqlite3"
+            if not database_path.is_file():
+                continue
+            try:
+                with self.registry.store_for_repository(repository_id) as store:
+                    projects.extend(_project_response(record) for record in store.list_removed_projects())
+                    for record in store.list_removed_sessions():
+                        index = store.load_index_snapshot(record.index_id)
+                        sessions.append(_session_response(record, index))
+            except StorageError as exc:
+                raise ServiceError("internal_error", 500, "local trash storage failed") from exc
+        projects.sort(key=lambda item: (item.created_at, item.project_id), reverse=True)
+        sessions.sort(key=lambda item: (item.updated_at, item.session_id), reverse=True)
+        return TrashListResponse(projects=projects, sessions=sessions)
+
+    def move_project_to_trash(self, project_id: str) -> Project:
+        project = self._find_project(project_id)
+        with self._index_mutation_lock:
+            if self.registry.management_store.project_has_active_work(project_id):
+                raise ServiceError("conflict", 409, "project has an import or index update in progress")
+            with self._active_feature_lock:
+                if project_id in self._active_feature_projects:
+                    raise ServiceError("conflict", 409, "project has a feature generation in progress")
+            try:
+                with self.registry.store_for_repository(project.repository_id) as store:
+                    removed = store.move_project_to_trash(project_id, datetime.now(timezone.utc))
+                # Close the admission race with an import/update registered while the
+                # index database transaction was committing its tombstone.
+                if self.registry.management_store.project_has_active_work(project_id):
+                    with self.registry.store_for_repository(project.repository_id) as store:
+                        store.restore_project(project_id)
+                    raise ServiceError("conflict", 409, "project acquired active work during removal")
+            except ServiceError:
+                raise
+            except StorageConflictError as exc:
+                raise ServiceError("conflict", 409, str(exc)) from exc
+            except StorageNotFoundError as exc:
+                raise ServiceError("not_found", 404, "project was not found") from exc
+            except StorageError as exc:
+                raise ServiceError("internal_error", 500, "local project storage failed") from exc
+        return _project_response(removed)
+
+    def restore_project(self, project_id: str) -> Project:
+        for repository_id in self.registry.repository_ids:
+            database_path = self.registry.storage_root_for(repository_id) / ".codetrail" / "index.sqlite3"
+            if not database_path.is_file():
+                continue
+            try:
+                with self.registry.store_for_repository(repository_id) as store:
+                    try:
+                        record = store.restore_project(project_id)
+                    except StorageNotFoundError:
+                        continue
+            except StorageError as exc:
+                raise ServiceError("internal_error", 500, "local project storage failed") from exc
+            if record.repository_id != repository_id:
+                raise ServiceError("internal_error", 500, "project repository association is invalid")
+            return _project_response(record)
+        raise ServiceError("not_found", 404, "project was not found")
+
+    def move_session_to_trash(self, project_id: str, session_id: str) -> SessionResponse:
+        project = self._find_project(project_id)
+        try:
+            with self.registry.store_for_repository(project.repository_id) as store:
+                record = store.move_session_to_trash(project_id, session_id, datetime.now(timezone.utc))
+                index = store.load_index_snapshot(record.index_id)
+        except StorageConflictError as exc:
+            raise ServiceError("conflict", 409, str(exc)) from exc
+        except StorageNotFoundError as exc:
+            raise ServiceError("not_found", 404, "session was not found") from exc
+        except StorageError as exc:
+            raise ServiceError("internal_error", 500, "local session storage failed") from exc
+        return SessionResponse(session=_session_response(record, index))
+
+    def restore_session(self, project_id: str, session_id: str) -> SessionResponse:
+        project = self._find_project(project_id)
+        try:
+            with self.registry.store_for_repository(project.repository_id) as store:
+                record = store.restore_session(project_id, session_id)
+                index = store.load_index_snapshot(record.index_id)
+        except StorageNotFoundError as exc:
+            raise ServiceError("not_found", 404, "active project or removed session was not found") from exc
+        except StorageError as exc:
+            raise ServiceError("internal_error", 500, "local session storage failed") from exc
+        return SessionResponse(session=_session_response(record, index))
 
     def get_project(self, project_id: str) -> Project:
         return _project_response(self._find_project(project_id))
@@ -2625,17 +2723,37 @@ class WorkspaceService:
     ) -> ProjectUpdateRecord:
         operation_id = f"project-update-{uuid4().hex}"
         try:
-            operation = self.registry.management_store.begin_project_update(
-                operation_id=operation_id,
-                project_id=project.project_id,
-                repository_id=project.repository_id,
-                expected_latest_index_id=expected_latest_index_id,
-                owner_pid=os.getpid(),
-                source_url=source_url,
-                requested_ref=requested_ref,
-                resolved_ref=resolved_ref,
-                resolved_commit=resolved_commit,
-            )
+            with self._index_mutation_lock:
+                operation = self.registry.management_store.begin_project_update(
+                    operation_id=operation_id,
+                    project_id=project.project_id,
+                    repository_id=project.repository_id,
+                    expected_latest_index_id=expected_latest_index_id,
+                    owner_pid=os.getpid(),
+                    source_url=source_url,
+                    requested_ref=requested_ref,
+                    resolved_ref=resolved_ref,
+                    resolved_commit=resolved_commit,
+                )
+                try:
+                    with self.registry.store_for_repository(project.repository_id) as store:
+                        current = store.load_project(project.project_id)
+                    if current.repository_id != project.repository_id:
+                        raise StorageInputError("project repository association is invalid")
+                except StorageNotFoundError as exc:
+                    self.registry.management_store.abort_project_update(
+                        operation.operation_id,
+                        error_code="conflict",
+                        error_message="project was moved to trash before the update began",
+                    )
+                    raise ServiceError("conflict", 409, "project is in trash") from exc
+                except Exception:
+                    self.registry.management_store.abort_project_update(
+                        operation.operation_id,
+                        error_code="conflict",
+                        error_message="project update could not validate its active project",
+                    )
+                    raise
         except StorageConflictError as exc:
             raise ServiceError("conflict", 409, "project index update is already in progress") from exc
         except StorageError as exc:
@@ -3352,6 +3470,23 @@ class WorkspaceService:
         index_id: str,
         request: FeatureGenerationRequest,
     ) -> FeatureGenerationResponse:
+        with self._index_mutation_lock:
+            project = self._find_project(project_id)
+            self._require_project_index(project_id, index_id)
+            with self._active_feature_lock:
+                self._active_feature_projects.add(project_id)
+        try:
+            return self._generate_features(project_id, index_id, request)
+        finally:
+            with self._active_feature_lock:
+                self._active_feature_projects.discard(project_id)
+
+    def _generate_features(
+        self,
+        project_id: str,
+        index_id: str,
+        request: FeatureGenerationRequest,
+    ) -> FeatureGenerationResponse:
         """Generate, validate, persist, and return one bounded semantic result."""
 
         project = self._find_project(project_id)
@@ -3885,14 +4020,16 @@ class WorkspaceService:
         attempt = self.registry.management_store.load_attempt(attempt_id)
         if attempt.status not in {"failed", "interrupted", "cancelled"}:
             raise ServiceError("conflict", 409, "only failed or interrupted imports can be retried")
-        self.registry.management_store.update_attempt(
-            attempt_id,
-            status="queued",
-            phase="queued",
-            index_id=None,
-            error_code=None,
-            error_message=None,
-        )
+        with self._index_mutation_lock:
+            self._find_project(attempt.project_id)
+            self.registry.management_store.update_attempt(
+                attempt_id,
+                status="queued",
+                phase="queued",
+                index_id=None,
+                error_code=None,
+                error_message=None,
+            )
         return self._run_import_attempt(attempt_id)
 
     def _run_import_for_project(
@@ -3903,6 +4040,7 @@ class WorkspaceService:
         normalized_path: str,
         request: LocalImportRequest,
     ) -> LocalImportResponse:
+        self._find_project(project.project_id)
         existing = (
             self.registry.management_store.find_attempt_by_idempotency(
                 request.idempotency_key,
@@ -3921,18 +4059,22 @@ class WorkspaceService:
                 return self._local_import_response(active)
 
         try:
-            attempt = self.registry.management_store.create_attempt(
-                attempt_id=f"import-{uuid4().hex}",
-                project_id=project.project_id,
-                repository_id=spec.repository_id,
-                source_path=str(source_path),
-                normalized_source_path=normalized_path,
-                name=project.name,
-                revision=request.revision,
-                dirty=request.dirty,
-                idempotency_key=request.idempotency_key,
-                created_at=datetime.now(timezone.utc),
-            )
+            with self._index_mutation_lock:
+                current_project = self._find_project(project.project_id)
+                if current_project.repository_id != spec.repository_id:
+                    raise ServiceError("not_found", 404, "project is outside the requested repository")
+                attempt = self.registry.management_store.create_attempt(
+                    attempt_id=f"import-{uuid4().hex}",
+                    project_id=project.project_id,
+                    repository_id=spec.repository_id,
+                    source_path=str(source_path),
+                    normalized_source_path=normalized_path,
+                    name=project.name,
+                    revision=request.revision,
+                    dirty=request.dirty,
+                    idempotency_key=request.idempotency_key,
+                    created_at=datetime.now(timezone.utc),
+                )
         except StorageConflictError:
             if request.idempotency_key is None:
                 active = self.registry.management_store.find_active_attempt(normalized_path)
@@ -4238,27 +4380,35 @@ class WorkspaceService:
     def _load_project_from_spec(self, spec: RepositorySpec) -> ProjectRecord:
         with self.registry.store_for_repository(spec.repository_id) as store:
             try:
-                return store.load_project(spec.project_id or "")
+                project = store.load_project_any(spec.project_id or "")
             except StorageNotFoundError as exc:
                 raise ServiceError("internal_error", 500, "managed project registration is incomplete") from exc
+            if project.removed_at is not None:
+                raise ServiceError("conflict", 409, "managed project is in trash; restore it before importing")
+            return project
 
     def _configured_project_for_source(self, spec: RepositorySpec, name: str) -> ProjectRecord:
         with self.registry.store_for_repository(spec.repository_id) as store:
             projects = [project for project in store.list_projects() if not project.project_id.startswith("project-legacy-")]
             if projects:
                 return projects[0]
+            if store.list_removed_projects():
+                raise ServiceError("conflict", 409, "repository project is in trash; restore it before importing")
         return self._find_project(self.create_project(CreateProjectRequest(name=name, repository_id=spec.repository_id)).project_id)
 
     def _ensure_managed_project(self, record: ManagedSourceRecord) -> None:
         self.registry.refresh_managed_sources()
         with self.registry.store_for_repository(record.repository_id) as store:
             try:
-                store.load_project(record.project_id)
+                project = store.load_project_any(record.project_id)
             except StorageNotFoundError:
                 try:
                     store.create_project(record.project_id, record.name, record.repository_id, record.created_at)
                 except StorageConflictError:
                     store.load_project(record.project_id)
+                return
+            if project.removed_at is not None:
+                return
 
     def _find_project(self, project_id: str) -> ProjectRecord:
         self._ensure_legacy_projects()

@@ -46425,6 +46425,272 @@
         }
       ]
     },
+    "TrashListResponse": {
+      "$defs": {
+        "IndexSnapshot": {
+          "additionalProperties": false,
+          "properties": {
+            "configuration_hash": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Configuration Hash"
+            },
+            "dirty": {
+              "title": "Dirty",
+              "type": "boolean"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "repository_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Repository Id",
+              "type": "string"
+            },
+            "revision": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Revision",
+              "type": "string"
+            },
+            "rules_version": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Rules Version"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            },
+            "snapshot_hash": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Snapshot Hash",
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "ready",
+                "building",
+                "failed"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "index_id",
+            "repository_id",
+            "revision",
+            "dirty",
+            "snapshot_hash",
+            "status"
+          ],
+          "title": "IndexSnapshot",
+          "type": "object"
+        },
+        "Project": {
+          "additionalProperties": false,
+          "properties": {
+            "available_index_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "title": "Available Index Ids",
+              "type": "array"
+            },
+            "building_index_id": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Building Index Id"
+            },
+            "created_at": {
+              "format": "date-time",
+              "title": "Created At",
+              "type": "string"
+            },
+            "latest_index_id": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Latest Index Id"
+            },
+            "name": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Name",
+              "type": "string"
+            },
+            "project_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Project Id",
+              "type": "string"
+            },
+            "repository_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Repository Id",
+              "type": "string"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            }
+          },
+          "required": [
+            "project_id",
+            "name",
+            "repository_id",
+            "created_at"
+          ],
+          "title": "Project",
+          "type": "object"
+        },
+        "Session": {
+          "additionalProperties": false,
+          "description": "A project-scoped investigation with one immutable index binding.",
+          "properties": {
+            "created_at": {
+              "format": "date-time",
+              "title": "Created At",
+              "type": "string"
+            },
+            "feature_generation_id": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Feature Generation Id"
+            },
+            "index": {
+              "$ref": "#/$defs/IndexSnapshot"
+            },
+            "message_count": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Message Count",
+              "type": "integer"
+            },
+            "project_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Project Id",
+              "type": "string"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            },
+            "session_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Session Id",
+              "type": "string"
+            },
+            "topic": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Topic",
+              "type": "string"
+            },
+            "updated_at": {
+              "format": "date-time",
+              "title": "Updated At",
+              "type": "string"
+            }
+          },
+          "required": [
+            "session_id",
+            "project_id",
+            "index",
+            "topic",
+            "created_at",
+            "updated_at"
+          ],
+          "title": "Session",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Recoverable projects and independently removed sessions.",
+      "properties": {
+        "projects": {
+          "items": {
+            "$ref": "#/$defs/Project"
+          },
+          "title": "Projects",
+          "type": "array"
+        },
+        "schema_version": {
+          "const": "0.1.0",
+          "default": "0.1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "sessions": {
+          "items": {
+            "$ref": "#/$defs/Session"
+          },
+          "title": "Sessions",
+          "type": "array"
+        }
+      },
+      "title": "TrashListResponse",
+      "type": "object"
+    },
     "UnresolvedReference": {
       "additionalProperties": false,
       "properties": {

@@ -344,6 +344,14 @@ def test_schema_artifact_includes_session_contracts() -> None:
     } <= models.keys()
 
 
+def test_schema_artifact_includes_recoverable_trash_contract() -> None:
+    schema = build_schema_document()["models"]["TrashListResponse"]
+
+    assert {"projects", "sessions", "schema_version"} <= schema["properties"].keys()
+    assert schema["properties"]["projects"]["type"] == "array"
+    assert schema["properties"]["sessions"]["type"] == "array"
+
+
 def test_schema_artifact_includes_run_impact_contracts() -> None:
     models = build_schema_document()["models"]
 

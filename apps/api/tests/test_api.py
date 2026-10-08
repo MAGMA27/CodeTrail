@@ -351,6 +351,236 @@ def test_project_workspace_isolated_and_restores_after_service_reopen(tmp_path: 
     assert [item["index_id"] for item in restored_indexes["indexes"]] == [index_two_id]
 
 
+def test_project_and_session_trash_restore_preserves_data_across_restart(tmp_path: Path) -> None:
+    repository = copy_fixture_named(tmp_path, "trash-project")
+    roots = {"trash-project": repository}
+    data_root = tmp_path / "service-data"
+    application = create_app(roots, data_root=data_root)
+
+    status, project = request(
+        application,
+        "POST",
+        "/api/projects",
+        {"name": "Recoverable project", "repository_id": "trash-project"},
+    )
+    assert status == 200
+    project_id = project["project_id"]
+    status, created_index = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/indexes",
+        {"revision": "trash-test", "dirty": False},
+    )
+    assert status == 200
+    index_id = created_index["index"]["index_id"]
+    status, created_session = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/sessions",
+        {"topic": "Keep this investigation", "index_id": index_id},
+    )
+    assert status == 200
+    session_id = created_session["session"]["session_id"]
+    status, other_project = request(
+        application,
+        "POST",
+        "/api/projects",
+        {"name": "Other project", "repository_id": "trash-project"},
+    )
+    assert status == 200
+    status, appended = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/sessions/{session_id}/messages",
+        {"source": "human", "content": "Keep these messages"},
+    )
+    assert status == 200
+    message_id = appended["message"]["message_id"]
+
+    status, removed_session = request(
+        application,
+        "DELETE",
+        f"/api/projects/{project_id}/sessions/{session_id}",
+    )
+    assert status == 200
+    assert removed_session["session"]["session_id"] == session_id
+    status, hidden_messages = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/sessions/{session_id}/messages",
+    )
+    assert status == 404
+    status, trash = request(application, "GET", "/api/trash")
+    assert status == 200
+    assert [item["session_id"] for item in trash["sessions"]] == [session_id]
+    assert trash["projects"] == []
+    status, cross_project_restore = request(
+        application,
+        "POST",
+        f"/api/projects/{other_project['project_id']}/sessions/{session_id}/restore",
+    )
+    assert status == 404
+
+    status, restored_session = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/sessions/{session_id}/restore",
+    )
+    assert status == 200
+    status, repeated_restore = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/sessions/{session_id}/restore",
+    )
+    assert status == 200
+    status, messages = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/sessions/{session_id}/messages",
+    )
+    assert status == 200
+    assert [item["message_id"] for item in messages["messages"]] == [message_id]
+
+    status, removed_session = request(
+        application,
+        "DELETE",
+        f"/api/projects/{project_id}/sessions/{session_id}",
+    )
+    assert status == 200
+    status, removed_project = request(application, "DELETE", f"/api/projects/{project_id}")
+    assert status == 200
+    status, hidden_project = request(application, "GET", f"/api/projects/{project_id}")
+    assert status == 404
+    status, hidden_index = request(application, "GET", f"/api/indexes/{index_id}")
+    assert status == 404
+    status, hidden_projects = request(application, "GET", "/api/projects")
+    assert status == 200
+    assert all(item["project_id"] != project_id for item in hidden_projects["projects"])
+    status, trash = request(application, "GET", "/api/trash")
+    assert status == 200
+    assert [item["project_id"] for item in trash["projects"]] == [project_id]
+    assert trash["sessions"] == []
+
+    reopened = create_app(roots, data_root=data_root)
+    status, still_hidden = request(reopened, "GET", "/api/projects")
+    assert status == 200
+    assert all(item["project_id"] != project_id for item in still_hidden["projects"])
+    status, restored_project = request(reopened, "POST", f"/api/projects/{project_id}/restore")
+    assert status == 200
+    status, repeated_project_restore = request(reopened, "POST", f"/api/projects/{project_id}/restore")
+    assert status == 200
+    status, no_auto_restored_session = request(reopened, "GET", f"/api/projects/{project_id}/sessions")
+    assert status == 200
+    assert no_auto_restored_session["sessions"] == []
+    status, restored_session = request(
+        reopened,
+        "POST",
+        f"/api/projects/{project_id}/sessions/{session_id}/restore",
+    )
+    assert status == 200
+    status, messages = request(
+        reopened,
+        "GET",
+        f"/api/projects/{project_id}/sessions/{session_id}/messages",
+    )
+    assert status == 200
+    assert [item["message_id"] for item in messages["messages"]] == [message_id]
+    status, visible_index = request(reopened, "GET", f"/api/indexes/{index_id}")
+    assert status == 200
+
+
+def test_project_trash_blocks_active_update_and_managed_source_does_not_revive(tmp_path: Path) -> None:
+    repository = copy_fixture_named(tmp_path, "trash-managed-source")
+    data_root = tmp_path / "service-data"
+    application = create_app({}, data_root=data_root, allowed_import_roots=(tmp_path,))
+    status, imported = request(
+        application,
+        "POST",
+        "/api/imports/local",
+        {"name": "Managed source", "path": str(repository), "revision": "trash-test", "dirty": False},
+    )
+    assert status == 200
+    project_id = imported["project"]["project_id"]
+    project = imported["project"]
+    operation_id = "project-update-trash-test"
+    application.state.registry.management_store.begin_project_update(
+        operation_id=operation_id,
+        project_id=project_id,
+        repository_id=project["repository_id"],
+        expected_latest_index_id=project["latest_index_id"],
+        owner_pid=None,
+    )
+    status, conflict = request(application, "DELETE", f"/api/projects/{project_id}")
+    assert status == 409
+    assert conflict["code"] == "conflict"
+    application.state.registry.management_store.abort_project_update(
+        operation_id,
+        error_code="cancelled",
+        error_message="test cleanup",
+    )
+
+    status, removed = request(application, "DELETE", f"/api/projects/{project_id}")
+    assert status == 200
+    reopened = create_app({}, data_root=data_root, allowed_import_roots=(tmp_path,))
+    status, projects = request(reopened, "GET", "/api/projects")
+    assert status == 200
+    assert all(item["project_id"] != project_id for item in projects["projects"])
+    status, retry_import = request(
+        reopened,
+        "POST",
+        "/api/imports/local",
+        {"name": "Managed source", "path": str(repository), "revision": "trash-again", "dirty": False},
+    )
+    assert status == 409
+    assert retry_import["code"] == "conflict"
+
+
+def test_legacy_project_trash_is_not_recreated_and_direct_index_write_is_blocked(tmp_path: Path) -> None:
+    repository = copy_fixture_named(tmp_path, "trash-legacy-source")
+    roots = {"legacy-source": repository}
+    data_root = tmp_path / "service-data"
+    application = create_app(roots, data_root=data_root)
+
+    status, created = request(
+        application,
+        "POST",
+        "/api/indexes",
+        {"repository_id": "legacy-source", "revision": "legacy-v1", "dirty": False},
+    )
+    assert status == 200
+    index_id = created["index"]["index_id"]
+    status, projects = request(application, "GET", "/api/projects")
+    assert status == 200
+    legacy_project = next(item for item in projects["projects"] if item["repository_id"] == "legacy-source")
+
+    status, removed = request(application, "DELETE", f"/api/projects/{legacy_project['project_id']}")
+    assert status == 200
+    status, hidden_projects = request(application, "GET", "/api/projects")
+    assert status == 200
+    assert all(item["project_id"] != legacy_project["project_id"] for item in hidden_projects["projects"])
+    status, hidden_index = request(application, "GET", f"/api/indexes/{index_id}")
+    assert status == 404
+    status, blocked_write = request(
+        application,
+        "POST",
+        "/api/indexes",
+        {"repository_id": "legacy-source", "revision": "legacy-v2", "dirty": False},
+    )
+    assert status == 404
+
+    reopened = create_app(roots, data_root=data_root)
+    status, still_hidden = request(reopened, "GET", "/api/projects")
+    assert status == 200
+    assert all(item["project_id"] != legacy_project["project_id"] for item in still_hidden["projects"])
+    status, trash = request(reopened, "GET", "/api/trash")
+    assert status == 200
+    assert [item["project_id"] for item in trash["projects"]] == [legacy_project["project_id"]]
+    status, restored = request(reopened, "POST", f"/api/projects/{legacy_project['project_id']}/restore")
+    assert status == 200
+    status, visible_index = request(reopened, "GET", f"/api/indexes/{index_id}")
+    assert status == 200
+
+
 def test_local_import_is_bounded_persistent_idempotent_and_retryable(tmp_path: Path) -> None:
     source = copy_fixture_named(tmp_path, "local-source")
     data_root = tmp_path / "service-data"

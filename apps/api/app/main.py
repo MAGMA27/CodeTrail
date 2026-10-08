@@ -60,6 +60,7 @@ from .contracts import (
     SessionMessagesResponse,
     SessionResponse,
     SourceIndexResponse,
+    TrashListResponse,
 )
 from .github import GitHubClient
 from .config import ModelProviderConfig
@@ -181,7 +182,7 @@ def create_app(
         CORSMiddleware,
         allow_origins=_allowed_origins(),
         allow_credentials=False,
-        allow_methods=["GET", "POST"],
+        allow_methods=["GET", "POST", "DELETE"],
         allow_headers=["*"],
     )
 
@@ -272,6 +273,30 @@ def create_app(
     async def list_projects() -> ProjectListResponse:
         return await run_in_threadpool(workspace_service.list_projects)
 
+    @application.get(
+        "/api/trash",
+        response_model=TrashListResponse,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def list_trash() -> TrashListResponse:
+        return await run_in_threadpool(workspace_service.list_trash)
+
+    @application.delete(
+        "/api/projects/{project_id}",
+        response_model=Project,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def move_project_to_trash(project_id: str) -> Project:
+        return await run_in_threadpool(workspace_service.move_project_to_trash, project_id)
+
+    @application.post(
+        "/api/projects/{project_id}/restore",
+        response_model=Project,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def restore_project(project_id: str) -> Project:
+        return await run_in_threadpool(workspace_service.restore_project, project_id)
+
     @application.post(
         "/api/projects/{project_id}/sessions",
         response_model=SessionResponse,
@@ -296,6 +321,22 @@ def create_app(
             limit=limit,
             cursor=cursor,
         )
+
+    @application.delete(
+        "/api/projects/{project_id}/sessions/{session_id}",
+        response_model=SessionResponse,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def move_session_to_trash(project_id: str, session_id: str) -> SessionResponse:
+        return await run_in_threadpool(workspace_service.move_session_to_trash, project_id, session_id)
+
+    @application.post(
+        "/api/projects/{project_id}/sessions/{session_id}/restore",
+        response_model=SessionResponse,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def restore_session(project_id: str, session_id: str) -> SessionResponse:
+        return await run_in_threadpool(workspace_service.restore_session, project_id, session_id)
 
     @application.get(
         "/api/projects/{project_id}/sessions/{session_id}",

@@ -1572,6 +1572,13 @@ class OverviewClassificationCoverage(ContractModel):
         return self
 
 
+class TrashListResponse(VersionedModel):
+    """Recoverable projects and independently removed sessions."""
+
+    projects: list[Project] = Field(default_factory=list)
+    sessions: list[Session] = Field(default_factory=list)
+
+
 class OverviewClassification(ContractModel):
     """One rule-confirmed architecture anchor, separate from static relations."""
 

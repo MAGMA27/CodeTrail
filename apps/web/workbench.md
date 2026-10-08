@@ -2,7 +2,7 @@
 
 ## 状态
 
-已实现多项目真实工作台、Project/Index/Session/消息、索引新鲜度检查/显式更新、O1/O2/O3 浏览和 P2-R1/P2-R2 Session 内显式 fixture/real Run 面板。项目知识页默认展示当前固定快照的项目架构画布，再展示入口、功能和结构详情；Python/TypeScript 静态 imports/calls 可筛选，HTTP 客户端到 FastAPI 路由的 method/path shape association 以单独虚线边聚合显示，也可独立过滤；参数化模板只有完整同形且唯一时关联，列表标示字面量/模板并保留客户端与路由的同一 index 双端证据。点击模块进入既有符号关系图，点击代表静态边打开同一 index 的源码证据。HTTP 关联列表可打开客户端锚点→独立 HTTP 形状→对应 handler 的有界 calls 视图；HTTP shape association 自身不生成 TypeScript calls，可证明的客户端调用作为独立静态边显示。函数值变量（包括单函数参数包装中的 callback）可在既有关系图中定位；包装器执行 callback 的关系若不能证明仍保留 unresolved。概览版本为 `python-entry-v6+http-shape-v2+architecture-v1`；无 TypeScript fact 标记的旧索引显示 `not_analyzed`；旧 v1 索引明确显示 `literal_only`，不把未做参数化分析解释为无调用。Run 面板支持 AI 分析提示、启动、状态同步、持久化 SSE 事件流、有限重连/轮询回退、工具结果、Issue/代码理解报告 evidence、候选位置与有界静态影响、取消、历史选择和刷新/切换恢复；Codex external Run 会从 Session history 自动发现、选择并订阅，代码理解结果按顺序步骤和覆盖级别展示。
+已实现多项目真实工作台、Project/Index/Session/消息、可恢复回收站、索引新鲜度检查/显式更新、O1/O2/O3 浏览和 P2-R1/P2-R2 Session 内显式 fixture/real Run 面板。项目知识页默认展示当前固定快照的项目架构画布，再展示入口、功能和结构详情；Python/TypeScript 静态 imports/calls 可筛选，HTTP 客户端到 FastAPI 路由的 method/path shape association 以单独虚线边聚合显示，也可独立过滤；参数化模板只有完整同形且唯一时关联，列表标示字面量/模板并保留客户端与路由的同一 index 双端证据。点击模块进入既有符号关系图，点击代表静态边打开同一 index 的源码证据。HTTP 关联列表可打开客户端锚点→独立 HTTP 形状→对应 handler 的有界 calls 视图；HTTP shape association 自身不生成 TypeScript calls，可证明的客户端调用作为独立静态边显示。函数值变量（包括单函数参数包装中的 callback）可在既有关系图中定位；包装器执行 callback 的关系若不能证明仍保留 unresolved。概览版本为 `python-entry-v6+http-shape-v2+architecture-v1`；无 TypeScript fact 标记的旧索引显示 `not_analyzed`；旧 v1 索引明确显示 `literal_only`，不把未做参数化分析解释为无调用。Run 面板支持 AI 分析提示、启动、状态同步、持久化 SSE 事件流、有限重连/轮询回退、工具结果、Issue/代码理解报告 evidence、候选位置与有界静态影响、取消、历史选择和刷新/切换恢复；Codex external Run 会从 Session history 自动发现、选择并订阅，代码理解结果按顺序步骤和覆盖级别展示。
 
 ## 职责与范围
 
@@ -38,6 +38,10 @@ Neighbors 查询返回的 `contextual_calls` 在代码关系面板单独列出�
 
 ## 项目知识桌面工作区
 
+侧栏为 Project 和 Session 提供“移入回收站”入口及明确确认文案，用户可从同一侧栏打开回收站并分别恢复项目或独立 Session。恢复只更新服务端移除标记，不自动选择对象、切换当前视图或启动分析；恢复项目也不恢复单独移除的 Session。正在更新索引的项目不能移除；Run、导入或功能生成与移除冲突时由服务端拒绝，界面保留具体错误以便重试。操作成功后只清理仍指向被移除对象的当前上下文、请求、草稿、图/证据选择和 URL；如果用户已切换到其他对象，晚到的清理不会覆盖新上下文。来源、固定索引、消息、Run、报告与证据均由服务端保留。
+
+架构容器展开后，模块 hover 只重投影关系边；节点数组与 hover 状态解耦，避免强调相邻关系时重建全部模块节点和重置布局。模块仍保留 `nodrag/nopan`、鼠标 hover、点击钻取和源码返回交互；模块关系与过滤仍来自同一个固定 overview 快照。
+
 中央知识页默认为架构视图，工具栏常驻，画布使用剩余高度。HTTP 关联、符号搜索、版本与覆盖由明确入口按需打开右侧详情；目录/职责选中立即显示结构详情，静态边选中显示聚合数量与源码依据，HTTP 边只显示所选聚合关系对应的双端证据。全部 HTTP 关联仅通过工具栏入口显示，不再默认纵向铺开。
 
 架构与功能是明确的视图切换；功能视图集中保存版本、显式生成、失败/重试及功能结果，独立滚动，不自动启动生成。架构组件切换时保持挂载，保留展开、聚焦与过滤。右侧详情独立滚动；全局源码证据或外部图面板打开时，架构详情暂时隐藏，返回后恢复所选上下文，避免并存两套右侧栏。关闭详情清理详情选择，不改索引或图展开；项目/index 的 key 变化重建知识视图并清空旧详情和旧展开，不新增持久化。
@@ -64,12 +68,15 @@ API 离线、项目/Session/index 不属于当前范围、索引不在 latest、
 
 ## 验证
 
+本次实际浏览器展开 API 职责后 hover `service` 模块，仅相邻关系强调、节点位置稳定，点击钻取/返回后展开状态保留。自动验收为 Web 67 项测试、typecheck 和 production build 通过。独立 localhost 标签确认 Project/Session 回收站控件可见；现有 API 返回 404 且未被重启，因此在线列表/恢复仍 UNVERIFIED，详见本地阶段记录。
+
 展开模块共用 40 个画布名额；无聚焦时总览中当前选中且已展开的组优先，聚焦时当前职责优先，其余按展开顺序分配。未返回的 overview 模块、画布名额不足和聚焦范围外的可用事实分别提示，选择组不会加载遗漏模块。静态过滤保留至少一种 imports/calls，HTTP 形状开关独立。可复现的较大样本生成与边界见 [样本说明](../../fixtures/README.md)。
 
 从仓库根目录执行 `pnpm --dir apps/web test`、`pnpm web:typecheck` 和 `pnpm web:build`。项目架构画布的浏览器交互验收及未完成项见本地 memory-bank 阶段记录；布局约束见 [工作区 UI 规范](../../docs/design/workspace-ui-spec.md)。2026-10-06 已在真实浏览器验证概览 503 失败后通过重试恢复；产品按用户确认面向 PC 端，窄屏矩阵不属于验收范围；已有 390×844 点检仅作为历史证据。当前架构验收画面可用官方浏览器截图接口查看，未保存截图文件；不能由构建或单测推定 UI 全部通过。其他浏览器流程与已知案例限制见 [影响链验收](../../evals/results/p4-e2b-codex-host-20261001/impact-chain-acceptance.md)，其既有边界状态仍有效。
 
 ## 相关决策
 
+- [Project 与 Session 可恢复回收站](../../docs/decisions/2026-10-08-workspace-trash.md)
 - [固定快照架构画布的可读层级](../../docs/decisions/2026-10-08-architecture-view-readability.md)
 - [Run 执行决策](../../docs/decisions/2026-09-12-run-execution.md)
 - [P2-R2 模型驱动 Issue 分析决策](../../docs/decisions/2026-09-12-run-model-analysis.md)

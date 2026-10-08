@@ -2,7 +2,7 @@
 
 ## 状态
 
-已实现 SQLite/FTS5 快照、Project/Index 归属、来源导入、Session/消息、搜索、源码证据、受限邻接、O2 功能结果，以及 P2-R1/P2-R2 Run/冻结输入/事件/工具结果/报告和模型用量持久化；P3-I1 增加从 Run 固定报告/快照派生的有界静态影响查询；external Codex Run 复用同一表记录真实工具调用、证据和结论；已支持索引规则/配置元数据、只读源码 manifest、latest 保护下的显式更新，以及项目隔离且共享容量的文件级定义描述/关系事实派生缓存。SSE 仅读取同一持久化事件事实，不增加存储日志，影响结果也不写回 Run。
+已实现 SQLite/FTS5 快照、Project/Index 归属、来源导入、Session/消息、可恢复 Project/Session 回收站、搜索、源码证据、受限邻接、O2 功能结果，以及 P2-R1/P2-R2 Run/冻结输入/事件/工具结果/报告和模型用量持久化；P3-I1 增加从 Run 固定报告/快照派生的有界静态影响查询；external Codex Run 复用同一表记录真实工具调用、证据和结论；已支持索引规则/配置元数据、只读源码 manifest、latest 保护下的显式更新，以及项目隔离且共享容量的文件级定义描述/关系事实派生缓存。SSE 仅读取同一持久化事件事实，不增加存储日志，影响结果也不写回 Run。
 
 ## 职责与范围
 
@@ -26,6 +26,10 @@
 
 ## 数据与生命周期
 
+Project 与 Session 以各自 SQLite 行上的 nullable `removed_at` 持久化移除状态；`ensure_schema` 为旧库幂等补列。普通项目/Session 列表、按 ID 读取、消息读取/写入、Run 作用域和索引更新只接收未移除对象；显式恢复使用包含已移除行的内部读取，再在事务中清除目标标记。移除只写 tombstone，不删除来源、immutable index、消息、Run、报告或 evidence。恢复 Project 不清除独立 Session 的 `removed_at`；恢复 Session 要求所属 Project 活动。
+
+直接按 index ID 读取也检查仍有活动 Project 归属；若仓库下所有 Project 都已移除，兼容的未归属索引读写不会把它们重新暴露。Legacy/managed 自动注册在事务内重查活动状态，不能复活移除行。Project 移除同时检查跨库更新/import 状态以及 IndexStore 中的活动构建；Session/Project 移除会检查活动 Run。导入准入、索引构建/完成、功能生成与移除通过存储事务或服务锁及二次检查协调，冲突保留原始数据并返回可重试错误。
+
 职责配置没有独立服务表或用户可编辑数据库状态：根 `codetrail-subsystems.json` 作为 64 KiB 有界 `snapshot_files` 成员与源码一起捕获，内容 hash 参与既有 snapshot identity；overview 和 provenance 从该 index 读取。源码文件/字节预算独立于这一个有界 metadata 读取，且 root 文件在源码预算截断前优先观察。规则升级到 `source-v4` 后 freshness 会使旧 index 显示规则变化；`relations-v13` 为新 index identity。旧不可变 index 和数据库行无需迁移：因其不含该文件，概览继续使用目录 fallback。
 
 索引更新还在 ManagementStore 的 `project_updates` 中保留跨数据库提交意图。该表以 `project_id` 唯一约束串行化项目更新，记录 expected latest、owner PID、attempt、候选 immutable index、GitHub source identity 和阶段；服务启动只处理 owner 明确已退出的记录。owner 探测为 `alive`、`exited`、`unknown` 三态：Windows 使用 `OpenProcess(SYNCHRONIZE)` 与 `WaitForSingleObject(..., 0)` 的只读句柄查询并始终关闭句柄，POSIX 才使用平台限定的无信号探测；权限不足、未知错误或查询失败保持 `unknown`，不会触发恢复。应用服务将 expected 贯穿源码检查、下载、构建、历史复用和 `finish_project_index` 的 CAS，候选快照可以先写入但不会绕过 latest 校验。latest CAS 成功后，管理库用一个 `BEGIN IMMEDIATE` 事务写入 source identity、attempt ready/index/hash 并删除意图；跨库中断时，当前 latest 若仍是候选 ready 快照则补提交，否则终止意图且不回滚其他 writer。恢复前的短暂 source/latest 差异由该意图解释，待恢复意图会阻止同项目继续更新。
@@ -42,10 +46,13 @@ Run 持久化限制工具调用、模型调用/修复、单次/总源码行、�
 
 ## 验证
 
+本次回收站验收在隔离临时数据目录下运行：`tests/test_api.py tests/test_storage.py tests/test_runs.py` 共 53 项通过，`tests/test_features.py tests/test_mcp.py` 共 31 项通过，覆盖旧库 `removed_at` 列升级、显式恢复/重启、数据保留、活动 Run/索引/导入/功能任务保护、归属边界、移除对象查询/写入拒绝和 legacy/managed 项目不自动复活；`compileall -q app` 通过。真实浏览器连接的旧 API 对 `/api/trash` 返回 404，在线列表/恢复流程未验证，详见本地阶段记录。
+
 `apps/api/tests/test_storage.py`、`apps/api/tests/test_definition_cache.py` 与 `apps/api/tests/test_typescript_indexing.py` 验证 SQLite 重开、事务、项目隔离、定义/关系事实缓存严格校验、冷/热复用、共享容量/并发和失败降级、旧快照、manifest、latest 冲突、邻接和影响路径边界；`apps/api/tests/test_process_liveness.py` 验证 Windows 只读进程句柄的 alive/exited/unknown 语义、句柄释放和 unknown 恢复保护；`apps/api/tests/test_github_process_lifecycle_script.py` 验证受控验收脚本的 release 超时、阶段报告、默认单场景和 worker 回收/日志保留；`apps/api/tests/test_freshness.py` 验证内容 hash、预算未知、显式复用/重建和旧 metadata，并验证关系语义升级时明确返回 rules/config 变化、生成 `relations-v13-rebuild` 且重复更新复用新快照，并覆盖 runtime 目录变化后的旧快照保留；其它测试继续覆盖 Run、SSE、API 双入口和 MCP。双进程验收脚本为 `scripts/verify-github-process-lifecycle.py`，默认只运行 `http-a-mcp-b`，`--scenario all` 才显式运行全部离线场景；每个场景具有父进程总超时、worker release 超时、受控失败日志和只针对脚本创建 worker 的安全清理。实际进程场景验收见相关决策；真实供应商语义质量、浏览器和公开 GitHub 仍未验证。
 
 ## 相关决策
 
+- [Project 与 Session 可恢复回收站](../../docs/decisions/2026-10-08-workspace-trash.md)
 - [GitHub 更新的跨进程提交一致性](../../docs/decisions/2026-09-16-github-update-commit-consistency.md)
 - [Run 执行决策](../../docs/decisions/2026-09-12-run-execution.md)
 - [P2-R2 模型驱动 Issue 分析决策](../../docs/decisions/2026-09-12-run-model-analysis.md)

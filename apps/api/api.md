@@ -2,7 +2,7 @@
 
 ## 状态
 
-已实现 Project/Index/Session、来源导入、O1 `python-entry-v6+http-shape-v2+architecture-v1` 概览（入口、显式职责/HTTP/源码结构组、聚合模块关系及同快照 HTTP 客户端/路由方法路径形状关联）、O2/O3 功能生成与 P2-R1/P2-R2 fixture/real Run 的 HTTP 和本地 MCP 入口；索引支持本地 `.py`/`.ts`/`.tsx` 源码 freshness 与显式更新，Python 文件缓存和 TypeScript 有界冷 AST 解析隔离。Run 已覆盖冻结输入、受限工具执行、单 Agent 有界模型循环、公开事件、持久化 SSE 回放/续接、Issue/代码理解报告、取消和重启中断；P3-I1 已增加从保存报告候选/发现读取固定快照的有界静态影响查询；Codex external Agent 已能通过本地 MCP 创建并驱动同一持久化 Run。HTTP method/path association 仅表达静态形状一致，不声称运行时网络目标；真实供应商语义质量仍未验证。
+已实现 Project/Index/Session、可恢复回收站、来源导入、O1 `python-entry-v6+http-shape-v2+architecture-v1` 概览（入口、显式职责/HTTP/源码结构组、聚合模块关系及同快照 HTTP 客户端/路由方法路径形状关联）、O2/O3 功能生成与 P2-R1/P2-R2 fixture/real Run 的 HTTP 和本地 MCP 入口；索引支持本地 `.py`/`.ts`/`.tsx` 源码 freshness 与显式更新，Python 文件缓存和 TypeScript 有界冷 AST 解析隔离。Run 已覆盖冻结输入、受限工具执行、单 Agent 有界模型循环、公开事件、持久化 SSE 回放/续接、Issue/代码理解报告、取消和重启中断；P3-I1 已增加从保存报告候选/发现读取固定快照的有界静态影响查询；Codex external Agent 已能通过本地 MCP 创建并驱动同一持久化 Run。HTTP method/path association 仅表达静态形状一致，不声称运行时网络目标；真实供应商语义质量仍未验证。
 
 ## 职责与范围
 
@@ -11,6 +11,10 @@
 ## 接口与依赖
 
 [service.py](app/service.py) 提供应用服务；[main.py](app/main.py) 提供 HTTP 路由；[mcp_server.py](app/mcp_server.py) 提供 stdio 工具注册和结构化错误；[run_execution.py](app/run_execution.py)、[run_sse.py](app/run_sse.py) 和 [issue_analysis.py](app/issue_analysis.py) 使用 [IndexService](app/service.py) 的实际 search/read/neighbors 工具结果或持久化事件。精确请求、状态、事件、SSE 帧和报告形状由 [contracts.py](app/contracts.py) 声明，Schema 由 [export_schema.py](app/export_schema.py) 生成。
+
+### Project 与 Session 回收站
+
+`GET /api/trash` 返回可恢复项目和独立移除的 Session；`DELETE /api/projects/{project_id}` 与 `DELETE /api/projects/{project_id}/sessions/{session_id}` 将对象软移除，`POST /api/projects/{project_id}/restore` 与 `POST /api/projects/{project_id}/sessions/{session_id}/restore` 显式恢复。移除不会物理删除来源、索引、消息、Run、报告或 evidence。普通列表与作用域读取隐藏移除对象；按 `index_id` 的兼容 HTTP 查询也会校验其仍有活动 Project 归属。恢复 Project 不会恢复独立移除的 Session。活动 Run、索引更新、导入或功能生成期间返回可重试的 409；这些入口仍由 WorkspaceService 和现有 Pydantic 契约拥有，不向 MCP 开放新的写工具。
 
 `search_code`、HTTP 搜索和 external Run 的 `run_search_code` 都委托同一 `IndexStore`。搜索先按有界名称层返回完整限定名（支持限定名后缀）、叶子名精确和名称部分命中，再按有界 FTS 批次复核符号自身源码范围内的正文命中；名称层先完成，因此精确定义不会被正文候选挤出。每次搜索共享服务端候选、源码文件/字节和 0.5 秒预算，SQL 使用 progress handler；同一文件只读取一次。结果保留 `index_id`、稳定 Symbol 身份、rank、matched terms、snippet 和截断说明，预算停止使用 `search budget exceeded: ...`，已确认还有更多结果才使用 `max_results reached`；模块正文范围仍是整文件，函数/类只使用自身行范围。HTTP、普通 MCP 与绑定 Run 不各自实现排序或预算规则。
 
@@ -56,6 +60,8 @@ MCP 代码更新后由 Codex 宿主对 `codetrail` 做一次 reload（或按宿�
 
 ## 验证
 
+回收站回归在隔离数据目录下完成：API/存储/Run 相关 53 项，功能生成/MCP 相关 31 项，契约检查 29 项均通过；Web 侧 67 项测试、typecheck 和生产构建通过。浏览器确认侧栏入口可见，但当前服务进程对 `GET /api/trash` 返回 404，在线恢复仍 UNVERIFIED；未重启用户服务或对现有项目/Session 执行移除。
+
 `apps/api/tests/test_runs.py` 验证 fixture 生命周期和固定报告影响查询；`apps/api/tests/test_storage.py` 验证有界静态路径、环、去重、manifest 和 latest 冲突；`apps/api/tests/test_freshness.py` 验证内容 hash、预算未知、显式复用/重建、旧 metadata 和旧 latest 保留；`apps/api/tests/test_process_liveness.py` 验证 Windows 只读句柄探测的存活/退出/未知分支、句柄关闭和 unknown 恢复保护；`apps/api/tests/test_github_process_lifecycle_script.py` 验证验收脚本的 release 超时、阶段报告、默认单场景和 worker 回收/日志保留；`apps/api/tests/test_run_sse.py` 验证持久化逐帧回放、双游标续接、终态控制帧、未来/跨 Run 拒绝、断开释放容量和 health 并发；`apps/api/tests/test_issue_runs.py` 验证 real 的模型工具协议、不同问题的工具计划、证据不足、非法引用/工具、有限修复、预算、持久化配置和 OpenAI-compatible 请求、供应商失败、取消与终态容量；`apps/api/tests/test_mcp.py` 验证 HTTP/MCP 新鲜度对照、独立 index 写能力、同一 Run、影响结果和 Codex external 的实际工具结果、代码理解有序步骤、证据拒绝、幂等、时间预算、取消与终态拒写；`apps/api/tests/test_overview.py` 另验证结构组、模块关系、预算和固定快照。双进程脚本默认只运行 `http-a-mcp-b`，`--scenario all` 才显式运行全部离线场景；每个场景有父进程总超时、worker release 超时、阶段日志和受控失败日志，取消时释放 gate、退出 MCP context 并只回收脚本创建的 HTTP worker。实际进程场景验收见相关决策；浏览器、公开 GitHub 和真实 DeepSeek 语义质量仍为 UNVERIFIED。
 
 现有 `apps/api/tests/test_definition_cache.py` 覆盖定义描述/关系事实缓存的冷/热复用、同构 AST 共享、重启、目标重绑定、失效、损坏、容量、并发和失败降级；测试和编译结果记录在具体交付/验收材料中。契约或前端改动时分别执行对应检查。
@@ -66,6 +72,7 @@ MCP 代码更新后由 Codex 宿主对 `codetrail` 做一次 reload（或按宿�
 - [P2-R2 模型驱动 Issue 分析决策](../../docs/decisions/2026-09-12-run-model-analysis.md)
 - [Run SSE 决策](../../docs/decisions/2026-09-12-run-sse.md)
 - [项目与会话决策](../../docs/decisions/2026-09-11-project-session-workspace.md)
+- [Project 与 Session 可恢复回收站](../../docs/decisions/2026-10-08-workspace-trash.md)
 - [统一接口决策](../../docs/decisions/2026-09-11-agent-native-interfaces.md)
 - [Codex 外部 Agent Run 决策](../../docs/decisions/2026-09-13-external-agent-run.md)
 - [FastAPI 路由入口概览](../../docs/decisions/2026-09-14-fastapi-route-overview.md)

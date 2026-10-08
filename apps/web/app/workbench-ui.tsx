@@ -44,6 +44,7 @@ import type {
   OverviewModuleRelation,
   ProjectOverview,
   ProjectRecord,
+  TrashListResponse,
   RunEvent,
   RunRecord,
   RunReport,
@@ -84,6 +85,15 @@ type ProjectUi = {
   status: UiAsyncStatus;
   error: string | null;
   onSelectProject: (projectId: string) => void;
+  trash: TrashListResponse | null;
+  trashStatus: UiAsyncStatus;
+  trashError: string | null;
+  trashMutationBusy: boolean;
+  onLoadTrash: Action;
+  onMoveProjectToTrash: (projectId: string) => void | Promise<void>;
+  onMoveSessionToTrash: (projectId: string, sessionId: string) => void | Promise<void>;
+  onRestoreProject: (projectId: string) => void | Promise<void>;
+  onRestoreSession: (projectId: string, sessionId: string) => void | Promise<void>;
 };
 
 type LocalImportUi = {
@@ -484,6 +494,7 @@ function ProjectRail({
   onViewKnowledge: () => void;
 }) {
   const [sessionFormOpen, setSessionFormOpen] = useState(false);
+  const [trashOpen, setTrashOpen] = useState(false);
   const selectedProject = project.selectedProject;
   useEffect(() => {
     if (session.writeStatus === "success") {
@@ -497,7 +508,19 @@ function ProjectRail({
           <p className="ct-overline">PROJECTS</p>
           <h2>项目</h2>
         </div>
-        <button type="button" className="ct-text-button" onClick={() => onOpenOperation("create-project")}>+ 新建</button>
+        <div className="ct-sidebar-header-actions">
+          <button type="button" className="ct-text-button" onClick={() => onOpenOperation("create-project")}>+ 新建</button>
+          <button
+            type="button"
+            className={`ct-text-button${trashOpen ? " is-active" : ""}`}
+            aria-expanded={trashOpen}
+            onClick={() => {
+              const next = !trashOpen;
+              setTrashOpen(next);
+              if (next) void project.onLoadTrash();
+            }}
+          >回收站</button>
+        </div>
       </div>
       <div className="ct-sidebar-scroll">
         <div className="ct-sidebar-caption">
@@ -514,20 +537,33 @@ function ProjectRail({
                   ? `${item.available_index_ids.length} 个快照`
                   : "未索引";
               return (
-                <button
-                  type="button"
-                  key={item.project_id}
-                  className={`ct-project-item${selected ? " is-selected" : ""}`}
-                  onClick={() => project.onSelectProject(item.project_id)}
-                  aria-current={selected ? "page" : undefined}
-                >
-                  <span className="ct-project-initial" aria-hidden="true">{item.name.slice(0, 1).toUpperCase()}</span>
-                  <span className="ct-project-copy">
-                    <strong>{item.name}</strong>
-                    <span>{status}</span>
-                  </span>
-                  <span className="ct-project-chevron" aria-hidden="true">{selected ? "·" : "›"}</span>
-                </button>
+                <div className="ct-project-item-row" key={item.project_id}>
+                  <button
+                    type="button"
+                    className={`ct-project-item${selected ? " is-selected" : ""}`}
+                    onClick={() => project.onSelectProject(item.project_id)}
+                    aria-current={selected ? "page" : undefined}
+                  >
+                    <span className="ct-project-initial" aria-hidden="true">{item.name.slice(0, 1).toUpperCase()}</span>
+                    <span className="ct-project-copy">
+                      <strong>{item.name}</strong>
+                      <span>{status}</span>
+                    </span>
+                    <span className="ct-project-chevron" aria-hidden="true">{selected ? "·" : "›"}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="ct-trash-icon-button"
+                    aria-label={`将项目“${item.name}”移入回收站`}
+                    title="移入回收站"
+                    disabled={project.trashMutationBusy || Boolean(item.building_index_id)}
+                    onClick={() => {
+                      if (window.confirm(`将项目“${item.name}”移入回收站？\n索引、会话、消息和报告会保留，可随时恢复。`)) {
+                        void project.onMoveProjectToTrash(item.project_id);
+                      }
+                    }}
+                  >⌫</button>
+                </div>
               );
             })}
           </div>
@@ -581,20 +617,33 @@ function ProjectRail({
             {session.sessions.length > 0 ? (
               <div className="ct-session-list">
                 {session.sessions.map((item) => (
-                  <button
-                    type="button"
-                    key={item.session_id}
-                    className={`ct-session-item${item.session_id === session.selectedSessionId ? " is-selected" : ""}`}
-                    data-session-id={item.session_id}
-                    onClick={() => session.onSelectSession(item.session_id)}
-                    aria-current={item.session_id === session.selectedSessionId ? "page" : undefined}
-                  >
-                    <span className="ct-session-item-copy">
-                      <strong>{item.topic}</strong>
-                      <small>{item.message_count} 条消息 · {item.index.revision}</small>
-                    </span>
-                    <span className="ct-session-item-time">{formatDate(item.updated_at)}</span>
-                  </button>
+                  <div className="ct-session-item-row" key={item.session_id}>
+                    <button
+                      type="button"
+                      className={`ct-session-item${item.session_id === session.selectedSessionId ? " is-selected" : ""}`}
+                      data-session-id={item.session_id}
+                      onClick={() => session.onSelectSession(item.session_id)}
+                      aria-current={item.session_id === session.selectedSessionId ? "page" : undefined}
+                    >
+                      <span className="ct-session-item-copy">
+                        <strong>{item.topic}</strong>
+                        <small>{item.message_count} 条消息 · {item.index.revision}</small>
+                      </span>
+                      <span className="ct-session-item-time">{formatDate(item.updated_at)}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="ct-trash-icon-button"
+                      aria-label={`将会话“${item.topic}”移入回收站`}
+                      title="移入回收站"
+                      disabled={project.trashMutationBusy}
+                      onClick={() => {
+                        if (window.confirm(`将会话“${item.topic}”移入回收站？\n消息、Run 和报告会保留，可在回收站恢复。`)) {
+                          void project.onMoveSessionToTrash(item.project_id, item.session_id);
+                        }
+                      }}
+                    >⌫</button>
+                  </div>
                 ))}
               </div>
             ) : session.status === "empty" ? (
@@ -608,6 +657,34 @@ function ProjectRail({
               </button>
             ) : null}
           </div>
+        ) : null}
+        {trashOpen ? (
+          <section className="ct-trash-panel" aria-label="回收站">
+            <div className="ct-trash-heading">
+              <div><p className="ct-overline">RECOVERABLE</p><strong>回收站</strong></div>
+              <button type="button" className="ct-link-button" onClick={() => void project.onLoadTrash()} disabled={project.trashStatus === "loading"}>刷新</button>
+            </div>
+            {project.trashError ? <p className="ct-inline-error" role="alert">{project.trashError}</p> : null}
+            {project.trashStatus === "loading" && !project.trash ? <p className="ct-sidebar-note">正在读取回收站…</p> : null}
+            {project.trash ? (
+              <>
+                {project.trash.projects.map((item) => (
+                  <div className="ct-trash-item" key={`project:${item.project_id}`}>
+                    <span><strong>{item.name}</strong><small>项目 · {item.available_index_ids.length} 个索引快照</small></span>
+                    <button type="button" className="ct-link-button" disabled={project.trashMutationBusy} onClick={() => void project.onRestoreProject(item.project_id)}>恢复</button>
+                  </div>
+                ))}
+                {project.trash.sessions.map((item) => (
+                  <div className="ct-trash-item" key={`session:${item.session_id}`}>
+                    <span><strong>{item.topic}</strong><small>会话 · {project.projects.find((candidate) => candidate.project_id === item.project_id)?.name ?? item.project_id}</small></span>
+                    <button type="button" className="ct-link-button" disabled={project.trashMutationBusy} onClick={() => void project.onRestoreSession(item.project_id, item.session_id)}>恢复</button>
+                  </div>
+                ))}
+                {project.trash.projects.length === 0 && project.trash.sessions.length === 0 ? <p className="ct-sidebar-note">回收站为空。</p> : null}
+                {project.trash.projects.length > 0 ? <p className="ct-sidebar-note">恢复项目不会恢复单独移入回收站的会话。</p> : null}
+              </>
+            ) : null}
+          </section>
         ) : null}
       </div>
       <div className="ct-sidebar-footer">
@@ -1160,7 +1237,7 @@ function ArchitectureSection({ overview, knowledge, graph, panelMode, onPanelMod
     }, 100);
     return () => window.clearTimeout(timer);
   }, [active, flow, focusedDirectoryNodeIds, inspectorVisible, model.directories]);
-  const reactFlowModel = useMemo(() => {
+  const architectureNodes = useMemo(() => {
     const nodes: Node[] = model.directories.map((directory) => ({
       id: directory.group.group_id,
       type: "architecture-directory",
@@ -1186,10 +1263,6 @@ function ArchitectureSection({ overview, knowledge, graph, panelMode, onPanelMod
       className: "ct-architecture-directory-node",
       zIndex: 0,
     }));
-    const nodeCenters = new Map<string, ArchitecturePosition>();
-    for (const directory of model.directories) {
-      nodeCenters.set(directory.group.group_id, { x: directory.position.x + directory.width / 2, y: directory.position.y + directory.height / 2 });
-    }
     for (const directory of model.directories) {
       for (const visible of directory.visibleModules) {
         const relatedModuleRelations = model.relations.filter((relation) =>
@@ -1197,10 +1270,6 @@ function ArchitectureSection({ overview, knowledge, graph, panelMode, onPanelMod
           && visibleModuleIds.has(relation.source)
           && visibleModuleIds.has(relation.target),
         );
-        nodeCenters.set(visible.module.module_id, {
-          x: directory.position.x + visible.position.x + 78,
-          y: directory.position.y + visible.position.y + 34,
-        });
         nodes.push({
           id: visible.module.module_id,
           type: "architecture-module",
@@ -1218,6 +1287,19 @@ function ArchitectureSection({ overview, knowledge, graph, panelMode, onPanelMod
           style: { width: 156, height: 68 },
           className: "ct-architecture-module-node",
           zIndex: 2,
+        });
+      }
+    }
+    return nodes;
+  }, [knowledge, model, onDetailChange, visibleModuleIds]);
+  const reactFlowModel = useMemo(() => {
+    const nodeCenters = new Map<string, ArchitecturePosition>();
+    for (const directory of model.directories) {
+      nodeCenters.set(directory.group.group_id, { x: directory.position.x + directory.width / 2, y: directory.position.y + directory.height / 2 });
+      for (const visible of directory.visibleModules) {
+        nodeCenters.set(visible.module.module_id, {
+          x: directory.position.x + visible.position.x + 78,
+          y: directory.position.y + visible.position.y + 34,
         });
       }
     }
@@ -1253,7 +1335,7 @@ function ArchitectureSection({ overview, knowledge, graph, panelMode, onPanelMod
       style: { stroke: relation.highlighted ? "#087f75" : "#9ba7a9", strokeWidth: 2, strokeDasharray: "6 4", opacity: relation.highlighted ? 0.95 : 0.35 },
       labelStyle: { fill: relation.highlighted ? "#075e57" : "#778487", fontSize: 10 },
       labelBgStyle: { fill: "#f5fbfa", fillOpacity: 0.98 },
-      labelBgPadding: [5, 3] as [number, number],
+      labelBgPadding: [5, 3],
       interactionWidth: 20,
       data: { httpRelation: relation },
     }));
@@ -1265,8 +1347,8 @@ function ArchitectureSection({ overview, knowledge, graph, panelMode, onPanelMod
       type: focusedGroupId ? edge.type : "straight",
       label: edge.id === hoveredEdgeId || edge.id === selectedEdgeId ? edge.label : undefined,
     }));
-    return { nodes, edges, foldedEdgeCount };
-  }, [activeArchitectureModuleId, displayedArchitectureRelations, focusedGroupId, hoveredEdgeId, knowledge, model, overview.index.index_id, selectedEdgeId, visibleModuleIds]);
+    return { edges, foldedEdgeCount };
+  }, [displayedArchitectureRelations, focusedGroupId, hoveredEdgeId, model, selectedEdgeId]);
   const coverageWarnings = [
     overview.truncated ? "概览路径、未知边界或扫描分析存在截断" : null,
     overview.coverage.visible_groups < overview.coverage.total_groups ? `概览仅返回 ${overview.coverage.visible_groups}/${overview.coverage.total_groups} 组（含 HTTP 路由组）` : null,
@@ -1313,7 +1395,7 @@ function ArchitectureSection({ overview, knowledge, graph, panelMode, onPanelMod
       : [...current, kind]);
   };
   const focusGraph = () => {
-    if (!flow || reactFlowModel.nodes.length === 0) return;
+    if (!flow || architectureNodes.length === 0) return;
     const nodeIds = focusedDirectoryNodeIds.length > 0 ? focusedDirectoryNodeIds : model.directories.map((directory) => directory.group.group_id);
     void flow.fitView({ nodes: nodeIds.map((id) => ({ id })), padding: 0.18, duration: 240 });
   };
@@ -1349,7 +1431,7 @@ function ArchitectureSection({ overview, knowledge, graph, panelMode, onPanelMod
         <label className="ct-architecture-kind"><input type="checkbox" checked={relationKinds.includes("imports")} onChange={() => toggleRelationKind("imports")} /><span>imports</span></label>
         <label className="ct-architecture-kind"><input type="checkbox" checked={relationKinds.includes("calls")} onChange={() => toggleRelationKind("calls")} /><span>calls</span></label>
         <label className="ct-architecture-kind ct-architecture-http-kind"><input type="checkbox" checked={showHttpAssociations} onChange={() => setShowHttpAssociations((current) => !current)} /><span>HTTP 形状</span></label>
-        <button type="button" className="ct-button ct-button-secondary" onClick={focusGraph} disabled={reactFlowModel.nodes.length === 0}>聚焦画布</button>
+        <button type="button" className="ct-button ct-button-secondary" onClick={focusGraph} disabled={architectureNodes.length === 0}>聚焦画布</button>
         {model.supportingDirectoryCount > 0 ? <button type="button" className="ct-link-button" aria-expanded={showSupportingDirectories} onClick={() => setShowSupportingDirectories((current) => !current)}>{showSupportingDirectories ? "隐藏辅助源码目录" : "查看辅助源码目录"} · {model.supportingDirectoryCount}</button> : null}
         {focusedGroup ? <span>{focusedGroup.group_kind === "responsibility" ? "职责聚焦" : "目录聚焦"} · {focusedGroup.label}</span> : null}
         {!focusedGroup && selectedArchitectureGroup ? <button type="button" className="ct-button ct-button-secondary" onClick={() => focusArchitectureGroup(selectedArchitectureGroup)}>{selectedArchitectureGroup.group_kind === "responsibility" ? "聚焦此职责" : "聚焦此目录"}</button> : null}
@@ -1389,7 +1471,7 @@ function ArchitectureSection({ overview, knowledge, graph, panelMode, onPanelMod
       ) : (
         <div className="ct-architecture-canvas">
           <ReactFlow<Node, Edge>
-            nodes={reactFlowModel.nodes}
+            nodes={architectureNodes}
             edges={reactFlowModel.edges}
             nodeTypes={architectureNodeTypes}
             onInit={setFlow}
