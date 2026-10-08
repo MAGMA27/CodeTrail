@@ -60,6 +60,7 @@ from .contracts import (
     IssueModelFinal,
     LocalImportRequest,
     LocalImportResponse,
+    ModelConfigSettingsResponse,
     NeighborsIndexResponse,
     ModuleSymbolsPageResponse,
     ProjectOverview,
@@ -99,6 +100,7 @@ from .contracts import (
     SearchCodeFailure,
     SearchCodeSuccess,
     SearchIndexResponse,
+    SaveModelConfigRequest,
     Session,
     SessionListResponse,
     SessionMessage,
@@ -109,7 +111,7 @@ from .contracts import (
     ToolRequest,
     ToolResult,
 )
-from .config import ModelProviderConfig, load_model_config
+from .config import ModelConfigError, ModelProviderConfig, load_model_config, save_model_config as persist_model_config
 from .indexing import (
     DEFINITION_EXTRACTION_RULES_VERSION,
     PYTHON_AST_VERSION,
@@ -249,7 +251,10 @@ class RepositoryRegistry:
             )
         configured_data_root = data_root or os.getenv("CODETRAIL_DATA_DIR") or (Path.cwd() / ".codetrail")
         self._data_root = _prepare_data_root(configured_data_root)
-        self._model_config = model_config if model_config is not None else load_model_config(self._data_root)
+        self._model_config_override = model_config
+        self._model_config_lock = threading.RLock()
+        if model_config is None:
+            load_model_config(self._data_root)
         self._management_store = ManagementStore(self._data_root / "registry.sqlite3")
         self._allowed_import_roots = self._prepare_allowed_import_roots(
             allowed_import_roots
@@ -373,7 +378,13 @@ class RepositoryRegistry:
 
     @property
     def model_config(self) -> ModelProviderConfig:
-        return self._model_config
+        with self._model_config_lock:
+            return self._model_config_override or load_model_config(self._data_root)
+
+    def save_model_config(self, config: ModelProviderConfig) -> None:
+        with self._model_config_lock:
+            persist_model_config(self._data_root, config)
+            self._model_config_override = None
 
     @property
     def management_store(self) -> ManagementStore:
@@ -1451,6 +1462,45 @@ class WorkspaceService:
             model_adapter_factory=run_model_adapter_factory,
         )
 
+    def get_model_config_settings(self) -> ModelConfigSettingsResponse:
+        config = self._current_model_config()
+        return ModelConfigSettingsResponse(
+            provider=config.provider,
+            base_url=config.base_url,
+            model=config.model,
+            has_api_key=bool(config.api_key),
+        )
+
+    def save_model_config_settings(self, request: SaveModelConfigRequest) -> ModelConfigSettingsResponse:
+        current = self._current_model_config()
+        api_key = current.api_key
+        if request.remove_api_key:
+            api_key = ""
+        elif request.api_key and request.api_key.strip():
+            api_key = request.api_key
+        config = ModelProviderConfig(
+            provider=request.provider,
+            api_key=api_key,
+            base_url=request.base_url,
+            model=request.model,
+        )
+        try:
+            self.registry.save_model_config(config)
+        except ModelConfigError as exc:
+            raise ServiceError("internal_error", 500, "local model configuration could not be saved") from exc
+        return ModelConfigSettingsResponse(
+            provider=config.provider,
+            base_url=config.base_url,
+            model=config.model,
+            has_api_key=bool(config.api_key),
+        )
+
+    def _current_model_config(self) -> ModelProviderConfig:
+        try:
+            return self.registry.model_config
+        except ModelConfigError as exc:
+            raise ServiceError("internal_error", 500, "local model configuration could not be read") from exc
+
     def create_project(self, request: CreateProjectRequest) -> Project:
         spec = self.registry.spec_for(request.repository_id)
         project_id = _new_project_id()
@@ -1891,8 +1941,9 @@ class WorkspaceService:
                     input_chars=input_chars,
                     frozen_at=frozen_at,
                 )
+                run_model_config = self._current_model_config() if request.mode == "real" else None
                 resolved_model = (
-                    resolve_model("real", request.model, model_config=self.registry.model_config)
+                    resolve_model("real", request.model, model_config=run_model_config)
                     if request.mode == "real"
                     else request.model
                 )
@@ -1907,7 +1958,7 @@ class WorkspaceService:
                     analysis_kind=request.analysis_kind,
                     execution_source=request.execution_source,
                     fixture_scenario=request.fixture_scenario,
-                    model_provider=(self.registry.model_config.provider if request.mode == "real" else None),
+                    model_provider=run_model_config.provider if run_model_config is not None else None,
                     model=resolved_model,
                     prompt_version=(request.prompt_version or ISSUE_PROMPT_VERSION) if request.mode == "real" else request.prompt_version,
                     execution_version=(
@@ -1969,7 +2020,11 @@ class WorkspaceService:
             if created:
                 if request.mode != "external":
                     assert reservation is not None
-                    self.run_executor.submit(record.run, reservation=reservation)
+                    self.run_executor.submit(
+                        record.run,
+                        reservation=reservation,
+                        model_config=run_model_config,
+                    )
                     handed_to_worker = True
             elif reservation is not None:
                 reservation.release()
@@ -3524,7 +3579,8 @@ class WorkspaceService:
             with self.registry.store_for_repository(project.repository_id) as store:
                 relation = store.load_index(index_id)
                 index = relation.snapshot.index
-                model = resolve_model(request.mode, request.model, model_config=self.registry.model_config)
+                model_config = self._current_model_config() if request.mode == "real" else None
+                model = resolve_model(request.mode, request.model, model_config=model_config)
                 cache_key = build_cache_key(
                     index.index_id,
                     index.snapshot_hash,
@@ -3554,7 +3610,7 @@ class WorkspaceService:
                 generation_engine = FeatureGenerationEngine(
                     self,
                     adapter_factory=self.feature_adapter_factory,
-                    model_config=self.registry.model_config,
+                    model_config=model_config,
                 )
                 generation_started = time.monotonic()
                 generation = generation_engine.generate(

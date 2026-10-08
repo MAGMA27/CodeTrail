@@ -55,10 +55,12 @@ from .contracts import (
     RunToolResultsResponse,
     SearchIndexResponse,
     ModuleSymbolsPageResponse,
+    ModelConfigSettingsResponse,
     SessionListResponse,
     SessionMessageResponse,
     SessionMessagesResponse,
     SessionResponse,
+    SaveModelConfigRequest,
     SourceIndexResponse,
     TrashListResponse,
 )
@@ -203,6 +205,26 @@ def create_app(
         """Report that the local API is available."""
 
         return HealthResponse(status="ok", service="codetrail-api", version="0.1.0")
+
+    @application.get(
+        "/api/model-config",
+        response_model=ModelConfigSettingsResponse,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def get_model_config() -> ModelConfigSettingsResponse:
+        return await run_in_threadpool(workspace_service.get_model_config_settings)
+
+    @application.post(
+        "/api/model-config",
+        response_model=ModelConfigSettingsResponse,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def save_model_config(
+        http_request: Request,
+        payload: SaveModelConfigRequest,
+    ) -> ModelConfigSettingsResponse:
+        _require_local_write(http_request)
+        return await run_in_threadpool(workspace_service.save_model_config_settings, payload)
 
     @application.post(
         "/api/imports/local",

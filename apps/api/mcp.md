@@ -34,6 +34,8 @@ API (`codetrail api`) 与 MCP (`codetrail mcp`) 都读取 `~/.config/codetrail/s
 
 功能生成和 Run 的 `real` 模式默认适配 DeepSeek，从服务数据目录的 `config.json` 读取配置；例如：
 
+工作台通过 `GET/POST /api/model-config` 查看和保存脱敏设置；留空密钥保留当前值，明确移除才清除。API 与 MCP 的新 real 任务每次读取同一文件，因此改模型配置不需重启服务；活动 Run 使用创建时捕获的配置。保存只写配置，不会试连供应商或发送源码。
+
 ```json
 {
   "provider": "deepseek",

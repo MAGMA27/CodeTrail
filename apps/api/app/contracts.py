@@ -2529,6 +2529,27 @@ class ApiErrorResponse(VersionedModel):
     message: str = Field(min_length=1, max_length=2_000)
 
 
+class SaveModelConfigRequest(VersionedModel):
+    provider: str = Field(min_length=1, max_length=100)
+    base_url: str = Field(min_length=1, max_length=2_000)
+    model: str = Field(min_length=1, max_length=200)
+    api_key: str | None = Field(default=None, max_length=500)
+    remove_api_key: bool = False
+
+    @model_validator(mode="after")
+    def reject_key_and_removal_together(self) -> SaveModelConfigRequest:
+        if self.remove_api_key and self.api_key:
+            raise ValueError("api_key cannot be replaced and removed in the same request")
+        return self
+
+
+class ModelConfigSettingsResponse(VersionedModel):
+    provider: str
+    base_url: str
+    model: str
+    has_api_key: bool
+
+
 McpErrorCode: TypeAlias = Literal[
     "not_found",
     "invalid_input",

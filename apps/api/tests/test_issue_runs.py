@@ -602,3 +602,47 @@ def test_real_run_uses_persistent_openai_compatible_provider_protocol(tmp_path: 
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
+
+
+def test_real_run_freezes_config_at_start_and_new_run_reads_saved_config(tmp_path: Path, monkeypatch) -> None:
+    application, project_id, index_id = setup_workspace(tmp_path)
+    first_session = create_session(application, project_id, index_id, "Freeze model configuration")
+    captured_configs = []
+    factory_entered = threading.Event()
+    release_factory = threading.Event()
+
+    def capture_config(mode: str, *, model_config=None):
+        assert mode == "real"
+        captured_configs.append(model_config)
+        if len(captured_configs) == 1:
+            factory_entered.set()
+            assert release_factory.wait(3)
+        raise FeatureGenerationErrorBase("model_failed", "configuration snapshot test")
+
+    monkeypatch.setattr("app.run_execution.default_issue_adapter", capture_config)
+    first_run = start_real_run(application, project_id, first_session, index_id)
+    assert factory_entered.wait(2)
+
+    status, saved = request(
+        application,
+        "POST",
+        "/api/model-config",
+        {
+            "schema_version": "0.1.0",
+            "provider": "test-provider",
+            "base_url": "https://model.example.test/v1",
+            "model": "test-model",
+            "api_key": "codetrail-fake-key",
+            "remove_api_key": False,
+        },
+    )
+    assert status == 200
+    assert "api_key" not in saved
+    release_factory.set()
+    assert wait_for_terminal(application, project_id, first_session, first_run)["run"]["status"] == "failed"
+    assert captured_configs[0].api_key == ""
+
+    next_session = create_session(application, project_id, index_id, "Use updated model configuration")
+    next_run = start_real_run(application, project_id, next_session, index_id)
+    assert wait_for_terminal(application, project_id, next_session, next_run)["run"]["status"] == "failed"
+    assert captured_configs[1].api_key == "codetrail-fake-key"

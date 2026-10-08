@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+import tempfile
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -62,3 +64,33 @@ def load_model_config_file(path: str | Path) -> ModelProviderConfig:
         return ModelProviderConfig.model_validate(decoded)
     except ValidationError as exc:
         raise ModelConfigError("persistent model config has invalid fields") from exc
+
+
+def save_model_config(data_root: str | Path, config: ModelProviderConfig) -> None:
+    """Atomically replace the service-owned model config without exposing its contents."""
+
+    path = model_config_path(data_root)
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=".config-",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temporary_path = Path(handle.name)
+            json.dump(config.model_dump(mode="json"), handle, ensure_ascii=False, indent=2)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_path, path)
+    except OSError as exc:
+        raise ModelConfigError("persistent model config cannot be saved") from exc
+    finally:
+        if temporary_path is not None:
+            try:
+                temporary_path.unlink(missing_ok=True)
+            except OSError:
+                pass

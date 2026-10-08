@@ -54,6 +54,7 @@ from .contracts import (
     ToolParams,
 )
 from .feature_generation import FeatureGenerationErrorBase, ModelCall
+from .config import ModelProviderConfig
 from .issue_analysis import (
     IssueAnalysisContext,
     IssueAnalysisEngine,
@@ -132,9 +133,7 @@ class RunExecutor:
         self._threads_lock = threading.RLock()
         self._reserved_count = 0
         self.thread_factory = thread_factory
-        self.model_adapter_factory = model_adapter_factory or (
-            lambda mode: default_issue_adapter(mode, model_config=workspace.registry.model_config)
-        )
+        self.model_adapter_factory = model_adapter_factory
         self._cancel_events: dict[str, threading.Event] = {}
         # Tests and local demos may use this to make cancellation observable.
         # It is intentionally not part of the public request contract.
@@ -149,7 +148,13 @@ class RunExecutor:
             self._reserved_count += 1
         return RunReservation(self._release_slot)
 
-    def submit(self, run: Run, *, reservation: RunReservation | None = None) -> None:
+    def submit(
+        self,
+        run: Run,
+        *,
+        reservation: RunReservation | None = None,
+        model_config: ModelProviderConfig | None = None,
+    ) -> None:
         """Start one worker using a caller-owned or newly acquired reservation."""
 
         admission = reservation or self.reserve()
@@ -161,7 +166,7 @@ class RunExecutor:
                 self._cancel_events[run.run_id] = threading.Event()
             thread = self.thread_factory(
                 target=self._run_guarded,
-                args=(run, admission),
+                args=(run, admission, model_config),
                 name=f"codetrail-run-{run.run_id[:20]}",
                 daemon=True,
             )
@@ -222,11 +227,16 @@ class RunExecutor:
             self._reserved_count -= 1
         self._slots.release()
 
-    def _run_guarded(self, run: Run, admission: RunReservation) -> None:
+    def _run_guarded(
+        self,
+        run: Run,
+        admission: RunReservation,
+        model_config: ModelProviderConfig | None,
+    ) -> None:
         thread = threading.current_thread()
         deadline = time.monotonic() + float(run.budget.max_seconds)
         try:
-            self._execute(run, deadline)
+            self._execute(run, deadline, model_config)
         except (StorageConflictError, StorageNotFoundError):
             # A concurrent cancel or a project removal has already made the Run
             # terminal/out of scope. The persisted state is the source of truth.
@@ -259,7 +269,12 @@ class RunExecutor:
                 self._threads.discard(thread)
                 self._cancel_events.pop(run.run_id, None)
 
-    def _execute(self, initial_run: Run, deadline: float) -> None:
+    def _execute(
+        self,
+        initial_run: Run,
+        deadline: float,
+        model_config: ModelProviderConfig | None,
+    ) -> None:
         record = self._load(initial_run)
         started_at = datetime.now(timezone.utc)
         start_event = RunStartedEvent(
@@ -290,7 +305,7 @@ class RunExecutor:
         limitations: list[str] = []
 
         if record.run.mode == "real":
-            self._execute_real(record, deadline)
+            self._execute_real(record, deadline, model_config)
             return
 
         self._append_stage(record, "retrieval", deadline=deadline)
@@ -450,7 +465,12 @@ class RunExecutor:
             limitations=limitations,
         )
 
-    def _execute_real(self, record: RunRecord, deadline: float) -> None:
+    def _execute_real(
+        self,
+        record: RunRecord,
+        deadline: float,
+        model_config: ModelProviderConfig | None,
+    ) -> None:
         context = IssueAnalysisContext(
             project_id=record.run.project_id,
             index_id=record.run.index_id,
@@ -493,7 +513,11 @@ class RunExecutor:
 
         try:
             self._append_stage(record, "retrieval", deadline=deadline)
-            adapter = self.model_adapter_factory("real")
+            adapter = (
+                self.model_adapter_factory("real")
+                if self.model_adapter_factory is not None
+                else default_issue_adapter("real", model_config=model_config)
+            )
             result = IssueAnalysisEngine(adapter).run(
                 context,
                 model=record.run.model or "",

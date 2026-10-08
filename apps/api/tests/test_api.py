@@ -116,6 +116,84 @@ def create_request() -> dict:
     return {"repository_id": "timeout-demo", "revision": "fixture-v1", "dirty": False}
 
 
+def test_model_config_settings_redact_secret_preserve_blank_and_remove_explicitly(tmp_path: Path, monkeypatch) -> None:
+    application = create_app({}, data_root=tmp_path / "data")
+    second_application = create_app({}, data_root=tmp_path / "data")
+    config_path = tmp_path / "data" / "config.json"
+
+    status, initial = request(application, "GET", "/api/model-config")
+    assert status == 200
+    assert initial["has_api_key"] is False
+    assert "api_key" not in initial
+
+    payload = {
+        "schema_version": "0.1.0",
+        "provider": "test-provider",
+        "base_url": "https://model.example.test/v1",
+        "model": "test-model",
+        "api_key": "codetrail-fake-key",
+        "remove_api_key": False,
+    }
+    status, saved = request(application, "POST", "/api/model-config", payload)
+    assert status == 200
+    assert saved["has_api_key"] is True
+    assert "api_key" not in saved
+    assert "codetrail-fake-key" not in json.dumps(saved)
+    assert second_application.state.registry.model_config.api_key == "codetrail-fake-key"
+
+    status, retained = request(
+        application,
+        "POST",
+        "/api/model-config",
+        {**payload, "provider": "updated-provider", "api_key": ""},
+    )
+    assert status == 200
+    assert retained["provider"] == "updated-provider"
+    assert retained["has_api_key"] is True
+    assert json.loads(config_path.read_text(encoding="utf-8"))["api_key"] == "codetrail-fake-key"
+
+    before_failed_save = config_path.read_bytes()
+    import app.config as config_module
+
+    def fail_replace(_source, _target):
+        raise OSError("simulated atomic replace failure")
+
+    monkeypatch.setattr(config_module.os, "replace", fail_replace)
+    status, failure = request(application, "POST", "/api/model-config", {**payload, "api_key": "new-fake-key"})
+    assert status == 500
+    assert "new-fake-key" not in json.dumps(failure)
+    assert config_path.read_bytes() == before_failed_save
+    assert not list(config_path.parent.glob(".config-*.tmp"))
+    monkeypatch.undo()
+
+    status, removed = request(
+        application,
+        "POST",
+        "/api/model-config",
+        {**payload, "api_key": "", "remove_api_key": True},
+    )
+    assert status == 200
+    assert removed["has_api_key"] is False
+    assert json.loads(config_path.read_text(encoding="utf-8"))["api_key"] == ""
+
+
+def test_model_config_write_requires_loopback_client(tmp_path: Path) -> None:
+    application = create_app({}, data_root=tmp_path / "data")
+    payload = {
+        "schema_version": "0.1.0",
+        "provider": "test-provider",
+        "base_url": "https://model.example.test/v1",
+        "model": "test-model",
+        "api_key": "codetrail-fake-key",
+        "remove_api_key": False,
+    }
+
+    status, response = request(application, "POST", "/api/model-config", payload, client_host="198.51.100.20")
+    assert status == 403
+    assert response["code"] == "forbidden"
+    assert not (tmp_path / "data" / "config.json").exists()
+
+
 def file_manifest(root: Path) -> dict[str, str]:
     return {
         path.relative_to(root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()

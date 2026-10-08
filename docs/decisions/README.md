@@ -1,5 +1,7 @@
 # 决策记录
 
+- [工作台管理服务端模型配置](2026-10-09-workbench-model-provider-settings.md)
+
 - [项目知识采用画布与按需详情工作区](2026-10-08-project-knowledge-workspace.md)
 
 - [Project 与 Session 可恢复回收站](2026-10-08-workspace-trash.md)

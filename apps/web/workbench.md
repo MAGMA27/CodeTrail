@@ -4,6 +4,8 @@
 
 已实现多项目真实工作台、Project/Index/Session/消息、可恢复回收站、索引新鲜度检查/显式更新、O1/O2/O3 浏览和 P2-R1/P2-R2 Session 内显式 fixture/real Run 面板。项目知识页默认展示当前固定快照的项目架构画布，再展示入口、功能和结构详情；Python/TypeScript 静态 imports/calls 可筛选，HTTP 客户端到 FastAPI 路由的 method/path shape association 以单独虚线边聚合显示，也可独立过滤；参数化模板只有完整同形且唯一时关联，列表标示字面量/模板并保留客户端与路由的同一 index 双端证据。点击模块进入“模块内部结构”，初开复用同一 project/index 的定义分页，只显示当前文件已加载的定义；用户可显式读取按目标文件聚合的静态导入依赖，或为所选定义读取一跳静态 calls。类成员只在限定名与源码范围同时吻合时缩进，不生成包含边；每个聚合导入保留原始静态边数和同一 index 的源码位置。HTTP 关联列表可打开客户端锚点→独立 HTTP 形状→对应 handler 的有界 calls 视图；HTTP shape association 自身不生成 TypeScript calls，可证明的客户端调用作为独立静态边显示。函数值变量（包括单函数参数包装中的 callback）可在既有关系图中定位；包装器执行 callback 的关系若不能证明仍保留 unresolved。所有静态箭头只表示 source→target，不代表数据流或运行时必然执行。概览版本为 `python-entry-v6+http-shape-v2+architecture-v1`；无 TypeScript fact 标记的旧索引显示 `not_analyzed`；旧 v1 索引明确显示 `literal_only`，不把未做参数化分析解释为无调用。Run 面板支持 AI 分析提示、启动、状态同步、持久化 SSE 事件流、有限重连/轮询回退、工具结果、Issue/代码理解报告 evidence、候选位置与有界静态影响、取消、历史选择和刷新/切换恢复；Codex external Run 会从 Session history 自动发现、选择并订阅，代码理解结果按顺序步骤和覆盖级别展示。
 
+顶部常驻模型设置入口；读取接口只返回供应商、服务地址、模型和密钥是否已配置。未配置密钥时，项目功能识别和 Session real Run 会在创建任务前打开同一设置面板，避免产生必失败记录。留空保留已保存密钥，只有明确移除操作才会清除；密钥只保留在当前表单内存，保存成功后清空。保存不试连供应商、不发送源码，后续任务读取更新，活动 Run 保留启动时配置。
+
 ## 职责与范围
 
 架构画布以职责和未归属的业务源码目录为主路径；常见测试、fixture、docs、examples、benchmarks 等辅助源码目录默认收起，显式打开后按目录容器呈现。聚焦职责居中，入向邻居在左、出向邻居在右，同一双向邻居只显示一个节点；仅保留聚焦职责与一跳邻居之间的真实关系，不画邻居彼此关系。职责之间的关系连接容器，展开组内模块关系默认汇总在容器计数中；悬停或键盘聚焦模块时，画布才显示该模块的已返回相邻边，并在模块提示中提供当前邻边计数。展开一次只分配一个职责/目录组；模块点击进入内部定义模式，返回后恢复架构视图。静态导入依目标文件聚合并按需读取；选中具体定义后才查询一跳静态 calls，箭头明确表示 source→target。依赖层级遵循已返回方向；循环组保持同层并计数，不伪造无环拓扑。通用符号关系图目录容器按每行最高内容高度定位子目录，子节点保持父容器内。
@@ -99,4 +101,4 @@ API 离线、项目/Session/index 不属于当前范围、索引不在 latest、
 - [GitHub 远端 ref 新鲜度与显式更新](../../docs/decisions/2026-09-16-github-remote-freshness.md)
 - [本项目索引更新与缓存效果联合验收](../../docs/decisions/2026-09-16-project-index-cache-acceptance.md)
 
-普通工作台的功能识别和 Issue 分析不提供 fixture/real 或固定场景选项；两个显式动作只发送 real 模式，未配置模型或服务端未开放时保留错误，不模拟成功。历史 fixture 功能版本及 Run 仍可读取，标记“演示结果”；Codex 外部 Agent 保持独立来源标识。开发者通过[fixtures 离线入口](../../fixtures/README.md)使用模拟项目，HTTP/MCP 的 fixture 契约与自动测试保持兼容。
+普通工作台的功能识别和 Issue 分析不提供 fixture/real 或固定场景选项；两个显式动作只发送 real 模式，未配置密钥时先导向模型设置，不启动任务。历史 fixture 功能版本及 Run 仍可读取，标记“演示结果”；Codex 外部 Agent 保持独立来源标识。开发者通过[fixtures 离线入口](../../fixtures/README.md)使用模拟项目，HTTP/MCP 的 fixture 契约与自动测试保持兼容。

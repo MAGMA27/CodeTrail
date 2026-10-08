@@ -32837,6 +32837,41 @@
       "title": "McpSourceResponse",
       "type": "object"
     },
+    "ModelConfigSettingsResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "base_url": {
+          "title": "Base Url",
+          "type": "string"
+        },
+        "has_api_key": {
+          "title": "Has Api Key",
+          "type": "boolean"
+        },
+        "model": {
+          "title": "Model",
+          "type": "string"
+        },
+        "provider": {
+          "title": "Provider",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "0.1.0",
+          "default": "0.1.0",
+          "title": "Schema Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "base_url",
+        "model",
+        "has_api_key"
+      ],
+      "title": "ModelConfigSettingsResponse",
+      "type": "object"
+    },
     "ModelOutput": {
       "$defs": {
         "CandidateLink": {
@@ -42087,6 +42122,60 @@
         "run_id"
       ],
       "title": "RunToolResultsResponse",
+      "type": "object"
+    },
+    "SaveModelConfigRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "api_key": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Api Key"
+        },
+        "base_url": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Base Url",
+          "type": "string"
+        },
+        "model": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Model",
+          "type": "string"
+        },
+        "provider": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Provider",
+          "type": "string"
+        },
+        "remove_api_key": {
+          "default": false,
+          "title": "Remove Api Key",
+          "type": "boolean"
+        },
+        "schema_version": {
+          "const": "0.1.0",
+          "default": "0.1.0",
+          "title": "Schema Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "base_url",
+        "model"
+      ],
+      "title": "SaveModelConfigRequest",
       "type": "object"
     },
     "Session": {

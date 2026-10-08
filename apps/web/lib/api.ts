@@ -964,6 +964,23 @@ export type HealthResponse = {
   version: string;
 };
 
+export type ModelConfigSettings = {
+  schema_version: typeof SCHEMA_VERSION;
+  provider: string;
+  base_url: string;
+  model: string;
+  has_api_key: boolean;
+};
+
+export type SaveModelConfigRequest = {
+  schema_version: typeof SCHEMA_VERSION;
+  provider: string;
+  base_url: string;
+  model: string;
+  api_key: string;
+  remove_api_key: boolean;
+};
+
 export class ApiRequestError extends Error {
   readonly code: string;
   readonly status: number;
@@ -2821,6 +2838,17 @@ export function isHealthResponse(value: unknown): value is HealthResponse {
   );
 }
 
+export function isModelConfigSettings(value: unknown): value is ModelConfigSettings {
+  return (
+    isRecord(value) &&
+    value.schema_version === SCHEMA_VERSION &&
+    isString(value.provider) &&
+    isString(value.base_url) &&
+    isString(value.model) &&
+    typeof value.has_api_key === "boolean"
+  );
+}
+
 function isApiErrorResponse(value: unknown): value is ApiErrorResponse {
   return (
     isRecord(value) &&
@@ -3409,6 +3437,21 @@ export function refreshGitHubSource(
 
 export function getHealth(signal?: AbortSignal): Promise<HealthResponse> {
   return requestJson("/api/health", isHealthResponse, { signal });
+}
+
+export function getModelConfig(signal?: AbortSignal): Promise<ModelConfigSettings> {
+  return requestJson("/api/model-config", isModelConfigSettings, { signal });
+}
+
+export function saveModelConfig(
+  request: SaveModelConfigRequest,
+  signal?: AbortSignal,
+): Promise<ModelConfigSettings> {
+  return requestJson("/api/model-config", isModelConfigSettings, {
+    method: "POST",
+    signal,
+    body: JSON.stringify(request),
+  });
 }
 
 export function openIndex(indexId: string, signal?: AbortSignal): Promise<IndexResponse> {

@@ -22,6 +22,7 @@ import {
   createProjectIndex,
   checkProjectIndexFreshness,
   generateProjectFeatures,
+  getModelConfig,
   getHealth,
   getImportStatus,
   getProjectNeighbors,
@@ -39,6 +40,7 @@ import {
   getProjectSessionRun,
   getProjectSessionRunImpact,
   getProjectSessionRunReport,
+  saveModelConfig,
   listProjectIndexes,
   listProjectFeatureGenerations,
   listProjectModuleSymbols,
@@ -89,6 +91,8 @@ import {
   type OverviewGroup,
   type OverviewModule,
   type ModuleSymbolsPageResponse,
+  type ModelConfigSettings,
+  type SaveModelConfigRequest,
   type ProjectOverview,
   type ProjectRecord,
   type TrashListResponse,
@@ -460,6 +464,12 @@ export default function Workbench() {
   const [connectionState, setConnectionState] = useState<"checking" | "connected" | "error">("checking");
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [modelConfigSettings, setModelConfigSettings] = useState<ModelConfigSettings | null>(null);
+  const [modelConfigStatus, setModelConfigStatus] = useState<AsyncStatus>("idle");
+  const [modelConfigError, setModelConfigError] = useState<string | null>(null);
+  const [modelConfigSaving, setModelConfigSaving] = useState(false);
+  const [modelConfigSaved, setModelConfigSaved] = useState(false);
+  const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [projectStatus, setProjectStatus] = useState<AsyncStatus>("idle");
@@ -603,6 +613,8 @@ export default function Workbench() {
   }, [sessionDrafts]);
 
   const healthController = useRef<AbortController | null>(null);
+  const modelConfigController = useRef<AbortController | null>(null);
+  const modelConfigRequestId = useRef(0);
   const projectController = useRef<AbortController | null>(null);
   const trashController = useRef<AbortController | null>(null);
   const trashMutationInFlight = useRef(false);
@@ -741,6 +753,58 @@ export default function Workbench() {
     setRunImpactSelection(null);
   }, []);
 
+  const loadModelConfig = useCallback(async (): Promise<ModelConfigSettings | null> => {
+    modelConfigController.current?.abort();
+    const controller = new AbortController();
+    modelConfigController.current = controller;
+    const requestId = ++modelConfigRequestId.current;
+    setModelConfigStatus("loading");
+    setModelConfigError(null);
+    try {
+      const response = await getModelConfig(controller.signal);
+      if (!isLatestRequest(requestId, modelConfigRequestId.current)) return null;
+      setModelConfigSettings(response);
+      setModelConfigStatus("success");
+      return response;
+    } catch (error) {
+      if (isAbortError(error) || !isLatestRequest(requestId, modelConfigRequestId.current)) return null;
+      setModelConfigStatus("error");
+      setModelConfigError(errorMessage(error));
+      return null;
+    }
+  }, []);
+
+  const openModelSettings = useCallback(() => {
+    setModelSettingsOpen(true);
+    setModelConfigSaved(false);
+    void loadModelConfig();
+  }, [loadModelConfig]);
+
+  const ensureModelConfigured = useCallback(async () => {
+    const settings = modelConfigStatus === "success" ? modelConfigSettings : await loadModelConfig();
+    if (settings?.has_api_key) return true;
+    setModelSettingsOpen(true);
+    return false;
+  }, [loadModelConfig, modelConfigSettings, modelConfigStatus]);
+
+  const saveModelConfigSettings = useCallback(async (request: SaveModelConfigRequest): Promise<boolean> => {
+    setModelConfigSaving(true);
+    setModelConfigSaved(false);
+    setModelConfigError(null);
+    try {
+      const response = await saveModelConfig(request);
+      setModelConfigSettings(response);
+      setModelConfigStatus("success");
+      setModelConfigSaved(true);
+      return true;
+    } catch (error) {
+      setModelConfigError(errorMessage(error));
+      return false;
+    } finally {
+      setModelConfigSaving(false);
+    }
+  }, []);
+
   const checkHealth = useCallback(async () => {
     healthController.current?.abort();
     const controller = new AbortController();
@@ -843,8 +907,11 @@ export default function Workbench() {
 
   useEffect(() => {
     void checkHealth();
+    void loadModelConfig();
     return () => {
       healthController.current?.abort();
+      modelConfigController.current?.abort();
+      modelConfigRequestId.current += 1;
       projectController.current?.abort();
       trashController.current?.abort();
       importController.current?.abort();
@@ -1260,6 +1327,7 @@ export default function Workbench() {
       if (featureStatus === "loading") {
         return;
       }
+      if (!(await ensureModelConfigured())) return;
       const key = retryFailed && featureGeneration?.status === "failed"
         ? newFeatureIdempotencyKey()
         : featureIdempotencyKey.current ?? newFeatureIdempotencyKey();
@@ -1306,6 +1374,7 @@ export default function Workbench() {
     },
     [
       applyFeatureGenerationResponse,
+      ensureModelConfigured,
       featureGeneration?.status,
       featureSourceScope,
       featureStatus,
@@ -1834,6 +1903,7 @@ export default function Workbench() {
       void loadRunDetails(selectedProjectId, selectedSessionId, activeRun.run_id);
       return;
     }
+    if (!(await ensureModelConfigured())) return;
     const previous = runCreateRequest.current;
     const key = previous?.projectId === selectedProjectId && previous.sessionId === selectedSessionId
       ? previous.key
@@ -1882,7 +1952,7 @@ export default function Workbench() {
       setRunWriteStatus("error");
       setRunWriteError(errorMessage(error));
     }
-  }, [loadRunDetails, loadRunHistory, runHistory, runWriteStatus, selectedProjectId, selectedSessionId, sessionMessages, sessions]);
+  }, [ensureModelConfigured, loadRunDetails, loadRunHistory, runHistory, runWriteStatus, selectedProjectId, selectedSessionId, sessionMessages, sessions]);
 
   const cancelSelectedRun = useCallback(async () => {
     if (!selectedProjectId || !selectedSessionId || !selectedRunId) {
@@ -3459,7 +3529,7 @@ export default function Workbench() {
     graphRequestId.current += 1;
     setArchitectureGraphRootId(null);
     setPanelMode("none");
-  }, []);
+  }, [checkHealth, loadModelConfig]);
 
   const runSearch = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
@@ -4096,6 +4166,18 @@ export default function Workbench() {
         error: connectionError,
         onCheck: checkHealth,
       }}
+      modelSettings={{
+        open: modelSettingsOpen,
+        status: modelConfigStatus,
+        settings: modelConfigSettings,
+        error: modelConfigError,
+        saving: modelConfigSaving,
+        saved: modelConfigSaved,
+        onOpen: openModelSettings,
+        onClose: () => setModelSettingsOpen(false),
+        onRetry: () => { void loadModelConfig(); },
+        onSave: saveModelConfigSettings,
+      }}
       project={{
         projects,
         selectedProjectId,
@@ -4231,6 +4313,8 @@ export default function Workbench() {
         runStreamError,
         runWriteStatus,
         runWriteError,
+        modelApiKeyConfigured: modelConfigSettings?.has_api_key ?? null,
+        onOpenModelSettings: openModelSettings,
         onSelectRun: selectRun,
         onStartRun: startSessionRun,
         onCancelRun: cancelSelectedRun,
@@ -4280,6 +4364,8 @@ export default function Workbench() {
         featureStatus,
         featureGeneration,
         featureError,
+        modelApiKeyConfigured: modelConfigSettings?.has_api_key ?? null,
+        onOpenModelSettings: openModelSettings,
         featureHistory,
         featureHistoryStatus,
         featureHistoryError,

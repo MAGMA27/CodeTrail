@@ -49,7 +49,7 @@ pwsh -File .\scripts\start-local.ps1 -Service api
 
 API 健康检查为 `GET /api/health`。前端或测试先创建 Project、建立 Index、创建 Session 并追加至少一条已保存消息，再 POST Run 请求；`message_end_sequence` 省略时由服务端读取当前保存消息计数。Run 读取通过同一 Project/Session 的 list/detail/events/tool-results/report 端点，取消使用 cancel 端点。Run 请求可声明预算和幂等键；响应的 Run 状态、输入 hash、消息范围、公开事件、工具结果和报告都是服务端持久化数据。external Run 的工具 request_id 和 start/complete/cancel 由 MCP 固定入口承载；工作台会从 Session Run history 发现 Codex external Run 并订阅其 SSE。
 
-模型供应商配置从服务数据目录的持久化 `config.json` 读取，缺少密钥时 fixture 功能可用而 real Run 明确失败；配置格式和 DeepSeek 示例见 [MCP 配置](mcp.md)。Run 记录 provider/model、提示词版本和执行版本，但不保存密钥、原始 prompt 或原始模型 response。HTTP real 需设置 `CODETRAIL_REAL_RUN_ENABLED=1`；MCP real 还需设置 `CODETRAIL_MCP_REAL_RUN_ENABLED=1`，两个开关相互独立。
+模型供应商配置从服务数据目录的持久化 `config.json` 读取，工作台通过 `/api/model-config` 管理脱敏状态和设置；留空保留已有密钥，明确移除才会清除。API 与 MCP 的新 real 任务读取共享文件，活动 Run 保留创建时配置。缺少密钥时 fixture 功能可用而 real Run 明确失败；配置格式和 DeepSeek 示例见 [MCP 配置](mcp.md)。Run 记录 provider/model、提示词版本和执行版本，但不保存密钥、原始 prompt 或原始模型 response。HTTP real 需设置 `CODETRAIL_REAL_RUN_ENABLED=1`；MCP real 还需设置 `CODETRAIL_MCP_REAL_RUN_ENABLED=1`，两个开关相互独立。
 
 ## 错误与限制
 
