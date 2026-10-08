@@ -8,6 +8,7 @@ import {
   hasDirectedCallCycle,
   isHttpCallChainResponse,
   isLatestRequest,
+  layoutSymbolGroups,
   mergeContextualCalls,
   mergeNeighborGraph,
   unresolvedForSymbol,
@@ -120,6 +121,30 @@ test("groupSymbolsByDirectory keeps a deterministic directory/file hierarchy", (
   assert.deepEqual(groups.map((group) => group.key), [".", "timeout_demo"]);
   assert.equal(groups[1].symbols[0].path, "timeout_demo/app.py");
   assert.equal(groups[1].label, "timeout_demo");
+});
+
+test("symbol directory containers grow with their children and stay disjoint", () => {
+  const groups = [4, 3, 2, 5, 1].map((count, groupIndex) => ({
+    key: `dir-${groupIndex}`,
+    label: `dir-${groupIndex}`,
+    symbols: Array.from({ length: count }, (_, symbolIndex) => symbol(`s-${groupIndex}-${symbolIndex}`, `dir-${groupIndex}/f${symbolIndex}.py`, `f${symbolIndex}`, 1)),
+  }));
+  const expanded = new Set(groups.map(({ key }) => key));
+  const boxes = layoutSymbolGroups(groups, expanded);
+
+  for (let index = 0; index < groups.length; index += 1) {
+    const box = boxes[index];
+    const lastChildBottom = box.position.y + 58 + (groups[index].symbols.length - 1) * 78 + 60;
+    assert.ok(lastChildBottom <= box.position.y + box.height);
+    for (let other = index + 1; other < groups.length; other += 1) {
+      const next = boxes[other];
+      const overlaps = box.position.x < next.position.x + 340
+        && box.position.x + 340 > next.position.x
+        && box.position.y < next.position.y + next.height
+        && box.position.y + box.height > next.position.y;
+      assert.equal(overlaps, false, `${groups[index].key} overlaps ${groups[other].key}`);
+    }
+  }
 });
 
 test("stale request IDs and unresolved references stay explicit", () => {

@@ -11,7 +11,7 @@ import type {
   ProjectOverview,
   SymbolRecord,
 } from "./api.ts";
-import { ARCHITECTURE_MODULE_LIMIT, buildArchitectureGraph } from "./architecture-graph.ts";
+import { ARCHITECTURE_MODULE_LIMIT, architectureOverviewEdgeVisible, architectureEdgeSides, buildArchitectureGraph, visibleArchitectureRelations } from "./architecture-graph.ts";
 
 const indexId = "index-architecture-test";
 
@@ -262,7 +262,7 @@ test("responsibility containers preserve source-to-target dependency direction",
   assert.equal(folded.relations[0].target, "role-web");
 
   const apiExpanded = buildArchitectureGraph(roles, { expandedGroupIds: ["role-api"] });
-  assert.equal(apiExpanded.relations[0].source, "a1");
+  assert.equal(apiExpanded.relations[0].source, "role-api");
   assert.equal(apiExpanded.relations[0].target, "role-web");
 });
 
@@ -296,7 +296,7 @@ test("expanded modules keep valid endpoints and the global 40-node ceiling", () 
   assert.equal(bounded.directories[0].omittedByCanvasLimit, 5);
 });
 
-test("an expanded selected responsibility gets module slots before earlier expanded groups", () => {
+test("architecture allows one expanded responsibility at a time", () => {
   const makeRole = (role: string, count: number) => {
     const modules = Array.from({ length: count }, (_, index) =>
       moduleRecord(`${role}-${index}`, `${role}/mod${index}.py`),
@@ -319,18 +319,86 @@ test("an expanded selected responsibility gets module slots before earlier expan
     selectedGroupId: selected.group.group_id,
   });
 
-  assert.equal(graph.visibleModuleCount, ARCHITECTURE_MODULE_LIMIT);
+  assert.equal(graph.visibleModuleCount, 10);
   assert.equal(graph.directories.find((item) => item.group.group_id === selected.group.group_id)?.visibleModules.length, 10);
   assert.equal(graph.directories.find((item) => item.group.group_id === selected.group.group_id)?.omittedByCanvasLimit, 0);
-  assert.equal(graph.directories.find((item) => item.group.group_id === first.group.group_id)?.visibleModules.length, 30);
+  assert.equal(graph.directories.find((item) => item.group.group_id === first.group.group_id)?.visibleModules.length, 0);
   assert.equal(graph.directories.find((item) => item.group.group_id === second.group.group_id)?.visibleModules.length, 0);
 
   const unselected = buildArchitectureGraph(value, {
     expandedGroupIds: [first.group.group_id, second.group.group_id, selected.group.group_id],
   });
-  assert.equal(unselected.directories.find((item) => item.group.group_id === first.group.group_id)?.visibleModules.length, 30);
-  assert.equal(unselected.directories.find((item) => item.group.group_id === second.group.group_id)?.visibleModules.length, 10);
-  assert.equal(unselected.directories.find((item) => item.group.group_id === selected.group.group_id)?.visibleModules.length, 0);
+  assert.equal(unselected.visibleModuleCount, 10);
+  assert.equal(unselected.directories.find((item) => item.group.group_id === selected.group.group_id)?.visibleModules.length, 10);
+});
+
+test("supporting source directories are explicit and reappear as real focused boundaries", () => {
+  const roles = overview(
+    [a1, b1],
+    [
+      { ...directory("role-api", "api", [a1.module_id]), group_kind: "responsibility", group_key: "api", label: "API" },
+      directory("tests-api", "apps/api/tests", [b1.module_id]),
+      directory("dir-covered", "apps/api", [a1.module_id]),
+    ],
+    [relation("api-test", a1, b1, ["imports"], [codeEdge("api-test-edge", a1.module_id, b1.module_id, "imports", a1.symbol.path)])],
+  );
+
+  const overviewGraph = buildArchitectureGraph(roles);
+  assert.deepEqual(overviewGraph.directories.map(({ group }) => group.group_id), ["role-api"]);
+  assert.equal(overviewGraph.supportingDirectoryCount, 1);
+  assert.equal(overviewGraph.omittedRelationCount, 1);
+  assert.deepEqual(buildArchitectureGraph(roles, { showSupportingDirectories: true }).directories.map(({ group }) => group.group_id), ["role-api", "tests-api"]);
+
+  const focused = buildArchitectureGraph(roles, { focusedGroupId: "role-api" });
+  assert.deepEqual(focused.directories.map(({ group }) => group.group_id), ["role-api", "tests-api"]);
+  assert.deepEqual(focused.relations.map(({ source, target }) => [source, target]), [["role-api", "tests-api"]]);
+});
+
+test("dependency layout keeps cycles honest, layers real direction, and contains expanded modules", () => {
+  const modules = Array.from({ length: 7 }, (_, index) => moduleRecord(`dense-${index}`, `src/d${index}/m.py`));
+  const groups = modules.map((module, index) => ({
+    ...directory(`role-${index}`, `d${index}`, [module.module_id]),
+    group_kind: "responsibility" as const,
+    label: `D${index}`,
+  }));
+  const relations = [
+    relation("cycle-a-b", modules[0], modules[1], ["imports"], [codeEdge("ab", modules[0].module_id, modules[1].module_id, "imports", modules[0].symbol.path)]),
+    relation("cycle-b-a", modules[1], modules[0], ["calls"], [codeEdge("ba", modules[1].module_id, modules[0].module_id, "calls", modules[1].symbol.path)]),
+    relation("cycle-b-c", modules[1], modules[2], ["imports"], [codeEdge("bc", modules[1].module_id, modules[2].module_id, "imports", modules[1].symbol.path)]),
+    relation("c-to-d", modules[2], modules[3], ["calls"], [codeEdge("cd", modules[2].module_id, modules[3].module_id, "calls", modules[2].symbol.path)]),
+    relation("d-to-e", modules[3], modules[4], ["imports"], [codeEdge("de", modules[3].module_id, modules[4].module_id, "imports", modules[3].symbol.path)]),
+  ];
+  const graph = buildArchitectureGraph(overview(modules, groups, relations), { expandedGroupIds: ["role-4"] });
+  assert.equal(graph.dependencyCycleCount, 1);
+  assert.equal(graph.directories.find(({ group }) => group.group_id === "role-0")?.dependencyCycleGroupSize, 2);
+  assert.equal(graph.directories.find(({ group }) => group.group_id === "role-1")?.dependencyCycleGroupSize, 2);
+  const positions = new Map(graph.directories.map(({ group, position }) => [group.group_id, position]));
+  assert.ok(positions.get("role-2")!.x > positions.get("role-0")!.x);
+  assert.ok(positions.get("role-3")!.x > positions.get("role-2")!.x);
+
+  for (let index = 0; index < graph.directories.length; index += 1) {
+    const current = graph.directories[index];
+    for (const module of current.visibleModules) {
+      assert.ok(module.position.x + 156 <= current.width);
+      assert.ok(module.position.y + 68 <= current.height);
+    }
+    for (let other = index + 1; other < graph.directories.length; other += 1) {
+      const next = graph.directories[other];
+      const overlaps = current.position.x < next.position.x + next.width
+        && current.position.x + current.width > next.position.x
+        && current.position.y < next.position.y + next.height
+        && current.position.y + current.height > next.position.y;
+      assert.equal(overlaps, false, `${current.group.group_id} overlaps ${next.group.group_id}`);
+    }
+  }
+  const nodeIds = new Set([...graph.directories.map(({ group }) => group.group_id), ...graph.directories.flatMap(({ visibleModules }) => visibleModules.map(({ module }) => module.module_id))]);
+  assert.ok(graph.relations.every(({ source, target }) => nodeIds.has(source) && nodeIds.has(target)));
+});
+
+test("architecture edges choose center handles along the dominant dependency direction", () => {
+  assert.deepEqual(architectureEdgeSides({ x: 0, y: 0 }, { x: 200, y: 30 }), { source: "right", target: "left" });
+  assert.deepEqual(architectureEdgeSides({ x: 0, y: 0 }, { x: 20, y: 180 }), { source: "bottom", target: "top" });
+  assert.deepEqual(architectureEdgeSides({ x: 200, y: 0 }, { x: 0, y: 0 }), { source: "left", target: "right" });
 });
 
 test("HTTP entry focus highlights its source module without changing static relation counts", () => {
@@ -367,7 +435,7 @@ test("HTTP shape edges stay separate from imports/calls and map through folded o
   assert.equal(buildArchitectureGraph(value, { showHttpAssociations: false }).httpRelations.length, 0);
 
   const expanded = buildArchitectureGraph(value, { expandedGroupIds: ["group-web"] });
-  assert.equal(expanded.httpRelations[0].source, b1.module_id);
+  assert.equal(expanded.httpRelations[0].source, "group-web");
   assert.equal(expanded.httpRelations[0].target, "group-api");
   assert.equal(expanded.httpRelations[0].representative?.client_evidence.path, b1.symbol.path);
 });
@@ -424,11 +492,97 @@ test("responsibility focus keeps only filtered bidirectional one-hop groups and 
     showHttpAssociations: false,
   });
   assert.deepEqual(bothKinds.directories.map(({ group }) => group.group_id), ["role-api", "role-storage", "role-web"]);
-  assert.equal(bothKinds.relations.length, 3);
-  assert.equal(bothKinds.relations.some(({ source, target }) => source === "role-storage" && target === "role-worker"), false);
+  assert.equal(bothKinds.relations.length, 2);
+  assert.equal(bothKinds.relations.some(({ source, target }) => source === "role-storage" && target === "role-web"), false);
   assert.equal(bothKinds.focusHiddenGroupCount, 1);
-  assert.equal(bothKinds.focusHiddenRelationCount, 1);
+  assert.equal(bothKinds.focusHiddenRelationCount, 2);
   assert.equal(bothKinds.focusHiddenHttpAssociationCount, 0);
+});
+
+test("focused dependency view centers the responsibility and keeps one-hop edge corridors clear", () => {
+  const modules = [
+    moduleRecord("focus-center", "center/main.py"),
+    moduleRecord("focus-a", "a/main.py"),
+    moduleRecord("focus-b", "b/main.py"),
+    moduleRecord("focus-c", "c/main.py"),
+    moduleRecord("focus-d", "d/main.py"),
+    moduleRecord("focus-e", "e/main.py"),
+  ];
+  const [center, a, b, c, d, e] = modules;
+  const roles = modules.map((module, index) => ({
+    ...directory(`role-${String.fromCharCode(97 + index)}`, `role-${index}`, [module.module_id]),
+    group_kind: "responsibility" as const,
+    label: index === 0 ? "Center" : `Neighbor ${String.fromCharCode(96 + index)}`,
+  }));
+  const edges = [
+    relation("a-to-center", a, center, ["imports"], [codeEdge("a-center", a.module_id, center.module_id, "imports", a.symbol.path)]),
+    relation("c-to-center", c, center, ["imports"], [codeEdge("c-center", c.module_id, center.module_id, "imports", c.symbol.path)]),
+    relation("center-to-b", center, b, ["calls"], [codeEdge("center-b", center.module_id, b.module_id, "calls", center.symbol.path)]),
+    relation("center-to-d", center, d, ["imports"], [codeEdge("center-d", center.module_id, d.module_id, "imports", center.symbol.path)]),
+    relation("e-to-center", e, center, ["imports"], [codeEdge("e-center", e.module_id, center.module_id, "imports", e.symbol.path)]),
+    relation("center-to-e", center, e, ["calls"], [codeEdge("center-e", center.module_id, e.module_id, "calls", center.symbol.path)]),
+    relation("neighbor-cross", a, d, ["imports"], [codeEdge("a-d", a.module_id, d.module_id, "imports", a.symbol.path)]),
+  ];
+  const model = buildArchitectureGraph(overview(modules, roles, edges), {
+    focusedGroupId: "role-a",
+    showHttpAssociations: false,
+  });
+  const positions = new Map(model.directories.map(({ group, position, width, height }) => [group.group_id, { ...position, width, height }]));
+  const focus = positions.get("role-a")!;
+  assert.ok(positions.get("role-b")!.x < focus.x);
+  assert.ok(positions.get("role-c")!.x > focus.x);
+  assert.ok(positions.get("role-d")!.x < focus.x);
+  assert.ok(positions.get("role-e")!.x > focus.x);
+  assert.ok(positions.get("role-f")!.x < focus.x, "bidirectional neighbor has one stable left-column node");
+  assert.equal(model.relations.some(({ source, target }) => source === "role-b" && target === "role-d"), false);
+  assert.equal(model.focusHiddenRelationCount, 1);
+
+  for (const edge of model.relations) {
+    const source = positions.get(edge.source)!;
+    const target = positions.get(edge.target)!;
+    const sourceCenter = { x: source.x + source.width / 2, y: source.y + source.height / 2 };
+    const targetCenter = { x: target.x + target.width / 2, y: target.y + target.height / 2 };
+    assert.equal(architectureEdgeSides(sourceCenter, targetCenter).source, sourceCenter.x < targetCenter.x ? "right" : "left");
+    const corridorLeft = Math.min(source.x + source.width, target.x + target.width);
+    const corridorRight = Math.max(source.x, target.x);
+    for (const [groupId, box] of positions) {
+      if (groupId === edge.source || groupId === edge.target) continue;
+      assert.ok(
+        box.x + box.width <= corridorLeft || box.x >= corridorRight,
+        `${groupId} occupies the ${edge.source} → ${edge.target} edge corridor`,
+      );
+    }
+  }
+});
+
+test("cross-responsibility edges aggregate at containers while expanded internals keep module endpoints", () => {
+  const a2 = moduleRecord("a2", "api/handlers.py");
+  const b2 = moduleRecord("b2", "web/routes.py");
+  const value = overview(
+    [a1, a2, b1, b2],
+    [
+      { ...directory("role-api", "api", [a1.module_id, a2.module_id]), group_kind: "responsibility", group_key: "api", label: "API" },
+      { ...directory("role-web", "web", [b1.module_id, b2.module_id]), group_kind: "responsibility", group_key: "web", label: "Web" },
+    ],
+    [
+      relation("api-web-one", a1, b1, ["imports"], [codeEdge("api-web-import-one", a1.module_id, b1.module_id, "imports", a1.symbol.path)]),
+      relation("api-web-two", a2, b2, ["calls"], [codeEdge("api-web-call-two", a2.module_id, b2.module_id, "calls", a2.symbol.path)]),
+      relation("api-internal", a1, a2, ["calls"], [codeEdge("api-internal-call", a1.module_id, a2.module_id, "calls", a1.symbol.path)]),
+    ],
+  );
+
+  const model = buildArchitectureGraph(value, { expandedGroupIds: ["role-api"] });
+  const boundary = model.relations.find(({ source, target }) => source === "role-api" && target === "role-web");
+  assert.equal(boundary?.relationCount, 2);
+  assert.equal(boundary?.edgeCount, 2);
+  assert.deepEqual(boundary?.relationKinds, ["calls", "imports"]);
+  assert.equal(model.relations.some(({ source, target }) => source === "a1" && target === "a2"), true);
+  assert.equal(model.relations.some(({ source, target }) => source === "a1" && target === "b1"), false);
+  const visibleModuleIds = new Set(model.directories.flatMap(({ visibleModules }) => visibleModules.map(({ module }) => module.module_id)));
+  assert.deepEqual(visibleArchitectureRelations(model.relations, visibleModuleIds).map(({ source, target }) => [source, target]), [["role-api", "role-web"]]);
+  const inspectingApiModule = visibleArchitectureRelations(model.relations, visibleModuleIds, "a1");
+  assert.deepEqual(inspectingApiModule.map(({ source, target }) => [source, target]), [["a1", "a2"], ["role-api", "role-web"]]);
+  assert.equal(inspectingApiModule.find(({ source }) => source === "a1")?.edgeCount, 1);
 });
 
 test("HTTP focus neighbors stay independent from static filters and preserve folded endpoints", () => {
@@ -480,4 +634,20 @@ test("focused adjacency uses available module ownership before the 40-module can
   assert.equal(model.relations[0].target, "role-web");
   assert.equal(model.focusHiddenGroupCount, 0);
   assert.equal(model.focusHiddenRelationCount, 0);
+});
+
+
+test("overview folds obstructed edges without deleting graph relations", () => {
+  const value = overview([a1, b1], [directory("a", "api", [a1.module_id]), directory("b", "web", [b1.module_id])], [relation("ab", a1, b1, ["calls"], [codeEdge("ab-call", a1.module_id, b1.module_id, "calls", a1.symbol.path)])]);
+  const model = buildArchitectureGraph(value);
+  const a = { ...model.directories[0], position: { x: 0, y: 0 } };
+  const b = { ...model.directories[1], position: { x: 900, y: 0 } };
+  const obstacle = { ...a, group: { ...a.group, group_id: "obstacle" }, position: { x: 450, y: 0 } };
+  assert.equal(architectureOverviewEdgeVisible("a", "b", [a, b, obstacle]), false);
+  assert.equal(architectureOverviewEdgeVisible("b", "a", [a, b, obstacle]), false);
+  assert.equal(architectureOverviewEdgeVisible("a", "b", [a, b, { ...obstacle, position: { x: 450, y: 200 } }]), true);
+  const verticalB = { ...b, position: { x: 0, y: 600 } };
+  assert.equal(architectureOverviewEdgeVisible("a", "b", [a, verticalB, { ...obstacle, position: { x: 0, y: 300 } }]), false);
+  assert.equal(model.relations.length, 1);
+  assert.equal(model.relations[0].edgeCount, 1);
 });

@@ -10,6 +10,54 @@ import type {
 export const ARCHITECTURE_MODULE_LIMIT = 40;
 
 export type ArchitecturePosition = { x: number; y: number };
+export type ArchitectureSide = "left" | "right" | "top" | "bottom";
+
+// ponytail: overview uses unobstructed straight edges; inspect a responsibility for folded dependencies.
+export function architectureOverviewEdgeVisible(source: string, target: string, directories: ArchitectureDirectory[]): boolean {
+  const from = directories.find((item) => item.group.group_id === source);
+  const to = directories.find((item) => item.group.group_id === target);
+  if (!from || !to) return true;
+  const start = { x: from.position.x + from.width / 2, y: from.position.y + from.height / 2 };
+  const end = { x: to.position.x + to.width / 2, y: to.position.y + to.height / 2 };
+  const sides = architectureEdgeSides(start, end);
+  for (const [point, box, side] of [[start, from, sides.source], [end, to, sides.target]] as const) {
+    if (side === "left") point.x = box.position.x;
+    if (side === "right") point.x = box.position.x + box.width;
+    if (side === "top") point.y = box.position.y;
+    if (side === "bottom") point.y = box.position.y + box.height;
+  }
+  return !directories.some((box) => {
+    if (box === from || box === to) return false;
+    let low = 0;
+    let high = 1;
+    for (const axis of ["x", "y"] as const) {
+      const delta = end[axis] - start[axis];
+      const min = box.position[axis] - 8;
+      const max = box.position[axis] + (axis === "x" ? box.width : box.height) + 8;
+      if (delta === 0) {
+        if (start[axis] < min || start[axis] > max) return false;
+      } else {
+        const a = (min - start[axis]) / delta;
+        const b = (max - start[axis]) / delta;
+        low = Math.max(low, Math.min(a, b));
+        high = Math.min(high, Math.max(a, b));
+        if (low > high) return false;
+      }
+    }
+    return low <= high;
+  });
+}
+
+const AUXILIARY_DIRECTORY_NAMES = new Set(["test", "tests", "fixture", "fixtures", "eval", "evals", "docs", "examples", "benchmarks"]);
+
+export function architectureEdgeSides(source: ArchitecturePosition, target: ArchitecturePosition): { source: ArchitectureSide; target: ArchitectureSide } {
+  const dx = target.x - source.x;
+  const dy = target.y - source.y;
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    return dx >= 0 ? { source: "right", target: "left" } : { source: "left", target: "right" };
+  }
+  return dy >= 0 ? { source: "bottom", target: "top" } : { source: "top", target: "bottom" };
+}
 
 export type ArchitectureDirectory = {
   group: OverviewGroup;
@@ -26,6 +74,7 @@ export type ArchitectureDirectory = {
   internalEdgeCount: number;
   internalHttpAssociationCount: number;
   highlighted: boolean;
+  dependencyCycleGroupSize: number | null;
 };
 
 export type ArchitectureRelation = {
@@ -63,12 +112,186 @@ export type ArchitectureGraphModel = {
   focusHiddenGroupCount: number;
   focusHiddenRelationCount: number;
   focusHiddenHttpAssociationCount: number;
+  supportingDirectoryCount: number;
+  dependencyCycleCount: number;
 };
+
+export function visibleArchitectureRelations(
+  relations: ArchitectureRelation[],
+  visibleModuleIds: ReadonlySet<string>,
+  activeModuleId?: string | null,
+): ArchitectureRelation[] {
+  return relations.filter((relation) => {
+    const sourceIsModule = visibleModuleIds.has(relation.source);
+    const targetIsModule = visibleModuleIds.has(relation.target);
+    if (!sourceIsModule || !targetIsModule) return true;
+    return Boolean(activeModuleId && (relation.source === activeModuleId || relation.target === activeModuleId));
+  });
+}
+
+function isSupportingDirectory(group: OverviewGroup): boolean {
+  return group.group_kind === "source_directory" && group.group_key.split(/[\\/]+/).some((part) => AUXILIARY_DIRECTORY_NAMES.has(part.toLowerCase()));
+}
+
+function layoutByDependency(
+  groups: OverviewGroup[],
+  heights: Map<string, number>,
+  relations: Array<{ source: string; target: string }>,
+): { positions: Map<string, ArchitecturePosition>; cycleSizes: Map<string, number>; cycleCount: number } {
+  const groupIds = groups.map((group) => group.group_id);
+  const outgoing = new Map(groupIds.map((id) => [id, [] as string[]]));
+  for (const { source, target } of relations) {
+    if (source !== target && outgoing.has(source) && outgoing.has(target)) outgoing.get(source)!.push(target);
+  }
+
+  let nextIndex = 0;
+  const indexById = new Map<string, number>();
+  const lowById = new Map<string, number>();
+  const stack: string[] = [];
+  const onStack = new Set<string>();
+  const components: string[][] = [];
+  const visit = (id: string) => {
+    indexById.set(id, nextIndex);
+    lowById.set(id, nextIndex++);
+    stack.push(id);
+    onStack.add(id);
+    for (const target of outgoing.get(id) ?? []) {
+      if (!indexById.has(target)) {
+        visit(target);
+        lowById.set(id, Math.min(lowById.get(id)!, lowById.get(target)!));
+      } else if (onStack.has(target)) {
+        lowById.set(id, Math.min(lowById.get(id)!, indexById.get(target)!));
+      }
+    }
+    if (lowById.get(id) === indexById.get(id)) {
+      const component: string[] = [];
+      let member = "";
+      do {
+        member = stack.pop()!;
+        onStack.delete(member);
+        component.push(member);
+      } while (member !== id);
+      components.push(component);
+    }
+  };
+  for (const id of groupIds) if (!indexById.has(id)) visit(id);
+
+  const componentById = new Map<string, number>();
+  components.forEach((component, componentIndex) => component.forEach((id) => componentById.set(id, componentIndex)));
+  const componentEdges = new Map(components.map((_, index) => [index, new Set<number>()]));
+  const indegree = new Array(components.length).fill(0) as number[];
+  for (const [source, targets] of outgoing) {
+    for (const target of targets) {
+      const from = componentById.get(source)!;
+      const to = componentById.get(target)!;
+      if (from !== to && !componentEdges.get(from)!.has(to)) {
+        componentEdges.get(from)!.add(to);
+        indegree[to] += 1;
+      }
+    }
+  }
+  const rank = new Array(components.length).fill(0) as number[];
+  const queue = components.map((_, index) => index).filter((index) => indegree[index] === 0);
+  while (queue.length > 0) {
+    const component = queue.shift()!;
+    for (const target of componentEdges.get(component) ?? []) {
+      rank[target] = Math.max(rank[target], rank[component] + 1);
+      indegree[target] -= 1;
+      if (indegree[target] === 0) queue.push(target);
+    }
+  }
+
+  const groupById = new Map(groups.map((group) => [group.group_id, group]));
+  const layers = new Map<number, string[]>();
+  for (const group of groups) {
+    const layer = rank[componentById.get(group.group_id)!];
+    const members = layers.get(layer) ?? [];
+    members.push(group.group_id);
+    layers.set(layer, members);
+  }
+  const positions = new Map<string, ArchitecturePosition>();
+  const cycleSizes = new Map<string, number>();
+  for (const component of components) {
+    if (component.length > 1) for (const id of component) cycleSizes.set(id, component.length);
+  }
+  for (const [layer, members] of layers) {
+    let y = 24;
+    const sortedMembers = members.sort((left, right) => groupById.get(left)!.label.localeCompare(groupById.get(right)!.label) || left.localeCompare(right));
+    for (let index = 0; index < sortedMembers.length; index += 2) {
+      const row = sortedMembers.slice(index, index + 2);
+      row.forEach((id, column) => positions.set(id, { x: 24 + layer * 820 + column * 410, y }));
+      y += Math.max(...row.map((id) => heights.get(id) ?? 96)) + 36;
+    }
+  }
+  return { positions, cycleSizes, cycleCount: components.filter((component) => component.length > 1).length };
+}
+
+function layoutFocusedBoundary(
+  groups: OverviewGroup[],
+  heights: Map<string, number>,
+  relations: Array<{ source: string; target: string }>,
+  focusedGroupId: string,
+  groupWidth: number,
+): Map<string, ArchitecturePosition> {
+  const incoming = new Set<string>();
+  const outgoing = new Set<string>();
+  for (const { source, target } of relations) {
+    if (target === focusedGroupId && source !== focusedGroupId) incoming.add(source);
+    if (source === focusedGroupId && target !== focusedGroupId) outgoing.add(target);
+  }
+
+  const left: OverviewGroup[] = [];
+  const right: OverviewGroup[] = [];
+  const heightOf = (group: OverviewGroup) => heights.get(group.group_id) ?? 96;
+  const totalHeight = (column: OverviewGroup[]) => column.reduce((total, group) => total + heightOf(group), Math.max(0, column.length - 1) * 36);
+  const neighbors = groups
+    .filter((group) => group.group_id !== focusedGroupId)
+    .sort((a, b) => a.label.localeCompare(b.label) || a.group_id.localeCompare(b.group_id));
+
+  for (const group of neighbors) {
+    const hasIncoming = incoming.has(group.group_id);
+    const hasOutgoing = outgoing.has(group.group_id);
+    if (hasIncoming && !hasOutgoing) {
+      left.push(group);
+    } else if (hasOutgoing && !hasIncoming) {
+      right.push(group);
+    } else if (totalHeight(left) <= totalHeight(right)) {
+      // Bidirectional neighbors stay a single node; stable left-on-tie placement
+      // keeps both real directions in the same clear center corridor.
+      left.push(group);
+    } else {
+      right.push(group);
+    }
+  }
+
+  const focusHeight = heights.get(focusedGroupId) ?? 96;
+  const leftHeight = totalHeight(left);
+  const rightHeight = totalHeight(right);
+  const canvasHeight = Math.max(focusHeight, leftHeight, rightHeight);
+  const centerGap = Math.max(groupWidth + 160, Math.ceil(Math.max(leftHeight, rightHeight) / 2) + 80);
+  const positions = new Map<string, ArchitecturePosition>();
+  positions.set(focusedGroupId, {
+    x: 24 + centerGap,
+    y: 24 + (canvasHeight - focusHeight) / 2,
+  });
+
+  const placeColumn = (column: OverviewGroup[], x: number, columnHeight: number) => {
+    let y = 24 + (canvasHeight - columnHeight) / 2;
+    for (const group of column) {
+      positions.set(group.group_id, { x, y });
+      y += heightOf(group) + 36;
+    }
+  };
+  placeColumn(left, 24, leftHeight);
+  placeColumn(right, 24 + centerGap * 2, rightHeight);
+  return positions;
+}
 
 export function buildArchitectureGraph(
   overview: ProjectOverview,
   options: {
     expandedGroupIds?: string[];
+    showSupportingDirectories?: boolean;
     focusedGroupId?: string | null;
     selectedHttpGroupId?: string | null;
     selectedGroupId?: string | null;
@@ -78,13 +301,25 @@ export function buildArchitectureGraph(
   } = {},
 ): ArchitectureGraphModel {
   const indexId = overview.index.index_id;
-  const directoryGroups = overview.groups
+  const allDirectoryGroups = overview.groups
     .filter((group) => ["source_directory", "responsibility"].includes(group.group_kind) && group.index_id === indexId)
     .sort((left, right) => {
       const leftKind = left.group_kind === "responsibility" ? 0 : 1;
       const rightKind = right.group_kind === "responsibility" ? 0 : 1;
       return leftKind - rightKind || left.label.localeCompare(right.label) || left.group_id.localeCompare(right.group_id);
     });
+  const responsibilityGroups = allDirectoryGroups.filter((group) => group.group_kind === "responsibility");
+  const assignedModuleIds = new Set(responsibilityGroups.flatMap((group) => group.module_ids));
+  const hasResponsibilityManifest = responsibilityGroups.length > 0;
+  const directoryGroups = allDirectoryGroups
+    .filter((group) => group.group_kind === "responsibility" || !hasResponsibilityManifest || group.module_ids.some((moduleId) => !assignedModuleIds.has(moduleId)))
+    .map((group) => group.group_kind === "source_directory" && hasResponsibilityManifest
+      ? { ...group, module_ids: group.module_ids.filter((moduleId) => !assignedModuleIds.has(moduleId)) }
+      : group);
+  const supportingGroups = directoryGroups.filter(isSupportingDirectory);
+  const selectedGroupId = options.selectedGroupId;
+  const showSupportingDirectories = options.showSupportingDirectories === true || supportingGroups.some((group) => group.group_id === selectedGroupId);
+  const defaultDirectoryGroups = directoryGroups.filter((group) => showSupportingDirectories || !isSupportingDirectory(group));
   const groupById = new Map(directoryGroups.map((group) => [group.group_id, group]));
   const moduleById = new Map(
     overview.modules
@@ -108,7 +343,7 @@ export function buildArchitectureGraph(
   ) ?? null;
   const httpModuleIds = new Set(selectedHttpGroup?.module_ids ?? []);
   const relationKinds = new Set(options.relationKinds ?? ["imports", "calls"]);
-  const focusedGroup = directoryGroups.find((group) => group.group_id === options.focusedGroupId && group.group_kind === "responsibility") ?? null;
+  const focusedGroup = allDirectoryGroups.find((group) => group.group_id === options.focusedGroupId && group.group_kind === "responsibility") ?? null;
   const retainedGroupIds = new Set<string>();
   let focusHiddenRelationCount = 0;
   let focusHiddenHttpAssociationCount = 0;
@@ -134,11 +369,14 @@ export function buildArchitectureGraph(
   }
   const visibleDirectoryGroups = focusedGroup
     ? directoryGroups.filter((group) => retainedGroupIds.has(group.group_id))
-    : directoryGroups;
+    : defaultDirectoryGroups;
   const visibleGroupIds = new Set(visibleDirectoryGroups.map((group) => group.group_id));
   const focusHiddenGroupCount = focusedGroup ? directoryGroups.length - visibleDirectoryGroups.length : 0;
 
-  const expandedGroupIds = [...new Set(options.expandedGroupIds ?? [])].filter((groupId) => visibleGroupIds.has(groupId));
+  const requestedExpandedGroupIds = [...new Set(options.expandedGroupIds ?? [])].filter((groupId) => visibleGroupIds.has(groupId));
+  const preferredExpandedGroupId = [focusedGroup?.group_id, selectedGroupId].find((id) => id && requestedExpandedGroupIds.includes(id));
+  const expandedGroupId = preferredExpandedGroupId ?? requestedExpandedGroupIds.at(-1);
+  const expandedGroupIds = expandedGroupId ? [expandedGroupId] : [];
   const expandedGroups = new Set(expandedGroupIds);
   const maxVisibleModules = Math.max(0, Math.min(options.maxVisibleModules ?? ARCHITECTURE_MODULE_LIMIT, ARCHITECTURE_MODULE_LIMIT));
   const visibleModuleIdsByGroup = new Map<string, string[]>();
@@ -191,14 +429,23 @@ export function buildArchitectureGraph(
       omittedRelationEdgeCount += relation.edge_count;
       continue;
     }
-    if (focusedGroup && (!retainedGroupIds.has(sourceGroupId) || !retainedGroupIds.has(targetGroupId))) {
+    if (focusedGroup && (
+      sourceGroupId !== focusedGroup.group_id && targetGroupId !== focusedGroup.group_id
+      || !retainedGroupIds.has(sourceGroupId)
+      || !retainedGroupIds.has(targetGroupId)
+    )) {
       focusHiddenRelationCount += 1;
+      continue;
+    }
+    if (!visibleGroupIds.has(sourceGroupId) || !visibleGroupIds.has(targetGroupId)) {
+      omittedRelationCount += 1;
+      omittedRelationEdgeCount += relation.edge_count;
       continue;
     }
     const sourceVisible = visibleModuleIds.has(relation.source_module_id);
     const targetVisible = visibleModuleIds.has(relation.target_module_id);
-    const source = sourceVisible ? relation.source_module_id : sourceGroupId;
-    const target = targetVisible ? relation.target_module_id : targetGroupId;
+    const source = sourceGroupId === targetGroupId && sourceVisible ? relation.source_module_id : sourceGroupId;
+    const target = sourceGroupId === targetGroupId && targetVisible ? relation.target_module_id : targetGroupId;
     const routeHighlighted = httpModuleIds.size === 0
       || httpModuleIds.has(relation.source_module_id)
       || httpModuleIds.has(relation.target_module_id);
@@ -265,17 +512,23 @@ export function buildArchitectureGraph(
         omittedHttpAssociationCount += 1;
         continue;
       }
-      if (focusedGroup && (!retainedGroupIds.has(sourceGroupId) || !retainedGroupIds.has(targetGroupId))) {
+      if (focusedGroup && (
+        sourceGroupId !== focusedGroup.group_id && targetGroupId !== focusedGroup.group_id
+        || !retainedGroupIds.has(sourceGroupId)
+        || !retainedGroupIds.has(targetGroupId)
+      )) {
         focusHiddenHttpAssociationCount += 1;
         continue;
       }
-      const sourceVisible = visibleModuleIds.has(association.client_module.symbol_id);
-      const targetVisible = visibleModuleIds.has(association.server_module.symbol_id);
-      const sourceExpandedButHidden = expandedGroups.has(sourceGroupId) && !sourceVisible;
-      const targetExpandedButHidden = expandedGroups.has(targetGroupId) && !targetVisible;
+      if (!visibleGroupIds.has(sourceGroupId) || !visibleGroupIds.has(targetGroupId)) {
+        omittedHttpAssociationCount += 1;
+        continue;
+      }
+      const sourceExpandedButHidden = expandedGroups.has(sourceGroupId) && !visibleModuleIds.has(association.client_module.symbol_id);
+      const targetExpandedButHidden = expandedGroups.has(targetGroupId) && !visibleModuleIds.has(association.server_module.symbol_id);
       if (sourceExpandedButHidden || targetExpandedButHidden) summarizedHttpAssociationCount += 1;
-      const source = sourceVisible ? association.client_module.symbol_id : sourceGroupId;
-      const target = targetVisible ? association.server_module.symbol_id : targetGroupId;
+      const source = sourceGroupId;
+      const target = targetGroupId;
       if (sourceGroupId === targetGroupId && source === target) {
         internalHttpByGroup.set(sourceGroupId, (internalHttpByGroup.get(sourceGroupId) ?? 0) + 1);
         continue;
@@ -295,24 +548,32 @@ export function buildArchitectureGraph(
     }
   }
 
-  const groupColumnCount = 4;
   const groupWidth = 350;
-  const groupColumnGap = 370;
-  const groupRowGap = 20;
-  const groupHeights = visibleDirectoryGroups.map((group) => {
+  const groupHeights = new Map(visibleDirectoryGroups.map((group) => {
     const visibleCount = visibleModuleIdsByGroup.get(group.group_id)?.length ?? 0;
-    return visibleCount > 0 ? 82 + Math.ceil(visibleCount / 2) * 80 : 96;
-  });
-  const rowHeights: number[] = [];
-  for (let index = 0; index < visibleDirectoryGroups.length; index += 1) {
-    const row = Math.floor(index / groupColumnCount);
-    rowHeights[row] = Math.max(rowHeights[row] ?? 0, groupHeights[index]);
-  }
-  const rowOffsets: number[] = [];
-  rowHeights.forEach((_, row) => {
-    rowOffsets[row] = (rowOffsets[row - 1] ?? 24) + (row === 0 ? 0 : groupRowGap + rowHeights[row - 1]);
-    if (row === 0) rowOffsets[row] = 24;
-  });
+    return [group.group_id, visibleCount > 0 ? 82 + Math.ceil(visibleCount / 2) * 80 : 96] as const;
+  }));
+  const displayPairs = [...relationsByDisplayPair.values(), ...httpRelationsByDisplayPair.values()];
+  const layout = layoutByDependency(
+    visibleDirectoryGroups,
+    groupHeights,
+    displayPairs.map(({ source, target }) => ({
+      source: groupByModuleId.get(source) ?? source,
+      target: groupByModuleId.get(target) ?? target,
+    })),
+  );
+  const positions = focusedGroup
+    ? layoutFocusedBoundary(
+      visibleDirectoryGroups,
+      groupHeights,
+      displayPairs.map(({ source, target }) => ({
+        source: groupByModuleId.get(source) ?? source,
+        target: groupByModuleId.get(target) ?? target,
+      })),
+      focusedGroup.group_id,
+      groupWidth,
+    )
+    : layout.positions;
 
   const selectedGroup = groupById.get(options.selectedGroupId ?? "") ?? null;
   const focusGroupIds = new Set<string>();
@@ -337,12 +598,10 @@ export function buildArchitectureGraph(
   }
 
   let visibleModuleCount = 0;
-  const directories = visibleDirectoryGroups.map((group, index): ArchitectureDirectory => {
+  const directories = visibleDirectoryGroups.map((group): ArchitectureDirectory => {
     const moduleIds = moduleIdsByGroup.get(group.group_id) ?? [];
     const loadedModules = moduleIds.filter((moduleId) => moduleById.has(moduleId));
     const visibleModules = visibleModuleIdsByGroup.get(group.group_id) ?? [];
-    const column = index % groupColumnCount;
-    const row = Math.floor(index / groupColumnCount);
     const visibleModuleViews = visibleModules.map((moduleId, moduleIndex) => {
       const module = moduleById.get(moduleId)!;
       visibleModuleCount += 1;
@@ -361,9 +620,9 @@ export function buildArchitectureGraph(
     return {
       group,
       expanded: expandedGroups.has(group.group_id),
-      position: { x: 24 + column * groupColumnGap, y: rowOffsets[row] ?? 24 },
+      position: positions.get(group.group_id) ?? { x: 24, y: 24 },
       width: groupWidth,
-      height: groupHeights[index],
+      height: groupHeights.get(group.group_id) ?? 96,
       visibleModules: visibleModuleViews,
       loadedModuleCount: loadedModules.length,
       classificationCounts: loadedModules.reduce((counts, moduleId) => {
@@ -380,6 +639,7 @@ export function buildArchitectureGraph(
       internalEdgeCount: internal.edgeCount,
       internalHttpAssociationCount: internalHttpByGroup.get(group.group_id) ?? 0,
       highlighted: httpModuleIds.size === 0 || moduleIds.some((moduleId) => httpModuleIds.has(moduleId)),
+      dependencyCycleGroupSize: layout.cycleSizes.get(group.group_id) ?? null,
     };
   });
 
@@ -432,5 +692,7 @@ export function buildArchitectureGraph(
     focusHiddenGroupCount,
     focusHiddenRelationCount,
     focusHiddenHttpAssociationCount,
+    supportingDirectoryCount: supportingGroups.length,
+    dependencyCycleCount: layout.cycleCount,
   };
 }

@@ -180,6 +180,7 @@ code { font-family: var(--ct-mono); }
 .ct-architecture-canvas .react-flow__minimap { overflow: hidden; border: 1px solid var(--ct-border-strong); border-radius: 7px; background: var(--ct-surface); }
 .ct-architecture-canvas .react-flow__edge-text { fill: var(--ct-muted); font-family: var(--ct-mono); font-size: 10px; }
 .ct-architecture-canvas .react-flow__edge-textbg { fill: var(--ct-surface); }
+.ct-architecture-handle { opacity: 0; pointer-events: none; }
 .ct-architecture-directory-node, .ct-architecture-module-node { padding: 0 !important; border: 0 !important; border-radius: 0 !important; background: transparent !important; box-shadow: none !important; }
 .ct-architecture-directory { position: relative; display: flex; height: 100%; flex-direction: column; overflow: visible; border: 1px solid var(--ct-border-strong); border-radius: 9px; background: rgb(255 255 255 / 94%); box-shadow: 0 3px 12px rgb(32 38 51 / 8%); transition: border-color .15s, opacity .15s, box-shadow .15s; }
 .ct-architecture-directory.is-selected { border-color: var(--ct-blue); box-shadow: 0 0 0 2px rgb(49 88 217 / 13%), 0 4px 15px rgb(32 38 51 / 9%); }
@@ -209,6 +210,21 @@ code { font-family: var(--ct-mono); }
 .ct-architecture-empty { display: grid; min-height: 340px; place-content: center; justify-items: center; gap: 7px; border: 1px dashed var(--ct-border-strong); border-radius: 8px; background: var(--ct-subtle); text-align: center; }
 .ct-architecture-empty strong { font-size: 14px; }
 .ct-architecture-empty span { color: var(--ct-muted); font-size: 11px; }
+.ct-architecture-warnings { border-left: 3px solid var(--ct-warning); background: var(--ct-warning-soft); color: var(--ct-warning); font-size: 10px; line-height: 1.45; }
+.ct-architecture-warnings summary { padding: 8px 11px; cursor: pointer; font-weight: 600; }
+.ct-architecture-warnings > span { display: block; padding: 2px 11px; }
+.ct-architecture-warnings > span:last-child { padding-bottom: 8px; }
+.ct-architecture-warnings code, .ct-architecture-drilldown-unresolved code { font-family: var(--ct-mono); }
+.ct-architecture-drilldown-toolbar { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 9px 11px; border: 1px solid var(--ct-border); border-radius: 8px; background: var(--ct-surface); }
+.ct-architecture-drilldown-toolbar > span { min-width: 0; flex: 1; color: var(--ct-muted); font-size: 11px; }
+.ct-architecture-drilldown-toolbar code { display: inline-block; max-width: 100%; overflow: hidden; color: var(--ct-text); text-overflow: ellipsis; vertical-align: bottom; white-space: nowrap; }
+.ct-architecture-drilldown-toolbar small { color: var(--ct-faint); font-family: var(--ct-mono); font-size: 9px; }
+.ct-architecture-drilldown { display: grid; min-width: 0; gap: 8px; }
+.ct-architecture-drilldown-status { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 12px; color: var(--ct-muted); font-size: 10px; }
+.ct-architecture-drilldown-status strong { color: var(--ct-text); }
+.ct-architecture-drilldown .ct-graph-canvas { height: clamp(320px, calc(100dvh - 470px), 760px); min-height: 320px; border: 1px solid var(--ct-border-strong); border-radius: 9px; }
+.ct-architecture-drilldown-unresolved { display: grid; gap: 4px; padding: 7px 10px; border-left: 3px solid var(--ct-warning); background: var(--ct-warning-soft); color: var(--ct-warning); font-size: 10px; }
+.ct-architecture-drilldown-unresolved summary { cursor: pointer; font-weight: 600; }
 .ct-http-associations { display: grid; gap: 9px; padding: 13px; border: 1px solid var(--ct-border-strong); border-radius: 8px; background: var(--ct-surface); }
 .ct-http-associations-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
 .ct-http-associations-heading > div { display: grid; gap: 3px; }

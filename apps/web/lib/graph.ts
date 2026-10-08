@@ -173,6 +173,23 @@ export function groupSymbolsByDirectory(symbols: SymbolRecord[]): SymbolGroup[] 
     }));
 }
 
+export function layoutSymbolGroups(groups: SymbolGroup[], expandedKeys: Set<string>): Array<{ position: { x: number; y: number }; height: number }> {
+  const heights = groups.map((group) => expandedKeys.has(group.key) ? Math.max(126, 72 + group.symbols.length * 78) : 74);
+  const rowHeights: number[] = [];
+  heights.forEach((height, index) => {
+    const row = Math.floor(index / 2);
+    rowHeights[row] = Math.max(rowHeights[row] ?? 0, height);
+  });
+  const rowOffsets: number[] = [];
+  rowHeights.forEach((height, row) => {
+    rowOffsets[row] = row === 0 ? 26 : rowOffsets[row - 1] + rowHeights[row - 1] + 30;
+  });
+  return groups.map((_, index) => ({
+    position: { x: 30 + index % 2 * 370, y: rowOffsets[Math.floor(index / 2)] ?? 26 },
+    height: heights[index],
+  }));
+}
+
 export function isLatestRequest(requestId: number, latestRequestId: number): boolean {
   return requestId === latestRequestId;
 }

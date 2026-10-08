@@ -121,6 +121,7 @@ import {
   hasDirectedCallCycle,
   isHttpCallChainResponse,
   isLatestRequest,
+  layoutSymbolGroups,
   mergeContextualCalls,
   mergeNeighborGraph,
   unresolvedForSymbol,
@@ -495,6 +496,7 @@ export default function Workbench() {
   const [contextualCalls, setContextualCalls] = useState<ContextualCall[]>([]);
   const [viewMode, setViewMode] = useState<WorkbenchView>("overview");
   const [panelMode, setPanelMode] = useState<WorkbenchPanel>("none");
+  const [architectureGraphRootId, setArchitectureGraphRootId] = useState<string | null>(null);
   const [overviewStatus, setOverviewStatus] = useState<AsyncStatus>("idle");
   const [overview, setOverview] = useState<ProjectOverview | null>(null);
   const [overviewError, setOverviewError] = useState<string | null>(null);
@@ -2187,6 +2189,7 @@ export default function Workbench() {
 
   const applyIndexResponse = useCallback(
     (response: IndexResponse) => {
+      setArchitectureGraphRootId(null);
       setIndexResponse(response);
       setIndexError(null);
       setIndexFreshness(null);
@@ -2211,6 +2214,7 @@ export default function Workbench() {
       indexController.current = controller;
       const requestId = ++indexRequestId.current;
       setIndexResponse(null);
+      setArchitectureGraphRootId(null);
       setIndexError(null);
       setIndexFreshness(null);
       setIndexFreshnessError(null);
@@ -3323,6 +3327,7 @@ export default function Workbench() {
     setGraphIndexId(null);
     setContextualCalls([]);
     setPanelMode("none");
+    setArchitectureGraphRootId(null);
   }, [resetModuleSymbols]);
 
   const clearOverviewGroup = useCallback(() => {
@@ -3336,12 +3341,18 @@ export default function Workbench() {
         return;
       }
       selectSymbol(module.symbol);
+      setArchitectureGraphRootId(module.symbol.symbol_id);
       setViewMode("overview");
       setPanelMode("graph");
       void loadNeighborhood(indexResponse.index.index_id, module.symbol.symbol_id, true);
     },
     [indexResponse, loadNeighborhood, selectSymbol],
   );
+
+  const closeArchitectureGraph = useCallback(() => {
+    setArchitectureGraphRootId(null);
+    setPanelMode("none");
+  }, []);
 
   const runSearch = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
@@ -3538,12 +3549,10 @@ export default function Workbench() {
 
     const nodes: FlowNode[] = [];
     const visibleSymbolIds = new Set<string>();
+    const groupLayout = layoutSymbolGroups(groups, expandedGroups);
     groups.forEach((group, groupIndex) => {
-      const column = groupIndex % 2;
-      const row = Math.floor(groupIndex / 2);
-      const position = { x: 30 + column * 370, y: 26 + row * 290 };
+      const { position, height: groupHeight } = groupLayout[groupIndex];
       const expanded = expandedGroups.has(group.key);
-      const groupHeight = expanded ? Math.max(126, 72 + group.symbols.length * 78) : 74;
       nodes.push({
         id: `group:${group.key}`,
         type: "group",
@@ -3568,7 +3577,9 @@ export default function Workbench() {
         nodes.push({
           id: symbol.symbol_id,
           type: "symbol",
-          position: { x: position.x + 16, y: position.y + 58 + symbolIndex * 78 },
+          parentId: `group:${group.key}`,
+          extent: "parent",
+          position: { x: 16, y: 58 + symbolIndex * 78 },
           data: {
             symbol,
             selected: selectedId === symbol.symbol_id,
@@ -3856,6 +3867,7 @@ export default function Workbench() {
           setSelectedSessionId(null);
           setViewMode("overview");
           setPanelMode("none");
+          setArchitectureGraphRootId(null);
           setSelectedProjectId(projectId);
           replaceWorkbenchLocation(projectId);
         },
@@ -3984,6 +3996,8 @@ export default function Workbench() {
         overviewError,
         selectedOverviewEntryId,
         selectedOverviewGroupId,
+        architectureGraphRootId,
+        onCloseArchitectureGraph: closeArchitectureGraph,
         moduleSymbolsRoot,
         moduleSymbolsPage,
         moduleSymbolsStatus,

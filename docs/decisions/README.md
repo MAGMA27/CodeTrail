@@ -1,5 +1,6 @@
 # 决策记录
 
+- [固定快照架构画布的可读层级](2026-10-08-architecture-view-readability.md)
 - [安装入口与共享运行配置分离](2026-10-07-installed-cli-config.md)
 
 库与插件架构分类的规则、证据和范围见[库与插件架构概览](2026-10-07-library-plugin-overview.md)。
