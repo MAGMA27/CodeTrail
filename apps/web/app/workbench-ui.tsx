@@ -482,20 +482,110 @@ function EmptyState({ title, detail, action }: { title: string; detail: string; 
   );
 }
 
+function RowActionsMenu({ label, disabled, onMoveToTrash }: { label: string; disabled: boolean; onMoveToTrash: () => void }) {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDetailsElement>(null);
+  const triggerRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = () => {
+      if (menuRef.current) menuRef.current.open = false;
+      setOpen(false);
+    };
+    const onPointerDown = (event: globalThis.PointerEvent) => {
+      if (event.target instanceof Node && !menuRef.current?.contains(event.target)) close();
+    };
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        close();
+        triggerRef.current?.focus();
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown, true);
+    };
+  }, [open]);
+  return (
+    <details
+      ref={menuRef}
+      className="ct-row-actions"
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+      onBlur={(event) => {
+        if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) {
+          event.currentTarget.open = false;
+          setOpen(false);
+        }
+      }}
+    >
+      <summary ref={triggerRef} aria-label={`${label}的更多操作`}>更多</summary>
+      <div className="ct-row-actions-popover">
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => {
+            if (menuRef.current) menuRef.current.open = false;
+            setOpen(false);
+            triggerRef.current?.focus();
+            onMoveToTrash();
+          }}
+        >移到回收站</button>
+      </div>
+    </details>
+  );
+}
+
 function ProjectRail({
   project,
   session,
+  viewMode,
   onOpenOperation,
   onViewKnowledge,
 }: {
   project: ProjectUi;
   session: SessionUi;
+  viewMode: "overview" | "session";
   onOpenOperation: OpenOperation;
   onViewKnowledge: () => void;
 }) {
   const [sessionFormOpen, setSessionFormOpen] = useState(false);
   const [trashOpen, setTrashOpen] = useState(false);
+  const [projectPickerOpen, setProjectPickerOpen] = useState(false);
+  const projectPickerRef = useRef<HTMLDetailsElement>(null);
+  const projectPickerTriggerRef = useRef<HTMLElement>(null);
   const selectedProject = project.selectedProject;
+  useEffect(() => {
+    if (!projectPickerOpen) return;
+    const close = () => {
+      if (projectPickerRef.current) projectPickerRef.current.open = false;
+      setProjectPickerOpen(false);
+    };
+    const onPointerDown = (event: globalThis.PointerEvent) => {
+      if (event.target instanceof Node && !projectPickerRef.current?.contains(event.target)) close();
+    };
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        close();
+        projectPickerTriggerRef.current?.focus();
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [projectPickerOpen]);
+  const closeProjectPicker = (restoreFocus = false) => {
+    if (projectPickerRef.current) projectPickerRef.current.open = false;
+    setProjectPickerOpen(false);
+    if (restoreFocus) projectPickerTriggerRef.current?.focus();
+  };
   useEffect(() => {
     if (session.writeStatus === "success") {
       setSessionFormOpen(false);
@@ -509,12 +599,13 @@ function ProjectRail({
           <h2>项目</h2>
         </div>
         <div className="ct-sidebar-header-actions">
-          <button type="button" className="ct-text-button" onClick={() => onOpenOperation("create-project")}>+ 新建</button>
+          <button type="button" className="ct-text-button" onClick={() => { closeProjectPicker(); onOpenOperation("create-project"); }}>+ 新建</button>
           <button
             type="button"
             className={`ct-text-button${trashOpen ? " is-active" : ""}`}
             aria-expanded={trashOpen}
             onClick={() => {
+              closeProjectPicker();
               const next = !trashOpen;
               setTrashOpen(next);
               if (next) void project.onLoadTrash();
@@ -522,81 +613,77 @@ function ProjectRail({
           >回收站</button>
         </div>
       </div>
-      <div className="ct-sidebar-scroll">
-        <div className="ct-sidebar-caption">
-          <span>可切换工作区</span>
-          <span>{project.status === "loading" ? "同步中" : `${project.projects.length} 个`}</span>
+      {project.projects.length > 0 ? (
+        <div className="ct-sidebar-project-context">
+          <details
+            ref={projectPickerRef}
+            className="ct-project-picker"
+            onToggle={(event) => setProjectPickerOpen(event.currentTarget.open)}
+            onBlur={(event) => {
+              if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) {
+                event.currentTarget.open = false;
+                setProjectPickerOpen(false);
+              }
+            }}
+          >
+            <summary ref={projectPickerTriggerRef} aria-label={`当前项目：${selectedProject?.name ?? "未选择"}；切换项目`}>
+              <span><small>当前项目</small><strong>{selectedProject?.name ?? "选择项目"}</strong></span>
+              <span className="ct-project-picker-caret" aria-hidden="true">切换⌄</span>
+            </summary>
+            <div className="ct-project-picker-list" aria-label="可切换项目">
+              {project.projects.map((item) => {
+                const selected = item.project_id === project.selectedProjectId;
+                const status = item.building_index_id
+                  ? "建立中"
+                  : item.available_index_ids.length > 0
+                    ? `${item.available_index_ids.length} 个快照`
+                    : "未索引";
+                return (
+                  <div className="ct-project-item-row" key={item.project_id}>
+                    <button
+                      type="button"
+                      className={`ct-project-item${selected ? " is-selected" : ""}`}
+                      onClick={() => {
+                        closeProjectPicker(true);
+                        project.onSelectProject(item.project_id);
+                      }}
+                      aria-current={selected ? "page" : undefined}
+                    >
+                      <span className="ct-project-initial" aria-hidden="true">{item.name.slice(0, 1).toUpperCase()}</span>
+                      <span className="ct-project-copy"><strong>{item.name}</strong><span>{status}</span></span>
+                      <span className="ct-project-chevron" aria-hidden="true">{selected ? "✓" : "›"}</span>
+                    </button>
+                    <RowActionsMenu
+                      label={`项目“${item.name}”`}
+                      disabled={project.trashMutationBusy || Boolean(item.building_index_id)}
+                      onMoveToTrash={() => {
+                        if (window.confirm(`将项目“${item.name}”移到回收站？\n索引、会话、消息和报告会保留，可随时恢复。`)) {
+                          void project.onMoveProjectToTrash(item.project_id);
+                        }
+                      }}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          </details>
+          {selectedProject ? <button type="button" className={`ct-nav-item${viewMode === "overview" ? " is-active" : ""}`} aria-current={viewMode === "overview" ? "page" : undefined} onClick={() => { setSessionFormOpen(false); onViewKnowledge(); }}>
+            <span className="ct-nav-marker" aria-hidden="true" />
+            <span>项目知识</span>
+            <span className="ct-nav-arrow" aria-hidden="true">›</span>
+          </button> : null}
         </div>
-        {project.projects.length > 0 ? (
-          <div className="ct-project-list">
-            {project.projects.map((item) => {
-              const selected = item.project_id === project.selectedProjectId;
-              const status = item.building_index_id
-                ? "建立中"
-                : item.available_index_ids.length > 0
-                  ? `${item.available_index_ids.length} 个快照`
-                  : "未索引";
-              return (
-                <div className="ct-project-item-row" key={item.project_id}>
-                  <button
-                    type="button"
-                    className={`ct-project-item${selected ? " is-selected" : ""}`}
-                    onClick={() => project.onSelectProject(item.project_id)}
-                    aria-current={selected ? "page" : undefined}
-                  >
-                    <span className="ct-project-initial" aria-hidden="true">{item.name.slice(0, 1).toUpperCase()}</span>
-                    <span className="ct-project-copy">
-                      <strong>{item.name}</strong>
-                      <span>{status}</span>
-                    </span>
-                    <span className="ct-project-chevron" aria-hidden="true">{selected ? "·" : "›"}</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="ct-trash-icon-button"
-                    aria-label={`将项目“${item.name}”移入回收站`}
-                    title="移入回收站"
-                    disabled={project.trashMutationBusy || Boolean(item.building_index_id)}
-                    onClick={() => {
-                      if (window.confirm(`将项目“${item.name}”移入回收站？\n索引、会话、消息和报告会保留，可随时恢复。`)) {
-                        void project.onMoveProjectToTrash(item.project_id);
-                      }
-                    }}
-                  >⌫</button>
-                </div>
-              );
-            })}
-          </div>
-        ) : project.status === "loading" ? (
-          <div className="ct-sidebar-loading"><span /><span /><span /></div>
-        ) : (
-          <div className="ct-sidebar-empty"><strong>还没有项目</strong><span>导入本地目录或 GitHub 仓库，建立一个固定快照。</span></div>
-        )}
+      ) : project.status === "loading" ? (
+        <div className="ct-sidebar-loading"><span /><span /><span /></div>
+      ) : (
+        <div className="ct-sidebar-empty"><strong>还没有项目</strong><span>导入本地目录或 GitHub 仓库，建立一个固定快照。</span></div>
+      )}
 
         {selectedProject ? (
-          <div className="ct-project-section">
-            <div className="ct-project-section-heading">
-              <div>
-                <p className="ct-overline">CURRENT PROJECT</p>
-                <strong>{selectedProject.name}</strong>
-              </div>
-              <button
-                type="button"
-                className="ct-icon-button"
-                aria-label="新建会话"
-                onClick={() => setSessionFormOpen((value) => !value)}
-              >
-                +
-              </button>
-            </div>
-            <button type="button" className="ct-nav-item is-active" onClick={() => { setSessionFormOpen(false); onViewKnowledge(); }}>
-              <span className="ct-nav-marker" aria-hidden="true" />
-              <span>项目知识</span>
-              <span className="ct-nav-arrow" aria-hidden="true">›</span>
-            </button>
+          <section className="ct-project-section" aria-label={`${selectedProject.name}的会话`}>
             <div className="ct-session-heading">
-              <span>会话</span>
-              <span>{session.sessions.length}</span>
+              <span>会话 <small>{session.sessions.length}</small></span>
+              <button type="button" className="ct-icon-button" aria-label="新建会话" aria-expanded={sessionFormOpen} onClick={() => setSessionFormOpen((value) => !value)}>+</button>
             </div>
             {sessionFormOpen ? (
               <form className="ct-session-create" onSubmit={(event) => void session.onCreate(event)}>
@@ -614,49 +701,46 @@ function ProjectRail({
               </form>
             ) : null}
             {session.error ? <p className="ct-inline-error" role="alert">{session.error}</p> : null}
-            {session.sessions.length > 0 ? (
-              <div className="ct-session-list">
-                {session.sessions.map((item) => (
-                  <div className="ct-session-item-row" key={item.session_id}>
-                    <button
-                      type="button"
-                      className={`ct-session-item${item.session_id === session.selectedSessionId ? " is-selected" : ""}`}
-                      data-session-id={item.session_id}
-                      onClick={() => session.onSelectSession(item.session_id)}
-                      aria-current={item.session_id === session.selectedSessionId ? "page" : undefined}
-                    >
-                      <span className="ct-session-item-copy">
-                        <strong>{item.topic}</strong>
-                        <small>{item.message_count} 条消息 · {item.index.revision}</small>
-                      </span>
-                      <span className="ct-session-item-time">{formatDate(item.updated_at)}</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="ct-trash-icon-button"
-                      aria-label={`将会话“${item.topic}”移入回收站`}
-                      title="移入回收站"
-                      disabled={project.trashMutationBusy}
-                      onClick={() => {
-                        if (window.confirm(`将会话“${item.topic}”移入回收站？\n消息、Run 和报告会保留，可在回收站恢复。`)) {
-                          void project.onMoveSessionToTrash(item.project_id, item.session_id);
-                        }
-                      }}
-                    >⌫</button>
-                  </div>
-                ))}
-              </div>
-            ) : session.status === "empty" ? (
-              <p className="ct-sidebar-note">还没有会话。点击右上角 + 开始记录排查主题。</p>
-            ) : session.status === "loading" ? (
-              <p className="ct-sidebar-note">正在读取会话…</p>
-            ) : null}
-            {session.hasMore ? (
-              <button type="button" className="ct-link-button" onClick={() => void session.onLoadMore()} disabled={session.status === "loading"}>
-                加载更多会话
-              </button>
-            ) : null}
-          </div>
+            <div className="ct-session-scroll">
+              {session.sessions.length > 0 ? (
+                <div className="ct-session-list">
+                  {session.sessions.map((item) => {
+                    const selected = viewMode === "session" && item.session_id === session.selectedSessionId;
+                    return (
+                      <div className="ct-session-item-row" key={item.session_id}>
+                        <button
+                          type="button"
+                          className={`ct-session-item${selected ? " is-selected" : ""}`}
+                          data-session-id={item.session_id}
+                          onClick={() => session.onSelectSession(item.session_id)}
+                          aria-current={selected ? "page" : undefined}
+                        >
+                          <span className="ct-session-item-copy">
+                            <strong>{item.topic}</strong>
+                            <small>{item.message_count} 条消息</small>
+                          </span>
+                        </button>
+                        <RowActionsMenu
+                          label={`会话“${item.topic}”`}
+                          disabled={project.trashMutationBusy}
+                          onMoveToTrash={() => {
+                            if (window.confirm(`将会话“${item.topic}”移到回收站？\n消息、Run 和报告会保留，可在回收站恢复。`)) {
+                              void project.onMoveSessionToTrash(item.project_id, item.session_id);
+                            }
+                          }}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : session.status === "empty" ? (
+                <p className="ct-sidebar-note">还没有会话。点击右上角 + 开始记录排查主题。</p>
+              ) : session.status === "loading" ? (
+                <p className="ct-sidebar-note">正在读取会话…</p>
+              ) : null}
+              {session.hasMore ? <button type="button" className="ct-link-button" onClick={() => void session.onLoadMore()} disabled={session.status === "loading"}>加载更多会话</button> : null}
+            </div>
+          </section>
         ) : null}
         {trashOpen ? (
           <section className="ct-trash-panel" aria-label="回收站">
@@ -686,7 +770,6 @@ function ProjectRail({
             ) : null}
           </section>
         ) : null}
-      </div>
       <div className="ct-sidebar-footer">
         <button type="button" className="ct-sidebar-action" onClick={() => onOpenOperation("project-management", "source")}>
           <span>源代码与索引</span><span aria-hidden="true">↗</span>
@@ -1417,6 +1500,15 @@ function ArchitectureSection({ overview, knowledge, graph, panelMode, onPanelMod
     setSelectedHttpGroupId(null);
     knowledge.onClearOverviewGroup();
   };
+  const resetArchitecture = () => {
+    setFocusedGroupId(null);
+    expandedBeforeFocus.current = null;
+    setExpandedGroupIds([]);
+    setSelectedHttpGroupId(null);
+    setRelationKinds(["imports", "calls"]);
+    setShowHttpAssociations(true);
+    knowledge.onClearOverviewGroup();
+  };
 
   return (
     <div className={`ct-knowledge-workspace${inspectorVisible ? " has-detail" : ""}`}>
@@ -1427,25 +1519,38 @@ function ArchitectureSection({ overview, knowledge, graph, panelMode, onPanelMod
       </div>
       {!isModuleDrilldown ? <>
       <div className="ct-architecture-toolbar">
-        <label>HTTP 入口<select aria-label="筛选 HTTP 入口" value={selectedHttpGroupId ?? ""} onChange={(event) => selectHttpGroup(event.target.value)}><option value="">全部源码依赖</option>{httpGroups.map((group) => <option value={group.group_id} key={group.group_id}>{group.label} · {group.module_ids.length} modules</option>)}</select></label>
-        <label className="ct-architecture-kind"><input type="checkbox" checked={relationKinds.includes("imports")} onChange={() => toggleRelationKind("imports")} /><span>imports</span></label>
-        <label className="ct-architecture-kind"><input type="checkbox" checked={relationKinds.includes("calls")} onChange={() => toggleRelationKind("calls")} /><span>calls</span></label>
-        <label className="ct-architecture-kind ct-architecture-http-kind"><input type="checkbox" checked={showHttpAssociations} onChange={() => setShowHttpAssociations((current) => !current)} /><span>HTTP 形状</span></label>
-        <button type="button" className="ct-button ct-button-secondary" onClick={focusGraph} disabled={architectureNodes.length === 0}>聚焦画布</button>
-        {model.supportingDirectoryCount > 0 ? <button type="button" className="ct-link-button" aria-expanded={showSupportingDirectories} onClick={() => setShowSupportingDirectories((current) => !current)}>{showSupportingDirectories ? "隐藏辅助源码目录" : "查看辅助源码目录"} · {model.supportingDirectoryCount}</button> : null}
-        {focusedGroup ? <span>{focusedGroup.group_kind === "responsibility" ? "职责聚焦" : "目录聚焦"} · {focusedGroup.label}</span> : null}
-        {!focusedGroup && selectedArchitectureGroup ? <button type="button" className="ct-button ct-button-secondary" onClick={() => focusArchitectureGroup(selectedArchitectureGroup)}>{selectedArchitectureGroup.group_kind === "responsibility" ? "聚焦此职责" : "聚焦此目录"}</button> : null}
-        {focusedGroup && selectedArchitectureGroup && selectedArchitectureGroup.group_id !== focusedGroup.group_id ? <button type="button" className="ct-button ct-button-secondary" onClick={() => focusArchitectureGroup(selectedArchitectureGroup)}>切换到所选分组</button> : null}
-        {focusedGroup ? <button type="button" className="ct-link-button" onClick={returnToOverview}>返回项目总览</button> : null}
-        <button type="button" className="ct-link-button" onClick={() => {
-          setFocusedGroupId(null);
-          expandedBeforeFocus.current = null;
-          setExpandedGroupIds([]);
-          setSelectedHttpGroupId(null);
-          setRelationKinds(["imports", "calls"]);
-          setShowHttpAssociations(true);
-          knowledge.onClearOverviewGroup();
-      }}>重置画布</button>
+        <div className="ct-architecture-toolbar-group ct-architecture-filters" role="group" aria-label="关系筛选">
+          <span className="ct-architecture-toolbar-label">关系筛选</span>
+          <label className="ct-architecture-http-entry" title="按 HTTP 方法与路径形状关联选择入口">
+            <span>HTTP 入口</span>
+            <select aria-label="筛选 HTTP 入口" value={selectedHttpGroupId ?? ""} onChange={(event) => selectHttpGroup(event.target.value)}>
+              <option value="">全部 HTTP 入口</option>
+              {httpGroups.map((group) => <option value={group.group_id} key={group.group_id}>{group.label} · {group.module_ids.length} 个模块</option>)}
+            </select>
+          </label>
+          <label className={`ct-architecture-kind${relationKinds.includes("imports") ? " is-selected" : ""}`} title="imports">
+            <input type="checkbox" checked={relationKinds.includes("imports")} onChange={() => toggleRelationKind("imports")} />
+            <span>静态导入</span>
+          </label>
+          <label className={`ct-architecture-kind${relationKinds.includes("calls") ? " is-selected" : ""}`} title="calls">
+            <input type="checkbox" checked={relationKinds.includes("calls")} onChange={() => toggleRelationKind("calls")} />
+            <span>静态调用</span>
+          </label>
+          <label className={`ct-architecture-kind ct-architecture-http-kind${showHttpAssociations ? " is-selected" : ""}`} title="HTTP method/path 形状关联">
+            <input type="checkbox" checked={showHttpAssociations} onChange={() => setShowHttpAssociations((current) => !current)} />
+            <span>HTTP 关联</span>
+          </label>
+        </div>
+        <div className="ct-architecture-toolbar-group ct-architecture-actions" role="group" aria-label="画布操作">
+          <span className="ct-architecture-toolbar-label">画布操作</span>
+          <button type="button" className="ct-architecture-action" onClick={focusGraph} disabled={architectureNodes.length === 0}>聚焦画布</button>
+          {model.supportingDirectoryCount > 0 ? <button type="button" className={`ct-architecture-action${showSupportingDirectories ? " is-selected" : ""}`} aria-pressed={showSupportingDirectories} onClick={() => setShowSupportingDirectories((current) => !current)}>{showSupportingDirectories ? "隐藏辅助目录" : "显示辅助目录"} · {model.supportingDirectoryCount}</button> : null}
+          {focusedGroup ? <span className="ct-architecture-focus-status" role="status">{focusedGroup.group_kind === "responsibility" ? "职责聚焦" : "目录聚焦"} · {focusedGroup.label}</span> : null}
+          {!focusedGroup && selectedArchitectureGroup ? <button type="button" className="ct-architecture-action is-primary" onClick={() => focusArchitectureGroup(selectedArchitectureGroup)}>{selectedArchitectureGroup.group_kind === "responsibility" ? "聚焦此职责" : "聚焦此目录"}</button> : null}
+          {focusedGroup && selectedArchitectureGroup && selectedArchitectureGroup.group_id !== focusedGroup.group_id ? <button type="button" className="ct-architecture-action is-primary" onClick={() => focusArchitectureGroup(selectedArchitectureGroup)}>切换到所选分组</button> : null}
+          {focusedGroup ? <button type="button" className="ct-architecture-action" onClick={returnToOverview}>返回项目总览</button> : null}
+          <button type="button" className="ct-architecture-action is-quiet" onClick={resetArchitecture}>重置画布</button>
+        </div>
       </div>
       </> : <div className="ct-architecture-drilldown-toolbar">
         <button type="button" className="ct-link-button" onClick={knowledge.onCloseArchitectureGraph}>← 返回项目架构</button>
@@ -2330,7 +2435,7 @@ export default function WorkbenchUi(props: WorkbenchUiProps) {
       </header>
       <div className="ct-workspace-frame">
         {mobileSidebarOpen ? <button type="button" className="ct-mobile-scrim" aria-label="关闭项目导航" onClick={() => setMobileSidebarOpen(false)} /> : null}
-        <div className={`ct-sidebar-slot${mobileSidebarOpen ? " is-open" : ""}`}><ProjectRail project={{ ...props.project, onSelectProject: selectProject }} session={{ ...props.session, onSelectSession: selectSession }} onOpenOperation={openOperation} onViewKnowledge={openKnowledge} /></div>
+        <div className={`ct-sidebar-slot${mobileSidebarOpen ? " is-open" : ""}`}><ProjectRail project={{ ...props.project, onSelectProject: selectProject }} session={{ ...props.session, onSelectSession: selectSession }} viewMode={props.viewMode} onOpenOperation={openOperation} onViewKnowledge={openKnowledge} /></div>
         <section className="ct-center-column" aria-label={props.viewMode === "session" ? "Issue 会话" : "项目知识页"}>
           <ContextHeader project={props.project} index={props.index} viewMode={props.viewMode} />
           {alert ? <div className="ct-global-alert" role="alert"><span>{alert}</span>{props.connection.state === "error" ? <button type="button" className="ct-link-button" onClick={() => void props.connection.onCheck()}>重新检查</button> : null}</div> : null}

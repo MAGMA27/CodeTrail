@@ -76,3 +76,21 @@ test("production analysis actions send real mode without fixture scenarios", () 
   visit(source);
   assert.equal(seen.size, 2);
 });
+
+test("row trash actions keep an accessible disclosure and explicit close behavior", () => {
+  const source = ts.createSourceFile("workbench-ui.tsx", readFileSync(new URL("../app/workbench-ui.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  let rowActionsMenu: ts.FunctionDeclaration | undefined;
+  function visit(node: ts.Node) {
+    if (ts.isFunctionDeclaration(node) && node.name?.text === "RowActionsMenu") rowActionsMenu = node;
+    ts.forEachChild(node, visit);
+  }
+  visit(source);
+  assert.ok(rowActionsMenu, "Project and Session rows must share the accessible action menu");
+
+  const component = rowActionsMenu.getText(source);
+  assert.match(component, /<details[\s\S]*?<summary[^>]*aria-label=\{`\$\{label\}的更多操作`\}[^>]*>更多<\/summary>/);
+  assert.match(component, /event\.key === "Escape"[\s\S]*?event\.stopPropagation\(\)[\s\S]*?triggerRef\.current\?\.focus\(\)/);
+  assert.match(component, /addEventListener\("pointerdown"/);
+  assert.match(component, /onBlur=\{/);
+  assert.match(component, /<button[\s\S]*?disabled=\{disabled\}[\s\S]*?onMoveToTrash\(\)[\s\S]*?>移到回收站<\/button>/);
+});
