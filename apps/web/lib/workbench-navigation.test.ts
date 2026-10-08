@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
+import ts from "typescript";
 
 import { canShowKnowledgeInspector, readWorkbenchRoute, resolveGraphReturnPanel, resolveWorkbenchProject, workbenchLocation } from "./workbench-navigation.ts";
 
@@ -54,4 +56,23 @@ test("graph evidence returns to the same panel and scope changes clear that retu
   assert.equal(returnPanel, "graph");
   assert.equal(resolveGraphReturnPanel(returnPanel ?? "source", "source", true), null);
   assert.equal(resolveGraphReturnPanel("source", "graph", false), null);
+});
+
+test("production analysis actions send real mode without fixture scenarios", () => {
+  const source = ts.createSourceFile("workbench.tsx", readFileSync(new URL("../app/workbench.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const seen = new Set<string>();
+  function visit(node: ts.Node) {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && ["generateProjectFeatures", "createProjectSessionRun"].includes(node.expression.text)) {
+      const payload = node.arguments.find(ts.isObjectLiteralExpression);
+      assert.ok(payload, "analysis action must send an explicit payload");
+      const mode = payload.properties.find((property) => ts.isPropertyAssignment(property) && property.name.getText(source) === "mode");
+      assert.ok(mode && ts.isPropertyAssignment(mode) && ts.isStringLiteral(mode.initializer));
+      assert.equal(mode.initializer.text, "real");
+      assert.ok(!payload.properties.some((property) => /scenario/.test(property.getText(source))));
+      seen.add(node.expression.text);
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(source);
+  assert.equal(seen.size, 2);
 });

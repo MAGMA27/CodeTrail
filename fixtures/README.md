@@ -65,3 +65,9 @@ uv run --project apps/api python fixtures/generate_responses.py
 样本含 129 个 Python/TypeScript 模块、6 个显式职责、跨职责 imports/calls 循环、静态 HTTP 形状与动态 unknown，以及一个含 46 项定义的模块。通过允许根目录内的本地导入建立实际索引，用于核对默认 overview 100 模块截断、画布 40 模块上限、职责展开/过滤/聚焦及定义分页与固定快照源码回返；这些计数是样本设计，解析结果仍需实际验收。它不是独立模型质量评测或真实运行流程。
 
 O2 的 fixture-feature-v1 从真实索引的入口、search、neighbors 和源码 evidence 确定性生成主要功能结果，不另存一份模拟模型报告。`apps/api/tests/test_features.py` 验证工具上下文、生成、保存、读取和证据钻取；fixture 通过不代表真实模型语义质量。
+
+## 专用演示项目与普通工作台
+
+模拟数据使用本目录的专用样本，不混入普通项目。可将 `fixtures/repos/timeout-demo` 作为独立本地项目导入，浏览真实静态结构和源码；导入本身不会调用模型或自动产生模拟分析。普通工作台的功能识别与 Issue 分析只启动服务端模型，不提供 fixture/real 开关或固定场景选项。
+
+离线验证使用上面的 `fixtures/generate_responses.py` 与后端 `tests/test_features.py`、`tests/test_runs.py`，无 API Key 或供应商调用。开发者需要查看持久化演示结果时，可对该专用样本项目通过现有 HTTP/MCP fixture 接口显式生成；Run 的 scenario 仅适用于对应 timeout 样本及固定快照，不按项目名称或路径自动切换模式。工作台只读取并标注已保存的“演示结果”，不把其身份改为真实分析。精确接口与开关见 [API 工具适配](../apps/api/api.md) 和 [Run 执行](../apps/api/execution.md)。

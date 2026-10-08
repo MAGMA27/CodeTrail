@@ -63,7 +63,6 @@ import {
   type Evidence,
   type FeatureGeneration,
   type FeatureGenerationSummary,
-  type FeatureGenerationMode,
   type FeatureGraph,
   type FeatureGraphNode,
   type FeatureGraphOrigin,
@@ -88,10 +87,8 @@ import {
   type ProjectOverview,
   type ProjectRecord,
   type RunEvent,
-  type RunMode,
   type RunReport,
   type RunImpactResponse,
-  type RunScenario,
   type RunStatusResponse,
   type RunToolResult,
   type RunRecord,
@@ -520,7 +517,6 @@ export default function Workbench() {
   const [featureGraphStatus, setFeatureGraphStatus] = useState<AsyncStatus>("idle");
   const [featureGraph, setFeatureGraph] = useState<FeatureGraph | null>(null);
   const [featureGraphError, setFeatureGraphError] = useState<string | null>(null);
-  const [featureMode, setFeatureMode] = useState<FeatureGenerationMode>("fixture");
   const [featureSourceScope, setFeatureSourceScope] = useState<FeatureSourceScope>("entry_reachable");
   const [sessions, setSessions] = useState<Session[]>([]);
   const [sessionCursor, setSessionCursor] = useState<string | null>(null);
@@ -647,8 +643,6 @@ export default function Workbench() {
   const runCreateRequest = useRef<{
     projectId: string;
     sessionId: string;
-    mode: RunMode;
-    scenario: RunScenario;
     key: string;
   } | null>(null);
   const runPollTimer = useRef<number | null>(null);
@@ -1239,7 +1233,7 @@ export default function Workbench() {
           selectedProjectId,
           currentIndexId,
           {
-            mode: featureMode,
+            mode: "real",
             source_scope: featureSourceScope,
             idempotency_key: key,
           },
@@ -1270,7 +1264,6 @@ export default function Workbench() {
     [
       applyFeatureGenerationResponse,
       featureGeneration?.status,
-      featureMode,
       featureSourceScope,
       featureStatus,
       indexResponse,
@@ -1775,7 +1768,7 @@ export default function Workbench() {
     void loadRunDetails(selectedProjectId, selectedSessionId, runId);
   }, [loadRunDetails, resetRunImpact, selectedProjectId, selectedSessionId]);
 
-  const startSessionRun = useCallback(async (mode: RunMode, scenario: RunScenario) => {
+  const startSessionRun = useCallback(async () => {
     if (!selectedProjectId || !selectedSessionId) {
       setRunWriteStatus("error");
       setRunWriteError("请先选择一个会话。");
@@ -1799,10 +1792,10 @@ export default function Workbench() {
       return;
     }
     const previous = runCreateRequest.current;
-    const key = previous?.projectId === selectedProjectId && previous.sessionId === selectedSessionId && previous.mode === mode && previous.scenario === scenario
+    const key = previous?.projectId === selectedProjectId && previous.sessionId === selectedSessionId
       ? previous.key
       : newSessionIdempotencyKey();
-    runCreateRequest.current = { projectId: selectedProjectId, sessionId: selectedSessionId, mode, scenario, key };
+    runCreateRequest.current = { projectId: selectedProjectId, sessionId: selectedSessionId, key };
     runWriteController.current?.abort();
     const controller = new AbortController();
     runWriteController.current = controller;
@@ -1819,8 +1812,7 @@ export default function Workbench() {
           issueId: `session-${selectedSessionId}`,
           title: selectedSession.topic,
           body: (savedContext || selectedSession.topic).slice(0, 20_000),
-          mode,
-          ...(mode === "fixture" ? { scenario } : {}),
+          mode: "real",
           idempotencyKey: key,
         },
         controller.signal,
@@ -4037,9 +4029,7 @@ export default function Workbench() {
         },
         selectedFeatureGenerationId,
         onSelectFeatureGeneration: selectFeatureGeneration,
-        featureMode,
         featureSourceScope,
-        onFeatureModeChange: (mode) => resetFeatureRequest(() => setFeatureMode(mode)),
         onFeatureSourceScopeChange: (scope) => resetFeatureRequest(() => setFeatureSourceScope(scope)),
         onRunFeatureGeneration: runFeatureGeneration,
         onReloadFeatureGeneration: loadSavedFeatureGeneration,

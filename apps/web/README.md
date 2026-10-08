@@ -2,7 +2,7 @@
 
 ## 职责与边界
 
-`apps/web` 提供项目/索引切换、索引新鲜度检查与显式更新、概览、Session/消息、保存功能历史、同快照功能图、源码证据，以及 Session 内显式 fixture/real Run 的启动、状态、事件、工具结果、Issue/代码理解报告、候选位置与有界静态影响、SSE 订阅和取消；项目架构画布并列展示 Python/TypeScript imports/calls 与独立的 HTTP 方法/路径形状关联及双端证据。HTTP 关联列表可打开客户端锚点→方法/路径形状→FastAPI handler，再从 handler 查看最多 2 层、40 节点的同快照 calls 查询与 unresolved 边界。Codex external Run 会被自动发现并接入同一展示链。它只通过公开 HTTP API 访问服务端数据，不直接访问 SQLite、GitHub、宿主路径或模型。
+`apps/web` 提供项目/索引切换、索引新鲜度检查与显式更新、概览、Session/消息、保存功能历史、同快照功能图、源码证据，以及 Session 内显式 AI 分析 Run 的启动、状态、事件、工具结果、Issue/代码理解报告、候选位置与有界静态影响、SSE 订阅和取消；项目架构画布并列展示 Python/TypeScript imports/calls 与独立的 HTTP 方法/路径形状关联及双端证据。HTTP 关联列表可打开客户端锚点→方法/路径形状→FastAPI handler，再从 handler 查看最多 2 层、40 节点的同快照 calls 查询与 unresolved 边界。Codex external Run 会被自动发现并接入同一展示链。它只通过公开 HTTP API 访问服务端数据，不直接访问 SQLite、GitHub、宿主路径或模型。
 
 ## 入口与目录导航
 
@@ -34,7 +34,7 @@
 pwsh -File .\scripts\start-local.ps1 -Service web
 ```
 
-打开 `http://localhost:3000`，从本地目录或 GitHub HTTPS 导入项目，或打开已有项目；导入 ready 后会选中项目和索引并打开架构页。导入状态轮询最多 40 次且总等待不超过 35 秒，初次导入及重试请求最多等待 60 秒；超时会保留“服务端可能仍在处理”的状态，可刷新已有 attempt，或用相同表单重新连接初次请求。项目级 URL 刷新保持架构视图，只有完整 Session URL 恢复 Session；固定索引列表可直接打开版本。本地目录未开放时按页面提示更新 API 设置并重启。然后创建 Session 并保存至少一条消息，在 Session 的“Issue 分析”面板选择 fixture 场景后点击“启动离线分析”，或选择 real 后点击“启动真实分析”。`success-timeout-missing` 展示候选结论和同快照 evidence；`insufficient-external-service` 展示证据不足；`tool-failure-read-source` 展示工具失败及失败前保留的 evidence。real 还要求 API 设置 `CODETRAIL_REAL_RUN_ENABLED=1` 并在服务数据目录配置 `config.json`。
+打开 `http://localhost:3000`，从本地目录或 GitHub HTTPS 导入项目，或打开已有项目；导入 ready 后会选中项目和索引并打开架构页。导入状态轮询最多 40 次且总等待不超过 35 秒，初次导入及重试请求最多等待 60 秒；超时会保留“服务端可能仍在处理”的状态，可刷新已有 attempt，或用相同表单重新连接初次请求。项目级 URL 刷新保持架构视图，只有完整 Session URL 恢复 Session；固定索引列表可直接打开版本。本地目录未开放时按页面提示更新 API 设置并重启。然后创建 Session 并保存至少一条消息，点击“开始分析”。服务端模型分析要求 API 设置 `CODETRAIL_REAL_RUN_ENABLED=1` 并在服务数据目录配置 `config.json`；未配置或调用失败会显示错误，不自动切换模拟响应。功能视图的“识别主要功能”同样使用服务端模型，保留源码范围选择。普通工作台不提供 fixture 模式或固定场景选择；开发演示使用专用[样本仓库与离线入口](../../fixtures/README.md)，已有演示结果保留明确标识。
 
 CodeTrail 作为自身仓库的 Codex external 验收流程见 [MVP 操作说明](../../docs/mvp-operation.md)；external Run 使用本地 MCP 和固定项目/Session，不需要真实供应商配置。
 

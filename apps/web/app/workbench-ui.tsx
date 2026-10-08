@@ -22,7 +22,6 @@ import type {
   EdgeKind,
   Evidence,
   FeatureGeneration,
-  FeatureGenerationMode,
   FeatureGenerationSummary,
   FeatureGraph,
   FeatureSourceScope,
@@ -46,7 +45,6 @@ import type {
   ProjectOverview,
   ProjectRecord,
   RunEvent,
-  RunMode,
   RunRecord,
   RunReport,
   RunImpactResponse,
@@ -172,7 +170,7 @@ type SessionUi = {
   runWriteStatus: UiAsyncStatus;
   runWriteError: string | null;
   onSelectRun: (runId: string) => void;
-  onStartRun: (mode: RunMode, scenario: RunScenario) => void | Promise<void>;
+  onStartRun: () => void | Promise<void>;
   onCancelRun: Action;
   onSelectRunEvidence: (evidence: Evidence) => void;
   onSelectRunSymbol: (symbolId: string) => void;
@@ -221,9 +219,7 @@ type KnowledgeUi = {
   onRetryFeatureHistory: Action;
   selectedFeatureGenerationId: string | null;
   onSelectFeatureGeneration: (generationId: string) => void;
-  featureMode: FeatureGenerationMode;
   featureSourceScope: FeatureSourceScope;
-  onFeatureModeChange: (mode: FeatureGenerationMode) => void;
   onFeatureSourceScopeChange: (scope: FeatureSourceScope) => void;
   onRunFeatureGeneration: (retryFailed?: boolean) => void | Promise<void>;
   onReloadFeatureGeneration: Action;
@@ -1505,7 +1501,7 @@ function FeatureSection({ knowledge }: { knowledge: KnowledgeUi }) {
           <span className="ct-count-label">{generation?.features.length ?? "—"}</span>
         </div>
       </div>
-      <p className="ct-section-lede">显式选择 fixture 或 real 后，服务端只使用当前索引中实际返回的入口、模块、符号和源码证据生成有边界的描述。</p>
+      <p className="ct-section-lede">点击识别后，服务端模型结合当前索引的入口、模块、符号和源码证据生成主要功能描述。相关源码会发送给已配置的模型服务，可能产生调用费用。</p>
       <div className="ct-history-block">
         <div className="ct-history-heading"><strong>已保存版本 · 当前快照</strong><span data-state={knowledge.featureHistoryStatus}>{knowledge.featureHistoryStatus === "loading" ? "载入中" : `${knowledge.featureHistory.length} 个版本`}</span></div>
         {knowledge.featureHistoryError ? <div className="ct-error-block compact" role="alert"><span>{knowledge.featureHistoryError}</span><button type="button" className="ct-link-button" onClick={() => void knowledge.onRetryFeatureHistory()}>重试</button></div> : null}
@@ -1513,7 +1509,7 @@ function FeatureSection({ knowledge }: { knowledge: KnowledgeUi }) {
           <div className="ct-history-list">
             {knowledge.featureHistory.map((item) => (
               <button type="button" key={item.generation_id} className={`ct-history-item${item.generation_id === knowledge.selectedFeatureGenerationId ? " is-selected" : ""}`} onClick={() => knowledge.onSelectFeatureGeneration(item.generation_id)} aria-pressed={item.generation_id === knowledge.selectedFeatureGenerationId}>
-                <span className="ct-history-top"><strong>{savedFeatureStatusLabel(item.status)}</strong><span>{item.mode === "fixture" ? "FIXTURE" : "REAL"} · {formatDate(item.created_at)}</span></span>
+                <span className="ct-history-top"><strong>{savedFeatureStatusLabel(item.status)}</strong><span>{item.mode === "fixture" ? "演示结果" : "AI 分析"} · {formatDate(item.created_at)}</span></span>
                 <span className="ct-history-id"><code>{item.generation_id}</code><code>{item.index.revision} · {shortHash(item.index.snapshot_hash)}</code></span>
                 <span className="ct-history-stats">{item.feature_count} 功能 · {item.evidence_count} 证据 · {item.rules_version}</span>
                 <span className="ct-history-summary">{item.summary}</span>
@@ -1525,7 +1521,6 @@ function FeatureSection({ knowledge }: { knowledge: KnowledgeUi }) {
         {knowledge.featureHistoryHasMore ? <button type="button" className="ct-link-button" onClick={() => void knowledge.onLoadMoreFeatureHistory()} disabled={knowledge.featureHistoryStatus === "loading"}>加载更多版本</button> : null}
       </div>
       <div className="ct-feature-controls">
-        <label>模式<select value={knowledge.featureMode} onChange={(event) => knowledge.onFeatureModeChange(event.target.value as FeatureGenerationMode)} disabled={knowledge.featureStatus === "loading"}><option value="fixture">fixture / 离线</option><option value="real">real / 服务端模型</option></select></label>
         <label>源码范围<select value={knowledge.featureSourceScope} onChange={(event) => knowledge.onFeatureSourceScopeChange(event.target.value as FeatureSourceScope)} disabled={knowledge.featureStatus === "loading"}><option value="entry_reachable">应用入口可达模块</option><option value="visible_modules">当前可见模块</option></select></label>
         <button type="button" className="ct-button ct-button-primary" onClick={() => void knowledge.onRunFeatureGeneration()} disabled={knowledge.featureStatus === "loading"}>{knowledge.featureStatus === "loading" ? "生成中…" : "识别主要功能"}</button>
         {generation ? <button type="button" className="ct-button ct-button-secondary" onClick={() => void knowledge.onReloadFeatureGeneration()} disabled={knowledge.featureStatus === "loading"}>重读已保存结果</button> : null}
@@ -1541,7 +1536,7 @@ function FeatureSection({ knowledge }: { knowledge: KnowledgeUi }) {
 function FeatureGenerationResult({ generation, knowledge }: { generation: FeatureGeneration; knowledge: KnowledgeUi }) {
   return (
     <div className="ct-feature-result">
-      <div className="ct-feature-meta"><span className={`ct-badge is-${generation.status}`}>{generation.status}</span><span className={`ct-badge is-${generation.mode}`}>{generation.mode === "fixture" ? "FIXTURE / OFFLINE" : "REAL / SERVER CONFIG"}</span><code title={generation.model ?? "未配置模型"}>{generation.model ?? "未配置模型"}</code><small>{generation.source_paths.length} 个源码文件 · {generation.usage.tool_calls} 次工具 · {generation.usage.model_calls} 次模型 · {generation.usage.elapsed_ms} ms</small></div>
+      <div className="ct-feature-meta"><span className={`ct-badge is-${generation.status}`}>{generation.status}</span><span className={`ct-badge is-${generation.mode}`}>{generation.mode === "fixture" ? "演示结果" : "AI 分析"}</span><code title={generation.model ?? "未配置模型"}>{generation.model ?? "未配置模型"}</code><small>{generation.source_paths.length} 个源码文件 · {generation.usage.tool_calls} 次工具 · {generation.usage.model_calls} 次模型 · {generation.usage.elapsed_ms} ms</small></div>
       <p className="ct-feature-summary">{generation.summary}</p>
       {generation.error ? <div className="ct-error-block compact" role="alert"><span>{generation.error.message}</span><button type="button" className="ct-link-button" onClick={() => void knowledge.onRunFeatureGeneration(true)}>重试</button></div> : null}
       {generation.truncated ? <p className="ct-warning">上下文已截断：{generation.truncation_reason}</p> : null}
@@ -1820,7 +1815,7 @@ function runModeLabel(run: RunRecord): string {
   if (run.execution_source === "codex" || run.mode === "external") {
     return "CODEX / 外部 Agent";
   }
-  return run.mode === "real" ? "REAL / 模型分析" : "FIXTURE / 离线";
+  return run.mode === "real" ? "AI 分析" : "演示结果";
 }
 
 function explanationStepKindLabel(kind: CodeExplanation["steps"][number]["kind"]): string {
@@ -1899,8 +1894,6 @@ function runEventLabel(event: RunEvent): string {
 }
 
 function RunPanel({ session }: { session: SessionUi }) {
-  const [mode, setMode] = useState<RunMode>("fixture");
-  const [scenario, setScenario] = useState<RunScenario>("success-timeout-missing");
   const selectedRun = session.runs.find((run) => run.run_id === session.selectedRunId) ?? null;
   const currentRun = session.runStatusResponse?.run ?? selectedRun;
   const active = currentRun?.status === "queued" || currentRun?.status === "running";
@@ -1914,11 +1907,9 @@ function RunPanel({ session }: { session: SessionUi }) {
       <p className="ct-run-lede">显式启动后，服务端只冻结当前已保存消息到一个不可变快照；当前草稿不会进入本次 Run，也不会隐式触发分析。</p>
       {draftPending ? <p className="ct-run-draft-warning" role="status">当前有未保存草稿：启动 Run 不会包含它，请先保存消息。</p> : null}
       <div className="ct-run-start-row">
-        <label htmlFor="run-mode">模式<select id="run-mode" value={mode} onChange={(event) => setMode(event.target.value as RunMode)} disabled={active || session.runWriteStatus === "loading"}><option value="fixture">fixture / 离线演示</option><option value="real">real / 模型分析</option></select></label>
-        {mode === "fixture" ? <label htmlFor="run-scenario">fixture 场景<select id="run-scenario" value={scenario} onChange={(event) => setScenario(event.target.value as RunScenario)} disabled={active || session.runWriteStatus === "loading"}><option value="success-timeout-missing">{runScenarioLabel("success-timeout-missing")}</option><option value="insufficient-external-service">{runScenarioLabel("insufficient-external-service")}</option><option value="tool-failure-read-source">{runScenarioLabel("tool-failure-read-source")}</option></select></label> : null}
-        <button type="button" className="ct-button ct-button-primary" onClick={() => void session.onStartRun(mode, scenario)} disabled={active || session.runWriteStatus === "loading" || session.messagesStatus === "loading"}>{session.runWriteStatus === "loading" ? "处理中…" : mode === "real" ? "启动真实分析" : "启动离线分析"}</button>
+        <button type="button" className="ct-button ct-button-primary" onClick={() => void session.onStartRun()} disabled={active || session.runWriteStatus === "loading" || session.messagesStatus === "loading"}>{session.runWriteStatus === "loading" ? "处理中…" : "开始分析"}</button>
       </div>
-      {mode === "real" ? <p className="ct-run-real-warning" role="note">真实模式会把冻结的 Issue、已保存消息和有界源码证据发送到服务端配置的模型，可能产生费用；未配置或失败时不会回退到 fixture。</p> : null}
+      <p className="ct-run-real-warning" role="note">分析会把本次 Issue、已保存消息和有界源码证据发送到已配置的模型服务，可能产生调用费用；未配置或调用失败时会显示错误。</p>
       {session.runWriteError ? <p className="ct-inline-error" role="alert">{session.runWriteError}</p> : null}
       {session.runsError ? <div className="ct-error-block compact" role="alert"><span>{session.runsError}</span></div> : null}
       {currentRun ? <div className="ct-run-detail">
@@ -1927,12 +1918,12 @@ function RunPanel({ session }: { session: SessionUi }) {
           <div className="ct-run-snapshot"><span><small>固定消息</small><code>1–{session.runStatusResponse.input.message_end_sequence}</code></span><span><small>INPUT HASH</small><code title={session.runStatusResponse.input.input_hash}>{shortHash(session.runStatusResponse.input.input_hash, 12)}</code></span><span><small>INDEX</small><code title={session.runStatusResponse.run.index_id}>{shortHash(session.runStatusResponse.run.index_id, 16)}</code></span><span><small>来源</small><code>{runModeLabel(session.runStatusResponse.run)}</code></span><span><small>版本</small><code>{session.runStatusResponse.run.execution_version}</code></span></div>
           {session.runError ? <p className="ct-inline-error" role="alert">{session.runError}</p> : null}
           {session.runStreamError ? <p className="ct-inline-note" role="status">{session.runStreamError}</p> : null}
-          {session.runReport ? <div className="ct-run-report"><div className="ct-run-subheading"><strong>{session.runReport.outcome === "candidate_found" ? "候选结论" : session.runReport.outcome === "insufficient_evidence" ? "证据不足" : session.runReport.outcome === "explanation" ? "流程解释" : "执行结果"}</strong><span>{session.runStatusResponse.run.execution_source === "codex" ? "CODEX / EXTERNAL" : session.runReport.fixture_mode ? "FIXTURE" : "REAL"}</span></div><p>{session.runReport.summary}</p>{session.runReport.limitations.length > 0 ? <div className="ct-run-evidence-list"><small>限制</small>{session.runReport.limitations.map((limitation) => <p key={limitation}>{limitation}</p>)}</div> : null}{session.runReport.candidate_links.length > 0 ? <div className="ct-run-impact-links"><small>候选位置与有界影响</small>{session.runReport.candidate_links.map((candidate) => <div className="ct-run-impact-link" key={candidate.candidate_id}><span><code>{candidate.source_symbol_id}</code><small>{candidate.relation}</small></span><button type="button" className="ct-link-button" onClick={() => session.onSelectRunImpact({ candidateId: candidate.candidate_id })}>查看影响范围</button></div>)}</div> : null}{session.runReport.findings.map((finding) => <div className="ct-run-finding" key={finding.finding_id}><strong>{finding.kind}</strong><span>{finding.text}</span>{finding.symbol_ids.length === 1 ? <button type="button" className="ct-link-button" onClick={() => session.onSelectRunImpact({ findingId: finding.finding_id })}>查看潜在影响</button> : <small className="ct-run-impact-unmapped">无唯一可映射符号 · 仅显示证据</small>}{finding.evidence_ids.map((evidenceId) => { const evidence = session.runReport?.evidence.find((item) => item.evidence_id === evidenceId); return evidence ? <button type="button" className="ct-link-button" key={evidenceId} onClick={() => session.onSelectRunEvidence(evidence)}>查看证据 · {evidence.path}:L{evidence.start_line}</button> : null; })}</div>)}{session.runReport.evidence.length > 0 ? <div className="ct-run-evidence-list"><small>本次报告证据</small>{session.runReport.evidence.map((evidence) => <button type="button" className="ct-link-button" key={evidence.evidence_id} onClick={() => session.onSelectRunEvidence(evidence)}>{evidence.path}:L{evidence.start_line}–L{evidence.end_line}</button>)}</div> : null}</div> : null}
+          {session.runReport ? <div className="ct-run-report"><div className="ct-run-subheading"><strong>{session.runReport.outcome === "candidate_found" ? "候选结论" : session.runReport.outcome === "insufficient_evidence" ? "证据不足" : session.runReport.outcome === "explanation" ? "流程解释" : "执行结果"}</strong><span>{session.runStatusResponse.run.execution_source === "codex" ? "CODEX / EXTERNAL" : session.runReport.fixture_mode ? "演示结果" : "AI 分析"}</span></div><p>{session.runReport.summary}</p>{session.runReport.limitations.length > 0 ? <div className="ct-run-evidence-list"><small>限制</small>{session.runReport.limitations.map((limitation) => <p key={limitation}>{limitation}</p>)}</div> : null}{session.runReport.candidate_links.length > 0 ? <div className="ct-run-impact-links"><small>候选位置与有界影响</small>{session.runReport.candidate_links.map((candidate) => <div className="ct-run-impact-link" key={candidate.candidate_id}><span><code>{candidate.source_symbol_id}</code><small>{candidate.relation}</small></span><button type="button" className="ct-link-button" onClick={() => session.onSelectRunImpact({ candidateId: candidate.candidate_id })}>查看影响范围</button></div>)}</div> : null}{session.runReport.findings.map((finding) => <div className="ct-run-finding" key={finding.finding_id}><strong>{finding.kind}</strong><span>{finding.text}</span>{finding.symbol_ids.length === 1 ? <button type="button" className="ct-link-button" onClick={() => session.onSelectRunImpact({ findingId: finding.finding_id })}>查看潜在影响</button> : <small className="ct-run-impact-unmapped">无唯一可映射符号 · 仅显示证据</small>}{finding.evidence_ids.map((evidenceId) => { const evidence = session.runReport?.evidence.find((item) => item.evidence_id === evidenceId); return evidence ? <button type="button" className="ct-link-button" key={evidenceId} onClick={() => session.onSelectRunEvidence(evidence)}>查看证据 · {evidence.path}:L{evidence.start_line}</button> : null; })}</div>)}{session.runReport.evidence.length > 0 ? <div className="ct-run-evidence-list"><small>本次报告证据</small>{session.runReport.evidence.map((evidence) => <button type="button" className="ct-link-button" key={evidence.evidence_id} onClick={() => session.onSelectRunEvidence(evidence)}>{evidence.path}:L{evidence.start_line}–L{evidence.end_line}</button>)}</div> : null}</div> : null}
           {session.runReport?.explanation ? <RunExplanation explanation={session.runReport.explanation} evidence={session.runReport.evidence} onSelectEvidence={session.onSelectRunEvidence} onSelectSymbol={session.onSelectRunSymbol} /> : null}
         </> : <LoadingNote>正在读取 Run 详情…</LoadingNote>}
       </div> : null}
       {session.runStatusResponse && (session.runEvents.length > 0 || session.runToolResults.length > 0) ? <details className="ct-run-activity-details"><summary>执行历史 · {session.runEvents.length} 个事件 · {session.runToolResults.length} 个工具结果</summary>{session.runEvents.length > 0 ? <div className="ct-run-events"><div className="ct-run-subheading"><strong>公开执行事件</strong><span>{session.runEvents.length} 条</span></div>{session.runEvents.map((event) => <div className="ct-run-event" key={`${event.run_id}-${event.sequence}`}><code>#{event.sequence}</code><span>{runEventLabel(event)}</span></div>)}</div> : null}{session.runToolResults.length > 0 ? <div className="ct-run-tools"><div className="ct-run-subheading"><strong>工具结果</strong><span>{session.runToolResults.length} 项</span></div>{session.runToolResults.map((result) => <div className="ct-run-tool" key={result.request_id}><code>{result.tool}</code><span>{result.kind.endsWith("failed") ? "失败" : "已返回"} · #{result.completed_sequence}</span></div>)}</div> : null}</details> : null}
-      {session.runs.length > 0 ? <details className="ct-run-history-details"><summary>Run 历史 · {session.runs.length} 次</summary><div className="ct-run-history" aria-label="Run 历史">{session.runs.map((run) => <button type="button" key={run.run_id} className={`ct-run-history-item${run.run_id === session.selectedRunId ? " is-selected" : ""}`} onClick={() => session.onSelectRun(run.run_id)}><span><strong>{runStatusLabel(run.status)}</strong><small>{run.fixture_scenario ? runScenarioLabel(run.fixture_scenario) : runModeLabel(run)}</small></span><code>{run.run_id}</code><small>消息 1–{run.message_end_sequence} · {run.execution_version}</small></button>)}</div></details> : session.runsStatus === "loading" ? <LoadingNote>正在读取 Run 历史…</LoadingNote> : <div className="ct-run-empty">还没有 Run。可选择 fixture/real 显式启动；外部 Codex Run 会自动出现。</div>}
+      {session.runs.length > 0 ? <details className="ct-run-history-details"><summary>Run 历史 · {session.runs.length} 次</summary><div className="ct-run-history" aria-label="Run 历史">{session.runs.map((run) => <button type="button" key={run.run_id} className={`ct-run-history-item${run.run_id === session.selectedRunId ? " is-selected" : ""}`} onClick={() => session.onSelectRun(run.run_id)}><span><strong>{runStatusLabel(run.status)}</strong><small>{run.fixture_scenario ? `演示结果 · ${runScenarioLabel(run.fixture_scenario)}` : runModeLabel(run)}</small></span><code>{run.run_id}</code><small>消息 1–{run.message_end_sequence} · {run.execution_version}</small></button>)}</div></details> : session.runsStatus === "loading" ? <LoadingNote>正在读取 Run 历史…</LoadingNote> : <div className="ct-run-empty">还没有 Run。点击开始分析可创建一次调查；外部 Codex Run 会自动出现。</div>}
     </section>
   );
 }
@@ -2266,7 +2257,7 @@ export default function WorkbenchUi(props: WorkbenchUiProps) {
         {props.panelMode === "source" ? <EvidencePanel evidence={props.evidence} returnPanel={returnPanel} onReturnToPanel={() => props.onPanelModeChange(returnPanel ?? "graph")} /> : showSideGraphPanel ? <GraphPanel graph={props.graph} /> : null}
       </div>
       {props.panelMode === "source" ? <div className="ct-panel-width-control"><label htmlFor="panel-width">面板宽度</label><input id="panel-width" type="range" min="300" max="440" step="10" value={panelWidth} onChange={(event) => setPanelWidth(Number(event.target.value))} /><output>{panelWidth}px</output></div> : null}
-      <footer className="ct-footer"><span>STATIC FACTS / FIXED EVIDENCE</span><span>Run：fixture / real 或 Codex 外部 Agent · 有界工具循环 · SSE 事件流与轮询回退</span><span>{props.index.response ? `${props.graph.codeSymbolCount} nodes · ${props.graph.codeEdgeCount} edges` : "No snapshot loaded"}</span></footer>
+      <footer className="ct-footer"><span>STATIC FACTS / FIXED EVIDENCE</span><span>AI 分析或 Codex 外部 Agent · 有界工具循环 · SSE 事件流与轮询回退</span><span>{props.index.response ? `${props.graph.codeSymbolCount} nodes · ${props.graph.codeEdgeCount} edges` : "No snapshot loaded"}</span></footer>
     </main>
   );
 }
