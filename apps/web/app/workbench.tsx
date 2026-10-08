@@ -347,62 +347,6 @@ async function githubImportResponseFromStatus(
   };
 }
 
-function indexStatusLabel(status: IndexUiStatus): string {
-  return {
-    unindexed: "未打开索引",
-    creating: "正在建立快照",
-    loading: "正在载入索引",
-    ready: "索引就绪",
-    partial: "索引部分完成",
-    error: "索引错误",
-  }[status];
-}
-
-function queryStatusLabel(status: AsyncStatus): string {
-  return {
-    idle: "等待搜索",
-    loading: "检索中",
-    success: "已返回",
-    empty: "没有命中",
-    error: "检索失败",
-  }[status];
-}
-
-function overviewStatusLabel(status: AsyncStatus, overview: ProjectOverview | null): string {
-  if (status === "loading") {
-    return "概览载入中";
-  }
-  if (status === "error") {
-    return "概览失败";
-  }
-  if (overview?.entry_status === "not_identified") {
-    return "未识别入口";
-  }
-  if (overview?.entry_status === "partial") {
-    return "结果已截断";
-  }
-  return overview ? "规则概览" : "等待索引";
-}
-
-function importStatusLabel(status: ImportStatus): string {
-  return {
-    queued: "排队中",
-    acquiring: "校验来源",
-    indexing: "建立索引",
-    ready: "导入完成",
-    failed: "导入失败",
-    cancelled: "已取消",
-    interrupted: "重启中断",
-  }[status];
-}
-
-function evidenceLines(evidence: Evidence): Array<{ number: number; text: string }> {
-  return evidence.excerpt.split("\n").map((text, offset) => ({
-    number: evidence.start_line + offset,
-    text,
-  }));
-}
-
 function newFeatureIdempotencyKey(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return `workbench-${crypto.randomUUID()}`;
@@ -425,39 +369,6 @@ function featureAsyncStatus(generation: FeatureGeneration): AsyncStatus {
     return "empty";
   }
   return "success";
-}
-
-function featureStatusLabel(status: AsyncStatus, generation: FeatureGeneration | null): string {
-  if (status === "loading") {
-    return "生成功能中";
-  }
-  if (status === "error") {
-    return "生成功能失败";
-  }
-  if (generation?.status === "insufficient_evidence") {
-    return "证据不足";
-  }
-  if (generation?.status === "partial") {
-    return "部分完成";
-  }
-  if (generation?.status === "succeeded") {
-    return "已生成";
-  }
-  return "等待生成";
-}
-
-function savedFeatureStatusLabel(status: FeatureGenerationSummary["status"]): string {
-  return {
-    succeeded: "已生成",
-    partial: "部分完成",
-    insufficient_evidence: "证据不足",
-    failed: "失败",
-  }[status];
-}
-
-function formatFeatureCreatedAt(value: string): string {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString("zh-CN", { hour12: false });
 }
 
 function featureSelectionStorageKey(projectId: string, indexId: string): string {

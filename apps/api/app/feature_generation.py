@@ -1079,10 +1079,6 @@ def resolve_model(
     return requested_model or (model_config.model if model_config is not None else DEFAULT_REAL_MODEL)
 
 
-def _model_output_tokens(context: FeatureContext) -> int:
-    return _model_output_tokens_for_chars(context.max_output_chars)
-
-
 def _model_output_tokens_for_chars(max_output_chars: int) -> int:
     estimated_tokens = (max_output_chars + CHARS_PER_MODEL_TOKEN - 1) // CHARS_PER_MODEL_TOKEN
     return max(MIN_MODEL_OUTPUT_TOKENS, min(MAX_MODEL_OUTPUT_TOKENS, estimated_tokens))

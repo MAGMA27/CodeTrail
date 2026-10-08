@@ -2888,48 +2888,6 @@ export async function requestJson<T>(
 export const IMPORT_REQUEST_TIMEOUT_MS = 60_000;
 export const IMPORT_STATUS_REQUEST_TIMEOUT_MS = 10_000;
 
-export function createIndex(
-  repositoryId: string,
-  revision: string,
-  dirty: boolean,
-  signal?: AbortSignal,
-): Promise<IndexResponse> {
-  return requestJson(
-    "/api/indexes",
-    isIndexResponse,
-    {
-      method: "POST",
-      signal,
-      body: JSON.stringify({
-        schema_version: SCHEMA_VERSION,
-        repository_id: repositoryId,
-        revision,
-        dirty,
-      }),
-    },
-  );
-}
-
-export function createProject(
-  name: string,
-  repositoryId: string,
-  signal?: AbortSignal,
-): Promise<ProjectRecord> {
-  return requestJson(
-    "/api/projects",
-    isProjectRecord,
-    {
-      method: "POST",
-      signal,
-      body: JSON.stringify({
-        schema_version: SCHEMA_VERSION,
-        name,
-        repository_id: repositoryId,
-      }),
-    },
-  );
-}
-
 export function importLocalPath(
   name: string,
   path: string,

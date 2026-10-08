@@ -1206,13 +1206,6 @@ def _valid_parser_range(value: dict[str, object], line_count: int) -> bool:
     )
 
 
-def _extract_file_definitions(source_file: SnapshotFile) -> DefinitionCacheEntry:
-    """Parse one file into index-independent definitions and diagnostics."""
-
-    entry, _tree = _extract_file_definitions_with_tree(source_file)
-    return entry
-
-
 def _extract_file_definitions_with_tree(
     source_file: SnapshotFile,
 ) -> tuple[DefinitionCacheEntry, ast.Module | None]:
@@ -1460,44 +1453,6 @@ def _resolve_repository_root(repository_root: str | Path) -> Path:
     if not root.is_dir():
         raise SnapshotBoundaryError("repository root must be a directory")
     return root
-
-
-def _discover_python_files(root: Path) -> tuple[list[Path], list[SnapshotIssue]]:
-    paths: list[Path] = []
-    issues: list[SnapshotIssue] = []
-
-    def visit(directory: Path) -> None:
-        try:
-            entries = sorted(directory.iterdir(), key=lambda entry: entry.name.casefold())
-        except OSError as exc:
-            relative = _relative_path_for_issue(root, directory)
-            issues.append(SnapshotIssue(relative, "read_error", f"could not list directory: {exc}"))
-            return
-
-        for entry in entries:
-            relative = _relative_path_for_issue(root, entry)
-            if entry.is_dir() and entry.name.lower() in _EXCLUDED_DIRECTORIES:
-                continue
-            if _is_secret_name(entry.name):
-                continue
-            if entry.is_symlink():
-                issues.append(SnapshotIssue(relative, "symlink", "symbolic links are not indexed"))
-                continue
-            if entry.is_dir():
-                visit(entry)
-                continue
-            if entry.suffix.lower() != ".py" or not entry.is_file():
-                continue
-            try:
-                resolved = entry.resolve(strict=False)
-                resolved.relative_to(root)
-            except (OSError, ValueError):
-                issues.append(SnapshotIssue(relative, "outside_root", "source resolves outside root"))
-                continue
-            paths.append(entry)
-
-    visit(root)
-    return paths, issues
 
 
 def _normalize_relative_path(relative_path: str) -> str:

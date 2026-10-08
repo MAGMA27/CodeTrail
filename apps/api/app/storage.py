@@ -5216,12 +5216,6 @@ def _search_candidate_sort_key(candidate: _SearchCandidate) -> tuple[int, float,
     )
 
 
-def _symbol_source_text(source_text: str, symbol: Symbol) -> str:
-    """Return only the immutable source span owned by one indexed symbol."""
-
-    return _symbol_source_text_from_lines(tuple(source_text.splitlines()), symbol)
-
-
 def _symbol_source_text_from_lines(lines: tuple[str, ...], symbol: Symbol) -> str:
     """Return one symbol span from a file that has already been line-split."""
 
