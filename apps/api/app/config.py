@@ -6,8 +6,9 @@ import json
 import os
 from pathlib import Path
 import tempfile
+from urllib.parse import urlsplit
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 
 MODEL_CONFIG_FILENAME = "config.json"
@@ -20,15 +21,58 @@ class ModelConfigError(ValueError):
     """Raised when the persistent model configuration cannot be loaded safely."""
 
 
+def normalize_model_config_text(value: str) -> str:
+    normalized = value.strip()
+    if not normalized:
+        raise ValueError("value must not be blank")
+    return normalized
+
+
+def normalize_model_config_base_url(value: str) -> str:
+    normalized = value.strip()
+    if not normalized or any(character.isspace() for character in normalized):
+        raise ValueError("base_url must be an absolute HTTP(S) URL without credentials")
+    try:
+        parsed = urlsplit(normalized)
+        hostname = parsed.hostname
+        parsed.port
+    except ValueError as exc:
+        raise ValueError("base_url must be an absolute HTTP(S) URL without credentials") from exc
+    if (
+        parsed.scheme.lower() not in {"http", "https"}
+        or not parsed.netloc
+        or not hostname
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        raise ValueError("base_url must be an absolute HTTP(S) URL without credentials")
+    return normalized
+
+
 class ModelProviderConfig(BaseModel):
     """Server-owned credentials and endpoint settings for one model provider."""
 
     model_config = ConfigDict(extra="forbid")
 
-    provider: str = Field(default=DEFAULT_MODEL_PROVIDER, min_length=1, max_length=100)
+    provider: str = Field(default=DEFAULT_MODEL_PROVIDER, min_length=1, max_length=100, pattern=r".*\S.*")
     api_key: str = Field(default="", max_length=500)
-    base_url: str = Field(default=DEFAULT_MODEL_BASE_URL, min_length=1, max_length=2_000)
-    model: str = Field(default=DEFAULT_MODEL_NAME, min_length=1, max_length=200)
+    base_url: str = Field(
+        default=DEFAULT_MODEL_BASE_URL,
+        min_length=1,
+        max_length=2_000,
+        json_schema_extra={"format": "uri", "pattern": r"^https?://", "description": "Absolute HTTP(S) URL without userinfo credentials."},
+    )
+    model: str = Field(default=DEFAULT_MODEL_NAME, min_length=1, max_length=200, pattern=r".*\S.*")
+
+    @field_validator("provider", "model")
+    @classmethod
+    def normalize_required_text(cls, value: str) -> str:
+        return normalize_model_config_text(value)
+
+    @field_validator("base_url")
+    @classmethod
+    def normalize_base_url(cls, value: str) -> str:
+        return normalize_model_config_base_url(value)
 
 
 def model_config_path(data_root: str | Path) -> Path:

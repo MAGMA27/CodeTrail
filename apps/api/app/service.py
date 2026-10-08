@@ -381,10 +381,16 @@ class RepositoryRegistry:
         with self._model_config_lock:
             return self._model_config_override or load_model_config(self._data_root)
 
-    def save_model_config(self, config: ModelProviderConfig) -> None:
+    def update_model_config(
+        self,
+        build_config: Callable[[ModelProviderConfig], ModelProviderConfig],
+    ) -> ModelProviderConfig:
         with self._model_config_lock:
+            current = self._model_config_override or load_model_config(self._data_root)
+            config = build_config(current)
             persist_model_config(self._data_root, config)
             self._model_config_override = None
+            return config
 
     @property
     def management_store(self) -> ManagementStore:
@@ -1472,22 +1478,23 @@ class WorkspaceService:
         )
 
     def save_model_config_settings(self, request: SaveModelConfigRequest) -> ModelConfigSettingsResponse:
-        current = self._current_model_config()
-        api_key = current.api_key
-        if request.remove_api_key:
-            api_key = ""
-        elif request.api_key and request.api_key.strip():
-            api_key = request.api_key
-        config = ModelProviderConfig(
-            provider=request.provider,
-            api_key=api_key,
-            base_url=request.base_url,
-            model=request.model,
-        )
         try:
-            self.registry.save_model_config(config)
+            config = self.registry.update_model_config(
+                lambda current: ModelProviderConfig(
+                    provider=request.provider,
+                    api_key=(
+                        ""
+                        if request.remove_api_key
+                        else request.api_key
+                        if request.api_key and request.api_key.strip()
+                        else current.api_key
+                    ),
+                    base_url=request.base_url,
+                    model=request.model,
+                )
+            )
         except ModelConfigError as exc:
-            raise ServiceError("internal_error", 500, "local model configuration could not be saved") from exc
+            raise ServiceError("internal_error", 500, "local model configuration could not be updated") from exc
         return ModelConfigSettingsResponse(
             provider=config.provider,
             base_url=config.base_url,

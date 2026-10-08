@@ -12,7 +12,7 @@ GitHub freshness 契约在 `IndexFreshness` 中额外区分 `remote_status` 的 
 
 ## 接口与依赖
 
-`GET/POST /api/model-config` 使用 `ModelConfigSettingsResponse` 和 `SaveModelConfigRequest`；状态只含 provider、base URL、model 与 `has_api_key`，保存请求允许留空保留密钥或用 `remove_api_key` 明确移除。密钥字段只在写请求中出现，不出现在响应 Schema 的属性中。
+`GET/POST /api/model-config` 使用 `ModelConfigSettingsResponse` 和 `SaveModelConfigRequest`；状态只含 provider、base URL、model 与 `has_api_key`，保存请求允许留空保留密钥或用 `remove_api_key` 明确移除。provider/model 去除首尾空白后不能为空，base URL 必须是绝对 HTTP(S) URL 并拒绝 userinfo；密钥字段只在写请求中出现，不出现在响应 Schema 的属性中。
 
 Run 的公共边界包括 `Run`、`RunInput`、`RunBudget`、`EventSequence` 中的连续事件、`ToolResult`、`Report`、`CreateRunRequest/Response`、Run history/events/tool-results/report/impact 响应及取消响应。`Run.analysis_kind` 区分 Issue 调查和代码理解；代码理解报告使用 `CodeUnderstandingFinal`、`CodeExplanation` 和最多 12 个有序 `ExplanationStep`，`complete/partial`、confirmed/inferred/unknown 及证据约束由契约校验。external MCP 另使用 `McpExternalToolResponse` 和 `McpExternalCompleteResponse`，分别只允许实际工具结果或成功 Run/report 进入 `ok` envelope。邻接 HTTP/MCP 结果的 `truncated`/`truncation_reason` 表示本次查询预算，`index_truncated`/`index_truncation_reason` 表示固定关系扫描覆盖，`index_unresolved_truncated`/`index_unresolved_truncation_reason` 表示 unresolved 详情覆盖；后者允许 NULL 表示旧索引未知，三组字段分别校验，不能交叉推断。Index 响应也保留同样的扫描与 unresolved 覆盖拆分。`RunImpactResponse` 要求恰好一个来自已保存报告的 candidate/finding ID，固定 `index_id`，明确 callers/callees 方向、最大深度、节点/边/路径/unresolved 上限、mapped/unmapped 状态和固定索引覆盖事实；路径只能解释同快照 `calls` 边。`SseEventFrame` 的 `id` 固定为 `{run_id}:{sequence}`，`SseStreamEndFrame` 只作为终态游标续接的非持久化完成标记；两者的 `event`/`data` 必须匹配，均保留 `schema_version`。MCP 的 Run 读/写 envelope 只允许对应 `ok` 状态携带 result/report；所有请求/响应保留 `schema_version`。精确字段以声明和生成 Schema 为准，不在文档中复制完整字段表。
 
@@ -26,7 +26,7 @@ Index freshness 结果绑定 `project_id`/`baseline_index_id`，检查时间、�
 
 ## 错误与限制
 
-`ModelConfigSettingsResponse` 不得含 API Key 或掩码替代值；Loopback/CORS 写入边界与原子持久化由 API 服务层验证，Schema 本身不能证明密钥未被日志记录或浏览器持久化。
+`ModelConfigSettingsResponse` 不得含 API Key 或掩码替代值；写请求要求 loopback 客户端，有 `Origin` 时还必须匹配已配置 Web Origin，无 Origin 的本地 CLI 可写。服务层在同一 Registry 锁内读取、合并与原子持久化；Schema 本身不能证明密钥未被日志记录或浏览器持久化。
 
 契约限制 freshness 的状态/时间一致性、非负计数、扫描截断原因、变化路径和规则/配置字段；refresh 必须绑定同一基准 index，不能以 reused 冒充新建或反之。扫描不完整、来源错误和旧 metadata 的业务含义由服务层决定，Schema 不把 unknown 升级为 consistent。其它契约限制 Run 模式、analysis kind、execution source、fixture scenario、工具调用/修复/源码/输入/输出/模型输入/模型输出/事件预算、分页页大小、消息 cutoff 和报告引用；real/external Run 不携带 fixture scenario，external 不携带内部 model；understanding 只能绑定 external，确认步骤必须有已返回 evidence，完整解释不能含 unknown，解释报告不能含 Issue findings/candidate links。概览的 `fastapi_route` 要求方法属于受支持集合、声明路径以 `/` 开头、handler 为同一 index/path 的 function symbol 且落在入口证据范围内；`OverviewGroup` 的 HTTP key 必须是路径前缀并含入口，源码目录组必须含模块；`OverviewModuleRelation` 只接受同一 index 的不同模块、imports/calls 类型及 1–8 条同快照代表边，`edge_count` 不得低于样本数。不支持的动态路径或绑定不会被契约升级为确定路由。概览的组、模块关系与既有模块/路径预算分别保留总量和可见量，不能把截断的结果解释成完整架构。邻接响应必须分别解释查询截断、关系扫描覆盖和 unresolved 详情覆盖；`index_unresolved_truncated=null` 只表示旧索引未记录状态，不能当作 false；空 `neighbors` 在 `index_truncated=true` 时不能表示“没有关系”。影响查询限制 candidate/finding 唯一性、方向、深度不超过 2、节点不超过 40、边不超过 80、路径和未知引用不超过 40，并携带固定索引的相同覆盖语义；unmapped 结果必须为空且说明无法唯一映射。SSE 游标和连接资源边界由 API 流程校验，Schema 约束帧元数据、终态完成标记和公开事件形状。静态关系与候选假设分开；tool failure、insufficient evidence、cancelled 和 interrupted 不冒充 candidate_found。Schema 是机械形状校验，不能单独证明 HTTP 归属、浏览器流程、真实模型质量或执行器时序。
 

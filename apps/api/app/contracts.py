@@ -17,6 +17,8 @@ from pydantic import (
     model_validator,
 )
 
+from .config import normalize_model_config_base_url, normalize_model_config_text
+
 
 SCHEMA_VERSION = "0.1.0"
 SchemaVersion: TypeAlias = Literal["0.1.0"]
@@ -2530,11 +2532,25 @@ class ApiErrorResponse(VersionedModel):
 
 
 class SaveModelConfigRequest(VersionedModel):
-    provider: str = Field(min_length=1, max_length=100)
-    base_url: str = Field(min_length=1, max_length=2_000)
-    model: str = Field(min_length=1, max_length=200)
+    provider: str = Field(min_length=1, max_length=100, pattern=r".*\S.*")
+    base_url: str = Field(
+        min_length=1,
+        max_length=2_000,
+        json_schema_extra={"format": "uri", "pattern": r"^https?://", "description": "Absolute HTTP(S) URL without userinfo credentials."},
+    )
+    model: str = Field(min_length=1, max_length=200, pattern=r".*\S.*")
     api_key: str | None = Field(default=None, max_length=500)
     remove_api_key: bool = False
+
+    @field_validator("provider", "model")
+    @classmethod
+    def normalize_required_text(cls, value: str) -> str:
+        return normalize_model_config_text(value)
+
+    @field_validator("base_url")
+    @classmethod
+    def normalize_base_url(cls, value: str) -> str:
+        return normalize_model_config_base_url(value)
 
     @model_validator(mode="after")
     def reject_key_and_removal_together(self) -> SaveModelConfigRequest:

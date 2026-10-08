@@ -42141,20 +42141,25 @@
           "title": "Api Key"
         },
         "base_url": {
+          "description": "Absolute HTTP(S) URL without userinfo credentials.",
+          "format": "uri",
           "maxLength": 2000,
           "minLength": 1,
+          "pattern": "^https?://",
           "title": "Base Url",
           "type": "string"
         },
         "model": {
           "maxLength": 200,
           "minLength": 1,
+          "pattern": ".*\\S.*",
           "title": "Model",
           "type": "string"
         },
         "provider": {
           "maxLength": 100,
           "minLength": 1,
+          "pattern": ".*\\S.*",
           "title": "Provider",
           "type": "string"
         },

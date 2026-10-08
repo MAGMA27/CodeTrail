@@ -8,6 +8,7 @@ import hashlib
 import json
 import shutil
 import sqlite3
+from threading import Event
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -23,7 +24,7 @@ from app.contracts import (
     SearchCodeSuccess,
     ToolRequest,
 )
-from app.main import create_app
+from app.main import _allowed_origins, create_app
 from app.service import IndexService, RepositoryRegistry, ServiceError
 
 
@@ -38,6 +39,7 @@ async def _request(
     payload: dict | None = None,
     *,
     client_host: str = "127.0.0.1",
+    origin: str | None = None,
 ) -> tuple[int, dict]:
     parsed = urlsplit(target)
     body = b"" if payload is None else json.dumps(payload).encode("utf-8")
@@ -57,6 +59,8 @@ async def _request(
     headers = [(b"host", b"testserver")]
     if payload is not None:
         headers.append((b"content-type", b"application/json"))
+    if origin is not None:
+        headers.append((b"origin", origin.encode("latin-1")))
     scope = {
         "type": "http",
         "asgi": {"version": "3.0", "spec_version": "2.3"},
@@ -88,8 +92,9 @@ def request(
     payload: dict | None = None,
     *,
     client_host: str = "127.0.0.1",
+    origin: str | None = None,
 ) -> tuple[int, dict]:
-    return asyncio.run(_request(application, method, target, payload, client_host=client_host))
+    return asyncio.run(_request(application, method, target, payload, client_host=client_host, origin=origin))
 
 
 def copy_fixture(tmp_path: Path) -> Path:
@@ -125,6 +130,31 @@ def test_model_config_settings_redact_secret_preserve_blank_and_remove_explicitl
     assert status == 200
     assert initial["has_api_key"] is False
     assert "api_key" not in initial
+
+    for invalid_settings in (
+        {"base_url": "relative/path"},
+        {"base_url": "ftp://model.example.test/v1"},
+        {"base_url": "https://codetrail-url-secret:model-pass@model.example.test/v1"},
+        {"provider": "   "},
+        {"model": "\t "},
+    ):
+        status, invalid = request(
+            application,
+            "POST",
+            "/api/model-config",
+            {
+                "schema_version": "0.1.0",
+                "provider": "test-provider",
+                "base_url": "https://model.example.test/v1",
+                "model": "test-model",
+                "api_key": "codetrail-fake-key",
+                "remove_api_key": False,
+                **invalid_settings,
+            },
+        )
+        assert status == 422
+        assert "codetrail-url-secret" not in json.dumps(invalid)
+        assert "codetrail-fake-key" not in json.dumps(invalid)
 
     payload = {
         "schema_version": "0.1.0",
@@ -192,6 +222,62 @@ def test_model_config_write_requires_loopback_client(tmp_path: Path) -> None:
     assert status == 403
     assert response["code"] == "forbidden"
     assert not (tmp_path / "data" / "config.json").exists()
+
+    status, response = request(
+        application,
+        "POST",
+        "/api/model-config",
+        payload,
+        origin="https://attacker.example",
+    )
+    assert status == 403
+    assert response["code"] == "forbidden"
+    assert not (tmp_path / "data" / "config.json").exists()
+
+    status, response = request(
+        application,
+        "POST",
+        "/api/model-config",
+        payload,
+        origin=_allowed_origins()[0],
+    )
+    assert status == 200
+    assert response["has_api_key"] is True
+
+
+def test_model_config_concurrent_blank_save_keeps_new_key(tmp_path: Path) -> None:
+    registry = create_app({}, data_root=tmp_path / "data").state.registry
+    first_builder_entered = Event()
+    release_first_builder = Event()
+    second_attempted = Event()
+    second_builder_entered = Event()
+
+    def save_key(current):
+        first_builder_entered.set()
+        assert release_first_builder.wait(3)
+        return current.model_copy(update={"api_key": "codetrail-concurrent-key"})
+
+    def save_blank_key_update():
+        second_attempted.set()
+
+        def update(current):
+            second_builder_entered.set()
+            return current.model_copy(update={"provider": "second-provider"})
+
+        return registry.update_model_config(update)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first_save = executor.submit(registry.update_model_config, save_key)
+        assert first_builder_entered.wait(2)
+        second_save = executor.submit(save_blank_key_update)
+        assert second_attempted.wait(2)
+        assert not second_builder_entered.wait(0.1)
+        release_first_builder.set()
+        first_save.result(timeout=3)
+        second_save.result(timeout=3)
+
+    assert registry.model_config.provider == "second-provider"
+    assert registry.model_config.api_key == "codetrail-concurrent-key"
 
 
 def file_manifest(root: Path) -> dict[str, str]:

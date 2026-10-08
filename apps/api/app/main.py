@@ -223,7 +223,7 @@ def create_app(
         http_request: Request,
         payload: SaveModelConfigRequest,
     ) -> ModelConfigSettingsResponse:
-        _require_local_write(http_request)
+        _require_model_config_write(http_request)
         return await run_in_threadpool(workspace_service.save_model_config_settings, payload)
 
     @application.post(
@@ -985,6 +985,13 @@ def _require_local_write(request: Request) -> None:
     host = request.client.host if request.client is not None else None
     if not is_loopback_host(host):
         raise ServiceError("forbidden", 403, "local import writes require a loopback client")
+
+
+def _require_model_config_write(request: Request) -> None:
+    _require_local_write(request)
+    origin = request.headers.get("origin")
+    if origin is not None and origin not in _allowed_origins():
+        raise ServiceError("forbidden", 403, "model configuration writes require an allowed web origin")
 
 
 def _error_response(status_code: int, code: str, message: str) -> JSONResponse:
