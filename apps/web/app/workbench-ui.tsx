@@ -61,6 +61,7 @@ import type {
   SymbolRecord,
   UnresolvedReference,
 } from "../lib/api";
+import { resolveGraphReturnPanel, type GraphPanelMode } from "../lib/workbench-navigation";
 import type { GraphState } from "../lib/graph";
 import { buildArchitectureGraph, type ArchitectureDirectory } from "../lib/architecture-graph";
 
@@ -870,7 +871,7 @@ function ContextHeader({
     <div className="ct-context-header">
       <div className="ct-context-copy">
         <p className="ct-overline">{viewMode === "session" ? "ISSUE SESSION" : "PROJECT KNOWLEDGE"}</p>
-        <h1>{project.selectedProject?.name ?? "建立一个代码理解工作区"}</h1>
+        <h1 title={project.selectedProject?.name ?? "建立一个代码理解工作区"}>{project.selectedProject?.name ?? "建立一个代码理解工作区"}</h1>
         <p>{project.selectedProject ? "浏览固定快照、入口和代码关系。" : "导入本地目录或 GitHub 仓库，开始代码理解工作区。"}</p>
       </div>
       {project.selectedProject ? (
@@ -992,8 +993,9 @@ const classificationLabels = {
 } as const;
 
 function ClassificationCounts({ counts, prefix }: { counts: OverviewClassificationCounts; prefix?: string }) {
+  const label = `${prefix ? `${prefix}；` : ""}当前规则已识别：入口 ${counts.application_entry}、API ${counts.public_api}、扩展点 ${counts.extension_point}、未识别 ${counts.unknown}`;
   return (
-    <span className="ct-classification-counts" aria-label={`${prefix ? `${prefix}；` : ""}当前规则已识别：入口 ${counts.application_entry}、API ${counts.public_api}、扩展点 ${counts.extension_point}、未识别 ${counts.unknown}`}>
+    <span className="ct-classification-counts" aria-label={label} title={label}>
       {`${prefix ? `${prefix} · ` : ""}入口 ${counts.application_entry} · API ${counts.public_api} · 扩展点 ${counts.extension_point} · 未识别 ${counts.unknown}`}
     </span>
   );
@@ -1770,19 +1772,18 @@ function RunPanel({ session }: { session: SessionUi }) {
       {mode === "real" ? <p className="ct-run-real-warning" role="note">真实模式会把冻结的 Issue、已保存消息和有界源码证据发送到服务端配置的模型，可能产生费用；未配置或失败时不会回退到 fixture。</p> : null}
       {session.runWriteError ? <p className="ct-inline-error" role="alert">{session.runWriteError}</p> : null}
       {session.runsError ? <div className="ct-error-block compact" role="alert"><span>{session.runsError}</span></div> : null}
-      {session.runs.length > 0 ? <div className="ct-run-history" aria-label="Run 历史">{session.runs.map((run) => <button type="button" key={run.run_id} className={`ct-run-history-item${run.run_id === session.selectedRunId ? " is-selected" : ""}`} onClick={() => session.onSelectRun(run.run_id)}><span><strong>{runStatusLabel(run.status)}</strong><small>{run.fixture_scenario ? runScenarioLabel(run.fixture_scenario) : runModeLabel(run)}</small></span><code>{run.run_id}</code><small>消息 1–{run.message_end_sequence} · {run.execution_version}</small></button>)}</div> : session.runsStatus === "loading" ? <LoadingNote>正在读取 Run 历史…</LoadingNote> : <div className="ct-run-empty">还没有 Run。可选择 fixture/real 显式启动；外部 Codex Run 会自动出现。</div>}
       {currentRun ? <div className="ct-run-detail">
         <div className="ct-run-detail-heading"><div><strong>{runStatusLabel(currentRun.status)}</strong><span data-state={session.runStatus}>{session.runStatus === "loading" ? "状态同步中" : session.runStatus === "error" ? "状态请求失败" : "已载入"}</span><span data-state={session.runStreamStatus}>事件：{runStreamStatusLabel(session.runStreamStatus)}</span></div>{active ? <button type="button" className="ct-button ct-button-danger" onClick={() => void session.onCancelRun()} disabled={session.runWriteStatus === "loading"}>取消 Run</button> : null}</div>
         {session.runStatusResponse ? <>
           <div className="ct-run-snapshot"><span><small>固定消息</small><code>1–{session.runStatusResponse.input.message_end_sequence}</code></span><span><small>INPUT HASH</small><code title={session.runStatusResponse.input.input_hash}>{shortHash(session.runStatusResponse.input.input_hash, 12)}</code></span><span><small>INDEX</small><code title={session.runStatusResponse.run.index_id}>{shortHash(session.runStatusResponse.run.index_id, 16)}</code></span><span><small>来源</small><code>{runModeLabel(session.runStatusResponse.run)}</code></span><span><small>版本</small><code>{session.runStatusResponse.run.execution_version}</code></span></div>
           {session.runError ? <p className="ct-inline-error" role="alert">{session.runError}</p> : null}
           {session.runStreamError ? <p className="ct-inline-note" role="status">{session.runStreamError}</p> : null}
-          {session.runEvents.length > 0 ? <div className="ct-run-events"><div className="ct-run-subheading"><strong>公开执行事件</strong><span>{session.runEvents.length} 条</span></div>{session.runEvents.map((event) => <div className="ct-run-event" key={`${event.run_id}-${event.sequence}`}><code>#{event.sequence}</code><span>{runEventLabel(event)}</span></div>)}</div> : null}
-          {session.runToolResults.length > 0 ? <div className="ct-run-tools"><div className="ct-run-subheading"><strong>工具结果</strong><span>{session.runToolResults.length} 项</span></div>{session.runToolResults.map((result) => <div className="ct-run-tool" key={result.request_id}><code>{result.tool}</code><span>{result.kind.endsWith("failed") ? "失败" : "已返回"} · #{result.completed_sequence}</span></div>)}</div> : null}
           {session.runReport ? <div className="ct-run-report"><div className="ct-run-subheading"><strong>{session.runReport.outcome === "candidate_found" ? "候选结论" : session.runReport.outcome === "insufficient_evidence" ? "证据不足" : session.runReport.outcome === "explanation" ? "流程解释" : "执行结果"}</strong><span>{session.runStatusResponse.run.execution_source === "codex" ? "CODEX / EXTERNAL" : session.runReport.fixture_mode ? "FIXTURE" : "REAL"}</span></div><p>{session.runReport.summary}</p>{session.runReport.limitations.length > 0 ? <div className="ct-run-evidence-list"><small>限制</small>{session.runReport.limitations.map((limitation) => <p key={limitation}>{limitation}</p>)}</div> : null}{session.runReport.candidate_links.length > 0 ? <div className="ct-run-impact-links"><small>候选位置与有界影响</small>{session.runReport.candidate_links.map((candidate) => <div className="ct-run-impact-link" key={candidate.candidate_id}><span><code>{candidate.source_symbol_id}</code><small>{candidate.relation}</small></span><button type="button" className="ct-link-button" onClick={() => session.onSelectRunImpact({ candidateId: candidate.candidate_id })}>查看影响范围</button></div>)}</div> : null}{session.runReport.findings.map((finding) => <div className="ct-run-finding" key={finding.finding_id}><strong>{finding.kind}</strong><span>{finding.text}</span>{finding.symbol_ids.length === 1 ? <button type="button" className="ct-link-button" onClick={() => session.onSelectRunImpact({ findingId: finding.finding_id })}>查看潜在影响</button> : <small className="ct-run-impact-unmapped">无唯一可映射符号 · 仅显示证据</small>}{finding.evidence_ids.map((evidenceId) => { const evidence = session.runReport?.evidence.find((item) => item.evidence_id === evidenceId); return evidence ? <button type="button" className="ct-link-button" key={evidenceId} onClick={() => session.onSelectRunEvidence(evidence)}>查看证据 · {evidence.path}:L{evidence.start_line}</button> : null; })}</div>)}{session.runReport.evidence.length > 0 ? <div className="ct-run-evidence-list"><small>本次报告证据</small>{session.runReport.evidence.map((evidence) => <button type="button" className="ct-link-button" key={evidence.evidence_id} onClick={() => session.onSelectRunEvidence(evidence)}>{evidence.path}:L{evidence.start_line}–L{evidence.end_line}</button>)}</div> : null}</div> : null}
           {session.runReport?.explanation ? <RunExplanation explanation={session.runReport.explanation} evidence={session.runReport.evidence} onSelectEvidence={session.onSelectRunEvidence} onSelectSymbol={session.onSelectRunSymbol} /> : null}
         </> : <LoadingNote>正在读取 Run 详情…</LoadingNote>}
       </div> : null}
+      {session.runStatusResponse && (session.runEvents.length > 0 || session.runToolResults.length > 0) ? <details className="ct-run-activity-details"><summary>执行历史 · {session.runEvents.length} 个事件 · {session.runToolResults.length} 个工具结果</summary>{session.runEvents.length > 0 ? <div className="ct-run-events"><div className="ct-run-subheading"><strong>公开执行事件</strong><span>{session.runEvents.length} 条</span></div>{session.runEvents.map((event) => <div className="ct-run-event" key={`${event.run_id}-${event.sequence}`}><code>#{event.sequence}</code><span>{runEventLabel(event)}</span></div>)}</div> : null}{session.runToolResults.length > 0 ? <div className="ct-run-tools"><div className="ct-run-subheading"><strong>工具结果</strong><span>{session.runToolResults.length} 项</span></div>{session.runToolResults.map((result) => <div className="ct-run-tool" key={result.request_id}><code>{result.tool}</code><span>{result.kind.endsWith("failed") ? "失败" : "已返回"} · #{result.completed_sequence}</span></div>)}</div> : null}</details> : null}
+      {session.runs.length > 0 ? <details className="ct-run-history-details"><summary>Run 历史 · {session.runs.length} 次</summary><div className="ct-run-history" aria-label="Run 历史">{session.runs.map((run) => <button type="button" key={run.run_id} className={`ct-run-history-item${run.run_id === session.selectedRunId ? " is-selected" : ""}`} onClick={() => session.onSelectRun(run.run_id)}><span><strong>{runStatusLabel(run.status)}</strong><small>{run.fixture_scenario ? runScenarioLabel(run.fixture_scenario) : runModeLabel(run)}</small></span><code>{run.run_id}</code><small>消息 1–{run.message_end_sequence} · {run.execution_version}</small></button>)}</div></details> : session.runsStatus === "loading" ? <LoadingNote>正在读取 Run 历史…</LoadingNote> : <div className="ct-run-empty">还没有 Run。可选择 fixture/real 显式启动；外部 Codex Run 会自动出现。</div>}
     </section>
   );
 }
@@ -1822,13 +1823,13 @@ function SessionView({ session, onBack }: { session: SessionUi; onBack: () => vo
   );
 }
 
-function EvidencePanel({ evidence }: { evidence: EvidenceUi }) {
+function EvidencePanel({ evidence, returnPanel, onReturnToPanel }: { evidence: EvidenceUi; returnPanel: "graph" | "feature_graph" | "impact" | null; onReturnToPanel: () => void }) {
   const selected = evidence.selectedSymbol;
   const sourceResponse = evidence.sourceResponse;
   const canExpandRelation = selected !== null && selected.kind !== "file" && !selected.symbol_id.startsWith("evidence-");
   return (
     <aside className="ct-side-panel ct-evidence-panel" aria-label="源码证据面板">
-      <div className="ct-side-panel-header"><div><p className="ct-overline">EVIDENCE</p><h2>源码证据</h2></div><button type="button" className="ct-close-button" onClick={evidence.onClose}>关闭</button></div>
+      <div className="ct-side-panel-header"><div><p className="ct-overline">EVIDENCE</p><h2>源码证据</h2></div><div>{returnPanel ? <button type="button" className="ct-link-button" onClick={onReturnToPanel}>返回{ returnPanel === "feature_graph" ? "功能图" : returnPanel === "impact" ? "影响范围" : "代码关系"}</button> : null}<button type="button" className="ct-close-button" onClick={evidence.onClose}>关闭</button></div></div>
       <div className="ct-panel-switch"><button type="button" className="is-active">源码证据</button><button type="button" onClick={() => void evidence.onExpandRelation()} disabled={!canExpandRelation}>代码关系</button>{evidence.hasHttpChain ? <button type="button" onClick={evidence.onReturnHttpChain}>HTTP 链路</button> : null}</div>
       <div className="ct-evidence-context"><span><small>PROJECT</small><code>{evidence.projectId ?? "—"}</code></span><span><small>INDEX</small><code>{evidence.index?.index_id ?? selected?.index_id ?? "—"}</code></span>{evidence.generationId ? <span><small>GENERATION</small><code>{evidence.generationId}</code></span> : null}{evidence.sourceResponse ? <span><small>EVIDENCE</small><code>{evidence.sourceResponse.evidence.evidence_id}</code></span> : null}</div>
       <div className="ct-panel-scroll">
@@ -2034,6 +2035,21 @@ export default function WorkbenchUi(props: WorkbenchUiProps) {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [operationPanel, setOperationPanel] = useState<OperationPanelState | null>(null);
   const [panelWidth, setPanelWidth] = useState(360);
+  const [returnPanel, setReturnPanel] = useState<GraphPanelMode | null>(null);
+  const graphScopeKey = `${props.project.selectedProject?.project_id ?? ""}:${props.index.response?.index.index_id ?? ""}`;
+  const previousGraphScopeKey = useRef(graphScopeKey);
+  const previousPanelMode = useRef(props.panelMode);
+  useEffect(() => {
+    const sameScope = previousGraphScopeKey.current === graphScopeKey;
+    const returnTarget = resolveGraphReturnPanel(props.panelMode, previousPanelMode.current, sameScope);
+    if (returnTarget) {
+      setReturnPanel(returnTarget);
+    } else if (!sameScope || props.panelMode !== "source") {
+      setReturnPanel(null);
+    }
+    previousGraphScopeKey.current = graphScopeKey;
+    previousPanelMode.current = props.panelMode;
+  }, [graphScopeKey, props.panelMode]);
   const closeOperation = () => {
     props.onImportFlowLeave();
     setOperationPanel(null);
@@ -2069,7 +2085,7 @@ export default function WorkbenchUi(props: WorkbenchUiProps) {
   const alert = props.index.error ?? props.project.error ?? props.session.error ?? props.localImport.error ?? props.githubImport.error ?? props.connection.error;
   const style = { "--ct-panel-width": `${panelWidth}px` } as CSSProperties;
   return (
-    <main className={`ct-app${props.panelMode !== "none" ? " has-side-panel" : ""}${props.panelMode === "impact" ? " has-impact-panel" : ""}`} style={style}>
+    <main className={`ct-app${props.panelMode !== "none" ? " has-side-panel" : ""}${props.panelMode === "graph" || props.panelMode === "feature_graph" || props.panelMode === "impact" ? " has-main-graph-panel" : ""}`} style={style}>
       <header className="ct-topbar">
         <button type="button" className="ct-mobile-menu" onClick={() => setMobileSidebarOpen(true)}>项目</button>
         <div className="ct-brand"><span className="ct-brand-mark">CT</span><span><strong>CODETRAIL</strong><small>CODE INTELLIGENCE WORKSPACE</small></span></div>
@@ -2084,9 +2100,9 @@ export default function WorkbenchUi(props: WorkbenchUiProps) {
           {alert ? <div className="ct-global-alert" role="alert"><span>{alert}</span>{props.connection.state === "error" ? <button type="button" className="ct-link-button" onClick={() => void props.connection.onCheck()}>重新检查</button> : null}</div> : null}
           {operationPanel ? <OperationPanel mode={operationPanel.mode} initialTab={operationPanel.tab} onClose={closeOperation} project={props.project} localImport={props.localImport} githubImport={props.githubImport} index={props.index} /> : props.viewMode === "session" ? <SessionView session={props.session} onBack={openKnowledge} /> : <KnowledgeView project={props.project} index={props.index} knowledge={props.knowledge} onOpenOperation={openOperation} />}
         </section>
-        {props.panelMode === "source" ? <EvidencePanel evidence={props.evidence} /> : props.panelMode === "graph" || props.panelMode === "feature_graph" || props.panelMode === "impact" ? <GraphPanel graph={props.graph} /> : null}
+        {props.panelMode === "source" ? <EvidencePanel evidence={props.evidence} returnPanel={returnPanel} onReturnToPanel={() => props.onPanelModeChange(returnPanel ?? "graph")} /> : props.panelMode === "graph" || props.panelMode === "feature_graph" || props.panelMode === "impact" ? <GraphPanel graph={props.graph} /> : null}
       </div>
-      {props.panelMode !== "none" && props.panelMode !== "impact" ? <div className="ct-panel-width-control"><label htmlFor="panel-width">面板宽度</label><input id="panel-width" type="range" min="300" max="440" step="10" value={panelWidth} onChange={(event) => setPanelWidth(Number(event.target.value))} /><output>{panelWidth}px</output></div> : null}
+      {props.panelMode === "source" ? <div className="ct-panel-width-control"><label htmlFor="panel-width">面板宽度</label><input id="panel-width" type="range" min="300" max="440" step="10" value={panelWidth} onChange={(event) => setPanelWidth(Number(event.target.value))} /><output>{panelWidth}px</output></div> : null}
       <footer className="ct-footer"><span>STATIC FACTS / FIXED EVIDENCE</span><span>Run：fixture / real 或 Codex 外部 Agent · 有界工具循环 · SSE 事件流与轮询回退</span><span>{props.index.response ? `${props.graph.codeSymbolCount} nodes · ${props.graph.codeEdgeCount} edges` : "No snapshot loaded"}</span></footer>
     </main>
   );

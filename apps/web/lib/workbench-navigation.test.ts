@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { readWorkbenchRoute, resolveWorkbenchProject, workbenchLocation } from "./workbench-navigation.ts";
+import { readWorkbenchRoute, resolveGraphReturnPanel, resolveWorkbenchProject, workbenchLocation } from "./workbench-navigation.ts";
 
 test("an explicit project URL wins over another tab's saved project and opens architecture", () => {
   const route = readWorkbenchRoute("?project_id=project-url");
@@ -36,4 +36,12 @@ test("returning to architecture replaces the session URL while preserving the ha
     workbenchLocation("https://codetrail.local/?project_id=project-a#overview", "project-a", "session-a"),
     "/?project_id=project-a&session_id=session-a#overview",
   );
+});
+
+test("graph evidence returns to the same panel and scope changes clear that return", () => {
+  const returnPanel = resolveGraphReturnPanel("source", "graph", true);
+
+  assert.equal(returnPanel, "graph");
+  assert.equal(resolveGraphReturnPanel(returnPanel ?? "source", "source", true), null);
+  assert.equal(resolveGraphReturnPanel("source", "graph", false), null);
 });

@@ -5,6 +5,22 @@ export type WorkbenchRoute = {
   error: string | null;
 };
 
+export type GraphPanelMode = "graph" | "feature_graph" | "impact";
+type WorkbenchPanelMode = GraphPanelMode | "source" | "none";
+
+export function resolveGraphReturnPanel(
+  currentPanel: WorkbenchPanelMode,
+  previousPanel: WorkbenchPanelMode,
+  sameScope: boolean,
+): GraphPanelMode | null {
+  if (!sameScope || currentPanel !== "source") {
+    return null;
+  }
+  return previousPanel === "graph" || previousPanel === "feature_graph" || previousPanel === "impact"
+    ? previousPanel
+    : null;
+}
+
 export function readWorkbenchRoute(search: string): WorkbenchRoute {
   const params = new URLSearchParams(search);
   const hasExplicitProject = params.has("project_id");
