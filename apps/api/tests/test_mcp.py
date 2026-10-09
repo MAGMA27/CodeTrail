@@ -13,9 +13,11 @@ from urllib.parse import urlsplit
 from mcp import Client
 from mcp.client.stdio import StdioServerParameters
 import pytest
+from pydantic import ValidationError
 
 from app.contracts import (
     CreateRunRequest,
+    FeatureGeneration,
     GetNeighborsParams,
     GetNeighborsSuccess,
     Issue,
@@ -25,6 +27,7 @@ from app.contracts import (
 )
 from app.main import create_app
 from app.service import ServiceError
+from app.storage import StorageInputError
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -2768,6 +2771,8 @@ def test_mcp_external_understanding_run_persists_ordered_explanation(tmp_path: P
             feature_generation = submitted_features.structured_content["generation"]
             assert feature_generation["source"] == "external"
             assert feature_generation["source_scope"] == "external_run"
+            assert feature_generation["external_run_id"] == run_id
+            assert feature_generation["external_session_id"] == session_id
             assert feature_generation["model"] == "host-test-model"
             assert feature_generation["usage"]["model_calls"] == 0
             assert feature_generation["usage"]["repair_calls"] == 0
@@ -2777,6 +2782,31 @@ def test_mcp_external_understanding_run_persists_ordered_explanation(tmp_path: P
             assert feature_generation["usage"]["output_chars"] == 0
             assert feature_generation["usage"]["input_tokens"] is None
             assert feature_generation["usage"]["output_tokens"] is None
+            legacy_generation = dict(feature_generation)
+            legacy_generation.pop("external_run_id")
+            legacy_generation.pop("external_session_id")
+            legacy_parsed = FeatureGeneration.model_validate(legacy_generation)
+            assert legacy_parsed.external_run_id is None
+            assert legacy_parsed.external_session_id is None
+            with pytest.raises(ValidationError, match="provenance"):
+                FeatureGeneration.model_validate({**legacy_generation, "external_run_id": run_id})
+
+            typed_generation = FeatureGeneration.model_validate(feature_generation)
+            with application.state.workspace_service.registry.store_for_repository("timeout-demo") as store:
+                with pytest.raises(StorageInputError, match="provenance"):
+                    store.save_feature_generation(
+                        typed_generation.model_copy(update={"external_run_id": "run-other"}),
+                        cache_key=typed_generation.cache_key,
+                        external_run_id=run_id,
+                        external_session_id=session_id,
+                    )
+                with pytest.raises(StorageInputError, match="provenance"):
+                    store.save_feature_generation(
+                        typed_generation,
+                        cache_key=typed_generation.cache_key,
+                        external_run_id="run-other",
+                        external_session_id=session_id,
+                    )
             generation_evidence_ids = {item["evidence_id"] for item in feature_generation["evidence"]}
             assert entry_evidence_id in generation_evidence_ids
             assert {reference["evidence_id"] for reference in submitted_features.structured_content["references"]} == generation_evidence_ids
@@ -2808,6 +2838,8 @@ def test_mcp_external_understanding_run_persists_ordered_explanation(tmp_path: P
                 if item["generation_id"] == feature_generation["generation_id"]
             )
             assert saved_external_summary["source"] == "external"
+            assert saved_external_summary["external_run_id"] == run_id
+            assert saved_external_summary["external_session_id"] == session_id
             assert saved_external_summary["usage"]["model_calls"] == 0
             mcp_feature_graph = await client.call_tool(
                 "get_feature_graph",
@@ -2958,6 +2990,8 @@ def test_mcp_external_understanding_run_persists_ordered_explanation(tmp_path: P
         if item["generation_id"] == feature_generation["generation_id"]
     )
     assert saved_summary["source"] == "external"
+    assert saved_summary["external_run_id"] == mcp_report["run_id"]
+    assert saved_summary["external_session_id"] == session_id
     assert saved_summary["usage"]["model_calls"] == 0
     status, http_feature_graph = request(
         application,

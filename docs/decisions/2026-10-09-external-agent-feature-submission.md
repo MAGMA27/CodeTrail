@@ -1,6 +1,6 @@
 # 决策：由外部 Agent 识别并提交项目功能
 
-Status: proposed
+Status: implemented
 
 ## 问题
 
@@ -12,7 +12,7 @@ MCP 的功能识别此前调用 CodeTrail 服务端模型；由 Codex 宿主调�
 
 WorkspaceService 复用 `_validate_model_output` 与现有 FeatureGeneration 存储。提交的 evidence ID 必须来自该 Run 持久化的 `run_read_source` 结果；服务端从结果恢复 Evidence，并针对固定 index 重读源码以验证 ID、路径、行范围和内容 hash。entry、module、symbol 也须由相同 index 概览、实际源码读取路径或 Run 搜索/邻接结果支持。项目、Session、Run、index、analysis kind、活动状态、时间和源码行/工具预算均在服务端校验。提交不创建静态 `CodeEdge`。
 
-外部 generation 记录 `source=external`、`source_scope=external_run`、`mode=real` 和可选宿主自报模型名；model 名只作显示标签。服务端模型与修复调用为 0，逐次模型字符用量为空、token 为 null，不能推断宿主 token 或费用。`FeatureGeneration`、历史摘要、版本及图读取仍是唯一保存与读取路径；HTTP 内置 real 生成功能保留原服务端模型路径。MCP 不再注册服务端 `generate_project_features`，`CODETRAIL_MCP_FEATURE_GENERATION_ENABLED` 不再有任何功能。
+外部 generation 记录 `source=external`、`source_scope=external_run`、`mode=real`、服务端确定的 `external_run_id`/`external_session_id` 和可选宿主自报模型名；客户端不能声明来源 ID，存储事务校验结果字段、调用 scope 与活动 Run 一致。model 名只作显示标签。服务端模型与修复调用为 0，逐次模型字符用量为空、token 为 null，不能推断宿主 token 或费用。generation 与历史摘要都保留来源 Run；工作台可打开该 Run。旧外部结果的两个来源字段均为空时继续读取并标明来源未记录，不从 cache key 或 evidence 猜测 Run。`FeatureGeneration`、历史摘要、版本及图读取仍是唯一保存与读取路径；HTTP 内置 real 生成功能保留原服务端模型路径。MCP 不再注册服务端 `generate_project_features`，`CODETRAIL_MCP_FEATURE_GENERATION_ENABLED` 不再有任何功能。
 
 幂等键按 Run 隔离：同 key/同内容复用已保存 generation，同 key/不同内容冲突；保存事务再次验证同一 active external understanding Run 未超时或终结。
 
@@ -22,8 +22,8 @@ WorkspaceService 复用 `_validate_model_output` 与现有 FeatureGeneration 存
 
 ## 验收与证据
 
-当前实现证据、定向测试、契约与 Schema 检查、工作台核对及独立审查结果由本阶段 memory-bank 进度记录维护；在主代理审查前保持 proposed。
+实现、真实 stdio MCP、契约/Schema 检查与主代理独立 PC 工作台验收已通过；当前 Codex 宿主尚未重载新工具 schema。详细测试、隔离数据和边界证据见本阶段 [memory-bank 进度记录](../../memory-bank/progress/2026-10-09-external-agent-feature-submission.md)。
 
 ## 后果
 
-FeatureGeneration 新增来源和 `external_run` scope，旧历史通过默认 `source=server` 保持可读。模型用量字段只描述服务端适配器；宿主实际模型调用和费用由宿主承担。MCP 客户端需重新加载工具定义，默认 HTTP 内置生成功能和历史/图读取不变。
+FeatureGeneration 新增来源和 `external_run` scope 及外部 Run provenance；旧 server/fixture 仍默认 null，早期 external 记录可作为未记录来源继续读取。模型用量字段只描述服务端适配器；宿主实际模型调用和费用由宿主承担。MCP 客户端需重新加载工具定义，默认 HTTP 内置生成功能和历史/图读取不变。

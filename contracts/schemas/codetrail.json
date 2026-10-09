@@ -6380,6 +6380,34 @@
           "title": "Evidence",
           "type": "array"
         },
+        "external_run_id": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "External Run Id"
+        },
+        "external_session_id": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "External Session Id"
+        },
         "features": {
           "items": {
             "$ref": "#/$defs/Feature"
@@ -6732,6 +6760,34 @@
               "minimum": 0,
               "title": "Evidence Count",
               "type": "integer"
+            },
+            "external_run_id": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "External Run Id"
+            },
+            "external_session_id": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "External Session Id"
             },
             "feature_count": {
               "minimum": 0,
@@ -7512,6 +7568,34 @@
               "title": "Evidence",
               "type": "array"
             },
+            "external_run_id": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "External Run Id"
+            },
+            "external_session_id": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "External Session Id"
+            },
             "features": {
               "items": {
                 "$ref": "#/$defs/Feature"
@@ -8239,6 +8323,34 @@
           "minimum": 0,
           "title": "Evidence Count",
           "type": "integer"
+        },
+        "external_run_id": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "External Run Id"
+        },
+        "external_session_id": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "External Session Id"
         },
         "feature_count": {
           "minimum": 0,
@@ -17746,6 +17858,34 @@
               "title": "Evidence Count",
               "type": "integer"
             },
+            "external_run_id": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "External Run Id"
+            },
+            "external_session_id": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "External Session Id"
+            },
             "feature_count": {
               "minimum": 0,
               "title": "Feature Count",
@@ -18476,6 +18616,34 @@
               "maxItems": 200,
               "title": "Evidence",
               "type": "array"
+            },
+            "external_run_id": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "External Run Id"
+            },
+            "external_session_id": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "External Session Id"
             },
             "features": {
               "items": {

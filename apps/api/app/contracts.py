@@ -2221,6 +2221,8 @@ class FeatureGeneration(VersionedModel):
     index: IndexSnapshot
     mode: FeatureGenerationMode
     source: FeatureGenerationSource = "server"
+    external_run_id: Identifier | None = None
+    external_session_id: Identifier | None = None
     model: str | None = Field(default=None, max_length=200)
     prompt_version: Identifier
     rules_version: Identifier
@@ -2317,6 +2319,10 @@ class FeatureGeneration(VersionedModel):
             raise ValueError("feature generation output exceeds its budget")
         if self.source_scope == "external_run" and self.source != "external":
             raise ValueError("external Run feature scope requires an external source")
+        if (self.external_run_id is None) != (self.external_session_id is None):
+            raise ValueError("external feature Run provenance must be complete")
+        if self.source == "server" and self.external_run_id is not None:
+            raise ValueError("server feature generations cannot claim external Run provenance")
         if self.source == "external" and (
             self.mode != "real"
             or self.source_scope != "external_run"
@@ -2343,6 +2349,8 @@ class FeatureGenerationSummary(VersionedModel):
     index: IndexSnapshot
     mode: FeatureGenerationMode
     source: FeatureGenerationSource = "server"
+    external_run_id: Identifier | None = None
+    external_session_id: Identifier | None = None
     model: str | None = Field(default=None, max_length=200)
     prompt_version: Identifier
     rules_version: Identifier
@@ -2371,6 +2379,10 @@ class FeatureGenerationSummary(VersionedModel):
             raise ValueError("successful feature generation summaries cannot include an error")
         if self.source_scope == "external_run" and self.source != "external":
             raise ValueError("external Run feature summary scope requires an external source")
+        if (self.external_run_id is None) != (self.external_session_id is None):
+            raise ValueError("external feature summary Run provenance must be complete")
+        if self.source == "server" and self.external_run_id is not None:
+            raise ValueError("server feature summaries cannot claim external Run provenance")
         if self.source == "external" and (
             self.mode != "real"
             or self.source_scope != "external_run"

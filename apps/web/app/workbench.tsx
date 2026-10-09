@@ -1995,7 +1995,7 @@ export default function Workbench() {
   }, [loadRunDetails, loadRunHistory, runHistory, runStatusResponse, selectedProjectId, selectedRunId, selectedSessionId]);
 
   const openSession = useCallback(
-    async (projectId: string, sessionId: string, knownSession?: Session) => {
+    async (projectId: string, sessionId: string, knownSession?: Session): Promise<boolean> => {
       sessionWriteController.current?.abort();
       sessionWriteRequestId.current += 1;
       runController.current?.abort();
@@ -2020,7 +2020,7 @@ export default function Workbench() {
           sessionOpenController.current = controller;
           const response = await getProjectSession(projectId, sessionId, controller.signal);
           if (!isLatestRequest(requestId, sessionOpenRequestId.current)) {
-            return;
+            return false;
           }
           session = response.session;
         }
@@ -2061,12 +2061,14 @@ export default function Workbench() {
         resetRunImpact();
         runCreateRequest.current = null;
         void loadRunHistory(projectId, sessionId);
+        return true;
       } catch (error) {
         if (isAbortError(error) || !isLatestRequest(requestId, sessionOpenRequestId.current)) {
-          return;
+          return false;
         }
         setSessionStatus("error");
         setSessionError(errorMessage(error));
+        return false;
       }
     },
     [closeRunEventStream, loadRunHistory, loadSessionMessages, replaceWorkbenchLocation, resetRunImpact, stopExternalRunDiscovery],
@@ -4391,6 +4393,20 @@ export default function Workbench() {
             setViewMode("overview");
             setPanelMode("feature_graph");
           }
+        },
+        onOpenExternalRun: (sessionId, runId) => {
+          if (!selectedProjectId) {
+            return;
+          }
+          const knownSession = sessions.find((session) => session.session_id === sessionId);
+          void openSession(selectedProjectId, sessionId, knownSession).then((opened) => {
+            if (!opened) {
+              return;
+            }
+            setSelectedRunId(runId);
+            setRunStatus("loading");
+            void loadRunDetails(selectedProjectId, sessionId, runId);
+          });
         },
         onSelectFeatureEvidence: selectFeatureEvidence,
       }}

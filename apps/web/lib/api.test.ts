@@ -807,6 +807,8 @@ function featureGeneration() {
       index: overview().index,
       mode: "fixture",
       source: "server",
+      external_run_id: null,
+      external_session_id: null,
       model: "fixture-feature-v1",
       prompt_version: "feature-summary-v2",
       rules_version: "python-entry-v1",
@@ -884,6 +886,8 @@ test("feature generation validator keeps host model claims outside server usage"
   const external = structuredClone(featureGeneration()) as unknown as {
     generation: {
       source: string;
+      external_run_id: string | null;
+      external_session_id: string | null;
       mode: string;
       source_scope: string;
       usage: {
@@ -910,6 +914,13 @@ test("feature generation validator keeps host model claims outside server usage"
   external.generation.usage.input_tokens = null;
   external.generation.usage.output_tokens = null;
   assert.equal(isFeatureGenerationResponse(external), true);
+
+  external.generation.external_run_id = "run-external-1";
+  external.generation.external_session_id = "session-external-1";
+  assert.equal(isFeatureGenerationResponse(external), true);
+  external.generation.external_session_id = null;
+  assert.equal(isFeatureGenerationResponse(external), false);
+  external.generation.external_session_id = "session-external-1";
 
   external.generation.usage.model_calls = 1;
   assert.equal(isFeatureGenerationResponse(external), false);
@@ -938,6 +949,8 @@ test("feature history and graph validators keep saved snapshot references explic
     index: generation.index,
     mode: generation.mode,
     source: generation.source,
+    external_run_id: generation.external_run_id,
+    external_session_id: generation.external_session_id,
     model: generation.model,
     prompt_version: generation.prompt_version,
     rules_version: generation.rules_version,

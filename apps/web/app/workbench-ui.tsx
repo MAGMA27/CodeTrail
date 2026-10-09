@@ -252,6 +252,7 @@ type KnowledgeUi = {
   onRunFeatureGeneration: (retryFailed?: boolean) => void | Promise<void>;
   onReloadFeatureGeneration: Action;
   onOpenFeatureGraph: Action;
+  onOpenExternalRun: (sessionId: string, runId: string) => void;
   onSelectFeatureEvidence: (evidence: Evidence) => void;
 };
 
@@ -1800,7 +1801,7 @@ function FeatureSection({ knowledge }: { knowledge: KnowledgeUi }) {
               <button type="button" key={item.generation_id} className={`ct-history-item${item.generation_id === knowledge.selectedFeatureGenerationId ? " is-selected" : ""}`} onClick={() => knowledge.onSelectFeatureGeneration(item.generation_id)} aria-pressed={item.generation_id === knowledge.selectedFeatureGenerationId}>
                 <span className="ct-history-top"><strong>{savedFeatureStatusLabel(item.status)}</strong><span>{item.source === "external" ? "外部 Agent" : item.mode === "fixture" ? "演示结果" : "服务端 AI"} · {formatDate(item.created_at)}</span></span>
                 <span className="ct-history-id"><code>{item.generation_id}</code><code>{item.index.revision} · {shortHash(item.index.snapshot_hash)}</code></span>
-                <span className="ct-history-stats">{item.feature_count} 功能 · {item.evidence_count} 证据 · {item.rules_version}</span>
+                <span className="ct-history-stats">{item.feature_count} 功能 · {item.evidence_count} 证据 · {item.rules_version}{item.external_run_id ? ` · 来源 Run ${item.external_run_id}` : item.source === "external" ? " · 来源 Run 未记录（历史版本）" : ""}</span>
                 <span className="ct-history-summary">{item.summary}</span>
                 {item.error ? <span className="ct-history-error">{item.error.message}</span> : null}
               </button>
@@ -1825,7 +1826,8 @@ function FeatureSection({ knowledge }: { knowledge: KnowledgeUi }) {
 function FeatureGenerationResult({ generation, knowledge }: { generation: FeatureGeneration; knowledge: KnowledgeUi }) {
   return (
     <div className="ct-feature-result">
-      <div className="ct-feature-meta"><span className={`ct-badge is-${generation.status}`}>{generation.status}</span><span className={`ct-badge is-${generation.mode}`}>{generation.source === "external" ? "外部 Agent" : generation.mode === "fixture" ? "演示结果" : "服务端 AI"}</span><code title={generation.source === "external" ? "宿主自报模型名，不代表服务端模型调用或费用" : generation.model ?? "未配置模型"}>{generation.source === "external" ? generation.model ? `宿主：${generation.model}` : "宿主模型未报告" : generation.model ?? "未配置模型"}</code><small>{generation.source_paths.length} 个源码文件 · {generation.usage.tool_calls} 次工具 · 服务端模型 {generation.usage.model_calls} 次 · {generation.usage.elapsed_ms} ms</small></div>
+      <div className="ct-feature-meta"><span className={`ct-badge is-${generation.status}`}>{generation.status}</span><span className={`ct-badge is-${generation.mode}`}>{generation.source === "external" ? "外部 Agent" : generation.mode === "fixture" ? "演示结果" : "服务端 AI"}</span><code title={generation.source === "external" ? "宿主自报模型名，不代表服务端模型调用或费用" : generation.model ?? "未配置模型"}>{generation.source === "external" ? generation.model ? `宿主自报：${generation.model}` : "宿主模型未报告" : generation.model ?? "未配置模型"}</code><small>{generation.source_paths.length} 个源码文件 · {generation.usage.tool_calls} 次工具 · 服务端模型 {generation.usage.model_calls} 次 · {generation.usage.elapsed_ms} ms</small></div>
+      {generation.source === "external" ? <div className="ct-feature-source-run">{generation.external_run_id && generation.external_session_id ? <button type="button" className="ct-link-button" onClick={() => knowledge.onOpenExternalRun(generation.external_session_id!, generation.external_run_id!)}>查看来源 Run · {generation.external_run_id}</button> : <small>来源 Run 未记录（历史版本）</small>}</div> : null}
       <p className="ct-feature-summary">{generation.summary}</p>
       {generation.error ? <div className="ct-error-block compact" role="alert"><span>{generation.error.message}</span><button type="button" className="ct-link-button" onClick={() => void knowledge.onRunFeatureGeneration(true)}>重试</button></div> : null}
       {generation.truncated ? <p className="ct-warning">上下文已截断：{generation.truncation_reason}</p> : null}

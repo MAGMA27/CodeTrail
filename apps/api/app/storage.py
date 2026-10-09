@@ -2620,6 +2620,11 @@ class IndexStore:
             raise StorageInputError("external feature persistence requires a complete Run scope")
         if (generation.source == "external") != (external_run_id is not None):
             raise StorageInputError("external feature results must be bound to an external Run")
+        if (
+            generation.external_run_id != external_run_id
+            or generation.external_session_id != external_session_id
+        ):
+            raise StorageInputError("external feature provenance must match the persisted Run scope")
         serialized = json.dumps(
             generation.model_dump(mode="json"),
             ensure_ascii=False,

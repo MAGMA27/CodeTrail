@@ -835,6 +835,8 @@ export type FeatureGeneration = {
   index: IndexSnapshot;
   mode: FeatureGenerationMode;
   source: FeatureGenerationSource;
+  external_run_id: string | null;
+  external_session_id: string | null;
   model: string | null;
   prompt_version: string;
   rules_version: string;
@@ -871,6 +873,8 @@ export type FeatureGenerationSummary = {
   index: IndexSnapshot;
   mode: FeatureGenerationMode;
   source: FeatureGenerationSource;
+  external_run_id: string | null;
+  external_session_id: string | null;
   model: string | null;
   prompt_version: string;
   rules_version: string;
@@ -2480,6 +2484,8 @@ function isFeatureGeneration(value: unknown): value is FeatureGeneration {
     !isString(value.project_id) ||
     !["fixture", "real"].includes(String(value.mode)) ||
     !["server", "external"].includes(String(value.source)) ||
+    !isNullableString(value.external_run_id) ||
+    !isNullableString(value.external_session_id) ||
     !isNullableString(value.model) ||
     !isString(value.prompt_version) ||
     !isString(value.rules_version) ||
@@ -2553,6 +2559,8 @@ function isFeatureGeneration(value: unknown): value is FeatureGeneration {
     return false;
   }
   if (
+    ((value.external_run_id === null) !== (value.external_session_id === null)) ||
+    (value.source === "server" && value.external_run_id !== null) ||
     (value.source === "external" &&
       (value.mode !== "real" || value.source_scope !== "external_run" || usage.model_calls !== 0 || usage.repair_calls !== 0 || modelInputChars.length > 0 || modelOutputChars.length > 0 || usage.input_tokens !== null || usage.output_tokens !== null)) ||
     (value.source === "server" && value.source_scope === "external_run")
@@ -2640,6 +2648,8 @@ export function isFeatureGenerationSummary(value: unknown): value is FeatureGene
     value.index.status !== "ready" ||
     !["fixture", "real"].includes(String(value.mode)) ||
     !["server", "external"].includes(String(value.source)) ||
+    !isNullableString(value.external_run_id) ||
+    !isNullableString(value.external_session_id) ||
     !isNullableString(value.model) ||
     !isString(value.prompt_version) ||
     !isString(value.rules_version) ||
@@ -2661,6 +2671,8 @@ export function isFeatureGenerationSummary(value: unknown): value is FeatureGene
     return false;
   }
   if (
+    ((value.external_run_id === null) !== (value.external_session_id === null)) ||
+    (value.source === "server" && value.external_run_id !== null) ||
     (value.source === "external" &&
       (value.mode !== "real" || value.source_scope !== "external_run" || value.usage.model_calls !== 0 || value.usage.repair_calls !== 0 || value.usage.model_input_chars.length > 0 || value.usage.model_output_chars.length > 0 || value.usage.input_tokens !== null || value.usage.output_tokens !== null)) ||
     (value.source === "server" && value.source_scope === "external_run")
