@@ -73,7 +73,7 @@ import {
   SIDEBAR_WIDTH_STORAGE_KEY,
   type SidebarWidthRange,
 } from "../lib/sidebar-width";
-import { moduleDefinitionRows as buildModuleDefinitionRows, type DirectImportTarget, type GraphState } from "../lib/graph";
+import { graphFitNodeIds, moduleDefinitionRows as buildModuleDefinitionRows, type DirectImportTarget, type GraphState } from "../lib/graph";
 import { architectureEntryModule, architectureEntrySummary, architectureOverviewEdgeVisible, architectureEdgeSides, buildArchitectureGraph, visibleArchitectureRelations, type ArchitectureDirectory, type ArchitecturePosition } from "../lib/architecture-graph";
 
 export type UiAsyncStatus = "idle" | "loading" | "success" | "empty" | "error";
@@ -1684,19 +1684,23 @@ function ArchitectureSection({ overview, knowledge, graph, panelMode, onPanelMod
         </div>
       </div>
       </> : <div className="ct-architecture-drilldown-toolbar">
-        <button type="button" className="ct-link-button" onClick={knowledge.onCloseArchitectureGraph}>← 返回项目架构</button>
-        <span>项目架构 <b>›</b> 模块内部结构 · <code title={architectureRoot?.symbol.path}>{architectureRoot?.symbol.path}</code></span>
-        <div className="ct-architecture-drilldown-modes" role="group" aria-label="模块视图">
-          <button type="button" className={`ct-link-button${moduleViewMode === "definitions" ? " is-selected" : ""}`} aria-pressed={moduleViewMode === "definitions"} onClick={() => architectureRoot && setModuleViewState({ rootId: architectureRoot.symbol.symbol_id, mode: "definitions", callSymbol: null })}>内部定义</button>
-          <button type="button" className={`ct-link-button${moduleViewMode === "imports" ? " is-selected" : ""}`} aria-pressed={moduleViewMode === "imports"} onClick={() => {
-            if (!architectureRoot) return;
-            setModuleViewState({ rootId: architectureRoot.symbol.symbol_id, mode: "imports", callSymbol: null });
-            knowledge.onOpenModuleImports(architectureRoot);
-          }}>静态导入依赖</button>
-          {moduleViewMode === "calls" ? <span className="ct-architecture-focus-status" role="status">静态调用 · {callRoot?.qualified_name ?? "所选符号"}</span> : null}
+        <div className="ct-architecture-drilldown-path">
+          <button type="button" className="ct-link-button" onClick={knowledge.onCloseArchitectureGraph}>← 返回项目架构</button>
+          <span>项目架构 <b>›</b> 模块内部结构 · <code title={architectureRoot?.symbol.path}>{architectureRoot?.symbol.path}</code></span>
         </div>
-        <button type="button" className="ct-button ct-button-secondary" onClick={() => onPanelModeChange("source")} disabled={!graph.selectedId}>查看所选源码</button>
-        <small>固定 index · {overview.index.index_id}</small>
+        <div className="ct-architecture-drilldown-actions">
+          <div className="ct-architecture-drilldown-modes" role="group" aria-label="模块视图">
+            <button type="button" className={`ct-link-button${moduleViewMode === "definitions" ? " is-selected" : ""}`} aria-pressed={moduleViewMode === "definitions"} onClick={() => architectureRoot && setModuleViewState({ rootId: architectureRoot.symbol.symbol_id, mode: "definitions", callSymbol: null })}>内部定义</button>
+            <button type="button" className={`ct-link-button${moduleViewMode === "imports" ? " is-selected" : ""}`} aria-pressed={moduleViewMode === "imports"} onClick={() => {
+              if (!architectureRoot) return;
+              setModuleViewState({ rootId: architectureRoot.symbol.symbol_id, mode: "imports", callSymbol: null });
+              knowledge.onOpenModuleImports(architectureRoot);
+            }}>静态导入依赖</button>
+            {moduleViewMode === "calls" ? <span className="ct-architecture-focus-status" role="status">静态调用 · {callRoot?.qualified_name ?? "所选符号"}</span> : null}
+          </div>
+          <button type="button" className="ct-button ct-button-secondary" onClick={() => onPanelModeChange("source")} disabled={!graph.selectedId}>查看所选源码</button>
+          <small>固定 index · {overview.index.index_id}</small>
+        </div>
       </div>}
       {focusedGroup && model.directories.length === 1 ? <p className="ct-architecture-filter-note">当前筛选下没有一跳相邻职责或目录。</p> : null}
       {isModuleDrilldown ? (
@@ -1731,7 +1735,7 @@ function ArchitectureSection({ overview, knowledge, graph, panelMode, onPanelMod
               <details><summary>{target.edges.length} 条原始静态边 · 查看源码依据</summary>{target.edges.map((edge) => <button type="button" className="ct-link-button" key={edge.edge_id} onClick={() => knowledge.onOpenArchitectureSource({ indexId: overview.index.index_id, path: edge.source_location.path, startLine: edge.source_location.start_line, endLine: edge.source_location.end_line })}>{edge.source_location.path}:L{edge.source_location.start_line}–L{edge.source_location.end_line}</button>)}</details>
             </article>)}
             {graph.codeStatus === "empty" ? <p className="ct-muted">未返回静态导入边；索引覆盖和查询预算见上方状态。</p> : null}
-          </section> : <section className="ct-architecture-module-relations" aria-label="所选符号静态调用关系">
+          </section> : <section className="ct-architecture-module-relations is-calls" aria-label="所选符号静态调用关系">
             <div className="ct-architecture-drilldown-status" role="status">
               <strong>{graph.codeStatus === "loading" ? `正在读取 ${callRoot?.qualified_name ?? "所选符号"} 的静态调用` : graph.codeStatus === "error" ? "静态调用读取失败" : graph.codeStatus === "empty" ? "当前符号没有返回静态调用边" : `${graph.codeSymbolCount} 个符号 · ${graph.codeEdgeCount} 条静态 calls`}</strong>
               {graph.codeTruncated ? <span>调用查询已截断 · {graph.codeTruncationReason}；未显示的调用仍可能存在。</span> : null}
@@ -2550,9 +2554,7 @@ function GraphFitController({
       return;
     }
     const timer = window.setTimeout(() => {
-      const nodeIds = focusNodeIds.length > 0
-        ? focusNodeIds
-        : model.nodes.map((node) => node.id);
+      const nodeIds = graphFitNodeIds(model.nodes, focusNodeIds);
       const bounds = flow.getNodesBounds(nodeIds);
       if (bounds.width === 0 && bounds.height === 0) {
         return;

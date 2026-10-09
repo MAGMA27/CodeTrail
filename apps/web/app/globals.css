@@ -299,19 +299,22 @@ code { font-family: var(--ct-mono); }
 .ct-architecture-warnings > span { display: block; padding: 2px 11px; }
 .ct-architecture-warnings > span:last-child { padding-bottom: 8px; }
 .ct-architecture-warnings code, .ct-architecture-drilldown-unresolved code { font-family: var(--ct-mono); }
-.ct-architecture-drilldown-toolbar { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 9px 11px; border: 1px solid var(--ct-border); border-radius: 8px; background: var(--ct-surface); }
-.ct-architecture-drilldown-toolbar > span { min-width: 0; flex: 1; color: var(--ct-muted); font-size: 11px; }
+.ct-architecture-drilldown-toolbar { display: grid; min-width: 0; gap: 8px; padding: 9px 11px; border: 1px solid var(--ct-border); border-radius: 8px; background: var(--ct-surface); }
+.ct-architecture-drilldown-path, .ct-architecture-drilldown-actions { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.ct-architecture-drilldown-path > span { min-width: 0; flex: 1; color: var(--ct-muted); font-size: 11px; }
+.ct-architecture-drilldown-actions > small { min-width: 0; overflow: hidden; color: var(--ct-faint); font-family: var(--ct-mono); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .ct-architecture-drilldown-toolbar code { display: inline-block; max-width: 100%; overflow: hidden; color: var(--ct-text); text-overflow: ellipsis; vertical-align: bottom; white-space: nowrap; }
-.ct-architecture-drilldown-toolbar small { color: var(--ct-faint); font-family: var(--ct-mono); font-size: 9px; }
 .ct-architecture-drilldown { display: grid; min-width: 0; gap: 8px; }
 .ct-architecture-drilldown-status { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 12px; color: var(--ct-muted); font-size: 10px; }
 .ct-architecture-drilldown-status strong { color: var(--ct-text); }
-.ct-architecture-drilldown .ct-graph-canvas { height: clamp(320px, calc(100dvh - 470px), 760px); min-height: 320px; border: 1px solid var(--ct-border-strong); border-radius: 9px; }
+.ct-architecture-drilldown .ct-graph-canvas { border: 1px solid var(--ct-border-strong); border-radius: 9px; }
 .ct-architecture-drilldown-unresolved { display: grid; gap: 4px; padding: 7px 10px; border-left: 3px solid var(--ct-warning); background: var(--ct-warning-soft); color: var(--ct-warning); font-size: 10px; }
 .ct-architecture-drilldown-unresolved summary { cursor: pointer; font-weight: 600; }
 .ct-architecture-drilldown-modes { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .ct-architecture-drilldown-modes .is-selected { border-color: var(--ct-blue); background: var(--ct-blue-soft); color: var(--ct-blue); }
 .ct-architecture-module-definitions, .ct-architecture-module-relations { display: grid; min-width: 0; min-height: 0; flex: 1; align-content: start; gap: 8px; overflow: auto; padding: 12px; border: 1px solid var(--ct-border-strong); border-radius: 9px; background: var(--ct-surface); }
+.ct-architecture-module-relations.is-calls { display: flex; flex-direction: column; overflow: hidden; }
+.ct-architecture-module-relations.is-calls .ct-graph-canvas { flex: 1; height: auto; min-height: 180px; }
 .ct-architecture-module-definitions > p, .ct-architecture-module-relations > p { margin: 0; }
 .ct-architecture-definition-list { display: grid; align-content: start; gap: 4px; }
 .ct-architecture-definition-row { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 8px; padding: 5px 7px; border-bottom: 1px solid var(--ct-border); }

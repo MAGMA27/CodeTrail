@@ -34,6 +34,21 @@ export type DirectImportTarget = {
   edges: CodeEdge[];
 };
 
+export function graphFitNodeIds(nodes: Array<{ id: string; parentId?: string }>, focusNodeIds: string[]): string[] {
+  if (focusNodeIds.length === 0) return nodes.map(({ id }) => id);
+
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const fitIds = new Set(focusNodeIds);
+  for (const id of focusNodeIds) {
+    let parentId = nodeById.get(id)?.parentId;
+    while (parentId && !fitIds.has(parentId)) {
+      fitIds.add(parentId);
+      parentId = nodeById.get(parentId)?.parentId;
+    }
+  }
+  return [...fitIds];
+}
+
 export const emptyGraphState: GraphState = {
   symbols: [],
   edges: [],

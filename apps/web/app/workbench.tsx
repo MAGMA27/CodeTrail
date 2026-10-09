@@ -3806,7 +3806,7 @@ export default function Workbench() {
           type: "symbol",
           parentId: `group:${group.key}`,
           extent: "parent",
-          position: { x: 16, y: 58 + symbolIndex * 78 },
+          position: { x: 16, y: 68 + symbolIndex * 78 },
           data: {
             symbol,
             selected: selectedId === symbol.symbol_id,

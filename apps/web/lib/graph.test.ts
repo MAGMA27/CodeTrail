@@ -5,6 +5,7 @@ import type { CodeEdge, ContextualCall, NeighborsResponse, SymbolRecord } from "
 import {
   emptyGraphState,
   directImportTargets,
+  graphFitNodeIds,
   groupSymbolsByDirectory,
   hasDirectedCallCycle,
   isCallsOnlyChainResponse,
@@ -189,7 +190,7 @@ test("symbol directory containers grow with their children and stay disjoint", (
 
   for (let index = 0; index < groups.length; index += 1) {
     const box = boxes[index];
-    const lastChildBottom = box.position.y + 58 + (groups[index].symbols.length - 1) * 78 + 60;
+    const lastChildBottom = box.position.y + 68 + (groups[index].symbols.length - 1) * 78 + 60;
     assert.ok(lastChildBottom <= box.position.y + box.height);
     for (let other = index + 1; other < groups.length; other += 1) {
       const next = boxes[other];
@@ -200,6 +201,25 @@ test("symbol directory containers grow with their children and stay disjoint", (
       assert.equal(overlaps, false, `${groups[index].key} overlaps ${groups[other].key}`);
     }
   }
+});
+
+test("graph focus bounds include only the focused nodes and their parent groups", () => {
+  const nodes = [
+    { id: "group:api" },
+    { id: "group:routes", parentId: "group:api" },
+    { id: "symbol:health", parentId: "group:routes" },
+    { id: "symbol:response", parentId: "group:routes" },
+    { id: "group:other" },
+    { id: "symbol:unused", parentId: "group:other" },
+  ];
+
+  assert.deepEqual(graphFitNodeIds(nodes, ["symbol:health", "symbol:response"]), [
+    "symbol:health",
+    "symbol:response",
+    "group:routes",
+    "group:api",
+  ]);
+  assert.deepEqual(graphFitNodeIds(nodes, []), nodes.map(({ id }) => id));
 });
 
 test("stale request IDs and unresolved references stay explicit", () => {
