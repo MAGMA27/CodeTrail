@@ -7,7 +7,7 @@ import {
   directImportTargets,
   groupSymbolsByDirectory,
   hasDirectedCallCycle,
-  isHttpCallChainResponse,
+  isCallsOnlyChainResponse,
   isLatestRequest,
   layoutSymbolGroups,
   mergeContextualCalls,
@@ -220,12 +220,12 @@ test("stale request IDs and unresolved references stay explicit", () => {
   assert.deepEqual(unresolvedForSymbol([unresolved], child.symbol_id), []);
 });
 
-test("HTTP chain results stay on the requested calls graph and expose bounded cycles", () => {
-  assert.equal(isHttpCallChainResponse(response, indexId, root.symbol_id), true);
-  assert.equal(isHttpCallChainResponse(response, "another-index", root.symbol_id), false);
-  assert.equal(isHttpCallChainResponse(response, indexId, child.symbol_id), false);
+test("calls-only entry chains stay on the requested graph and expose bounded cycles", () => {
+  assert.equal(isCallsOnlyChainResponse(response, indexId, root.symbol_id), true);
+  assert.equal(isCallsOnlyChainResponse(response, "another-index", root.symbol_id), false);
+  assert.equal(isCallsOnlyChainResponse(response, indexId, child.symbol_id), false);
   assert.equal(
-    isHttpCallChainResponse({
+    isCallsOnlyChainResponse({
       ...response,
       neighbors: [{ symbol: child, edge: { ...edge("edge-import", root.symbol_id, child.symbol_id), kind: "imports" } }],
     }, indexId, root.symbol_id),
@@ -242,9 +242,9 @@ test("HTTP chain results stay on the requested calls graph and expose bounded cy
     start_line: 20,
     end_line: 20,
   };
-  assert.equal(isHttpCallChainResponse({ ...response, unresolved: [unknownCall] }, indexId, root.symbol_id), true);
+  assert.equal(isCallsOnlyChainResponse({ ...response, unresolved: [unknownCall] }, indexId, root.symbol_id), true);
   assert.equal(
-    isHttpCallChainResponse({ ...response, unresolved: [{ ...unknownCall, source_symbol_id: "missing" }] }, indexId, root.symbol_id),
+    isCallsOnlyChainResponse({ ...response, unresolved: [{ ...unknownCall, source_symbol_id: "missing" }] }, indexId, root.symbol_id),
     false,
   );
   assert.equal(hasDirectedCallCycle(root.symbol_id, [edge("edge-out", root.symbol_id, child.symbol_id)]), false);

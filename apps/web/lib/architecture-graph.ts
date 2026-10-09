@@ -4,6 +4,7 @@ import type {
   OverviewHttpAssociation,
   OverviewModule,
   OverviewModuleRelation,
+  OverviewEntryPoint,
   ProjectOverview,
 } from "./api.ts";
 
@@ -11,6 +12,49 @@ export const ARCHITECTURE_MODULE_LIMIT = 40;
 
 export type ArchitecturePosition = { x: number; y: number };
 export type ArchitectureSide = "left" | "right" | "top" | "bottom";
+export type ArchitectureEntryCounts = Record<OverviewEntryPoint["kind"], number> & { unreturned: number; unmapped: number };
+
+export function architectureEntryModule(overview: ProjectOverview, entry: OverviewEntryPoint): OverviewModule | null {
+  const indexId = overview.index.index_id;
+  if (entry.index_id !== indexId) return null;
+  if (entry.kind === "fastapi_route") {
+    const handler = entry.handler_symbol;
+    if (!handler || handler.index_id !== indexId || handler.kind !== "function" || handler.path !== entry.path) return null;
+    return overview.modules.find((module) =>
+      module.index_id === indexId && module.symbol.index_id === indexId && module.symbol.kind === "module" && module.symbol.path === handler.path,
+    ) ?? null;
+  }
+  if (!entry.symbol_id) return null;
+  return overview.modules.find((module) =>
+    module.index_id === indexId && module.symbol.index_id === indexId && module.symbol.kind === "module" && module.symbol.path === entry.path &&
+    (module.module_id === entry.symbol_id || module.symbol.symbol_id === entry.symbol_id),
+  ) ?? null;
+}
+
+export function summarizeArchitectureEntries(
+  entryPointIds: string[],
+  entriesById: ReadonlyMap<string, OverviewEntryPoint>,
+  unmappedEntryPointIds: ReadonlySet<string> = new Set(),
+): ArchitectureEntryCounts {
+  const counts: ArchitectureEntryCounts = { fastapi_route: 0, python_main_module: 0, python_main_guard: 0, unreturned: 0, unmapped: 0 };
+  for (const entryPointId of new Set(entryPointIds)) {
+    const entry = entriesById.get(entryPointId);
+    if (entry && unmappedEntryPointIds.has(entryPointId)) counts.unmapped += 1;
+    else if (entry) counts[entry.kind] += 1;
+    else counts.unreturned += 1;
+  }
+  return counts;
+}
+
+export function architectureEntrySummary(counts: ArchitectureEntryCounts): string {
+  return [
+    counts.fastapi_route > 0 ? `HTTP入口 ${counts.fastapi_route}` : null,
+    counts.python_main_module > 0 ? `Python启动文件 ${counts.python_main_module}` : null,
+    counts.python_main_guard > 0 ? `__main__启动块 ${counts.python_main_guard}` : null,
+    counts.unmapped > 0 ? `入口模块未映射 ${counts.unmapped}` : null,
+    counts.unreturned > 0 ? `入口明细未返回 ${counts.unreturned}` : null,
+  ].filter((item): item is string => item !== null).join(" · ");
+}
 
 // ponytail: overview uses unobstructed straight edges; inspect a responsibility for folded dependencies.
 export function architectureOverviewEdgeVisible(source: string, target: string, directories: ArchitectureDirectory[]): boolean {
@@ -65,7 +109,7 @@ export type ArchitectureDirectory = {
   position: ArchitecturePosition;
   width: number;
   height: number;
-  visibleModules: Array<{ module: OverviewModule; position: ArchitecturePosition; highlighted: boolean }>;
+  visibleModules: Array<{ module: OverviewModule; position: ArchitecturePosition; highlighted: boolean; entryPointCounts: ArchitectureEntryCounts }>;
   loadedModuleCount: number;
   classificationCounts: OverviewClassificationCounts;
   omittedIndexModuleCount: number;
@@ -73,6 +117,7 @@ export type ArchitectureDirectory = {
   internalRelationCount: number;
   internalEdgeCount: number;
   internalHttpAssociationCount: number;
+  entryPointCounts: ArchitectureEntryCounts;
   highlighted: boolean;
   dependencyCycleGroupSize: number | null;
 };
@@ -326,6 +371,17 @@ export function buildArchitectureGraph(
       .filter((module) => module.index_id === indexId && module.symbol.index_id === indexId)
       .map((module) => [module.module_id, module]),
   );
+  const entriesById = new Map(
+    overview.entries
+      .filter((entry) => entry.index_id === indexId)
+      .map((entry) => [entry.entry_point_id, entry]),
+  );
+  const entryPointIdsByModule = new Map<string, Set<string>>();
+  for (const moduleId of moduleById.keys()) entryPointIdsByModule.set(moduleId, new Set());
+  for (const entry of entriesById.values()) {
+    const owner = architectureEntryModule(overview, entry);
+    if (owner) entryPointIdsByModule.get(owner.module_id)?.add(entry.entry_point_id);
+  }
   const groupByModuleId = new Map<string, string>();
   const moduleIdsByGroup = new Map<string, string[]>();
   for (const group of directoryGroups) {
@@ -337,6 +393,28 @@ export function buildArchitectureGraph(
       }
     }
   }
+  const entryPointIdsByGroup = new Map(directoryGroups.map((group) => {
+    const entryPointIds = new Set<string>();
+    const unmappedEntryPointIds = new Set<string>();
+    const groupModuleIds = new Set(moduleIdsByGroup.get(group.group_id) ?? []);
+    for (const moduleId of moduleIdsByGroup.get(group.group_id) ?? []) {
+      for (const entryPointId of entryPointIdsByModule.get(moduleId) ?? []) entryPointIds.add(entryPointId);
+    }
+    for (const entryPointId of group.entry_point_ids) {
+      const entry = entriesById.get(entryPointId);
+      if (!entry) entryPointIds.add(entryPointId);
+      else {
+        const owner = architectureEntryModule(overview, entry);
+        if (!owner) {
+          entryPointIds.add(entryPointId);
+          unmappedEntryPointIds.add(entryPointId);
+        } else if (groupModuleIds.has(owner.module_id)) {
+          entryPointIds.add(entryPointId);
+        }
+      }
+    }
+    return [group.group_id, { entryPointIds, unmappedEntryPointIds }] as const;
+  }));
 
   const selectedHttpGroup = overview.groups.find(
     (group) => group.group_kind === "http_path" && group.group_id === options.selectedHttpGroupId && group.index_id === indexId,
@@ -551,7 +629,8 @@ export function buildArchitectureGraph(
   const groupWidth = 350;
   const groupHeights = new Map(visibleDirectoryGroups.map((group) => {
     const visibleCount = visibleModuleIdsByGroup.get(group.group_id)?.length ?? 0;
-    return [group.group_id, visibleCount > 0 ? 82 + Math.ceil(visibleCount / 2) * 80 : 96] as const;
+    const hasEntries = (entryPointIdsByGroup.get(group.group_id)?.entryPointIds.size ?? 0) > 0;
+    return [group.group_id, (visibleCount > 0 ? 82 + Math.ceil(visibleCount / 2) * 80 : 96) + (hasEntries ? 28 : 0)] as const;
   }));
   const displayPairs = [...relationsByDisplayPair.values(), ...httpRelationsByDisplayPair.values()];
   const layout = layoutByDependency(
@@ -602,6 +681,7 @@ export function buildArchitectureGraph(
     const moduleIds = moduleIdsByGroup.get(group.group_id) ?? [];
     const loadedModules = moduleIds.filter((moduleId) => moduleById.has(moduleId));
     const visibleModules = visibleModuleIdsByGroup.get(group.group_id) ?? [];
+    const groupEntries = entryPointIdsByGroup.get(group.group_id) ?? { entryPointIds: new Set<string>(), unmappedEntryPointIds: new Set<string>() };
     const visibleModuleViews = visibleModules.map((moduleId, moduleIndex) => {
       const module = moduleById.get(moduleId)!;
       visibleModuleCount += 1;
@@ -611,9 +691,10 @@ export function buildArchitectureGraph(
         module,
         position: {
           x: 12 + (moduleIndex % 2) * 166,
-          y: 67 + Math.floor(moduleIndex / 2) * 80,
+          y: 67 + (groupEntries.entryPointIds.size > 0 ? 28 : 0) + Math.floor(moduleIndex / 2) * 80,
         },
         highlighted: routeHighlighted,
+        entryPointCounts: summarizeArchitectureEntries([...(entryPointIdsByModule.get(module.module_id) ?? [])], entriesById),
       };
     });
     const internal = internalByGroup.get(group.group_id) ?? { relationCount: 0, edgeCount: 0 };
@@ -633,6 +714,7 @@ export function buildArchitectureGraph(
         counts.unknown += module.classification_counts.unknown;
         return counts;
       }, { application_entry: 0, public_api: 0, extension_point: 0, unknown: 0 }),
+      entryPointCounts: summarizeArchitectureEntries([...groupEntries.entryPointIds], entriesById, groupEntries.unmappedEntryPointIds),
       omittedIndexModuleCount: moduleIds.length - loadedModules.length,
       omittedByCanvasLimit: expandedGroups.has(group.group_id) ? loadedModules.length - visibleModules.length : 0,
       internalRelationCount: internal.relationCount,

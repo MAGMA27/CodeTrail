@@ -6,12 +6,13 @@ import type {
   OverviewClassificationCounts,
   OverviewGroup,
   OverviewHttpAssociation,
+  OverviewEntryPoint,
   OverviewModule,
   OverviewModuleRelation,
   ProjectOverview,
   SymbolRecord,
 } from "./api.ts";
-import { ARCHITECTURE_MODULE_LIMIT, architectureOverviewEdgeVisible, architectureEdgeSides, buildArchitectureGraph, visibleArchitectureRelations } from "./architecture-graph.ts";
+import { ARCHITECTURE_MODULE_LIMIT, architectureEntrySummary, architectureOverviewEdgeVisible, architectureEdgeSides, buildArchitectureGraph, visibleArchitectureRelations } from "./architecture-graph.ts";
 
 const indexId = "index-architecture-test";
 
@@ -44,6 +45,36 @@ function directory(id: string, path: string, moduleIds: string[]): OverviewGroup
     label: `SOURCE ${path}`,
     module_ids: moduleIds,
     entry_point_ids: [],
+  };
+}
+
+function entryPoint(entryPointId: string, kind: OverviewEntryPoint["kind"]): OverviewEntryPoint {
+  const handler: SymbolRecord | null = kind === "fastapi_route" ? {
+    symbol_id: `handler-${entryPointId}`,
+    index_id: indexId,
+    path: "src/main.py",
+    qualified_name: "main.health",
+    kind: "function",
+    start_line: 10,
+    end_line: 12,
+  } : null;
+  return {
+    entry_point_id: entryPointId,
+    index_id: indexId,
+    path: "src/main.py",
+    start_line: 10,
+    end_line: 12,
+    kind,
+    rule_id: kind,
+    label: entryPointId,
+    symbol_id: handler?.symbol_id ?? "main-module",
+    http_method: kind === "fastapi_route" ? "GET" : null,
+    declared_path: kind === "fastapi_route" ? "/health" : null,
+    handler_symbol: handler,
+    evidence: null,
+    evidence_error: null,
+    direct_symbol_ids: [],
+    unresolved_ids: [],
   };
 }
 
@@ -112,6 +143,7 @@ function overview(
   groups: OverviewGroup[],
   moduleRelations: OverviewModuleRelation[],
   httpAssociations: OverviewHttpAssociation[] = [],
+  entries: OverviewEntryPoint[] = [],
 ): ProjectOverview {
   return {
     schema_version: "0.1.0",
@@ -139,7 +171,7 @@ function overview(
       content_hash: "hash",
       kind: "source",
     } : null,
-    entries: [],
+    entries,
     classifications: [],
     classification_coverage: {
       total: 0,
@@ -244,6 +276,45 @@ test("folded directories summarize returned module classifications without addin
     { application_entry: 1, public_api: 2, extension_point: 0, unknown: 0 },
     { application_entry: 0, public_api: 0, extension_point: 1, unknown: 1 },
   ]);
+});
+
+test("architecture containers label entry owners, not every reachable module", () => {
+  const module = moduleRecord("main-module", "src/main.py");
+  module.entry_point_ids = ["main-entry", "guard-entry", "missing-entry"];
+  const reachableModule = moduleRecord("reachable-helper", "src/helper.py", true);
+  reachableModule.entry_point_ids = ["route-entry", "main-entry", "guard-entry", "missing-entry"];
+  const unmappedEntry = { ...entryPoint("unmapped-entry", "python_main_guard"), path: "src/unmapped.py", symbol_id: "absent-module" };
+  const role = { ...directory("role-main", "main", [module.module_id, reachableModule.module_id]), group_kind: "responsibility" as const, group_key: "main", label: "Main", entry_point_ids: ["route-entry", "main-entry", "unmapped-entry", "missing-entry"] };
+  const value = overview([module, reachableModule], [role], [], [], [
+    entryPoint("route-entry", "fastapi_route"),
+    entryPoint("main-entry", "python_main_module"),
+    entryPoint("guard-entry", "python_main_guard"),
+    unmappedEntry,
+  ]);
+
+  const folded = buildArchitectureGraph(value);
+  assert.deepEqual(folded.directories[0].entryPointCounts, {
+    fastapi_route: 1,
+    python_main_module: 1,
+    python_main_guard: 1,
+    unmapped: 1,
+    unreturned: 1,
+  });
+  assert.equal(architectureEntrySummary(folded.directories[0].entryPointCounts), "HTTP入口 1 · Python启动文件 1 · __main__启动块 1 · 入口模块未映射 1 · 入口明细未返回 1");
+
+  const expanded = buildArchitectureGraph(value, { expandedGroupIds: [role.group_id] });
+  const mainView = expanded.directories[0].visibleModules.find(({ module: item }) => item.module_id === module.module_id)!;
+  const helperView = expanded.directories[0].visibleModules.find(({ module: item }) => item.module_id === reachableModule.module_id)!;
+  assert.deepEqual(mainView.entryPointCounts, {
+    fastapi_route: 1,
+    python_main_module: 1,
+    python_main_guard: 1,
+    unmapped: 0,
+    unreturned: 0,
+  });
+  assert.deepEqual(helperView.entryPointCounts, { fastapi_route: 0, python_main_module: 0, python_main_guard: 0, unmapped: 0, unreturned: 0 });
+  assert.equal(mainView.position.y, 95);
+  assert.equal(helperView.position.y, 95);
 });
 
 test("responsibility containers preserve source-to-target dependency direction", () => {

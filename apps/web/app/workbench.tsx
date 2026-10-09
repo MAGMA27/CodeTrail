@@ -15,6 +15,7 @@ import {
 } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { architectureEntryModule } from "../lib/architecture-graph";
 import {
   ApiRequestError,
   IMPORT_STATUS_REQUEST_TIMEOUT_MS,
@@ -127,7 +128,7 @@ import {
   directImportTargets,
   groupSymbolsByDirectory,
   hasDirectedCallCycle,
-  isHttpCallChainResponse,
+  isCallsOnlyChainResponse,
   isLatestRequest,
   layoutSymbolGroups,
   mergeContextualCalls,
@@ -157,6 +158,12 @@ type ImpactSelection = {
 type HttpEntryChain = {
   association: OverviewHttpAssociation;
   handler: SymbolRecord;
+};
+
+type OverviewEntryCallChain = {
+  entry: OverviewEntryPoint;
+  root: SymbolRecord;
+  startKind: "handler" | "module";
 };
 
 type SymbolNodeData = {
@@ -527,6 +534,7 @@ export default function Workbench() {
   const [selectedOverviewEntryId, setSelectedOverviewEntryId] = useState<string | null>(null);
   const [selectedOverviewGroupId, setSelectedOverviewGroupId] = useState<string | null>(null);
   const [httpEntryChain, setHttpEntryChain] = useState<HttpEntryChain | null>(null);
+  const [overviewEntryCallChain, setOverviewEntryCallChain] = useState<OverviewEntryCallChain | null>(null);
   const [featureStatus, setFeatureStatus] = useState<AsyncStatus>("idle");
   const [featureGeneration, setFeatureGeneration] = useState<FeatureGeneration | null>(null);
   const [featureError, setFeatureError] = useState<string | null>(null);
@@ -980,6 +988,7 @@ export default function Workbench() {
     setSelectedOverviewEntryId(null);
     setSelectedOverviewGroupId(null);
     setHttpEntryChain(null);
+    setOverviewEntryCallChain(null);
     featureRequestId.current += 1;
     featureIdempotencyKey.current = null;
     setFeatureStatus("idle");
@@ -3234,11 +3243,13 @@ export default function Workbench() {
       requestedDirection = direction,
       requestedEdgeKinds = edgeKinds,
       requestedHttpChain: HttpEntryChain | null = null,
+      requestedEntryCallChain: OverviewEntryCallChain | null = null,
     ) => {
       if (!selectedProjectId) {
         return;
       }
       setHttpEntryChain(requestedHttpChain);
+      setOverviewEntryCallChain(requestedEntryCallChain);
       graphController.current?.abort();
       const controller = new AbortController();
       graphController.current = controller;
@@ -3266,8 +3277,11 @@ export default function Workbench() {
         if (!isLatestRequest(requestId, graphRequestId.current)) {
           return;
         }
-        if (requestedHttpChain && !isHttpCallChainResponse(response, indexId, requestedHttpChain.handler.symbol_id)) {
+        if (requestedHttpChain && !isCallsOnlyChainResponse(response, indexId, requestedHttpChain.handler.symbol_id)) {
           throw new Error("链路响应与选定 HTTP 关联、handler 或静态 calls 快照不一致。");
+        }
+        if (requestedEntryCallChain && !isCallsOnlyChainResponse(response, indexId, requestedEntryCallChain.root.symbol_id)) {
+          throw new Error("入口 calls 响应与选定入口、起点或静态 calls 快照不一致。");
         }
         setGraph((previous) =>
           mergeNeighborGraph(replace || graphIndexChanged ? emptyGraphState : previous, response),
@@ -3353,9 +3367,12 @@ export default function Workbench() {
 
   const selectOverviewEntry = useCallback(
     (entry: OverviewEntryPoint) => {
+      if (!indexResponse || !overview || !selectedProjectId || overview.project_id !== selectedProjectId || overview.index.index_id !== indexResponse.index.index_id || entry.index_id !== indexResponse.index.index_id) return;
+      setHttpEntryChain(null);
+      setOverviewEntryCallChain(null);
       resetModuleSymbols();
       setSelectedOverviewEntryId(entry.entry_point_id);
-      if (!entry.evidence || !indexResponse || !selectedProjectId) {
+      if (!entry.evidence) {
         setSelectedId(null);
         setLinkedSymbol(null);
         setSourceResponse(null);
@@ -3378,26 +3395,47 @@ export default function Workbench() {
         },
       );
     },
-    [indexResponse, loadLinkedEvidence, resetModuleSymbols, selectedProjectId],
+    [indexResponse, loadLinkedEvidence, overview, resetModuleSymbols, selectedProjectId],
   );
+
+  const focusOverviewEntry = useCallback((entry: OverviewEntryPoint) => {
+    if (!indexResponse || !overview || !selectedProjectId || overview.project_id !== selectedProjectId || overview.index.index_id !== indexResponse.index.index_id || entry.index_id !== indexResponse.index.index_id) return;
+    setSelectedOverviewEntryId(entry.entry_point_id);
+  }, [indexResponse, overview, selectedProjectId]);
 
   const openOverviewEntryGraph = useCallback(
     (entry: OverviewEntryPoint) => {
-      if (!indexResponse || !overview) {
-        return;
-      }
-      const symbol = entry.handler_symbol
-        ?? overview.modules.find((candidate) => candidate.module_id === entry.symbol_id)?.symbol;
-      if (!symbol) {
-        return;
-      }
-      selectSymbol(symbol);
+      if (!indexResponse || !overview || !selectedProjectId) return;
+      const indexId = indexResponse.index.index_id;
+      if (overview.project_id !== selectedProjectId || overview.index.index_id !== indexId || entry.index_id !== indexId) return;
+      const module = architectureEntryModule(overview, entry);
+      const root = entry.kind === "fastapi_route" ? entry.handler_symbol : module?.symbol;
+      const startKind = entry.kind === "fastapi_route" ? "handler" : "module";
+      if (!root || root.index_id !== indexId || (entry.kind === "fastapi_route" && (root.kind !== "function" || root.path !== entry.path)) || (entry.kind !== "fastapi_route" && root.kind !== "module")) return;
+      const callChain: OverviewEntryCallChain = { entry, root, startKind };
+      selectSymbol(root);
+      setSelectedOverviewEntryId(entry.entry_point_id);
       setViewMode("overview");
       setPanelMode("graph");
-      void loadNeighborhood(indexResponse.index.index_id, symbol.symbol_id, true);
+      void loadNeighborhood(indexId, root.symbol_id, true, "callees", ["calls"], null, callChain);
     },
-    [indexResponse, loadNeighborhood, overview, selectSymbol],
+    [indexResponse, loadNeighborhood, overview, selectSymbol, selectedProjectId],
   );
+
+  const openEntryCallChainSource = useCallback(() => {
+    const entry = overviewEntryCallChain?.entry;
+    const evidence = entry?.evidence;
+    if (!entry || !evidence || !indexResponse || !overview || !selectedProjectId || overview.project_id !== selectedProjectId || overview.index.index_id !== indexResponse.index.index_id || entry.index_id !== indexResponse.index.index_id || evidence.index_id !== indexResponse.index.index_id) return;
+    void loadLinkedEvidence({
+      projectId: selectedProjectId,
+      indexId: evidence.index_id,
+      path: evidence.path,
+      startLine: evidence.start_line,
+      endLine: evidence.end_line,
+      contentHash: evidence.content_hash,
+      evidenceId: evidence.evidence_id,
+    });
+  }, [indexResponse, loadLinkedEvidence, overview, overviewEntryCallChain, selectedProjectId]);
 
   const openHttpEntryChain = useCallback(
     (association: OverviewHttpAssociation) => {
@@ -3423,6 +3461,7 @@ export default function Workbench() {
         graphController.current?.abort();
         graphRequestId.current += 1;
         setHttpEntryChain(null);
+        setOverviewEntryCallChain(null);
         setGraph(emptyGraphState);
         setGraphIndexId(null);
         setContextualCalls([]);
@@ -3433,6 +3472,7 @@ export default function Workbench() {
         return;
       }
       setSelectedOverviewEntryId(route.entry_point_id);
+      setOverviewEntryCallChain(null);
       setViewMode("overview");
       setPanelMode("graph");
       void loadNeighborhood(indexId, handler.symbol_id, true, "callees", ["calls"], {
@@ -3443,10 +3483,11 @@ export default function Workbench() {
     [indexResponse, loadNeighborhood, overview, selectedProjectId],
   );
 
-  const exitHttpEntryChain = useCallback(() => {
+  const exitEntryChain = useCallback(() => {
     graphController.current?.abort();
     graphRequestId.current += 1;
     setHttpEntryChain(null);
+    setOverviewEntryCallChain(null);
     setGraph(emptyGraphState);
     setGraphIndexId(null);
     setContextualCalls([]);
@@ -3480,6 +3521,7 @@ export default function Workbench() {
     setSelectedOverviewGroupId(group.group_id);
     setSelectedOverviewEntryId(null);
     setHttpEntryChain(null);
+    setOverviewEntryCallChain(null);
     setGraphIndexId(null);
     setContextualCalls([]);
     setPanelMode("none");
@@ -3504,6 +3546,7 @@ export default function Workbench() {
       setGraphError(null);
       setContextualCalls([]);
       setHttpEntryChain(null);
+      setOverviewEntryCallChain(null);
       setExpandedGroups(new Set());
       knownGroupKeys.current.clear();
       openModuleSymbols(module);
@@ -3672,8 +3715,9 @@ export default function Workbench() {
   }, [groups]);
 
   const flowModel = useMemo(() => {
-    if (httpEntryChain) {
-      const depthById = new Map<string, number>([[httpEntryChain.handler.symbol_id, 0]]);
+    const callRoot = httpEntryChain?.handler ?? overviewEntryCallChain?.root;
+    if (callRoot) {
+      const depthById = new Map<string, number>([[callRoot.symbol_id, 0]]);
       for (let depth = 0; depth < 2; depth += 1) {
         for (const edge of graph.edges) {
           if (edge.kind === "calls" && depthById.get(edge.source_id) === depth && !depthById.has(edge.target_id)) {
@@ -3806,11 +3850,14 @@ export default function Workbench() {
         labelBgPadding: [5, 3] as [number, number],
       }));
     return { nodes, edges };
-  }, [expandedGroups, graph.edges, graph.symbols, groups, httpEntryChain, indexResponse, loadNeighborhood, selectedId, selectSymbol, toggleGroup]);
+  }, [expandedGroups, graph.edges, graph.symbols, groups, httpEntryChain, indexResponse, loadNeighborhood, overviewEntryCallChain, selectedId, selectSymbol, toggleGroup]);
 
   const httpChainHasCycle = useMemo(
-    () => Boolean(httpEntryChain && hasDirectedCallCycle(httpEntryChain.handler.symbol_id, graph.edges)),
-    [graph.edges, httpEntryChain],
+    () => {
+      const rootSymbolId = httpEntryChain?.handler.symbol_id ?? overviewEntryCallChain?.root.symbol_id;
+      return rootSymbolId ? hasDirectedCallCycle(rootSymbolId, graph.edges) : false;
+    },
+    [graph.edges, httpEntryChain, overviewEntryCallChain],
   );
 
   const codeFocusNodeIds = useMemo(() => {
@@ -4200,6 +4247,7 @@ export default function Workbench() {
           graphController.current?.abort();
           graphRequestId.current += 1;
           setHttpEntryChain(null);
+          setOverviewEntryCallChain(null);
           setProjectError(null);
           sessionLink.current = null;
           sessionLinkApplied.current = true;
@@ -4345,6 +4393,7 @@ export default function Workbench() {
         moduleSymbolsPage,
         moduleSymbolsStatus,
         moduleSymbolsError,
+        onFocusOverviewEntry: focusOverviewEntry,
         onSelectOverviewEntry: selectOverviewEntry,
         onSelectOverviewGroup: selectOverviewGroup,
         onClearOverviewGroup: clearOverviewGroup,
@@ -4423,7 +4472,11 @@ export default function Workbench() {
         sourceHasNext: Boolean(sourceHasNext),
         connectedEdges,
         selectedUnresolved,
-        hasHttpChain: httpEntryChain !== null,
+        entryChainLabel: httpEntryChain
+          ? "返回 HTTP 入口链路"
+          : overviewEntryCallChain
+            ? "返回入口 calls 链路"
+            : null,
         onLoadSource: loadSource,
         onRetrySource: () => {
           if (selectedSymbol) {
@@ -4437,10 +4490,10 @@ export default function Workbench() {
             void loadNeighborhood(selectedSymbol.index_id, selectedSymbol.symbol_id, false);
           }
         },
-        onReturnHttpChain: () => setPanelMode("graph"),
+        onReturnEntryChain: () => setPanelMode("graph"),
         onClose: () => {
-          if (httpEntryChain) {
-            exitHttpEntryChain();
+          if (httpEntryChain || overviewEntryCallChain) {
+            exitEntryChain();
           } else {
             setPanelMode("none");
           }
@@ -4464,13 +4517,21 @@ export default function Workbench() {
         onSelectContextualCallEvidence: openContextualCallEvidence,
         codeHasCycle: httpChainHasCycle,
         httpChain: httpEntryChain,
+        entryCallChain: overviewEntryCallChain,
         onSelectHttpChainEvidence: selectFeatureEvidence,
+        onSelectEntryChainSource: openEntryCallChainSource,
         onRetryHttpChain: () => {
           if (httpEntryChain) {
             openHttpEntryChain(httpEntryChain.association);
           }
         },
-        onExitHttpChain: exitHttpEntryChain,
+        onRetryEntryCallChain: () => {
+          if (overviewEntryCallChain) {
+            openOverviewEntryGraph(overviewEntryCallChain.entry);
+          }
+        },
+        onExitHttpChain: exitEntryChain,
+        onExitEntryCallChain: exitEntryChain,
         codeFocusNodeIds,
         codeSymbolCount: graph.symbols.length,
         codeEdgeCount: graph.edges.length,
@@ -4518,8 +4579,8 @@ export default function Workbench() {
         selectedId,
         onPanelModeChange: setPanelMode,
         onClose: () => {
-          if (httpEntryChain) {
-            exitHttpEntryChain();
+          if (httpEntryChain || overviewEntryCallChain) {
+            exitEntryChain();
           } else {
             setPanelMode("none");
           }
