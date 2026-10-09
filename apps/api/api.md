@@ -2,7 +2,7 @@
 
 ## 状态
 
-已实现 Project/Index/Session、可恢复回收站、来源导入、O1 `python-entry-v6+http-shape-v2+architecture-v1` 概览（入口、显式职责/HTTP/源码结构组、聚合模块关系及同快照 HTTP 客户端/路由方法路径形状关联）、O2/O3 功能生成与 P2-R1/P2-R2 fixture/real Run 的 HTTP 和本地 MCP 入口；索引支持本地 `.py`/`.ts`/`.tsx` 源码 freshness 与显式更新，Python 文件缓存和 TypeScript 有界冷 AST 解析隔离。Run 已覆盖冻结输入、受限工具执行、单 Agent 有界模型循环、公开事件、持久化 SSE 回放/续接、Issue/代码理解报告、取消和重启中断；P3-I1 已增加从保存报告候选/发现读取固定快照的有界静态影响查询；Codex external Agent 已能通过本地 MCP 创建并驱动同一持久化 Run。HTTP method/path association 仅表达静态形状一致，不声称运行时网络目标；真实供应商语义质量仍未验证。
+已实现 Project/Index/Session、可恢复回收站、来源导入、O1 `python-entry-v6+http-shape-v2+architecture-v1` 概览（入口、显式职责/HTTP/源码结构组、聚合模块关系及同快照 HTTP 客户端/路由方法路径形状关联）、O2/O3 内置 HTTP 功能生成与 P2-R1/P2-R2 fixture/real Run；本地 MCP 提供共用历史/功能图读取和可选 Codex external Run，以及由宿主 Agent 识别后提交的功能结果。索引支持本地 `.py`/`.ts`/`.tsx` 源码 freshness 与显式更新，Python 文件缓存和 TypeScript 有界冷 AST 解析隔离。Run 已覆盖冻结输入、受限工具执行、单 Agent 有界模型循环、公开事件、持久化 SSE 回放/续接、Issue/代码理解报告、取消和重启中断；P3-I1 已增加从保存报告候选/发现读取固定快照的有界静态影响查询。HTTP method/path association 仅表达静态形状一致，不声称运行时网络目标；真实供应商语义质量仍未验证。
 
 ## 职责与范围
 
@@ -17,6 +17,8 @@
 `GET /api/trash` 返回可恢复项目和独立移除的 Session；`DELETE /api/projects/{project_id}` 与 `DELETE /api/projects/{project_id}/sessions/{session_id}` 将对象软移除，`POST /api/projects/{project_id}/restore` 与 `POST /api/projects/{project_id}/sessions/{session_id}/restore` 显式恢复。移除不会物理删除来源、索引、消息、Run、报告或 evidence。普通列表与作用域读取隐藏移除对象；按 `index_id` 的兼容 HTTP 查询也会校验其仍有活动 Project 归属。恢复 Project 不会恢复独立移除的 Session。活动 Run、索引更新、导入或功能生成期间返回可重试的 409；这些入口仍由 WorkspaceService 和现有 Pydantic 契约拥有，不向 MCP 开放新的写工具。
 
 `GET /api/model-config` 只返回 provider、base URL、model 和 `has_api_key`；`POST /api/model-config` 要求 loopback 客户端。有 `Origin` 时还必须精确匹配配置的 Web Origin；没有 `Origin` 的本地 CLI 请求允许写入。provider/model 会去除首尾空白并拒绝空值；base URL 必须是有效的绝对 HTTP(S) URL，不能包含 userinfo 凭据。留空 API Key 保留当前值，`remove_api_key=true` 才清除。每个 Registry 在同一锁内读取当前值、合并新设置并原子持久化，避免并发空 key 更新覆盖刚保存的 key；文件通过同目录临时文件和原子替换写入，失败保留旧文件。请求和持久文件包含密钥，响应与日志不包含密钥。API 与 MCP 每个新 real 功能生成/Run 都从共享文件读取配置；Run 在创建时冻结模型配置供 worker 使用。保存只做契约校验和持久化，不试连供应商或发送源码。
+
+内置功能生成使用 `POST /api/projects/{project_id}/indexes/{index_id}/features` 的 `FeatureGenerationRequest`，其 HTTP real 路径继续使用服务端模型。Codex external Agent 不再有服务端 MCP 生成入口；设置 `CODETRAIL_MCP_EXTERNAL_RUN_ENABLED=1` 后，宿主可在同一 `understanding` Run 终结前调用 `submit_project_features` 提交 `FeatureModelOutput`。应用服务复用 O2 引用校验与 FeatureGeneration 持久化，evidence 由 Run 的已保存 `read_source` 结果恢复并重新核对固定 index 的 hash/行范围。`source=external` 和 `source_scope=external_run` 标明宿主来源；宿主自报的 model 名称只作标签，服务端 `model_calls=0` 且不保存宿主 token/费用。旧的服务端 MCP 生成开关不再生效；HTTP/MCP 历史、版本和图读取仍查看同一持久化结果。
 
 `search_code`、HTTP 搜索和 external Run 的 `run_search_code` 都委托同一 `IndexStore`。搜索先按有界名称层返回完整限定名（支持限定名后缀）、叶子名精确和名称部分命中，再按有界 FTS 批次复核符号自身源码范围内的正文命中；名称层先完成，因此精确定义不会被正文候选挤出。每次搜索共享服务端候选、源码文件/字节和 0.5 秒预算，SQL 使用 progress handler；同一文件只读取一次。结果保留 `index_id`、稳定 Symbol 身份、rank、matched terms、snippet 和截断说明，预算停止使用 `search budget exceeded: ...`，已确认还有更多结果才使用 `max_results reached`；模块正文范围仍是整文件，函数/类只使用自身行范围。HTTP、普通 MCP 与绑定 Run 不各自实现排序或预算规则。
 

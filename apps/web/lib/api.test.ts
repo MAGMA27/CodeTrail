@@ -806,6 +806,7 @@ function featureGeneration() {
       project_id: "project-overview-test",
       index: overview().index,
       mode: "fixture",
+      source: "server",
       model: "fixture-feature-v1",
       prompt_version: "feature-summary-v2",
       rules_version: "python-entry-v1",
@@ -879,6 +880,41 @@ test("feature generation validator accepts snapshot-linked fixture output", () =
   assert.equal(isFeatureGenerationResponse(featureGeneration()), true);
 });
 
+test("feature generation validator keeps host model claims outside server usage", () => {
+  const external = structuredClone(featureGeneration()) as unknown as {
+    generation: {
+      source: string;
+      mode: string;
+      source_scope: string;
+      usage: {
+        model_calls: number;
+        repair_calls: number;
+        input_chars: number;
+        output_chars: number;
+        model_input_chars: number[];
+        model_output_chars: number[];
+        input_tokens: number | null;
+        output_tokens: number | null;
+      };
+    };
+  };
+  external.generation.source = "external";
+  external.generation.mode = "real";
+  external.generation.source_scope = "external_run";
+  external.generation.usage.model_calls = 0;
+  external.generation.usage.repair_calls = 0;
+  external.generation.usage.input_chars = 0;
+  external.generation.usage.output_chars = 0;
+  external.generation.usage.model_input_chars = [];
+  external.generation.usage.model_output_chars = [];
+  external.generation.usage.input_tokens = null;
+  external.generation.usage.output_tokens = null;
+  assert.equal(isFeatureGenerationResponse(external), true);
+
+  external.generation.usage.model_calls = 1;
+  assert.equal(isFeatureGenerationResponse(external), false);
+});
+
 test("feature generation validator rejects broken evidence or association references", () => {
   const brokenEvidence = structuredClone(featureGeneration()) as unknown as {
     generation: { features: Array<{ evidence_ids: string[] }> };
@@ -901,6 +937,7 @@ test("feature history and graph validators keep saved snapshot references explic
     project_id: generation.project_id,
     index: generation.index,
     mode: generation.mode,
+    source: generation.source,
     model: generation.model,
     prompt_version: generation.prompt_version,
     rules_version: generation.rules_version,

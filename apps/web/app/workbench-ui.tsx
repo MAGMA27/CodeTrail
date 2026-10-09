@@ -1789,7 +1789,7 @@ function FeatureSection({ knowledge }: { knowledge: KnowledgeUi }) {
           <span className="ct-count-label">{generation?.features.length ?? "—"}</span>
         </div>
       </div>
-      <p className="ct-section-lede">点击识别后，服务端模型结合当前索引的入口、模块、符号和源码证据生成主要功能描述。相关源码会发送给已配置的模型服务，可能产生调用费用。</p>
+      <p className="ct-section-lede">工作台内置识别使用服务端模型，并按预算发送当前索引的源码证据。Codex 外部 Agent 也可通过 MCP 自行识别并保存结果；它使用宿主模型，服务端不会为此再调用模型。</p>
       {knowledge.modelApiKeyConfigured === false ? <div className="ct-model-config-needed" role="status"><span>还没有配置模型密钥。保存配置不会测试供应商或发送源码。</span><button type="button" className="ct-link-button" onClick={() => void knowledge.onOpenModelSettings()}>打开设置</button></div> : null}
       <div className="ct-history-block">
         <div className="ct-history-heading"><strong>已保存版本 · 当前快照</strong><span data-state={knowledge.featureHistoryStatus}>{knowledge.featureHistoryStatus === "loading" ? "载入中" : `${knowledge.featureHistory.length} 个版本`}</span></div>
@@ -1798,7 +1798,7 @@ function FeatureSection({ knowledge }: { knowledge: KnowledgeUi }) {
           <div className="ct-history-list">
             {knowledge.featureHistory.map((item) => (
               <button type="button" key={item.generation_id} className={`ct-history-item${item.generation_id === knowledge.selectedFeatureGenerationId ? " is-selected" : ""}`} onClick={() => knowledge.onSelectFeatureGeneration(item.generation_id)} aria-pressed={item.generation_id === knowledge.selectedFeatureGenerationId}>
-                <span className="ct-history-top"><strong>{savedFeatureStatusLabel(item.status)}</strong><span>{item.mode === "fixture" ? "演示结果" : "AI 分析"} · {formatDate(item.created_at)}</span></span>
+                <span className="ct-history-top"><strong>{savedFeatureStatusLabel(item.status)}</strong><span>{item.source === "external" ? "外部 Agent" : item.mode === "fixture" ? "演示结果" : "服务端 AI"} · {formatDate(item.created_at)}</span></span>
                 <span className="ct-history-id"><code>{item.generation_id}</code><code>{item.index.revision} · {shortHash(item.index.snapshot_hash)}</code></span>
                 <span className="ct-history-stats">{item.feature_count} 功能 · {item.evidence_count} 证据 · {item.rules_version}</span>
                 <span className="ct-history-summary">{item.summary}</span>
@@ -1814,7 +1814,7 @@ function FeatureSection({ knowledge }: { knowledge: KnowledgeUi }) {
         <button type="button" className="ct-button ct-button-primary" onClick={() => void knowledge.onRunFeatureGeneration()} disabled={knowledge.featureStatus === "loading"}>{knowledge.featureStatus === "loading" ? "生成中…" : knowledge.modelApiKeyConfigured === false ? "配置模型后识别" : "识别主要功能"}</button>
         {generation ? <button type="button" className="ct-button ct-button-secondary" onClick={() => void knowledge.onReloadFeatureGeneration()} disabled={knowledge.featureStatus === "loading"}>重读已保存结果</button> : null}
       </div>
-      <div className="ct-feature-status"><span data-state={knowledge.featureStatus}>{featureStatusLabel(knowledge.featureStatus, generation)}</span><small>{knowledge.featureSourceScope === "entry_reachable" ? "只查询从已识别应用入口可达的模块；未查询模块不会被当作不存在。" : "在当前可见模块内查询，仍受工具、源码、输入和输出预算限制。"}</small></div>
+      <div className="ct-feature-status"><span data-state={knowledge.featureStatus}>{featureStatusLabel(knowledge.featureStatus, generation)}</span><small>{generation?.source === "external" ? "此版本绑定外部 understanding Run；证据来自该 Run 实际返回的源码读取，服务端模型调用为 0。" : knowledge.featureSourceScope === "entry_reachable" ? "只查询从已识别应用入口可达的模块；未查询模块不会被当作不存在。" : "在当前可见模块内查询，仍受工具、源码、输入和输出预算限制。"}</small></div>
       {knowledge.featureStatus === "loading" ? <LoadingNote>正在收集有界证据并生成语义摘要…</LoadingNote> : null}
       {knowledge.featureError && !generation ? <div className="ct-error-block compact" role="alert"><span>{knowledge.featureError}</span><button type="button" className="ct-link-button" onClick={() => void knowledge.onRunFeatureGeneration()}>重试</button></div> : null}
       {generation ? <FeatureGenerationResult generation={generation} knowledge={knowledge} /> : null}
@@ -1825,7 +1825,7 @@ function FeatureSection({ knowledge }: { knowledge: KnowledgeUi }) {
 function FeatureGenerationResult({ generation, knowledge }: { generation: FeatureGeneration; knowledge: KnowledgeUi }) {
   return (
     <div className="ct-feature-result">
-      <div className="ct-feature-meta"><span className={`ct-badge is-${generation.status}`}>{generation.status}</span><span className={`ct-badge is-${generation.mode}`}>{generation.mode === "fixture" ? "演示结果" : "AI 分析"}</span><code title={generation.model ?? "未配置模型"}>{generation.model ?? "未配置模型"}</code><small>{generation.source_paths.length} 个源码文件 · {generation.usage.tool_calls} 次工具 · {generation.usage.model_calls} 次模型 · {generation.usage.elapsed_ms} ms</small></div>
+      <div className="ct-feature-meta"><span className={`ct-badge is-${generation.status}`}>{generation.status}</span><span className={`ct-badge is-${generation.mode}`}>{generation.source === "external" ? "外部 Agent" : generation.mode === "fixture" ? "演示结果" : "服务端 AI"}</span><code title={generation.source === "external" ? "宿主自报模型名，不代表服务端模型调用或费用" : generation.model ?? "未配置模型"}>{generation.source === "external" ? generation.model ? `宿主：${generation.model}` : "宿主模型未报告" : generation.model ?? "未配置模型"}</code><small>{generation.source_paths.length} 个源码文件 · {generation.usage.tool_calls} 次工具 · 服务端模型 {generation.usage.model_calls} 次 · {generation.usage.elapsed_ms} ms</small></div>
       <p className="ct-feature-summary">{generation.summary}</p>
       {generation.error ? <div className="ct-error-block compact" role="alert"><span>{generation.error.message}</span><button type="button" className="ct-link-button" onClick={() => void knowledge.onRunFeatureGeneration(true)}>重试</button></div> : null}
       {generation.truncated ? <p className="ct-warning">上下文已截断：{generation.truncation_reason}</p> : null}

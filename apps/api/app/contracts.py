@@ -2043,6 +2043,8 @@ class ProjectOverview(VersionedModel):
 
 FeatureGenerationMode: TypeAlias = Literal["fixture", "real"]
 FeatureSourceScope: TypeAlias = Literal["entry_reachable", "visible_modules"]
+FeatureGenerationSource: TypeAlias = Literal["server", "external"]
+FeatureGenerationSourceScope: TypeAlias = Literal["entry_reachable", "visible_modules", "external_run"]
 FeatureGenerationStatus: TypeAlias = Literal[
     "succeeded",
     "partial",
@@ -2218,10 +2220,11 @@ class FeatureGeneration(VersionedModel):
     project_id: Identifier
     index: IndexSnapshot
     mode: FeatureGenerationMode
+    source: FeatureGenerationSource = "server"
     model: str | None = Field(default=None, max_length=200)
     prompt_version: Identifier
     rules_version: Identifier
-    source_scope: FeatureSourceScope
+    source_scope: FeatureGenerationSourceScope
     status: FeatureGenerationStatus
     summary: str = Field(min_length=1, max_length=5_000)
     features: list[Feature] = Field(default_factory=list, max_length=20)
@@ -2312,6 +2315,19 @@ class FeatureGeneration(VersionedModel):
             raise ValueError("feature generation input exceeds its budget")
         if self.usage.output_chars > self.budget.max_output_chars:
             raise ValueError("feature generation output exceeds its budget")
+        if self.source_scope == "external_run" and self.source != "external":
+            raise ValueError("external Run feature scope requires an external source")
+        if self.source == "external" and (
+            self.mode != "real"
+            or self.source_scope != "external_run"
+            or self.usage.model_calls != 0
+            or self.usage.repair_calls != 0
+            or self.usage.model_input_chars
+            or self.usage.model_output_chars
+            or self.usage.input_tokens is not None
+            or self.usage.output_tokens is not None
+        ):
+            raise ValueError("external feature results cannot claim server model usage")
         return self
 
 
@@ -2326,10 +2342,11 @@ class FeatureGenerationSummary(VersionedModel):
     project_id: Identifier
     index: IndexSnapshot
     mode: FeatureGenerationMode
+    source: FeatureGenerationSource = "server"
     model: str | None = Field(default=None, max_length=200)
     prompt_version: Identifier
     rules_version: Identifier
-    source_scope: FeatureSourceScope
+    source_scope: FeatureGenerationSourceScope
     status: FeatureGenerationStatus
     summary: str = Field(min_length=1, max_length=5_000)
     feature_count: NonNegativeInt
@@ -2352,6 +2369,19 @@ class FeatureGenerationSummary(VersionedModel):
             raise ValueError("failed feature generation summaries must include an error")
         if self.status != "failed" and self.error is not None:
             raise ValueError("successful feature generation summaries cannot include an error")
+        if self.source_scope == "external_run" and self.source != "external":
+            raise ValueError("external Run feature summary scope requires an external source")
+        if self.source == "external" and (
+            self.mode != "real"
+            or self.source_scope != "external_run"
+            or self.usage.model_calls != 0
+            or self.usage.repair_calls != 0
+            or self.usage.model_input_chars
+            or self.usage.model_output_chars
+            or self.usage.input_tokens is not None
+            or self.usage.output_tokens is not None
+        ):
+            raise ValueError("external feature summaries cannot claim server model usage")
         return self
 
 
@@ -2730,7 +2760,7 @@ class McpOverviewResponse(McpResultBase):
 
 
 class McpFeatureGenerationResponse(McpResultBase):
-    """Structured MCP response for an explicitly enabled feature generation."""
+    """Structured MCP response for a saved or externally submitted feature generation."""
 
     generation: FeatureGeneration | None = None
     references: list[EvidenceReference] = Field(default_factory=list)

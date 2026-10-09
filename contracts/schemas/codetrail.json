@@ -6490,6 +6490,15 @@
           "title": "Schema Version",
           "type": "string"
         },
+        "source": {
+          "default": "server",
+          "enum": [
+            "server",
+            "external"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
         "source_paths": {
           "items": {
             "maxLength": 500,
@@ -6503,7 +6512,8 @@
         "source_scope": {
           "enum": [
             "entry_reachable",
-            "visible_modules"
+            "visible_modules",
+            "external_run"
           ],
           "title": "Source Scope",
           "type": "string"
@@ -6782,10 +6792,20 @@
               "title": "Schema Version",
               "type": "string"
             },
+            "source": {
+              "default": "server",
+              "enum": [
+                "server",
+                "external"
+              ],
+              "title": "Source",
+              "type": "string"
+            },
             "source_scope": {
               "enum": [
                 "entry_reachable",
-                "visible_modules"
+                "visible_modules",
+                "external_run"
               ],
               "title": "Source Scope",
               "type": "string"
@@ -7602,6 +7622,15 @@
               "title": "Schema Version",
               "type": "string"
             },
+            "source": {
+              "default": "server",
+              "enum": [
+                "server",
+                "external"
+              ],
+              "title": "Source",
+              "type": "string"
+            },
             "source_paths": {
               "items": {
                 "maxLength": 500,
@@ -7615,7 +7644,8 @@
             "source_scope": {
               "enum": [
                 "entry_reachable",
-                "visible_modules"
+                "visible_modules",
+                "external_run"
               ],
               "title": "Source Scope",
               "type": "string"
@@ -8269,10 +8299,20 @@
           "title": "Schema Version",
           "type": "string"
         },
+        "source": {
+          "default": "server",
+          "enum": [
+            "server",
+            "external"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
         "source_scope": {
           "enum": [
             "entry_reachable",
-            "visible_modules"
+            "visible_modules",
+            "external_run"
           ],
           "title": "Source Scope",
           "type": "string"
@@ -17765,10 +17805,20 @@
               "title": "Schema Version",
               "type": "string"
             },
+            "source": {
+              "default": "server",
+              "enum": [
+                "server",
+                "external"
+              ],
+              "title": "Source",
+              "type": "string"
+            },
             "source_scope": {
               "enum": [
                 "entry_reachable",
-                "visible_modules"
+                "visible_modules",
+                "external_run"
               ],
               "title": "Source Scope",
               "type": "string"
@@ -18537,6 +18587,15 @@
               "title": "Schema Version",
               "type": "string"
             },
+            "source": {
+              "default": "server",
+              "enum": [
+                "server",
+                "external"
+              ],
+              "title": "Source",
+              "type": "string"
+            },
             "source_paths": {
               "items": {
                 "maxLength": 500,
@@ -18550,7 +18609,8 @@
             "source_scope": {
               "enum": [
                 "entry_reachable",
-                "visible_modules"
+                "visible_modules",
+                "external_run"
               ],
               "title": "Source Scope",
               "type": "string"
@@ -18930,7 +18990,7 @@
         }
       },
       "additionalProperties": false,
-      "description": "Structured MCP response for an explicitly enabled feature generation.",
+      "description": "Structured MCP response for a saved or externally submitted feature generation.",
       "properties": {
         "error": {
           "anyOf": [

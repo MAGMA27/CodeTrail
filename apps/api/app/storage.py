@@ -1413,6 +1413,8 @@ class ManagementStore:
                     (operation_id,),
                 )
                 connection.execute("COMMIT")
+        except StorageConflictError:
+            raise
         except StorageNotFoundError:
             raise
         except sqlite3.Error as exc:
@@ -2607,11 +2609,17 @@ class IndexStore:
         *,
         cache_key: str,
         idempotency_key: str | None = None,
+        external_run_id: str | None = None,
+        external_session_id: str | None = None,
     ) -> FeatureGeneration:
         """Persist one validated feature result without replacing another result."""
 
         if generation.cache_key != cache_key:
             raise StorageInputError("feature generation cache key does not match the persisted result")
+        if (external_run_id is None) != (external_session_id is None):
+            raise StorageInputError("external feature persistence requires a complete Run scope")
+        if (generation.source == "external") != (external_run_id is not None):
+            raise StorageInputError("external feature results must be bound to an external Run")
         serialized = json.dumps(
             generation.model_dump(mode="json"),
             ensure_ascii=False,
@@ -2627,6 +2635,28 @@ class IndexStore:
             ).fetchone()
             if active_project is None:
                 raise StorageNotFoundError("feature generation project or index is not active")
+            if external_run_id is not None and external_session_id is not None:
+                run_row = self._connection.execute(
+                    "SELECT project_id, session_id, index_id, status, run_json FROM runs WHERE run_id = ?",
+                    (external_run_id,),
+                ).fetchone()
+                if run_row is None or (
+                    run_row["project_id"] != generation.project_id
+                    or run_row["session_id"] != external_session_id
+                    or run_row["index_id"] != generation.index.index_id
+                ):
+                    raise StorageNotFoundError("external feature Run scope was not found")
+                run = Run.model_validate(json.loads(run_row["run_json"]))
+                if (
+                    run_row["status"] not in {"queued", "running"}
+                    or run.status not in {"queued", "running"}
+                    or run.mode != "external"
+                    or run.execution_source != "codex"
+                    or run.analysis_kind != "understanding"
+                ):
+                    raise StorageConflictError("external feature Run is not active")
+                if datetime.now(timezone.utc) >= run.created_at + timedelta(seconds=run.budget.max_seconds):
+                    raise StorageInputError("external feature Run time budget is exhausted")
             self._connection.execute(
                 "INSERT INTO feature_generations "
                 "(generation_id, project_id, index_id, cache_key, idempotency_key, mode, model, "
@@ -2648,7 +2678,19 @@ class IndexStore:
                 ),
             )
             self._connection.execute("COMMIT")
+        except StorageConflictError:
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise
         except StorageNotFoundError:
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise
+        except StorageInputError:
             try:
                 self._connection.execute("ROLLBACK")
             except sqlite3.Error:
@@ -2666,6 +2708,12 @@ class IndexStore:
             except sqlite3.Error:
                 pass
             raise StorageError(f"could not save feature generation: {exc}") from exc
+        except Exception:
+            try:
+                self._connection.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise
         return generation
 
     def load_feature_generation(self, generation_id: str) -> FeatureGeneration:

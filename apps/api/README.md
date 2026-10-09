@@ -2,7 +2,7 @@
 
 ## 职责与边界
 
-`apps/api` 提供本地 FastAPI 服务、静态仓库 allow-list、受限本地/GitHub 来源导入、Project/Index/Session 管理、索引新鲜度检查与显式更新、规则概览、功能生成，以及显式 fixture/real/external Run 的冻结、执行、事件、SSE、Issue/代码理解报告读取和报告候选的有界静态影响查询。源码索引覆盖 `.py`、`.ts`、`.tsx`；纯 Python 仓库可只用 `uv` 运行 API，仓库含 TypeScript 时，API 主机还必须可运行 Node.js，并使用 CodeTrail 工作区锁定的 `apps/web/node_modules/typescript` 5.9.3。工作区根目录运行 `codetrail init` 会自动发现它；安装 `codetrail` 包本身不包含 Web 或 TypeScript 编译器。解析器缺失或语法错误会显式令新索引失败。API 不执行被分析仓库代码、shell 或测试；real Run 只通过有界模型适配器请求服务端配置的兼容供应商，external Run 只接收 Codex 通过本地 MCP 发起的白名单工具调用和结构化结论。
+`apps/api` 提供本地 FastAPI 服务、静态仓库 allow-list、受限本地/GitHub 来源导入、Project/Index/Session 管理、索引新鲜度检查与显式更新、规则概览、功能生成，以及显式 fixture/real/external Run 的冻结、执行、事件、SSE、Issue/代码理解报告读取和报告候选的有界静态影响查询。外部 `understanding` Run 还可接收宿主 Agent 识别的功能结果；服务端只校验和保存，不为该提交调用模型。源码索引覆盖 `.py`、`.ts`、`.tsx`；纯 Python 仓库可只用 `uv` 运行 API，仓库含 TypeScript 时，API 主机还必须可运行 Node.js，并使用 CodeTrail 工作区锁定的 `apps/web/node_modules/typescript` 5.9.3。工作区根目录运行 `codetrail init` 会自动发现它；安装 `codetrail` 包本身不包含 Web 或 TypeScript 编译器。解析器缺失或语法错误会显式令新索引失败。API 不执行被分析仓库代码、shell 或测试；real Run 和内置 HTTP 功能生成只通过有界模型适配器请求服务端配置的兼容供应商，external Run 只接收 Codex 通过本地 MCP 发起的白名单工具调用和结构化结论。
 
 ## 入口与目录导航
 
@@ -20,7 +20,7 @@
 - [issue_analysis.py](app/issue_analysis.py)：real Run 的结构化模型输出、有限工具循环、预算和引用校验。
 - [indexing.py](app/indexing.py)、[typescript_parser.cjs](app/typescript_parser.cjs) 与 [relations.py](app/relations.py)：Python/TypeScript 快照、TypeScript AST 定义/导入/保守调用、Python 文件级缓存和静态关系目标解析；TypeScript 每次有界冷解析，不伪装成 Python cache hit。
 - [overview.py](app/overview.py)、[feature_generation.py](app/feature_generation.py) 与 [feature_graph.py](app/feature_graph.py)：同快照入口概览、唯一静态 HTTP method/path shape association、功能生成和功能图；HTTP 形状匹配不证明运行时请求目的地。
-- [mcp_server.py](app/mcp_server.py)：本地 MCP stdio 适配器，包含可选 Codex external Run 工具。
+- [mcp_server.py](app/mcp_server.py)：本地 MCP stdio 适配器，包含可选 Codex external Run 与宿主功能结果提交工具。
 - [config.py](app/config.py)：服务数据目录中的持久化模型供应商配置。
 
 ## 接口与依赖
@@ -68,6 +68,8 @@ API 健康检查为 `GET /api/health`。前端或测试先创建 Project、建�
 - [项目与会话决策](../../docs/decisions/2026-09-11-project-session-workspace.md)
 - [Run 决策](../../docs/decisions/2026-09-12-run-execution.md)
 - [P2-R2 模型驱动 Issue 分析决策](../../docs/decisions/2026-09-12-run-model-analysis.md)
+- [外部 Agent 功能结果提交决策](../../docs/decisions/2026-10-09-external-agent-feature-submission.md)
+- [O2 有证据的主要功能语义识别](../../docs/decisions/2026-09-11-feature-semantic-generation.md)
 - [MVP 操作说明](../../docs/mvp-operation.md)
 - [Run SSE 决策](../../docs/decisions/2026-09-12-run-sse.md)
 - [关系扫描与 unresolved 覆盖语义](../../docs/decisions/2026-09-13-relation-coverage.md)

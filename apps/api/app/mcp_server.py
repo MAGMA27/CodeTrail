@@ -19,12 +19,9 @@ from .contracts import (
     CancelRunRequest,
     CreateRunRequest,
     FeatureGraphResponse,
-    FeatureGenerationBudget,
     FeatureGenerationListResponse,
-    FeatureGenerationRequest,
     FeatureGenerationResponse,
-    FeatureGenerationMode,
-    FeatureSourceScope,
+    FeatureModelOutput,
     GitHubImportRequest,
     GitHubImportResponse,
     Identifier,
@@ -150,7 +147,6 @@ def create_mcp_server(
     citation_url = _normalize_workbench_url(workbench_url or os.getenv(_WORKBENCH_URL_ENV))
     local_import_enabled = service.registry.mcp_local_import_enabled
     github_import_enabled = service.registry.mcp_github_import_enabled
-    feature_generation_enabled = service.registry.mcp_feature_generation_enabled
     index_write_enabled = service.registry.mcp_index_write_enabled
     session_write_enabled = service.registry.mcp_session_write_enabled
     run_write_enabled = service.registry.mcp_run_write_enabled
@@ -158,15 +154,15 @@ def create_mcp_server(
     server_description = (
         "Discover CodeTrail projects and query one explicitly selected immutable index. "
         "Default tools are read-only. Explicitly enabled session writes, bounded fixture/real Run start/cancel, "
-        "Codex external-Agent Run tools, "
-        "local/GitHub import/status/retry, index refresh, and feature generation are separately gated."
-        if local_import_enabled or github_import_enabled or feature_generation_enabled or index_write_enabled or session_write_enabled or run_write_enabled or external_run_enabled
+        "Codex external-Agent Run and feature-submission tools, "
+        "local/GitHub import/status/retry, and index refresh are separately gated."
+        if local_import_enabled or github_import_enabled or index_write_enabled or session_write_enabled or run_write_enabled or external_run_enabled
         else "Discover CodeTrail projects and query one explicitly selected immutable index. "
         "All tools are read-only and never execute repository code."
     )
     server = MCPServer(
         name="codetrail",
-        title="CodeTrail workspace" if local_import_enabled or github_import_enabled or feature_generation_enabled or index_write_enabled or session_write_enabled or run_write_enabled or external_run_enabled else "CodeTrail read-only workspace",
+        title="CodeTrail workspace" if local_import_enabled or github_import_enabled or index_write_enabled or session_write_enabled or run_write_enabled or external_run_enabled else "CodeTrail read-only workspace",
         description=server_description,
         version="0.1.0",
         log_level="WARNING",
@@ -1156,6 +1152,44 @@ def create_mcp_server(
                 return _unexpected_failure("run_get_neighbors", McpExternalToolResponse)
 
         @server.tool(
+            name="submit_project_features",
+            title="Save host-recognized project features",
+            description=(
+                "Validate and save FeatureModelOutput produced by the host model for one active external understanding Run. "
+                "Evidence IDs, entries, modules, and symbols must be supported by this fixed snapshot and the Run's actual "
+                "saved tool results; source ranges and hashes are loaded from those results. The service does not call a "
+                "model. The optional model name is self-reported and does not represent server token or cost usage. "
+                "Submit this before submit_external_run; the same idempotency_key and content reuse the saved generation, "
+                "while different content conflicts."
+            ),
+            structured_output=True,
+        )
+        def submit_project_features(
+            project_id: _ProjectId,
+            session_id: _SessionId,
+            run_id: _RunId,
+            index_id: _IndexId,
+            output: FeatureModelOutput,
+            idempotency_key: Annotated[str, Field(min_length=1, max_length=200)],
+            model: Annotated[str | None, Field(min_length=1, max_length=200)] = None,
+        ) -> McpFeatureGenerationResponse:
+            try:
+                result = service.submit_external_features(
+                    project_id,
+                    session_id,
+                    run_id,
+                    index_id,
+                    output,
+                    model=model,
+                    idempotency_key=idempotency_key,
+                )
+                return _mcp_feature_generation_response(result, citation_url)
+            except ServiceError as exc:
+                return _failure(McpFeatureGenerationResponse, exc)
+            except Exception:
+                return _unexpected_failure("submit_project_features", McpFeatureGenerationResponse)
+
+        @server.tool(
             name="submit_external_run",
             title="Submit a Codex Run conclusion",
             description=(
@@ -1257,62 +1291,6 @@ def create_mcp_server(
                 return _failure(McpRunCancelResponse, exc)
             except Exception:
                 return _unexpected_failure("cancel_external_run", McpRunCancelResponse)
-
-    if feature_generation_enabled:
-
-        @server.tool(
-            name="generate_project_features",
-            title="Generate project features",
-            description=(
-                "Explicitly generate evidence-linked semantic features for one selected immutable index. "
-                "This tool is disabled by default because real mode can call a configured model and incur cost; "
-                "fixture mode is deterministic and bounded."
-            ),
-            structured_output=True,
-        )
-        def generate_project_features(
-            project_id: _ProjectId,
-            index_id: _IndexId,
-            mode: FeatureGenerationMode,
-            model: Annotated[str | None, Field(min_length=1, max_length=200, description="Server-configured model name; optional in fixture mode.")] = None,
-            source_scope: FeatureSourceScope = "entry_reachable",
-            prompt_version: Annotated[str, Field(min_length=1, max_length=200)] = "feature-summary-v2",
-            idempotency_key: Annotated[str | None, Field(min_length=1, max_length=200)] = None,
-            max_tool_calls: Annotated[int, Field(ge=1, le=12)] = 8,
-            max_model_calls: Annotated[int, Field(ge=1, le=2)] = 1,
-            max_seconds: Annotated[int, Field(ge=1, le=120)] = 20,
-            max_source_lines: Annotated[int, Field(ge=1, le=200)] = 120,
-            max_total_source_lines: Annotated[int, Field(ge=1, le=2_000)] = 800,
-            max_input_chars: Annotated[int, Field(ge=1, le=100_000)] = 60_000,
-            max_features: Annotated[int, Field(ge=1, le=20)] = 8,
-            max_output_chars: Annotated[int, Field(ge=1, le=50_000)] = 20_000,
-        ) -> McpFeatureGenerationResponse:
-            try:
-                result = service.generate_features(
-                    project_id,
-                    index_id,
-                    FeatureGenerationRequest(
-                        mode=mode,
-                        model=model,
-                        source_scope=source_scope,
-                        prompt_version=prompt_version,
-                        idempotency_key=idempotency_key,
-                        budget=FeatureGenerationBudget(
-                            max_tool_calls=max_tool_calls,
-                            max_model_calls=max_model_calls,
-                            max_source_lines=max_source_lines,
-                            max_total_source_lines=max_total_source_lines,
-                            max_input_chars=max_input_chars,
-                            max_features=max_features,
-                            max_output_chars=max_output_chars,
-                        ),
-                    ),
-                )
-                return _mcp_feature_generation_response(result, citation_url)
-            except ServiceError as exc:
-                return _failure(McpFeatureGenerationResponse, exc)
-            except Exception:
-                return _unexpected_failure("generate_project_features", McpFeatureGenerationResponse)
 
     if local_import_enabled:
 

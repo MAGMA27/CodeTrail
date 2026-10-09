@@ -1055,6 +1055,17 @@ class _CollectorState:
         return True
 
 
+@dataclass(frozen=True)
+class FeatureValidationContext:
+    """Observed references used to validate a host-produced feature output."""
+
+    index_id: str
+    observed_entry_point_ids: tuple[str, ...]
+    selected_module_ids: tuple[str, ...]
+    observed_symbol_ids: tuple[str, ...]
+    evidence_ids: tuple[str, ...]
+
+
 def default_feature_adapter(
     mode: str,
     *,
@@ -1225,7 +1236,7 @@ def _parse_model_output(raw_output: str) -> FeatureModelOutput:
 
 def _validate_model_output(
     output: FeatureModelOutput,
-    context: FeatureContext,
+    context: FeatureContext | FeatureValidationContext,
     budget: FeatureGenerationBudget,
 ) -> None:
     if output.index_id != context.index_id:

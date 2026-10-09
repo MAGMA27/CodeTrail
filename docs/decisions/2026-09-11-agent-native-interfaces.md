@@ -26,7 +26,7 @@ Agent 通过网页操作无法稳定组合能力；独立重写 MCP 存储和检
 
 ## 验收与证据
 
-A1 已实现并用官方 Python MCP SDK `2.2.0` 的真实 stdio client 验证：`apps/api/tests/test_mcp.py` 通过，客户端发现并调用七项基础查询工具，项目/索引/搜索/邻接/源码结果与 HTTP 领域 payload 对照一致，跨项目索引返回 `not_found`，源码结果带固定 project_id/index_id、行范围、content hash、evidence_id 和工作台 URL。O1 在同一适配器增加默认只读 `get_overview`，O2 又增加独立开关控制的 `generate_project_features`/`get_feature_generation`；P2-R2 增加独立开关控制的 `start_session_run` real 能力，并与 HTTP 共用 Run 归属、预算、取消和报告语义。其 HTTP/MCP 领域结果和证据引用已对照验证，默认 MCP 仍不注册生成工具。工作台浏览器流程已验证引用只打开归属项目的固定索引证据；SDK 协议帧使用 stdout，日志使用 stderr。
+A1 已实现并用官方 Python MCP SDK `2.2.0` 的真实 stdio client 验证：`apps/api/tests/test_mcp.py` 通过，客户端发现并调用七项基础查询工具，项目/索引/搜索/邻接/源码结果与 HTTP 领域 payload 对照一致，跨项目索引返回 `not_found`，源码结果带固定 project_id/index_id、行范围、content hash、evidence_id 和工作台 URL。O1 在同一适配器增加默认只读 `get_overview`；O2 首版曾以独立开关注册服务端 `generate_project_features`，该入口已移除。现在功能历史、版本和图仍复用 MCP/HTTP 领域读取；宿主负责的功能识别提交路径见[外部 Agent 功能结果提交决策](2026-10-09-external-agent-feature-submission.md)。P2-R2 增加独立开关控制的 `start_session_run` real 能力，并与 HTTP 共用 Run 归属、预算、取消和报告语义。工作台浏览器流程已验证引用只打开归属项目的固定索引证据；SDK 协议帧使用 stdout，日志使用 stderr。
 
 ## 后果
 

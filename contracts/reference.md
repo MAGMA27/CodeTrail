@@ -2,7 +2,7 @@
 
 ## 状态
 
-已实现 Pydantic 契约和可重复 Schema 导出；前端对 Project、Index、Index freshness/refresh、Session/消息、概览、功能、fixture/real/external Run、事件、工具结果、Issue/代码理解报告、Run 影响查询和错误响应执行运行时边界校验；MCP 使用同一领域契约包装结构化结果。external Run 的 `execution_source=codex`、`analysis_kind`、工具响应、结论响应和报告限制已纳入契约。
+已实现 Pydantic 契约和可重复 Schema 导出；前端对 Project、Index、Index freshness/refresh、Session/消息、概览、功能、fixture/real/external Run、事件、工具结果、Issue/代码理解报告、Run 影响查询和错误响应执行运行时边界校验；MCP 使用同一领域契约包装结构化结果。external Run 的 `execution_source=codex`、`analysis_kind`、工具响应、结论响应和报告限制，以及外部 Agent 功能生成的来源、范围和零服务端模型用量约束已纳入契约。
 
 ## 职责与范围
 
@@ -13,6 +13,8 @@ GitHub freshness 契约在 `IndexFreshness` 中额外区分 `remote_status` 的 
 ## 接口与依赖
 
 `GET/POST /api/model-config` 使用 `ModelConfigSettingsResponse` 和 `SaveModelConfigRequest`；状态只含 provider、base URL、model 与 `has_api_key`，保存请求允许留空保留密钥或用 `remove_api_key` 明确移除。provider/model 去除首尾空白后不能为空，base URL 必须是绝对 HTTP(S) URL 并拒绝 userinfo；密钥字段只在写请求中出现，不出现在响应 Schema 的属性中。
+
+`FeatureGeneration` 和 `FeatureGenerationSummary` 以 `source=server|external` 区分内置生成与宿主提交，以 `source_scope=external_run` 标记外部结果；外部结果使用 `mode=real` 表示宿主 AI 结果，但模型名是自报信息，不代表服务端供应商。契约要求 external 结果的服务端 `model_calls`/`repair_calls` 为 0，逐次模型字符数组为空，token 为 null。MCP `submit_project_features` 使用同一 `FeatureModelOutput` 输入和 `McpFeatureGenerationResponse` 输出，应用服务从关联 external understanding Run 的已保存工具结果恢复 evidence，不接受客户端自行构造 evidence 实体。
 
 Run 的公共边界包括 `Run`、`RunInput`、`RunBudget`、`EventSequence` 中的连续事件、`ToolResult`、`Report`、`CreateRunRequest/Response`、Run history/events/tool-results/report/impact 响应及取消响应。`Run.analysis_kind` 区分 Issue 调查和代码理解；代码理解报告使用 `CodeUnderstandingFinal`、`CodeExplanation` 和最多 12 个有序 `ExplanationStep`，`complete/partial`、confirmed/inferred/unknown 及证据约束由契约校验。external MCP 另使用 `McpExternalToolResponse` 和 `McpExternalCompleteResponse`，分别只允许实际工具结果或成功 Run/report 进入 `ok` envelope。邻接 HTTP/MCP 结果的 `truncated`/`truncation_reason` 表示本次查询预算，`index_truncated`/`index_truncation_reason` 表示固定关系扫描覆盖，`index_unresolved_truncated`/`index_unresolved_truncation_reason` 表示 unresolved 详情覆盖；后者允许 NULL 表示旧索引未知，三组字段分别校验，不能交叉推断。Index 响应也保留同样的扫描与 unresolved 覆盖拆分。`RunImpactResponse` 要求恰好一个来自已保存报告的 candidate/finding ID，固定 `index_id`，明确 callers/callees 方向、最大深度、节点/边/路径/unresolved 上限、mapped/unmapped 状态和固定索引覆盖事实；路径只能解释同快照 `calls` 边。`SseEventFrame` 的 `id` 固定为 `{run_id}:{sequence}`，`SseStreamEndFrame` 只作为终态游标续接的非持久化完成标记；两者的 `event`/`data` 必须匹配，均保留 `schema_version`。MCP 的 Run 读/写 envelope 只允许对应 `ok` 状态携带 result/report；所有请求/响应保留 `schema_version`。精确字段以声明和生成 Schema 为准，不在文档中复制完整字段表。
 

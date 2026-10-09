@@ -101,4 +101,4 @@ API 离线、项目/Session/index 不属于当前范围、索引不在 latest、
 - [GitHub 远端 ref 新鲜度与显式更新](../../docs/decisions/2026-09-16-github-remote-freshness.md)
 - [本项目索引更新与缓存效果联合验收](../../docs/decisions/2026-09-16-project-index-cache-acceptance.md)
 
-普通工作台的功能识别和 Issue 分析不提供 fixture/real 或固定场景选项；两个显式动作只发送 real 模式，未配置密钥时先导向模型设置，不启动任务。历史 fixture 功能版本及 Run 仍可读取，标记“演示结果”；Codex 外部 Agent 保持独立来源标识。开发者通过[fixtures 离线入口](../../fixtures/README.md)使用模拟项目，HTTP/MCP 的 fixture 契约与自动测试保持兼容。
+普通工作台内置的功能识别和 Issue 分析不提供 fixture/real 或固定场景选项；两个显式动作只发送 real 模式，未配置密钥时先导向模型设置，不启动任务。历史 fixture 功能版本及 Run 仍可读取，标记“演示结果”。MCP 外部 Agent 可用自己的宿主模型提交功能结果；历史列表与功能图会显示“外部 Agent”，自报模型名单独标为宿主信息，服务端模型调用统计为 0；结果刷新后仍从同一 FeatureGeneration 读取。该路径不要求配置 CodeTrail 服务端模型密钥。开发者通过[fixtures 离线入口](../../fixtures/README.md)使用模拟项目，HTTP/MCP 的 fixture 契约与自动测试保持兼容。

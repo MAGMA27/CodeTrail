@@ -11,6 +11,7 @@
 - [schemas/codetrail.json](schemas/codetrail.json)：当前聚合 Schema。
 - [后端契约声明](../apps/api/app/contracts.py)：字段、校验和版本的唯一机械来源。
 - [Schema 生成器](../apps/api/app/export_schema.py)：可重复生成 Schema。
+- [外部 Agent 功能结果提交决策](../docs/decisions/2026-10-09-external-agent-feature-submission.md)：来源、固定 Run 证据和服务端模型用量边界。
 
 ## 接口与依赖
 

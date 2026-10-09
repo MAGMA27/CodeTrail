@@ -1,5 +1,7 @@
 # 决策记录
 
+- [外部 Agent 功能结果提交](2026-10-09-external-agent-feature-submission.md)
+
 - [工作台管理服务端模型配置](2026-10-09-workbench-model-provider-settings.md)
 
 - [项目知识采用画布与按需详情工作区](2026-10-08-project-knowledge-workspace.md)

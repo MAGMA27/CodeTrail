@@ -33,7 +33,11 @@ from .contracts import (
     CancelRunRequest,
     CancelRunResponse,
     Event,
+    Evidence,
     FeatureGeneration,
+    FeatureGenerationBudget,
+    FeatureGenerationUsage,
+    FeatureModelOutput,
     FeatureGenerationListResponse,
     FeatureGenerationRequest,
     FeatureGenerationResponse,
@@ -100,6 +104,7 @@ from .contracts import (
     SearchCodeFailure,
     SearchCodeSuccess,
     SearchIndexResponse,
+    Symbol,
     SaveModelConfigRequest,
     Session,
     SessionListResponse,
@@ -135,10 +140,12 @@ from .relations import (
     extract_relations,
     relation_coverage_limitations,
 )
-from .overview import build_project_overview
+from .overview import RULES_VERSION, build_project_overview
 from .feature_generation import (
     FeatureGenerationEngine,
     FeatureModelAdapter,
+    FeatureValidationContext,
+    _validate_model_output,
     build_cache_key,
     new_generation_id,
     resolve_model,
@@ -217,7 +224,6 @@ class RepositoryRegistry:
         mcp_local_import_enabled: bool | None = None,
         github_import_enabled: bool | None = None,
         mcp_github_import_enabled: bool | None = None,
-        mcp_feature_generation_enabled: bool | None = None,
         mcp_index_write_enabled: bool | None = None,
         mcp_session_write_enabled: bool | None = None,
         mcp_run_write_enabled: bool | None = None,
@@ -276,11 +282,6 @@ class RepositoryRegistry:
             if mcp_github_import_enabled is None
             else mcp_github_import_enabled
         )
-        self._mcp_feature_generation_enabled = (
-            _env_flag("CODETRAIL_MCP_FEATURE_GENERATION_ENABLED")
-            if mcp_feature_generation_enabled is None
-            else mcp_feature_generation_enabled
-        )
         self._mcp_index_write_enabled = (
             _env_flag("CODETRAIL_MCP_INDEX_WRITE_ENABLED")
             if mcp_index_write_enabled is None
@@ -322,7 +323,6 @@ class RepositoryRegistry:
         *,
         github_import_enabled: bool | None = None,
         mcp_github_import_enabled: bool | None = None,
-        mcp_feature_generation_enabled: bool | None = None,
         mcp_index_write_enabled: bool | None = None,
         mcp_session_write_enabled: bool | None = None,
         mcp_run_write_enabled: bool | None = None,
@@ -356,7 +356,6 @@ class RepositoryRegistry:
             allowed_import_roots=allowed,
             github_import_enabled=github_import_enabled,
             mcp_github_import_enabled=mcp_github_import_enabled,
-            mcp_feature_generation_enabled=mcp_feature_generation_enabled,
             mcp_index_write_enabled=mcp_index_write_enabled,
             mcp_session_write_enabled=mcp_session_write_enabled,
             mcp_run_write_enabled=mcp_run_write_enabled,
@@ -407,10 +406,6 @@ class RepositoryRegistry:
     @property
     def mcp_github_import_enabled(self) -> bool:
         return self._mcp_github_import_enabled
-
-    @property
-    def mcp_feature_generation_enabled(self) -> bool:
-        return self._mcp_feature_generation_enabled
 
     @property
     def mcp_index_write_enabled(self) -> bool:
@@ -3651,6 +3646,241 @@ class WorkspaceService:
         except StorageError as exc:
             raise ServiceError("internal_error", 500, "local index storage failed") from exc
 
+    def submit_external_features(
+        self,
+        project_id: str,
+        session_id: str,
+        run_id: str,
+        index_id: str,
+        output: FeatureModelOutput,
+        *,
+        model: str | None,
+        idempotency_key: str,
+    ) -> FeatureGenerationResponse:
+        """Validate and persist host-produced features from one active understanding Run."""
+
+        try:
+            output = FeatureModelOutput.model_validate(output)
+        except ValueError as exc:
+            raise ServiceError("invalid_input", 400, "external feature output is invalid") from exc
+        if not idempotency_key.strip() or len(idempotency_key) > 200:
+            raise ServiceError("invalid_input", 400, "external feature idempotency key is invalid")
+        model = model.strip() if model and model.strip() else None
+        if model is not None and len(model) > 200:
+            raise ServiceError("invalid_input", 400, "external model name is too long")
+        serialized_output = json.dumps(
+            output.model_dump(mode="json"),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        if len(serialized_output) > 50_000:
+            raise ServiceError("budget_exceeded", 409, "external feature output exceeds the 50000 character budget")
+
+        submission_started = time.monotonic()
+        project = self._find_project(project_id)
+        try:
+            with self.registry.store_for_repository(project.repository_id) as store:
+                record = store._require_run_scope(project_id, session_id, run_id)
+                self._require_external_run(record)
+                if record.run.analysis_kind != "understanding":
+                    raise ServiceError("conflict", 409, "project features require an external understanding Run")
+                if record.run.index_id != index_id or output.index_id != index_id:
+                    raise ServiceError("conflict", 409, "external feature index must match the Run snapshot")
+                if record.run.status in {"failed", "cancelled", "interrupted"}:
+                    code = "budget_exceeded" if record.run.status == "interrupted" else "conflict"
+                    raise ServiceError(code, 409, "external feature Run is already terminal")
+                record = self._expire_external_run_if_needed(store, record)
+                if record.run.status not in {"queued", "running", "succeeded"}:
+                    raise ServiceError("budget_exceeded", 409, "external feature Run time budget is exhausted")
+                cache_key = hashlib.sha256(
+                    json.dumps(
+                        {
+                            "kind": "external-feature-output-v1",
+                            "run_id": run_id,
+                            "project_id": project_id,
+                            "index_id": index_id,
+                            "model": model,
+                            "output": output.model_dump(mode="json"),
+                        },
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                ).hexdigest()
+                storage_idempotency_key = "external-feature:" + hashlib.sha256(
+                    f"{run_id}\0{idempotency_key}".encode("utf-8")
+                ).hexdigest()
+                existing = store.find_feature_generation_by_idempotency(project_id, storage_idempotency_key)
+                if existing is not None:
+                    _, generation = existing
+                    if generation.source != "external" or generation.index.index_id != index_id or generation.cache_key != cache_key:
+                        raise ServiceError("conflict", 409, "feature idempotency key is already bound to different content")
+                    return FeatureGenerationResponse(generation=generation)
+                if record.run.status == "succeeded":
+                    raise ServiceError("conflict", 409, "feature submission must precede the Run conclusion")
+                record = self._ensure_external_run_started(store, record)
+                record = self._expire_external_run_if_needed(store, record)
+                if record.run.status not in {"queued", "running"}:
+                    raise ServiceError("budget_exceeded", 409, "external feature Run time budget is exhausted")
+                result_page = store.load_run_tool_results(project_id, session_id, run_id, limit=40)
+                tool_results = list(result_page.results)
+                symbols, _, _, raw_evidence, tool_truncated, tool_truncation_reason, coverage_limitations = (
+                    _external_graph_data(tool_results, run_id=run_id, index_id=index_id)
+                )
+                evidence_by_id = {
+                    key: value for key, value in raw_evidence.items() if isinstance(value, Evidence)
+                }
+                symbol_by_id = {
+                    symbol.symbol_id: symbol for symbol in symbols if isinstance(symbol, Symbol)
+                }
+                usage_budget = record.run.budget
+                is_truncated = (
+                    tool_truncated
+                    or result_page.has_more
+                    or usage_budget.tool_calls_used >= usage_budget.max_tool_calls
+                )
+                overview = self.get_overview(
+                    project_id,
+                    index_id,
+                    max_depth=4,
+                    max_paths=40,
+                    max_modules=200,
+                    max_groups=80,
+                    max_module_relations=200,
+                )
+                for evidence in evidence_by_id.values():
+                    try:
+                        current = self.read_source(
+                            project_id,
+                            index_id,
+                            evidence.path,
+                            evidence.start_line,
+                            evidence.end_line,
+                        ).evidence
+                    except ServiceError as exc:
+                        raise ServiceError("conflict", 409, "external evidence no longer matches the fixed snapshot") from exc
+                    if current != evidence:
+                        raise ServiceError("conflict", 409, "external evidence hash or line range does not match the fixed snapshot")
+                observed_entries = tuple(
+                    entry.entry_point_id
+                    for entry in overview.entries
+                    if entry.index_id == index_id
+                    and (entry.symbol_id is None or entry.symbol_id in symbol_by_id)
+                    and any(
+                        evidence.path == entry.path
+                        and evidence.start_line <= entry.end_line
+                        and entry.start_line <= evidence.end_line
+                        for evidence in evidence_by_id.values()
+                    )
+                )
+                observed_modules = tuple(
+                    module.module_id
+                    for module in overview.modules
+                    if module.index_id == index_id
+                    and any(evidence.path == module.symbol.path for evidence in evidence_by_id.values())
+                )
+                validation_context = FeatureValidationContext(
+                    index_id=index_id,
+                    observed_entry_point_ids=observed_entries,
+                    selected_module_ids=observed_modules,
+                    observed_symbol_ids=tuple(symbol_by_id),
+                    evidence_ids=tuple(evidence_by_id),
+                )
+                budget = FeatureGenerationBudget(
+                    max_tool_calls=max(1, usage_budget.max_tool_calls),
+                    max_model_calls=1,
+                    max_seconds=min(120, max(1, usage_budget.max_seconds)),
+                    max_source_lines=max(1, usage_budget.max_source_lines),
+                    max_total_source_lines=max(1, usage_budget.max_total_source_lines),
+                    max_input_chars=max(1, usage_budget.max_input_chars),
+                    max_features=20,
+                    max_output_chars=50_000,
+                )
+                try:
+                    _validate_model_output(output, validation_context, budget)
+                except (ValueError, TypeError) as exc:
+                    raise ServiceError("conflict", 409, "external feature output references unobserved snapshot data") from exc
+                if record.run.budget.source_lines_used > budget.max_total_source_lines:
+                    raise ServiceError("budget_exceeded", 409, "external feature Run exceeded its source-line budget")
+                limitations = list(dict.fromkeys([
+                    "功能识别由宿主 Agent 完成；服务端未调用模型，模型用量统计为 0。",
+                    *coverage_limitations,
+                    *output.limitations,
+                ]))[:30]
+                if overview.truncated:
+                    limitations.append("O1 overview was truncated; unshown entries and modules were not treated as absent")
+                if is_truncated and tool_truncation_reason:
+                    limitations.append(f"external Run tool results were truncated: {tool_truncation_reason}")
+                if usage_budget.tool_calls_used >= usage_budget.max_tool_calls:
+                    limitations.append("external Run tool-call budget was exhausted")
+                limitations = list(dict.fromkeys(limitations))[:30]
+                is_truncated = is_truncated or overview.truncated
+                truncation_reason = "; ".join(limitations[:4])[:1_000] if is_truncated else None
+                status = (
+                    "insufficient_evidence"
+                    if output.outcome == "insufficient_evidence"
+                    else "partial" if is_truncated else "succeeded"
+                )
+                generation = FeatureGeneration(
+                    generation_id=new_generation_id(),
+                    project_id=project_id,
+                    index=store.load_index(index_id).snapshot.index,
+                    mode="real",
+                    source="external",
+                    model=model,
+                    prompt_version="external-agent-feature-v1",
+                    rules_version=RULES_VERSION,
+                    source_scope="external_run",
+                    status=status,
+                    summary=output.summary,
+                    features=output.features,
+                    associations=output.associations,
+                    evidence=list(evidence_by_id.values()),
+                    observed_entry_point_ids=list(observed_entries),
+                    observed_module_ids=list(observed_modules),
+                    observed_symbol_ids=list(symbol_by_id),
+                    source_paths=list(dict.fromkeys(item.path for item in evidence_by_id.values())),
+                    omitted_module_ids=[module.module_id for module in overview.modules if module.module_id not in observed_modules],
+                    limitations=limitations,
+                    usage=FeatureGenerationUsage(
+                        tool_calls=usage_budget.tool_calls_used,
+                        model_calls=0,
+                        source_lines=usage_budget.source_lines_used,
+                        elapsed_ms=max(0, int((time.monotonic() - submission_started) * 1000)),
+                    ),
+                    budget=budget,
+                    cache_key=cache_key,
+                    created_at=datetime.now(timezone.utc),
+                    truncated=is_truncated,
+                    truncation_reason=truncation_reason,
+                )
+                try:
+                    store.save_feature_generation(
+                        generation,
+                        cache_key=cache_key,
+                        idempotency_key=storage_idempotency_key,
+                        external_run_id=run_id,
+                        external_session_id=session_id,
+                    )
+                except StorageConflictError:
+                    existing = store.find_feature_generation_by_idempotency(project_id, storage_idempotency_key)
+                    if existing is not None and existing[1].source == "external" and existing[1].cache_key == cache_key:
+                        return FeatureGenerationResponse(generation=existing[1])
+                    raise
+                return FeatureGenerationResponse(generation=generation)
+        except ServiceError:
+            raise
+        except StorageConflictError as exc:
+            raise ServiceError("conflict", 409, "external feature submission conflicts with existing data") from exc
+        except StorageNotFoundError as exc:
+            raise ServiceError("not_found", 404, "external feature Run or index was not found") from exc
+        except StorageInputError as exc:
+            code = "budget_exceeded" if "budget" in str(exc).lower() else "invalid_input"
+            raise ServiceError(code, 409 if code == "budget_exceeded" else 400, "external feature submission is invalid") from exc
+        except StorageError as exc:
+            raise ServiceError("internal_error", 500, "local external feature storage failed") from exc
+
     def get_feature_generation(
         self,
         project_id: str,
@@ -4689,6 +4919,7 @@ def _feature_generation_summary(generation: FeatureGeneration) -> FeatureGenerat
         project_id=generation.project_id,
         index=generation.index,
         mode=generation.mode,
+        source=generation.source,
         model=generation.model,
         prompt_version=generation.prompt_version,
         rules_version=generation.rules_version,

@@ -762,6 +762,8 @@ export type ProjectOverview = {
 
 export type FeatureGenerationMode = "fixture" | "real";
 export type FeatureSourceScope = "entry_reachable" | "visible_modules";
+export type FeatureGenerationSource = "server" | "external";
+export type FeatureGenerationSourceScope = FeatureSourceScope | "external_run";
 export type FeatureGenerationStatus = "succeeded" | "partial" | "insufficient_evidence" | "failed";
 
 export type FeatureGenerationBudget = {
@@ -832,10 +834,11 @@ export type FeatureGeneration = {
   project_id: string;
   index: IndexSnapshot;
   mode: FeatureGenerationMode;
+  source: FeatureGenerationSource;
   model: string | null;
   prompt_version: string;
   rules_version: string;
-  source_scope: FeatureSourceScope;
+  source_scope: FeatureGenerationSourceScope;
   status: FeatureGenerationStatus;
   summary: string;
   features: Feature[];
@@ -867,10 +870,11 @@ export type FeatureGenerationSummary = {
   project_id: string;
   index: IndexSnapshot;
   mode: FeatureGenerationMode;
+  source: FeatureGenerationSource;
   model: string | null;
   prompt_version: string;
   rules_version: string;
-  source_scope: FeatureSourceScope;
+  source_scope: FeatureGenerationSourceScope;
   status: FeatureGenerationStatus;
   summary: string;
   feature_count: number;
@@ -2475,10 +2479,11 @@ function isFeatureGeneration(value: unknown): value is FeatureGeneration {
     !isString(value.generation_id) ||
     !isString(value.project_id) ||
     !["fixture", "real"].includes(String(value.mode)) ||
+    !["server", "external"].includes(String(value.source)) ||
     !isNullableString(value.model) ||
     !isString(value.prompt_version) ||
     !isString(value.rules_version) ||
-    !["entry_reachable", "visible_modules"].includes(String(value.source_scope)) ||
+    !["entry_reachable", "visible_modules", "external_run"].includes(String(value.source_scope)) ||
     !["succeeded", "partial", "insufficient_evidence", "failed"].includes(String(value.status)) ||
     !isString(value.summary) ||
     !Array.isArray(value.features) ||
@@ -2544,6 +2549,13 @@ function isFeatureGeneration(value: unknown): value is FeatureGeneration {
         !isString(value.error.kind) ||
         !isString(value.error.message) ||
         typeof value.error.retryable !== "boolean"))
+  ) {
+    return false;
+  }
+  if (
+    (value.source === "external" &&
+      (value.mode !== "real" || value.source_scope !== "external_run" || usage.model_calls !== 0 || usage.repair_calls !== 0 || modelInputChars.length > 0 || modelOutputChars.length > 0 || usage.input_tokens !== null || usage.output_tokens !== null)) ||
+    (value.source === "server" && value.source_scope === "external_run")
   ) {
     return false;
   }
@@ -2627,10 +2639,11 @@ export function isFeatureGenerationSummary(value: unknown): value is FeatureGene
     !isIndexSnapshot(value.index) ||
     value.index.status !== "ready" ||
     !["fixture", "real"].includes(String(value.mode)) ||
+    !["server", "external"].includes(String(value.source)) ||
     !isNullableString(value.model) ||
     !isString(value.prompt_version) ||
     !isString(value.rules_version) ||
-    !["entry_reachable", "visible_modules"].includes(String(value.source_scope)) ||
+    !["entry_reachable", "visible_modules", "external_run"].includes(String(value.source_scope)) ||
     !["succeeded", "partial", "insufficient_evidence", "failed"].includes(String(value.status)) ||
     !isString(value.summary) ||
     !isNonNegativeInteger(value.feature_count) ||
@@ -2645,6 +2658,13 @@ export function isFeatureGenerationSummary(value: unknown): value is FeatureGene
     return false;
   }
   if (value.status === "failed" ? value.error === null : value.error !== null) {
+    return false;
+  }
+  if (
+    (value.source === "external" &&
+      (value.mode !== "real" || value.source_scope !== "external_run" || value.usage.model_calls !== 0 || value.usage.repair_calls !== 0 || value.usage.model_input_chars.length > 0 || value.usage.model_output_chars.length > 0 || value.usage.input_tokens !== null || value.usage.output_tokens !== null)) ||
+    (value.source === "server" && value.source_scope === "external_run")
+  ) {
     return false;
   }
   return true;

@@ -118,7 +118,6 @@ def create_app(
     allowed_import_roots: tuple[str | Path, ...] | list[str | Path] | None = None,
     github_import_enabled: bool | None = None,
     mcp_github_import_enabled: bool | None = None,
-    mcp_feature_generation_enabled: bool | None = None,
     mcp_index_write_enabled: bool | None = None,
     mcp_session_write_enabled: bool | None = None,
     mcp_run_write_enabled: bool | None = None,
@@ -138,7 +137,6 @@ def create_app(
         RepositoryRegistry.from_environment(
             github_import_enabled=github_import_enabled,
             mcp_github_import_enabled=mcp_github_import_enabled,
-            mcp_feature_generation_enabled=mcp_feature_generation_enabled,
             mcp_index_write_enabled=mcp_index_write_enabled,
             mcp_session_write_enabled=mcp_session_write_enabled,
             mcp_run_write_enabled=mcp_run_write_enabled,
@@ -154,7 +152,6 @@ def create_app(
             allowed_import_roots=allowed_import_roots,
             github_import_enabled=github_import_enabled,
             mcp_github_import_enabled=mcp_github_import_enabled,
-            mcp_feature_generation_enabled=mcp_feature_generation_enabled,
             mcp_index_write_enabled=mcp_index_write_enabled,
             mcp_session_write_enabled=mcp_session_write_enabled,
             mcp_run_write_enabled=mcp_run_write_enabled,

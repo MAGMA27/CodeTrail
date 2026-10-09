@@ -983,7 +983,7 @@ def test_mcp_historical_refresh_reuses_snapshot_and_matches_http(tmp_path: Path)
     assert current_project["latest_index_id"] == index_b_id
 
 
-def test_mcp_feature_generation_is_separately_opt_in_and_returns_citations(tmp_path: Path) -> None:
+def test_mcp_reads_server_feature_generations_without_registering_model_generation(tmp_path: Path) -> None:
     repository = copy_fixture(tmp_path)
     data_root = tmp_path / "data"
     application = create_app({"timeout-demo": repository}, data_root=data_root)
@@ -1003,6 +1003,15 @@ def test_mcp_feature_generation_is_separately_opt_in_and_returns_citations(tmp_p
     )
     assert status == 200
     index_id = created["index"]["index_id"]
+    status, server_generation = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/indexes/{index_id}/features",
+        {"mode": "fixture", "idempotency_key": "http-fixture-feature"},
+    )
+    assert status == 200
+    generation = server_generation["generation"]
+    assert generation["source"] == "server"
 
     parameters = StdioServerParameters(
         command=sys.executable,
@@ -1010,6 +1019,7 @@ def test_mcp_feature_generation_is_separately_opt_in_and_returns_citations(tmp_p
         env={
             "CODETRAIL_REPOSITORIES": json.dumps({"timeout-demo": str(repository)}),
             "CODETRAIL_DATA_DIR": str(data_root),
+            # This retired variable no longer registers a service-side MCP model call.
             "CODETRAIL_MCP_FEATURE_GENERATION_ENABLED": "1",
             "CODETRAIL_WORKBENCH_URL": "http://localhost:3000",
         },
@@ -1034,28 +1044,13 @@ def test_mcp_feature_generation_is_separately_opt_in_and_returns_citations(tmp_p
                 "get_neighbors",
                 "get_overview",
                 "list_feature_generations",
-                "generate_project_features",
                 "get_feature_generation",
                 "get_feature_graph",
             } | RUN_READ_TOOLS == tool_names
-            generated = await client.call_tool(
-                "generate_project_features",
-                {
-                    "project_id": project_id,
-                    "index_id": index_id,
-                    "mode": "fixture",
-                    "idempotency_key": "mcp-feature-one",
-                },
-            )
-            structured = generated.structured_content
-            assert structured["ok"] is True
-            generation = structured["generation"]
+            assert "generate_project_features" not in tool_names
+            assert "submit_project_features" not in tool_names
             assert generation["status"] in {"succeeded", "partial"}
             assert generation["features"]
-            assert {reference["evidence_id"] for reference in structured["references"]} == {
-                evidence["evidence_id"] for evidence in generation["evidence"]
-            }
-            assert all(reference["url"].startswith("http://localhost:3000?") for reference in structured["references"])
 
             reread = await client.call_tool(
                 "get_feature_generation",
@@ -1065,7 +1060,12 @@ def test_mcp_feature_generation_is_separately_opt_in_and_returns_citations(tmp_p
                     "generation_id": generation["generation_id"],
                 },
             )
-            assert reread.structured_content["generation"] == generation
+            structured = reread.structured_content
+            assert structured["generation"] == generation
+            assert {reference["evidence_id"] for reference in structured["references"]} == {
+                evidence["evidence_id"] for evidence in generation["evidence"]
+            }
+            assert all(reference["url"].startswith("http://localhost:3000?") for reference in structured["references"])
 
             history = await client.call_tool(
                 "list_feature_generations",
@@ -1996,6 +1996,7 @@ def test_mcp_external_run_persists_actual_tools_and_report(tmp_path: Path) -> No
                     "project_id": project_id,
                     "session_id": session_id,
                     "index_id": index_id,
+                    "analysis_kind": "understanding",
                     "issue_id": "external-timeout-issue",
                     "title": "bounded external Run",
                     "body": "This external Run must expire before its first tool call.",
@@ -2020,6 +2021,26 @@ def test_mcp_external_run_persists_actual_tools_and_report(tmp_path: Path) -> No
             )
             assert expired_tool.structured_content["ok"] is False
             assert expired_tool.structured_content["error"]["code"] == "budget_exceeded"
+            expired_features = await client.call_tool(
+                "submit_project_features",
+                {
+                    "project_id": project_id,
+                    "session_id": session_id,
+                    "run_id": timed_out_id,
+                    "index_id": index_id,
+                    "idempotency_key": "expired-feature-submit",
+                    "output": {
+                        "output_id": "expired-feature-output",
+                        "index_id": index_id,
+                        "outcome": "insufficient_evidence",
+                        "summary": "The Run expired before producing usable evidence.",
+                        "evidence_ids": [],
+                        "observed_symbol_ids": [],
+                    },
+                },
+            )
+            assert expired_features.structured_content["ok"] is False
+            assert expired_features.structured_content["error"]["code"] == "budget_exceeded"
             status, expired_status = await _request(
                 application,
                 "GET",
@@ -2034,6 +2055,7 @@ def test_mcp_external_run_persists_actual_tools_and_report(tmp_path: Path) -> No
                     "project_id": project_id,
                     "session_id": session_id,
                     "index_id": index_id,
+                    "analysis_kind": "understanding",
                     "issue_id": "external-cancel-issue",
                     "title": "cancelled external Run",
                     "body": "This external Run must not accept tools after cancellation.",
@@ -2080,6 +2102,26 @@ def test_mcp_external_run_persists_actual_tools_and_report(tmp_path: Path) -> No
             )
             assert late_tool.structured_content["ok"] is False
             assert late_tool.structured_content["error"]["code"] == "conflict"
+            cancelled_features = await client.call_tool(
+                "submit_project_features",
+                {
+                    "project_id": project_id,
+                    "session_id": session_id,
+                    "run_id": cancelled_id,
+                    "index_id": index_id,
+                    "idempotency_key": "cancelled-feature-submit",
+                    "output": {
+                        "output_id": "cancelled-feature-output",
+                        "index_id": index_id,
+                        "outcome": "insufficient_evidence",
+                        "summary": "The Run was cancelled before feature recognition.",
+                        "evidence_ids": [],
+                        "observed_symbol_ids": [],
+                    },
+                },
+            )
+            assert cancelled_features.structured_content["ok"] is False
+            assert cancelled_features.structured_content["error"]["code"] == "conflict"
             events = await client.call_tool(
                 "list_run_events",
                 {"project_id": project_id, "session_id": session_id, "run_id": cancelled_id},
@@ -2440,6 +2482,14 @@ def test_mcp_external_understanding_run_persists_ordered_explanation(tmp_path: P
         {"source": "human", "content": "How does the local import request flow through the service?"},
     )
     assert status == 200
+    status, another_project = request(
+        application,
+        "POST",
+        "/api/projects",
+        {"name": "External feature scope isolation", "repository_id": "timeout-demo"},
+    )
+    assert status == 200
+    another_project_id = another_project["project_id"]
 
     async def exercise() -> dict:
         environment = {
@@ -2455,6 +2505,7 @@ def test_mcp_external_understanding_run_persists_ordered_explanation(tmp_path: P
             cwd=API_ROOT,
         )
         async with Client(parameters, read_timeout_seconds=15) as client:
+            assert not (data_root / "config.json").exists()
             started = await client.call_tool(
                 "start_external_run",
                 {
@@ -2470,12 +2521,41 @@ def test_mcp_external_understanding_run_persists_ordered_explanation(tmp_path: P
             )
             assert started.structured_content["ok"] is True
             run_id = started.structured_content["result"]["run_id"]
+            tool_names = {tool.name for tool in (await client.list_tools()).tools}
+            assert "submit_project_features" in tool_names
+            assert "generate_project_features" not in tool_names
 
             run_status = await client.call_tool(
                 "get_session_run",
                 {"project_id": project_id, "session_id": session_id, "run_id": run_id},
             )
             assert run_status.structured_content["result"]["run"]["analysis_kind"] == "understanding"
+
+            overview_result = await client.call_tool(
+                "get_overview",
+                {"project_id": project_id, "index_id": index_id, "max_paths": 40, "max_modules": 200},
+            )
+            overview = overview_result.structured_content["overview"]
+            entry = next(
+                item for item in overview["entries"]
+                if item["symbol_id"] and item["end_line"] - item["start_line"] < 180
+            )
+            module = next(item for item in overview["modules"] if item["symbol"]["path"] == entry["path"])
+            entry_symbols = await client.call_tool(
+                "run_get_neighbors",
+                {
+                    "project_id": project_id,
+                    "session_id": session_id,
+                    "run_id": run_id,
+                    "index_id": index_id,
+                    "request_id": "external-understanding-entry-neighbors",
+                    "symbol_id": entry["symbol_id"],
+                    "direction": "both",
+                    "depth": 1,
+                    "limit": 20,
+                },
+            )
+            assert entry_symbols.structured_content["ok"] is True
 
             searched = await client.call_tool(
                 "run_search_code",
@@ -2521,6 +2601,228 @@ def test_mcp_external_understanding_run_persists_ordered_explanation(tmp_path: P
                 )
                 assert source.structured_content["ok"] is True
                 evidence_ids.append(source.structured_content["result"]["evidence"]["evidence_id"])
+
+            entry_source = await client.call_tool(
+                "run_read_source",
+                {
+                    "project_id": project_id,
+                    "session_id": session_id,
+                    "run_id": run_id,
+                    "index_id": index_id,
+                    "request_id": "external-understanding-read-entry",
+                    "path": entry["path"],
+                    "start_line": entry["start_line"],
+                    "end_line": entry["end_line"],
+                },
+            )
+            assert entry_source.structured_content["ok"] is True
+            entry_evidence_id = entry_source.structured_content["result"]["evidence"]["evidence_id"]
+
+            feature_output = {
+                "output_id": "host-features-output-1",
+                "index_id": index_id,
+                "outcome": "features_found",
+                "summary": "The external host identified the observed local command entry.",
+                "features": [
+                    {
+                        "feature_id": "host-feature-1",
+                        "index_id": index_id,
+                        "name": "Local command entry",
+                        "description": "The observed command entry starts the local demo flow.",
+                        "entry_point_ids": [entry["entry_point_id"]],
+                        "module_ids": [module["module_id"]],
+                        "symbol_ids": [entry["symbol_id"]],
+                        "evidence_ids": [entry_evidence_id],
+                        "limitations": [],
+                    }
+                ],
+                "associations": [
+                    {
+                        "association_id": "host-feature-association-1",
+                        "index_id": index_id,
+                        "feature_id": "host-feature-1",
+                        "relation": "triggered_by",
+                        "target_kind": "entry_point",
+                        "target_id": entry["entry_point_id"],
+                        "evidence_ids": [entry_evidence_id],
+                    }
+                ],
+                "evidence_ids": [entry_evidence_id],
+                "observed_symbol_ids": [entry["symbol_id"]],
+                "limitations": ["Host recognition does not prove runtime execution."],
+            }
+
+            async def submit_features(
+                output: dict,
+                key: str,
+                *,
+                selected_index_id: str = index_id,
+                selected_project_id: str = project_id,
+            ):
+                return await client.call_tool(
+                    "submit_project_features",
+                    {
+                        "project_id": selected_project_id,
+                        "session_id": session_id,
+                        "run_id": run_id,
+                        "index_id": selected_index_id,
+                        "output": output,
+                        "idempotency_key": key,
+                        "model": "host-test-model",
+                    },
+                )
+
+            invalid_evidence = json.loads(json.dumps(feature_output))
+            invalid_evidence["evidence_ids"] = ["evidence-not-returned"]
+            invalid_evidence["features"][0]["evidence_ids"] = ["evidence-not-returned"]
+            invalid_evidence["associations"][0]["evidence_ids"] = ["evidence-not-returned"]
+            rejected_evidence = await submit_features(invalid_evidence, "external-features-bad-evidence")
+            assert rejected_evidence.structured_content["ok"] is False
+            assert rejected_evidence.structured_content["error"]["code"] == "conflict"
+
+            invalid_symbol = json.loads(json.dumps(feature_output))
+            invalid_symbol["observed_symbol_ids"] = ["symbol-not-returned"]
+            invalid_symbol["features"][0]["symbol_ids"] = ["symbol-not-returned"]
+            rejected_symbol = await submit_features(invalid_symbol, "external-features-bad-symbol")
+            assert rejected_symbol.structured_content["ok"] is False
+            assert rejected_symbol.structured_content["error"]["code"] == "conflict"
+
+            invalid_module = json.loads(json.dumps(feature_output))
+            invalid_module["features"][0]["module_ids"] = ["module-not-returned"]
+            rejected_module = await submit_features(invalid_module, "external-features-bad-module")
+            assert rejected_module.structured_content["ok"] is False
+            assert rejected_module.structured_content["error"]["code"] == "conflict"
+
+            invalid_entry = json.loads(json.dumps(feature_output))
+            invalid_entry["features"][0]["entry_point_ids"] = ["entry-not-observed"]
+            invalid_entry["associations"][0]["target_id"] = "entry-not-observed"
+            rejected_entry = await submit_features(invalid_entry, "external-features-bad-entry")
+            assert rejected_entry.structured_content["ok"] is False
+            assert rejected_entry.structured_content["error"]["code"] == "conflict"
+
+            with application.state.registry.store_for_repository("timeout-demo") as store:
+                rows = store._connection.execute(
+                    "SELECT request_id, result_json FROM run_tool_results WHERE run_id = ?",
+                    (run_id,),
+                ).fetchall()
+                entry_result_row = next(
+                    row for row in rows
+                    if json.loads(row["result_json"]).get("kind") == "read_source.succeeded"
+                    and json.loads(row["result_json"]).get("evidence", {}).get("evidence_id") == entry_evidence_id
+                )
+                original_result_json = entry_result_row["result_json"]
+                corrupted = json.loads(original_result_json)
+                corrupted["evidence"]["content_hash"] = "0" * 64
+                store._connection.execute(
+                    "UPDATE run_tool_results SET result_json = ? WHERE run_id = ? AND request_id = ?",
+                    (json.dumps(corrupted), run_id, entry_result_row["request_id"]),
+                )
+            rejected_hash = await submit_features(feature_output, "external-features-bad-hash")
+            assert rejected_hash.structured_content["ok"] is False
+            assert rejected_hash.structured_content["error"]["code"] == "conflict"
+
+            corrupted = json.loads(original_result_json)
+            corrupted["evidence"]["start_line"] += 1
+            corrupted["evidence"]["end_line"] += 1
+            with application.state.registry.store_for_repository("timeout-demo") as store:
+                store._connection.execute(
+                    "UPDATE run_tool_results SET result_json = ? WHERE run_id = ? AND request_id = ?",
+                    (json.dumps(corrupted), run_id, entry_result_row["request_id"]),
+                )
+            rejected_lines = await submit_features(feature_output, "external-features-bad-lines")
+            assert rejected_lines.structured_content["ok"] is False
+            assert rejected_lines.structured_content["error"]["code"] == "conflict"
+            with application.state.registry.store_for_repository("timeout-demo") as store:
+                store._connection.execute(
+                    "UPDATE run_tool_results SET result_json = ? WHERE run_id = ? AND request_id = ?",
+                    (original_result_json, run_id, entry_result_row["request_id"]),
+                )
+
+            wrong_index = await submit_features(feature_output, "external-features-wrong-index", selected_index_id="index-other")
+            assert wrong_index.structured_content["ok"] is False
+            assert wrong_index.structured_content["error"]["code"] == "conflict"
+
+            cross_project = await submit_features(
+                feature_output,
+                "external-features-cross-project",
+                selected_project_id=another_project_id,
+            )
+            assert cross_project.structured_content["ok"] is False
+            assert cross_project.structured_content["error"]["code"] == "not_found"
+
+            insufficient_output = json.loads(json.dumps(feature_output))
+            insufficient_output["outcome"] = "insufficient_evidence"
+            insufficient_output["summary"] = "The host did not identify a feature from its observed evidence."
+            insufficient_output["features"] = []
+            insufficient_output["associations"] = []
+            insufficient_output["evidence_ids"] = []
+            insufficient_output["observed_symbol_ids"] = []
+            insufficient = await submit_features(insufficient_output, "external-features-insufficient")
+            assert insufficient.structured_content["ok"] is True
+            assert insufficient.structured_content["generation"]["status"] == "insufficient_evidence"
+            assert insufficient.structured_content["generation"]["features"] == []
+            assert insufficient.structured_content["generation"]["usage"]["model_calls"] == 0
+
+            submitted_features = await submit_features(feature_output, "external-features-output-1")
+            assert submitted_features.structured_content["ok"] is True
+            feature_generation = submitted_features.structured_content["generation"]
+            assert feature_generation["source"] == "external"
+            assert feature_generation["source_scope"] == "external_run"
+            assert feature_generation["model"] == "host-test-model"
+            assert feature_generation["usage"]["model_calls"] == 0
+            assert feature_generation["usage"]["repair_calls"] == 0
+            assert feature_generation["usage"]["model_input_chars"] == []
+            assert feature_generation["usage"]["model_output_chars"] == []
+            assert feature_generation["usage"]["input_chars"] == 0
+            assert feature_generation["usage"]["output_chars"] == 0
+            assert feature_generation["usage"]["input_tokens"] is None
+            assert feature_generation["usage"]["output_tokens"] is None
+            generation_evidence_ids = {item["evidence_id"] for item in feature_generation["evidence"]}
+            assert entry_evidence_id in generation_evidence_ids
+            assert {reference["evidence_id"] for reference in submitted_features.structured_content["references"]} == generation_evidence_ids
+
+            repeated_features = await submit_features(feature_output, "external-features-output-1")
+            assert repeated_features.structured_content == submitted_features.structured_content
+            conflicting_output = json.loads(json.dumps(feature_output))
+            conflicting_output["summary"] = "Changed content under the same idempotency key."
+            conflicting_features = await submit_features(conflicting_output, "external-features-output-1")
+            assert conflicting_features.structured_content["ok"] is False
+            assert conflicting_features.structured_content["error"]["code"] == "conflict"
+
+            mcp_generation = await client.call_tool(
+                "get_feature_generation",
+                {
+                    "project_id": project_id,
+                    "index_id": index_id,
+                    "generation_id": feature_generation["generation_id"],
+                },
+            )
+            assert mcp_generation.structured_content["generation"] == feature_generation
+            mcp_feature_history = await client.call_tool(
+                "list_feature_generations",
+                {"project_id": project_id, "index_id": index_id, "limit": 40},
+            )
+            saved_external_summary = next(
+                item
+                for item in mcp_feature_history.structured_content["result"]["generations"]
+                if item["generation_id"] == feature_generation["generation_id"]
+            )
+            assert saved_external_summary["source"] == "external"
+            assert saved_external_summary["usage"]["model_calls"] == 0
+            mcp_feature_graph = await client.call_tool(
+                "get_feature_graph",
+                {
+                    "project_id": project_id,
+                    "index_id": index_id,
+                    "generation_id": feature_generation["generation_id"],
+                },
+            )
+            assert mcp_feature_graph.structured_content["ok"] is True
+            assert mcp_feature_graph.structured_content["graph"]["index_id"] == index_id
+            assert {
+                reference["evidence_id"]
+                for reference in mcp_feature_graph.structured_content["references"]
+            } == {item["evidence_id"] for item in feature_generation["evidence"]}
 
             conclusion = {
                 "project_id": project_id,
@@ -2591,6 +2893,9 @@ def test_mcp_external_understanding_run_persists_ordered_explanation(tmp_path: P
                 "step-runtime-gap",
             ]
             assert len(report["evidence"]) == 3
+            late_features = await submit_features(feature_output, "external-features-after-conclusion")
+            assert late_features.structured_content["ok"] is False
+            assert late_features.structured_content["error"]["code"] == "conflict"
 
             repeated = await client.call_tool("submit_external_run", conclusion)
             assert repeated.structured_content == completed.structured_content
@@ -2620,13 +2925,14 @@ def test_mcp_external_understanding_run_persists_ordered_explanation(tmp_path: P
             )
             event_types = [event["type"] for event in events.structured_content["result"]["events"]]
             assert event_types[0] == "run.started"
-            assert event_types.count("tool.started") == 4
-            assert event_types.count("tool.completed") == 4
+            assert event_types.count("tool.started") == 6
+            assert event_types.count("tool.completed") == 6
             assert event_types.count("graph.updated") == 1
             assert event_types.count("run.completed") == 1
-            return report
+            assert not (data_root / "config.json").exists()
+            return report, feature_generation, mcp_feature_graph.structured_content["graph"]
 
-    mcp_report = asyncio.run(exercise())
+    mcp_report, feature_generation, mcp_feature_graph = asyncio.run(exercise())
     status, http_report = request(
         application,
         "GET",
@@ -2634,6 +2940,32 @@ def test_mcp_external_understanding_run_persists_ordered_explanation(tmp_path: P
     )
     assert status == 200
     assert http_report["report"] == mcp_report
+    status, http_generation = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/indexes/{index_id}/features/{feature_generation['generation_id']}",
+    )
+    assert status == 200
+    assert http_generation["generation"] == feature_generation
+    status, http_history = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/features?index_id={index_id}&limit=40",
+    )
+    assert status == 200
+    saved_summary = next(
+        item for item in http_history["generations"]
+        if item["generation_id"] == feature_generation["generation_id"]
+    )
+    assert saved_summary["source"] == "external"
+    assert saved_summary["usage"]["model_calls"] == 0
+    status, http_feature_graph = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/indexes/{index_id}/features/{feature_generation['generation_id']}/graph",
+    )
+    assert status == 200
+    assert http_feature_graph["graph"] == mcp_feature_graph
 
 
 def test_external_tool_expiry_interrupts_after_slow_bounded_call(tmp_path: Path) -> None:
