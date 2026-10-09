@@ -760,6 +760,67 @@ export type ProjectOverview = {
   truncation_reason: string | null;
 };
 
+export type JourneySummary = {
+  journey_id: string;
+  index_id: string;
+  action_label: string;
+  label_candidates: string[];
+  label_dynamic: boolean;
+  event_name: "onSubmit" | "onClick";
+  action_path: string;
+  action_start_line: number;
+  method: OverviewHttpAssociation["method"];
+  path: string;
+};
+
+export type JourneyCoverage = {
+  parser_status: "ready" | "unavailable" | "invalid" | "truncated";
+  http_association_status: "complete" | "incomplete" | "not_analyzed";
+  scanned_file_count: number;
+  action_count: number;
+  journey_count: number;
+  unsupported_action_count: number;
+  action_facts_omitted_count: number;
+  prop_facts_omitted_count: number;
+  action_facts_truncated: boolean;
+  prop_facts_truncated: boolean;
+  relation_truncated: boolean;
+  truncated: boolean;
+  limitations: string[];
+};
+
+export type ProjectJourneyCatalog = {
+  schema_version: typeof SCHEMA_VERSION;
+  project_id: string;
+  index: IndexSnapshot;
+  rules_version: string;
+  journeys: JourneySummary[];
+  coverage: JourneyCoverage;
+};
+
+export type JourneyStep = {
+  step_id: string;
+  role: "trigger" | "client_processing" | "request" | "server_processing" | "result";
+  title: string;
+  relation_kind: "ui_action" | "ui_callback" | "calls" | "http_shape" | "result_display" | "unresolved";
+  certainty: "static" | "shape" | "unconfirmed";
+  explanation: string;
+  symbols: SymbolRecord[];
+  evidence: Evidence[];
+};
+
+export type ProjectJourney = {
+  schema_version: typeof SCHEMA_VERSION;
+  project_id: string;
+  index: IndexSnapshot;
+  rules_version: string;
+  journey_id: string;
+  summary: JourneySummary;
+  steps: JourneyStep[];
+  coverage: JourneyCoverage;
+  markers: string[];
+};
+
 export type FeatureGenerationMode = "fixture" | "real";
 export type FeatureSourceScope = "entry_reachable" | "visible_modules";
 export type FeatureGenerationSource = "server" | "external";
@@ -2441,6 +2502,96 @@ export function isProjectOverviewResponse(value: unknown): value is ProjectOverv
   );
 }
 
+function isJourneySummary(value: unknown, indexId: string): value is JourneySummary {
+  return (
+    isRecord(value) &&
+    isString(value.journey_id) &&
+    value.index_id === indexId &&
+    isString(value.action_label) &&
+    Array.isArray(value.label_candidates) &&
+    value.label_candidates.length <= 5 &&
+    isStringArray(value.label_candidates) &&
+    typeof value.label_dynamic === "boolean" &&
+    ["onSubmit", "onClick"].includes(String(value.event_name)) &&
+    isString(value.action_path) &&
+    isPositiveInteger(value.action_start_line) &&
+    ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD", "TRACE"].includes(String(value.method)) &&
+    isString(value.path) &&
+    value.path.startsWith("/api/") &&
+    !/[?#]/.test(value.path)
+  );
+}
+
+function isJourneyCoverage(value: unknown): value is JourneyCoverage {
+  return (
+    isRecord(value) &&
+    ["ready", "unavailable", "invalid", "truncated"].includes(String(value.parser_status)) &&
+    ["complete", "incomplete", "not_analyzed"].includes(String(value.http_association_status)) &&
+    isNonNegativeInteger(value.scanned_file_count) &&
+    isNonNegativeInteger(value.action_count) &&
+    isNonNegativeInteger(value.journey_count) &&
+    isNonNegativeInteger(value.unsupported_action_count) &&
+    isNonNegativeInteger(value.action_facts_omitted_count) &&
+    isNonNegativeInteger(value.prop_facts_omitted_count) &&
+    typeof value.action_facts_truncated === "boolean" &&
+    typeof value.prop_facts_truncated === "boolean" &&
+    typeof value.relation_truncated === "boolean" &&
+    typeof value.truncated === "boolean" &&
+    isStringArray(value.limitations) &&
+    (value.parser_status !== "truncated" || value.truncated)
+  );
+}
+
+export function isProjectJourneyCatalogResponse(value: unknown): value is ProjectJourneyCatalog {
+  if (!isRecord(value) || value.schema_version !== SCHEMA_VERSION || !isIndexSnapshot(value.index)) {
+    return false;
+  }
+  const indexId = value.index.index_id;
+  return (
+    isString(value.project_id) &&
+    isString(value.rules_version) &&
+    Array.isArray(value.journeys) &&
+    value.journeys.length <= 40 &&
+    value.journeys.every((item) => isJourneySummary(item, indexId)) &&
+    isJourneyCoverage(value.coverage) &&
+    value.coverage.journey_count === value.journeys.length
+  );
+}
+
+function isJourneyStep(value: unknown, indexId: string): value is JourneyStep {
+  return (
+    isRecord(value) &&
+    isString(value.step_id) &&
+    ["trigger", "client_processing", "request", "server_processing", "result"].includes(String(value.role)) &&
+    isString(value.title) &&
+    ["ui_action", "ui_callback", "calls", "http_shape", "result_display", "unresolved"].includes(String(value.relation_kind)) &&
+    ["static", "shape", "unconfirmed"].includes(String(value.certainty)) &&
+    isString(value.explanation) &&
+    Array.isArray(value.symbols) && value.symbols.length <= 8 &&
+    value.symbols.every((symbol) => isSymbolRecord(symbol) && symbol.index_id === indexId) &&
+    Array.isArray(value.evidence) && value.evidence.length <= 8 &&
+    value.evidence.every((evidence) => isEvidence(evidence) && evidence.index_id === indexId)
+  );
+}
+
+export function isProjectJourneyResponse(value: unknown): value is ProjectJourney {
+  if (!isRecord(value) || value.schema_version !== SCHEMA_VERSION || !isIndexSnapshot(value.index)) {
+    return false;
+  }
+  const indexId = value.index.index_id;
+  return (
+    isString(value.project_id) &&
+    isString(value.rules_version) &&
+    isString(value.journey_id) &&
+    isJourneySummary(value.summary, indexId) &&
+    value.summary.journey_id === value.journey_id &&
+    Array.isArray(value.steps) && value.steps.length >= 1 && value.steps.length <= 8 &&
+    value.steps.every((step) => isJourneyStep(step, indexId)) &&
+    isJourneyCoverage(value.coverage) &&
+    isStringArray(value.markers)
+  );
+}
+
 function isFeature(value: unknown, indexId: string): value is Feature {
   return (
     isRecord(value) &&
@@ -3646,6 +3797,31 @@ export function getProjectOverview(
   return requestJson(
     `/api/projects/${encodeURIComponent(projectId)}/indexes/${encodeURIComponent(indexId)}/overview?${params.toString()}`,
     isProjectOverviewResponse,
+    { signal },
+  );
+}
+
+export function getProjectJourneyCatalog(
+  projectId: string,
+  indexId: string,
+  signal?: AbortSignal,
+): Promise<ProjectJourneyCatalog> {
+  return requestJson(
+    `/api/projects/${encodeURIComponent(projectId)}/indexes/${encodeURIComponent(indexId)}/journeys`,
+    isProjectJourneyCatalogResponse,
+    { signal },
+  );
+}
+
+export function getProjectJourney(
+  projectId: string,
+  indexId: string,
+  journeyId: string,
+  signal?: AbortSignal,
+): Promise<ProjectJourney> {
+  return requestJson(
+    `/api/projects/${encodeURIComponent(projectId)}/indexes/${encodeURIComponent(indexId)}/journeys/${encodeURIComponent(journeyId)}`,
+    isProjectJourneyResponse,
     { signal },
   );
 }

@@ -46,6 +46,8 @@ from .contracts import (
     ProjectIndexListResponse,
     ProjectListResponse,
     ProjectOverview,
+    ProjectJourney,
+    ProjectJourneyCatalog,
     RefreshProjectIndexRequest,
     ReportResponse,
     RunImpactResponse,
@@ -761,6 +763,22 @@ def create_app(
             max_groups=max_groups,
             max_module_relations=max_module_relations,
         )
+
+    @application.get(
+        "/api/projects/{project_id}/indexes/{index_id}/journeys",
+        response_model=ProjectJourneyCatalog,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def get_project_journey_catalog(project_id: str, index_id: str) -> ProjectJourneyCatalog:
+        return await run_in_threadpool(workspace_service.get_journey_catalog, project_id, index_id)
+
+    @application.get(
+        "/api/projects/{project_id}/indexes/{index_id}/journeys/{journey_id}",
+        response_model=ProjectJourney,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def get_project_journey(project_id: str, index_id: str, journey_id: str) -> ProjectJourney:
+        return await run_in_threadpool(workspace_service.get_journey, project_id, index_id, journey_id)
 
     @application.post(
         "/api/projects/{project_id}/indexes/{index_id}/features",

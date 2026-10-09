@@ -268,6 +268,24 @@ def test_overview_cache_rejects_index_from_another_project(tmp_path: Path, monke
     assert second.index.index_id == index_two
     assert build_count == 2
 
+    catalog = service.get_journey_catalog(project_one, index_one)
+    status, http_catalog = request(
+        application,
+        "GET",
+        f"/api/projects/{project_one}/indexes/{index_one}/journeys",
+    )
+    assert status == 200
+    assert http_catalog == catalog.model_dump(mode="json")
+    assert http_catalog["project_id"] == project_one
+    assert http_catalog["index"]["index_id"] == index_one
+    status, rejected_catalog = request(
+        application,
+        "GET",
+        f"/api/projects/{project_two}/indexes/{index_one}/journeys",
+    )
+    assert status == 404
+    assert rejected_catalog["code"] == "not_found"
+
 
 def test_overview_identifies_confirmed_fastapi_routes_and_rejects_ambiguous_bindings(
     tmp_path: Path,

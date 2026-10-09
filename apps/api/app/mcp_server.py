@@ -39,6 +39,8 @@ from .contracts import (
     McpIndexResponse,
     McpIndexFreshnessResponse,
     McpIndexRefreshResponse,
+    McpJourneyCatalogResponse,
+    McpJourneyResponse,
     McpNeighborsResponse,
     McpModuleSymbolsResponse,
     McpOverviewResponse,
@@ -66,6 +68,8 @@ from .contracts import (
     LocalImportResponse,
     ProjectIndexListResponse,
     ProjectOverview,
+    ProjectJourney,
+    ProjectJourneyCatalog,
     RefreshProjectIndexRequest,
     ReportResponse,
     RunEventsResponse,
@@ -548,6 +552,47 @@ def create_mcp_server(
             return _failure(McpOverviewResponse, exc)
         except Exception:
             return _unexpected_failure("get_overview", McpOverviewResponse)
+
+    @server.tool(
+        name="get_journey_catalog",
+        title="List action journeys for an index",
+        description=(
+            "Read lightweight UI action journey summaries from one immutable project index. "
+            "The bounded catalog uses same-snapshot JSX action anchors, static calls, and HTTP method/path shape matches; "
+            "it does not load source excerpts or claim runtime execution. Use get_journey for one selected journey's steps and evidence."
+        ),
+        structured_output=True,
+    )
+    def get_journey_catalog(project_id: _ProjectId, index_id: _IndexId) -> McpJourneyCatalogResponse:
+        try:
+            result = service.get_journey_catalog(project_id, index_id)
+            return McpJourneyCatalogResponse(ok=True, catalog=result)
+        except ServiceError as exc:
+            return _failure(McpJourneyCatalogResponse, exc)
+        except Exception:
+            return _unexpected_failure("get_journey_catalog", McpJourneyCatalogResponse)
+
+    @server.tool(
+        name="get_journey",
+        title="Read one action journey",
+        description=(
+            "Read at most eight responsibility steps and source excerpts for one exact journey_id from one immutable index. "
+            "Static calls, HTTP shape matches, and unconfirmed UI/result relationships remain separately labeled."
+        ),
+        structured_output=True,
+    )
+    def get_journey(
+        project_id: _ProjectId,
+        index_id: _IndexId,
+        journey_id: _IndexId,
+    ) -> McpJourneyResponse:
+        try:
+            result = service.get_journey(project_id, index_id, journey_id)
+            return _mcp_journey_response(result, citation_url)
+        except ServiceError as exc:
+            return _failure(McpJourneyResponse, exc)
+        except Exception:
+            return _unexpected_failure("get_journey", McpJourneyResponse)
 
     @server.tool(
         name="list_feature_generations",
@@ -1563,6 +1608,38 @@ def _mcp_overview_response(result: ProjectOverview, base_url: str) -> McpOvervie
             )
         )
     return McpOverviewResponse(ok=True, overview=result, references=references)
+
+
+def _mcp_journey_response(result: ProjectJourney, base_url: str) -> McpJourneyResponse:
+    references: list[EvidenceReference] = []
+    seen: set[str] = set()
+    for step in result.steps:
+        for evidence in step.evidence:
+            if evidence.evidence_id in seen:
+                continue
+            seen.add(evidence.evidence_id)
+            references.append(
+                EvidenceReference(
+                    project_id=result.project_id,
+                    index_id=evidence.index_id,
+                    path=evidence.path,
+                    start_line=evidence.start_line,
+                    end_line=evidence.end_line,
+                    content_hash=evidence.content_hash,
+                    evidence_id=evidence.evidence_id,
+                    url=_citation_url(
+                        base_url,
+                        project_id=result.project_id,
+                        index_id=evidence.index_id,
+                        path=evidence.path,
+                        start_line=evidence.start_line,
+                        end_line=evidence.end_line,
+                        content_hash=evidence.content_hash,
+                        evidence_id=evidence.evidence_id,
+                    ),
+                )
+            )
+    return McpJourneyResponse(ok=True, journey=result, references=references)
 
 
 def _mcp_feature_generation_response(

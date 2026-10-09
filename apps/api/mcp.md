@@ -4,7 +4,7 @@
 
 `python -m app.mcp_server` 启动 MCP SDK `2.2.0` 的本地 stdio 服务；stdout 只承载协议帧，日志写 stderr。服务复用 WorkspaceService，不直接访问 SQLite，不创建索引，不执行仓库代码。
 
-默认只读工具包括项目、索引、`check_index_freshness`、Session/消息、`get_overview`、`list_module_symbols`、`get_neighbors`、`read_source`、功能历史/版本/图，以及 `list_session_runs`、`get_session_run`、`list_run_events`、`list_run_tool_results`、`get_run_report`、`get_run_impact`。新鲜度检查按当前本地源码内容 hash 做有界只读核对，不创建索引；模块列表只分页读取固定快照中指定 module path 的 class/function/test definitions；Run 读取和影响查询只返回持久化报告及其固定快照上的静态结果，不重新执行分析。`generate_project_features` 不注册为 MCP 工具；内置 HTTP 功能生成仍可按既有服务端模型配置运行。
+默认只读工具包括项目、索引、`check_index_freshness`、Session/消息、`get_overview`、`get_journey_catalog`、`get_journey`、`list_module_symbols`、`get_neighbors`、`read_source`、功能历史/版本/图，以及 `list_session_runs`、`get_session_run`、`list_run_events`、`list_run_tool_results`、`get_run_report`、`get_run_impact`。旅程 catalog 只返回轻量摘要；选择一项后 `get_journey` 最多返回 8 个步骤和按需读取的同快照源码 evidence。TSX callbacks 和响应界面更新若规则不能确认，会保留断点，不推断运行时执行或数据流。新鲜度检查按当前本地源码内容 hash 做有界只读核对，不创建索引；模块列表只分页读取固定快照中指定 module path 的 class/function/test definitions；Run 读取和影响查询只返回持久化报告及其固定快照上的静态结果，不重新执行分析。`generate_project_features` 不注册为 MCP 工具；内置 HTTP 功能生成仍可按既有服务端模型配置运行。
 
 `list_module_symbols(project_id,index_id,module_id,limit=40,cursor)` 与 HTTP 的 `/api/projects/{project_id}/indexes/{index_id}/modules/{module_id}/symbols` 使用相同参数、cursor 和 response page。页最多 40 项，HTTP/MCP 共用 40,000 字节序列化预算；跨页传回原 cursor，跨 Project/Index/Module 的 cursor 返回 `invalid_input`，module 不存在或 symbol 不是 module root 返回 `not_found`。该工具只描述 indexer 在固定 snapshot 捕获到的定义，不保证解析完整；详情见[模块定义分页决策](../../docs/decisions/2026-10-06-module-symbol-pagination.md)。
 

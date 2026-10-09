@@ -28,6 +28,8 @@ import {
   getImportStatus,
   getProjectNeighbors,
   getProjectOverview,
+  getProjectJourneyCatalog,
+  getProjectJourney,
   getProjectFeatureGraph,
   getProjectFeatureGeneration,
   getProjectSessionRunEventsStreamUrl,
@@ -88,6 +90,8 @@ import {
   type LocalImportResponse,
   type NeighborDirection,
   type OverviewEntryPoint,
+  type ProjectJourneyCatalog,
+  type ProjectJourney,
   type OverviewHttpAssociation,
   type OverviewGroup,
   type OverviewModule,
@@ -526,6 +530,13 @@ export default function Workbench() {
   const [overviewStatus, setOverviewStatus] = useState<AsyncStatus>("idle");
   const [overview, setOverview] = useState<ProjectOverview | null>(null);
   const [overviewError, setOverviewError] = useState<string | null>(null);
+  const [journeyCatalog, setJourneyCatalog] = useState<ProjectJourneyCatalog | null>(null);
+  const [journeyCatalogStatus, setJourneyCatalogStatus] = useState<AsyncStatus>("idle");
+  const [journeyCatalogError, setJourneyCatalogError] = useState<string | null>(null);
+  const [selectedJourneyId, setSelectedJourneyId] = useState<string | null>(null);
+  const [journey, setJourney] = useState<ProjectJourney | null>(null);
+  const [journeyStatus, setJourneyStatus] = useState<AsyncStatus>("idle");
+  const [journeyError, setJourneyError] = useState<string | null>(null);
   const [moduleSymbolsRoot, setModuleSymbolsRoot] = useState<SymbolRecord | null>(null);
   const [moduleSymbolsPage, setModuleSymbolsPage] = useState<ModuleSymbolsPageResponse | null>(null);
   const [moduleSymbolsStatus, setModuleSymbolsStatus] = useState<AsyncStatus>("idle");
@@ -636,6 +647,8 @@ export default function Workbench() {
   const graphController = useRef<AbortController | null>(null);
   const sourceController = useRef<AbortController | null>(null);
   const overviewController = useRef<AbortController | null>(null);
+  const journeyCatalogController = useRef<AbortController | null>(null);
+  const journeyController = useRef<AbortController | null>(null);
   const moduleSymbolsController = useRef<AbortController | null>(null);
   const featureController = useRef<AbortController | null>(null);
   const featureHistoryController = useRef<AbortController | null>(null);
@@ -657,6 +670,8 @@ export default function Workbench() {
   const graphRequestId = useRef(0);
   const sourceRequestId = useRef(0);
   const overviewRequestId = useRef(0);
+  const journeyCatalogRequestId = useRef(0);
+  const journeyRequestId = useRef(0);
   const moduleSymbolsRequestId = useRef(0);
   const featureRequestId = useRef(0);
   const featureHistoryRequestId = useRef(0);
@@ -928,6 +943,8 @@ export default function Workbench() {
       graphController.current?.abort();
       sourceController.current?.abort();
       overviewController.current?.abort();
+      journeyCatalogController.current?.abort();
+      journeyController.current?.abort();
       moduleSymbolsController.current?.abort();
       featureController.current?.abort();
       featureHistoryController.current?.abort();
@@ -954,6 +971,8 @@ export default function Workbench() {
     graphController.current?.abort();
     sourceController.current?.abort();
     overviewController.current?.abort();
+    journeyCatalogController.current?.abort();
+    journeyController.current?.abort();
     resetModuleSymbols();
     featureController.current?.abort();
     featureHistoryController.current?.abort();
@@ -963,6 +982,8 @@ export default function Workbench() {
     graphRequestId.current += 1;
     sourceRequestId.current += 1;
     overviewRequestId.current += 1;
+    journeyCatalogRequestId.current += 1;
+    journeyRequestId.current += 1;
     featureHistoryRequestId.current += 1;
     featureGraphRequestId.current += 1;
     runImpactRequestId.current += 1;
@@ -985,6 +1006,13 @@ export default function Workbench() {
     setOverviewStatus("idle");
     setOverview(null);
     setOverviewError(null);
+    setJourneyCatalog(null);
+    setJourneyCatalogStatus("idle");
+    setJourneyCatalogError(null);
+    setSelectedJourneyId(null);
+    setJourney(null);
+    setJourneyStatus("idle");
+    setJourneyError(null);
     setSelectedOverviewEntryId(null);
     setSelectedOverviewGroupId(null);
     setHttpEntryChain(null);
@@ -1097,6 +1125,61 @@ export default function Workbench() {
       setOverviewError(errorMessage(error));
     }
   }, [resetModuleSymbols]);
+
+  const loadJourneyCatalog = useCallback(async (projectId: string, indexId: string) => {
+    journeyCatalogController.current?.abort();
+    journeyController.current?.abort();
+    const controller = new AbortController();
+    journeyCatalogController.current = controller;
+    const requestId = ++journeyCatalogRequestId.current;
+    journeyRequestId.current += 1;
+    setJourneyCatalogStatus("loading");
+    setJourneyCatalogError(null);
+    setJourneyCatalog(null);
+    setSelectedJourneyId(null);
+    setJourney(null);
+    setJourneyStatus("idle");
+    setJourneyError(null);
+    try {
+      const response = await getProjectJourneyCatalog(projectId, indexId, controller.signal);
+      if (!isLatestRequest(requestId, journeyCatalogRequestId.current)) return;
+      setJourneyCatalog(response);
+      setJourneyCatalogStatus(response.journeys.length > 0 ? "success" : "empty");
+    } catch (error) {
+      if (isAbortError(error) || !isLatestRequest(requestId, journeyCatalogRequestId.current)) return;
+      setJourneyCatalog(null);
+      setJourneyCatalogStatus("error");
+      setJourneyCatalogError(errorMessage(error));
+    }
+  }, []);
+
+  const selectJourney = useCallback(async (journeyId: string) => {
+    if (!selectedProjectId || !indexResponse ||
+      journeyCatalog?.project_id !== selectedProjectId ||
+      journeyCatalog.index.index_id !== indexResponse.index.index_id ||
+      !journeyCatalog.journeys.some((item) => item.journey_id === journeyId)) return;
+    if (selectedJourneyId === journeyId && journey?.journey_id === journeyId && journeyStatus === "success") return;
+    journeyController.current?.abort();
+    const controller = new AbortController();
+    journeyController.current = controller;
+    const requestId = ++journeyRequestId.current;
+    setSelectedJourneyId(journeyId);
+    setJourney(null);
+    setJourneyStatus("loading");
+    setJourneyError(null);
+    try {
+      const response = await getProjectJourney(selectedProjectId, indexResponse.index.index_id, journeyId, controller.signal);
+      if (!isLatestRequest(requestId, journeyRequestId.current) ||
+        response.project_id !== selectedProjectId || response.index.index_id !== indexResponse.index.index_id) return;
+      setJourney(response);
+      setJourneyStatus("success");
+    } catch (error) {
+      if (isAbortError(error) || !isLatestRequest(requestId, journeyRequestId.current)) return;
+      setJourney(null);
+      setJourneyStatus("error");
+      setJourneyError(errorMessage(error));
+    }
+  }, [indexResponse, journey, journeyCatalog, journeyStatus, selectedJourneyId, selectedProjectId]);
 
   const loadModuleSymbolsPage = useCallback(
     async (module: SymbolRecord, cursor: string | null = null, append = false) => {
@@ -4412,6 +4495,25 @@ export default function Workbench() {
             void loadOverview(selectedProjectId, indexResponse.index.index_id);
           }
         },
+        journeyCatalog,
+        journeyCatalogStatus,
+        journeyCatalogError,
+        selectedJourneyId,
+        journey,
+        journeyStatus,
+        journeyError,
+        onLoadJourneyCatalog: () => {
+          if (selectedProjectId && indexResponse) {
+            void loadJourneyCatalog(selectedProjectId, indexResponse.index.index_id);
+          }
+        },
+        onSelectJourney: (journeyId) => { void selectJourney(journeyId); },
+        onRetryJourneyCatalog: () => {
+          if (selectedProjectId && indexResponse) {
+            void loadJourneyCatalog(selectedProjectId, indexResponse.index.index_id);
+          }
+        },
+        onSelectJourneyEvidence: selectFeatureEvidence,
         featureStatus,
         featureGeneration,
         featureError,

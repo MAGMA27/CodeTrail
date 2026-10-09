@@ -2,7 +2,7 @@
 
 ## 状态
 
-已实现 Python 与 TypeScript/TSX 的有界不可变源码快照、定义、相对导入、静态调用及保守 HTTP path facts，以及本地 freshness 检查和显式索引更新；Python 继续使用文件级定义/关系事实缓存，TypeScript 使用每次有界冷 AST 解析，不计入 Python AST/cache 统计。`codetrail init` 从 CodeTrail 源码工作区发现锁定的 TypeScript 5.9.3 编译器；编译器不随安装包分发，缺失时 Python 索引仍可用，含 TypeScript/TSX 的新索引会显式失败。TypeScript 语法错误、锁定解析器不可用和快照扫描不完整都会显式令新索引 failed。源码捕获规则为 `source-v4`，TypeScript 编译器锁定 `5.9.3`，当前静态 facts 规则为 `typescript-facts-v4`，关系语义为 `relations-v9`，Python 关系事实缓存规则/格式为 `python-relation-facts-v4` / `relation-facts-v4`，索引身份为 `relations-v13`；定义/关系目标仍基于当前快照全量解析，不是完整增量索引。
+已实现 Python 与 TypeScript/TSX 的有界不可变源码快照、定义、相对导入、静态调用及保守 HTTP path facts，以及本地 freshness 检查和显式索引更新；Python 继续使用文件级定义/关系事实缓存，TypeScript 使用每次有界冷 AST 解析，不计入 Python AST/cache 统计。`codetrail init` 从 CodeTrail 源码工作区发现锁定的 TypeScript 5.9.3 编译器；编译器不随安装包分发，缺失时 Python 索引仍可用，含 TypeScript/TSX 的新索引会显式失败。TypeScript 语法错误、锁定解析器不可用和快照扫描不完整都会显式令新索引 failed。源码捕获规则为 `source-v4`，TypeScript 编译器锁定 `5.9.3`，当前静态 facts 规则为 `typescript-facts-v5`，关系语义为 `relations-v9`，Python 关系事实缓存规则/格式为 `python-relation-facts-v4` / `relation-facts-v4`，索引身份为 `relations-v13`；定义/关系目标仍基于当前快照全量解析，不是完整增量索引。v5 只识别 `requestJson` wrapper 直接函数体中的唯一 `fetch`，并允许已验证的 `init` timeout-rest 转发形状；嵌套回调中的 `fetch` 不纳入客户端请求事实。v4 及更旧 immutable snapshots 不会原地重写，新 association 需通过 freshness 和显式 refresh 创建新 index。
 
 Python calls 可将安全实例构造点绑定到构造器直接赋值的 `self.field`，再解析 `self.field.method()`。仅当当前快照中该类的所有可解析构造调用都把同一个安全类实例传给唯一参数、构造器与参数绑定没有动态展开/重赋值、类无继承/装饰器/`__new__` 或自定义属性协议，并且同名字段没有不兼容写入或可识别类引用逃逸时才生成静态边。裸类名作为普通调用实参、直接返回类名、字段/局部别名和绕过 `__init__` 的 `Class.__new__(Class)` 都使该类的实例来源不再可证明；仅有未知动态反射仍不构成运行时保证。类型注解不会单独证明实例类型；工厂、未知构造点、字段变更和未证明为同类实例的外部多段字段写继续 unresolved。该边只表示快照中的静态语法一致，不保证运行时一定采用该类型或执行调用。
 

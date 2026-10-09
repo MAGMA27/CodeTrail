@@ -438,6 +438,38 @@ code { font-family: var(--ct-mono); }
 .ct-feature-card-heading h4 { font-size: 14px; font-weight: 650; }
 .ct-feature-card-heading span, .ct-feature-card p, .ct-card-note { color: var(--ct-muted); font-size: 11px; }
 .ct-feature-card p { line-height: 1.6; }
+.ct-ai-feature-details { border-top: 1px solid var(--ct-border); padding-top: 10px; color: var(--ct-muted); font-size: 11px; }
+.ct-ai-feature-details > summary { cursor: pointer; color: var(--ct-blue); }
+.ct-ai-feature-content { display: grid; gap: 11px; padding-top: 11px; }
+.ct-journey-section { display: grid; gap: 10px; padding: 14px; border: 1px solid var(--ct-border); border-left: 3px solid var(--ct-blue); border-radius: 7px; background: var(--ct-subtle); }
+.ct-journey-heading, .ct-journey-step-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.ct-journey-heading h4 { margin: 0; font-size: 14px; }
+.ct-journey-heading .ct-overline { margin: 0 0 3px; }
+.ct-journey-layout { display: grid; grid-template-columns: minmax(180px, 0.36fr) minmax(0, 1fr); gap: 12px; }
+.ct-journey-list, .ct-journey-steps { display: grid; align-content: start; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.ct-journey-choice { display: grid; gap: 4px; width: 100%; padding: 9px; border: 1px solid var(--ct-border); border-left: 2px solid transparent; border-radius: 5px; background: var(--ct-surface); color: var(--ct-text); text-align: left; }
+.ct-journey-choice:hover { border-color: var(--ct-border-strong); }
+.ct-journey-choice.is-selected { border-left-color: var(--ct-blue); background: var(--ct-blue-soft); }
+.ct-journey-choice strong { font-size: 11px; }
+.ct-journey-choice span, .ct-journey-step-copy p, .ct-journey-coverage, .ct-journey-symbol { color: var(--ct-muted); font-size: 10px; }
+.ct-journey-detail { min-width: 0; }
+.ct-journey-step { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 8px; padding: 9px; border: 1px solid var(--ct-border); border-radius: 5px; background: var(--ct-surface); }
+.ct-journey-step-index { color: var(--ct-faint); font-family: var(--ct-mono); font-size: 10px; }
+.ct-journey-step-heading strong { font-size: 11px; }
+.ct-journey-certainty { flex: 0 0 auto; color: var(--ct-muted); font-size: 9px; }
+.ct-journey-certainty.is-unconfirmed, .ct-journey-break, .ct-journey-markers { color: var(--ct-warning); }
+.ct-journey-step-copy p { margin: 5px 0 0; line-height: 1.5; }
+.ct-journey-break { display: block; margin-top: 5px; font-size: 9px; }
+.ct-journey-sources { display: grid; justify-items: start; gap: 4px; margin-top: 7px; color: var(--ct-muted); font-size: 9px; }
+.ct-journey-sources summary { cursor: pointer; }
+.ct-journey-sources button { padding: 2px 0; border: 0; background: transparent; color: var(--ct-blue); font-family: var(--ct-mono); font-size: 9px; text-align: left; }
+.ct-journey-symbol { font-family: var(--ct-mono); overflow-wrap: anywhere; }
+.ct-journey-markers, .ct-journey-coverage { display: grid; gap: 4px; }
+.ct-journey-markers { margin-top: 8px; padding: 8px; border-left: 2px solid var(--ct-warning); background: var(--ct-warning-soft); }
+.ct-journey-markers summary { cursor: pointer; font-size: 10px; }
+.ct-journey-markers p { margin: 0; font-size: 10px; }
+.ct-journey-coverage { padding-top: 3px; }
+.ct-journey-coverage summary { cursor: pointer; }
 .ct-ref-list, .ct-evidence-links { display: flex; flex-wrap: wrap; gap: 5px; }
 .ct-ref-list span { padding: 3px 6px; border: 1px solid var(--ct-border); border-radius: 4px; color: var(--ct-muted); font-family: var(--ct-mono); font-size: 9px; }
 .ct-evidence-links button, .ct-evidence-links span { padding: 4px 6px; border: 1px solid #c9d4f5; border-radius: 4px; background: var(--ct-blue-soft); color: var(--ct-blue); font-family: var(--ct-mono); font-size: 9px; text-align: left; }
@@ -841,6 +873,7 @@ code { font-family: var(--ct-mono); }
   .ct-global-alert { margin-right: 16px; margin-left: 16px; }
   .ct-page { padding: 22px 16px 34px; }
   .ct-page-intro { display: grid; gap: 14px; margin-bottom: 18px; }
+  .ct-journey-layout { grid-template-columns: minmax(0, 1fr); }
   .ct-architecture-heading { align-items: start; }
   .ct-architecture-count { display: none; }
   .ct-architecture-canvas { height: 70dvh; min-height: 540px; }

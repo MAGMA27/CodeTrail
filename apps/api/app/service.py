@@ -61,6 +61,8 @@ from .contracts import (
     IndexResponse,
     IndexRefreshResponse,
     IndexSnapshot,
+    ProjectJourney,
+    ProjectJourneyCatalog,
     IssueModelFinal,
     LocalImportRequest,
     LocalImportResponse,
@@ -141,6 +143,7 @@ from .relations import (
     relation_coverage_limitations,
 )
 from .overview import RULES_VERSION, build_project_overview
+from .journeys import build_journey_catalog, build_project_journey
 from .feature_generation import (
     FeatureGenerationEngine,
     FeatureModelAdapter,
@@ -3547,6 +3550,69 @@ class WorkspaceService:
             raise ServiceError("not_found", 404, "requested index or source evidence was not found") from exc
         except StorageInputError as exc:
             raise ServiceError("invalid_input", 400, "overview parameters are invalid") from exc
+        except StorageError as exc:
+            raise ServiceError("internal_error", 500, "local index storage failed") from exc
+
+    def get_journey_catalog(self, project_id: str, index_id: str) -> ProjectJourneyCatalog:
+        """Read lightweight UI action journey summaries from one fixed source snapshot."""
+
+        self._require_project_index(project_id, index_id)
+        overview = self.get_overview(
+            project_id,
+            index_id,
+            max_depth=1,
+            max_paths=1,
+            max_modules=200,
+            max_groups=1,
+            max_module_relations=1,
+        )
+        try:
+            with self.registry.store_for_repository(self._require_project_index(project_id, index_id).repository_id) as store:
+                relation = store.load_index(index_id)
+                catalog, _specs = build_journey_catalog(project_id, relation, overview)
+            return catalog
+        except ServiceError:
+            raise
+        except ValueError as exc:
+            raise ServiceError("invalid_input", 400, "journey parameters are invalid") from exc
+        except StorageNotFoundError as exc:
+            raise ServiceError("not_found", 404, "requested index or source evidence was not found") from exc
+        except StorageError as exc:
+            raise ServiceError("internal_error", 500, "local index storage failed") from exc
+
+    def get_journey(self, project_id: str, index_id: str, journey_id: str) -> ProjectJourney:
+        """Read one bounded action journey and its same-snapshot source evidence."""
+
+        self._require_project_index(project_id, index_id)
+        overview = self.get_overview(
+            project_id,
+            index_id,
+            max_depth=1,
+            max_paths=1,
+            max_modules=200,
+            max_groups=1,
+            max_module_relations=1,
+        )
+        try:
+            project = self._require_project_index(project_id, index_id)
+            with self.registry.store_for_repository(project.repository_id) as store:
+                relation = store.load_index(index_id)
+                journey = build_project_journey(
+                    project_id,
+                    relation,
+                    overview,
+                    journey_id,
+                    store.read_evidence,
+                )
+            if journey is None:
+                raise ServiceError("not_found", 404, "journey was not found in the selected index")
+            return journey
+        except ServiceError:
+            raise
+        except ValueError as exc:
+            raise ServiceError("invalid_input", 400, "journey parameters are invalid") from exc
+        except StorageNotFoundError as exc:
+            raise ServiceError("not_found", 404, "requested index or source evidence was not found") from exc
         except StorageError as exc:
             raise ServiceError("internal_error", 500, "local index storage failed") from exc
 

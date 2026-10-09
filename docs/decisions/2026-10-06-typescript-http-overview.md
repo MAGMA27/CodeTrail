@@ -56,3 +56,7 @@ TypeScript facts 当时升级为 `typescript-facts-v3`，调用解析语义为 `
 函数调用初始化中的一个函数实参仍可独立生成函数符号和源码定位，但未知包装器返回值不再作为该变量的调用目标或导出目标。HTTP path 分析识别 `typescript-facts-v4`；关系语义为 `relations-v9`，新索引 identity 为 `relations-v13`。旧 `relations-v12` index、Session、Run 和 evidence 保持不变，语义修复通过新索引生效。
 
 本修正的 TypeScript 索引/关系定向测试 18 passed，freshness 测试 15 passed，全后端测试 246 passed；compileall、共享/本地 docs 检查及 diff 检查通过。父任务只读内存快照 probe 有 2514 symbols、issues=[]，并验证 `openArchitectureSource → readProjectSource` 源码 `calls/ast` 边位于 `apps/web/app/workbench.tsx:L2922`；索引 `index-self-readonly-review-a58a7582c8a576a5` 未持久化。新 rules-v4 持久化索引及 HTTP/stdio/宿主 MCP/PC 流程仍 UNVERIFIED；整仓阶段保持 partial。
+
+## v5 HTTP wrapper 识别（2026-10-09）
+
+当前 TypeScript facts 规则升为 `typescript-facts-v5`。`requestJson` wrapper 只有在直接函数体中存在唯一 `fetch`、path 与 apiBaseUrl 仍按透明形式拼接、请求 options 的唯一 rest 来源可证为 `init` 时才产出客户端请求事实；识别已验证的 `{ timeoutMs, ...requestInit } = init` 形状。扫描跳过嵌套回调中的 fetch，嵌套调用不参与唯一性判断。该扩展使本地导入客户端的 `/api/imports/local` request fact 可进入既有 HTTP association；facts 版本进入 freshness，因此 v4 及更旧 immutable index 继续可读但不会自动得到该新关联，需要显式 refresh 创建新 index。UI action facts 仍在读取 journey catalog 时从同一个快照的 TSX 源码有界冷解析，不写入索引关系或构造新 `CodeEdge`。

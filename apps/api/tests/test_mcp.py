@@ -333,6 +333,12 @@ def test_real_stdio_client_matches_http_and_returns_evidence_link(tmp_path: Path
         f"/api/projects/{project_id}/indexes/{index_id}/overview",
     )
     assert status == 200, http_overview
+    status, http_journey_catalog = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/indexes/{index_id}/journeys",
+    )
+    assert status == 200, http_journey_catalog
     status, http_freshness = request(
         application,
         "POST",
@@ -365,6 +371,7 @@ def test_real_stdio_client_matches_http_and_returns_evidence_link(tmp_path: Path
             http_neighbors=http_neighbors,
             http_source=http_source,
             http_overview=http_overview,
+            http_journey_catalog=http_journey_catalog,
             http_freshness=http_freshness,
         )
     )
@@ -659,6 +666,8 @@ def test_mcp_local_import_is_opt_in_and_shares_http_state(tmp_path: Path) -> Non
                 "read_source",
                 "get_neighbors",
                 "get_overview",
+                "get_journey_catalog",
+                "get_journey",
                 "list_feature_generations",
                 "get_feature_generation",
                 "get_feature_graph",
@@ -718,6 +727,8 @@ def test_mcp_local_import_is_opt_in_and_shares_http_state(tmp_path: Path) -> Non
                 "read_source",
                 "get_neighbors",
                 "get_overview",
+                "get_journey_catalog",
+                "get_journey",
                 "get_import_status",
                 "list_feature_generations",
                 "get_feature_generation",
@@ -1046,6 +1057,8 @@ def test_mcp_reads_server_feature_generations_without_registering_model_generati
                 "read_source",
                 "get_neighbors",
                 "get_overview",
+                "get_journey_catalog",
+                "get_journey",
                 "list_feature_generations",
                 "get_feature_generation",
                 "get_feature_graph",
@@ -1257,6 +1270,7 @@ async def _exercise_stdio(
     http_neighbors: dict,
     http_source: dict,
     http_overview: dict,
+    http_journey_catalog: dict,
     http_freshness: dict,
 ) -> None:
     expected_tools = {
@@ -1273,6 +1287,8 @@ async def _exercise_stdio(
         "read_source",
         "get_neighbors",
         "get_overview",
+        "get_journey_catalog",
+        "get_journey",
         "list_feature_generations",
         "get_feature_generation",
         "get_feature_graph",
@@ -1404,6 +1420,15 @@ async def _exercise_stdio(
             reference["evidence_id"] for reference in references
         }
 
+        journey_catalog_result = await client.call_tool(
+            "get_journey_catalog",
+            {"project_id": project_id, "index_id": index_id},
+        )
+        assert journey_catalog_result.structured_content["ok"] is True
+        assert journey_catalog_result.structured_content["catalog"] == http_journey_catalog
+        assert journey_catalog_result.structured_content["catalog"]["project_id"] == project_id
+        assert journey_catalog_result.structured_content["catalog"]["index"]["index_id"] == index_id
+
         wrong_project = await client.call_tool(
             "get_index",
             {"project_id": "project-does-not-exist", "index_id": index_id},
@@ -1415,6 +1440,13 @@ async def _exercise_stdio(
             "message": "project was not found",
             "retryable": False,
         }
+
+        wrong_journey_project = await client.call_tool(
+            "get_journey_catalog",
+            {"project_id": "project-does-not-exist", "index_id": index_id},
+        )
+        assert wrong_journey_project.structured_content["ok"] is False
+        assert wrong_journey_project.structured_content["error"]["code"] == "not_found"
 
 
 def test_mcp_run_reads_share_http_state_and_writes_are_separately_opt_in(tmp_path: Path) -> None:

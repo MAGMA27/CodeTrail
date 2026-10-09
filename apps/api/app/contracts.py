@@ -1891,6 +1891,104 @@ class OverviewCoverage(ContractModel):
         return self
 
 
+class JourneySummary(ContractModel):
+    """A lightweight, same-index action and HTTP shape match for discovery."""
+
+    journey_id: Identifier
+    index_id: Identifier
+    action_label: str = Field(min_length=1, max_length=300)
+    label_candidates: list[str] = Field(default_factory=list, max_length=5)
+    label_dynamic: bool = False
+    event_name: Literal["onSubmit", "onClick"]
+    action_path: RelativePath
+    action_start_line: PositiveInt
+    method: OverviewHttpMethod
+    path: str = Field(min_length=1, max_length=2_000)
+
+
+class JourneyCoverage(ContractModel):
+    """Bounded UI action extraction and route-matching coverage."""
+
+    parser_status: Literal["ready", "unavailable", "invalid", "truncated"] = "ready"
+    http_association_status: Literal["complete", "incomplete", "not_analyzed"] = "not_analyzed"
+    scanned_file_count: NonNegativeInt = 0
+    action_count: NonNegativeInt = 0
+    journey_count: NonNegativeInt = 0
+    unsupported_action_count: NonNegativeInt = 0
+    action_facts_omitted_count: NonNegativeInt = 0
+    prop_facts_omitted_count: NonNegativeInt = 0
+    action_facts_truncated: bool = False
+    prop_facts_truncated: bool = False
+    relation_truncated: bool = False
+    truncated: bool = False
+    limitations: list[str] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="after")
+    def validate_counts(self) -> JourneyCoverage:
+        if self.truncated != (self.parser_status == "truncated") and self.parser_status != "unavailable":
+            raise ValueError("truncated journey coverage must report parser truncation")
+        return self
+
+
+class ProjectJourneyCatalog(VersionedModel):
+    """Lightweight action journey summaries for one immutable project index."""
+
+    project_id: Identifier
+    index: IndexSnapshot
+    rules_version: Identifier
+    journeys: list[JourneySummary] = Field(default_factory=list, max_length=40)
+    coverage: JourneyCoverage
+
+    @model_validator(mode="after")
+    def validate_catalog(self) -> ProjectJourneyCatalog:
+        if any(item.index_id != self.index.index_id for item in self.journeys):
+            raise ValueError("journey summary belongs to a different index_id")
+        if len({item.journey_id for item in self.journeys}) != len(self.journeys):
+            raise ValueError("journey summary IDs must be unique")
+        if self.coverage.journey_count != len(self.journeys):
+            raise ValueError("visible journey count must match journey summaries")
+        return self
+
+
+class JourneyStep(ContractModel):
+    """One user-language responsibility step with explicitly typed evidence."""
+
+    step_id: Identifier
+    role: Literal["trigger", "client_processing", "request", "server_processing", "result"]
+    title: str = Field(min_length=1, max_length=300)
+    relation_kind: Literal["ui_action", "ui_callback", "calls", "http_shape", "result_display", "unresolved"]
+    certainty: Literal["static", "shape", "unconfirmed"]
+    explanation: str = Field(min_length=1, max_length=1_000)
+    symbols: list[Symbol] = Field(default_factory=list, max_length=8)
+    evidence: list[Evidence] = Field(default_factory=list, max_length=8)
+
+
+class ProjectJourney(VersionedModel):
+    """A bounded action-to-handler journey derived from one index snapshot."""
+
+    project_id: Identifier
+    index: IndexSnapshot
+    rules_version: Identifier
+    journey_id: Identifier
+    summary: JourneySummary
+    steps: list[JourneyStep] = Field(min_length=1, max_length=8)
+    coverage: JourneyCoverage
+    markers: list[str] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="after")
+    def validate_journey(self) -> ProjectJourney:
+        if self.summary.journey_id != self.journey_id or self.summary.index_id != self.index.index_id:
+            raise ValueError("journey summary must match the response identity and snapshot")
+        if len({step.step_id for step in self.steps}) != len(self.steps):
+            raise ValueError("journey step IDs must be unique")
+        for step in self.steps:
+            if any(symbol.index_id != self.index.index_id for symbol in step.symbols):
+                raise ValueError("journey symbols must belong to the same index")
+            if any(evidence.index_id != self.index.index_id for evidence in step.evidence):
+                raise ValueError("journey evidence must belong to the same snapshot")
+        return self
+
+
 class ProjectOverview(VersionedModel):
     """Deterministic, rule-only overview of one project index snapshot."""
 
@@ -2768,6 +2866,47 @@ class McpOverviewResponse(McpResultBase):
                     raise ValueError("overview references must match returned evidence")
         elif self.overview is not None or self.references:
             raise ValueError("failed overview results cannot include overview data")
+        return self
+
+
+class McpJourneyCatalogResponse(McpResultBase):
+    """Read-only MCP envelope for lightweight action journey summaries."""
+
+    catalog: ProjectJourneyCatalog | None = None
+
+    @model_validator(mode="after")
+    def validate_catalog_result(self) -> McpJourneyCatalogResponse:
+        if self.ok and self.catalog is None:
+            raise ValueError("successful journey catalogs require a catalog")
+        if not self.ok and self.catalog is not None:
+            raise ValueError("failed journey catalogs cannot include a catalog")
+        return self
+
+
+class McpJourneyResponse(McpResultBase):
+    """Read-only MCP envelope for one action journey with source citations."""
+
+    journey: ProjectJourney | None = None
+    references: list[EvidenceReference] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_journey_result(self) -> McpJourneyResponse:
+        if self.ok:
+            if self.journey is None:
+                raise ValueError("successful journey results require a journey")
+            evidence_ids = {
+                evidence.evidence_id
+                for step in self.journey.steps
+                for evidence in step.evidence
+            }
+            if any(
+                reference.index_id != self.journey.index.index_id
+                or reference.evidence_id not in evidence_ids
+                for reference in self.references
+            ):
+                raise ValueError("journey references must match returned source evidence")
+        elif self.journey is not None or self.references:
+            raise ValueError("failed journeys cannot include journey data")
         return self
 
 

@@ -60,6 +60,8 @@ Neighbors 查询返回的 `contextual_calls` 在代码关系面板单独列出�
 
 本轮验收以当前 PC 的 MVP 阅读流程为准，不要求固定分辨率矩阵；此前尺寸证据保留为历史。搜索、定义分页、固定快照源码校验、HTTP 链路和功能请求仍复用原编排与服务；后端概览没有改为按展开动作加载，也没有新增运行时数据流分析。
 
+功能页按需读取当前固定 index 的轻量 action journey catalog；选中一条后再请求最多 8 个职责步骤和来源 evidence。步骤优先显示用户动作、前端处理、HTTP 请求及服务端处理，symbols/evidence 默认折叠。动态按钮文字保留候选文本；跨组件 prop handler 和结果界面更新在静态规则无法确认时以断点说明，不将 `calls` 解释成执行或数据流。Coverage limitations 默认折叠。旧 TypeScript facts index 会说明可能缺少 HTTP request facts，显式刷新后才应用新 wrapper 识别规则。
+
 ## 数据与生命周期
 
 桌面代码关系、功能图和影响范围按 `.72fr / 1.28fr` 与当前中央内容分配主图空间；源码面板使用可调侧栏。窄屏断点和具体布局见 [工作区 UI 规范](../../docs/design/workspace-ui-spec.md)。断点和布局约束见 [工作区 UI 规范](../../docs/design/workspace-ui-spec.md)。

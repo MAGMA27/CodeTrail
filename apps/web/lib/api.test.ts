@@ -12,6 +12,8 @@ import {
   isModuleSymbolsPageResponse,
   isNeighborsResponse,
   isProjectOverviewResponse,
+  isProjectJourneyCatalogResponse,
+  isProjectJourneyResponse,
   isRunImpactResponse,
   isRunReportResponse,
   isSessionListResponse,
@@ -28,6 +30,100 @@ const indexId = "index-overview-test";
 const moduleId = "symbol-module";
 const functionId = "symbol-main";
 const entryId = "entry-main";
+
+function journeyFixture() {
+  const index = {
+    index_id: indexId,
+    repository_id: "journey-repo",
+    revision: "v1",
+    dirty: false,
+    snapshot_hash: "journey-snapshot",
+    status: "ready",
+    rules_version: "typescript-facts-v5",
+    configuration_hash: "config-hash",
+  };
+  const summary = {
+    journey_id: "journey-import",
+    index_id: indexId,
+    action_label: "导入并建立索引",
+    label_candidates: ["导入并建立索引", "建立中"],
+    label_dynamic: true,
+    event_name: "onSubmit",
+    action_path: "apps/web/app/workbench-ui.tsx",
+    action_start_line: 120,
+    method: "POST",
+    path: "/api/imports/local",
+  };
+  const coverage = {
+    parser_status: "ready",
+    http_association_status: "complete",
+    scanned_file_count: 3,
+    action_count: 1,
+    journey_count: 1,
+    unsupported_action_count: 0,
+    action_facts_omitted_count: 0,
+    prop_facts_omitted_count: 0,
+    action_facts_truncated: false,
+    prop_facts_truncated: false,
+    relation_truncated: false,
+    truncated: false,
+    limitations: [],
+  };
+  return {
+    index,
+    summary,
+    coverage,
+    catalog: {
+      schema_version: SCHEMA_VERSION,
+      project_id: "journey-project",
+      index,
+      rules_version: "feature-journey-v1",
+      journeys: [summary],
+      coverage,
+    },
+    detail: {
+      schema_version: SCHEMA_VERSION,
+      project_id: "journey-project",
+      index,
+      rules_version: "feature-journey-v1",
+      journey_id: summary.journey_id,
+      summary,
+      steps: [{
+        step_id: "trigger",
+        role: "trigger",
+        title: "提交导入表单",
+        relation_kind: "ui_action",
+        certainty: "static",
+        explanation: "JSX submit action",
+        symbols: [],
+        evidence: [],
+      }],
+      coverage,
+      markers: [],
+    },
+  };
+}
+
+test("journey response validators bind steps to one index and cap details at eight", () => {
+  const fixture = journeyFixture();
+  assert.equal(isProjectJourneyCatalogResponse(fixture.catalog), true);
+  assert.equal(isProjectJourneyResponse(fixture.detail), true);
+  assert.equal(isProjectJourneyCatalogResponse({
+    ...fixture.catalog,
+    journeys: [{ ...fixture.summary, index_id: "other-index" }],
+  }), false);
+  assert.equal(isProjectJourneyResponse({
+    ...fixture.detail,
+    steps: Array.from({ length: 9 }, (_unused, index) => ({
+      ...fixture.detail.steps[0],
+      step_id: `step-${index}`,
+    })),
+  }), false);
+  assert.equal(isProjectJourneyResponse({
+    ...fixture.detail,
+    coverage: { ...fixture.coverage, action_facts_omitted_count: -1 },
+  }), false);
+});
 
 test("module symbol page validator enforces fixed module scope and cursor consistency", () => {
   const module = {

@@ -17085,6 +17085,397 @@
       "title": "IssueModelToolCall",
       "type": "object"
     },
+    "JourneyCoverage": {
+      "additionalProperties": false,
+      "description": "Bounded UI action extraction and route-matching coverage.",
+      "properties": {
+        "action_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Action Count",
+          "type": "integer"
+        },
+        "action_facts_omitted_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Action Facts Omitted Count",
+          "type": "integer"
+        },
+        "action_facts_truncated": {
+          "default": false,
+          "title": "Action Facts Truncated",
+          "type": "boolean"
+        },
+        "http_association_status": {
+          "default": "not_analyzed",
+          "enum": [
+            "complete",
+            "incomplete",
+            "not_analyzed"
+          ],
+          "title": "Http Association Status",
+          "type": "string"
+        },
+        "journey_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Journey Count",
+          "type": "integer"
+        },
+        "limitations": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Limitations",
+          "type": "array"
+        },
+        "parser_status": {
+          "default": "ready",
+          "enum": [
+            "ready",
+            "unavailable",
+            "invalid",
+            "truncated"
+          ],
+          "title": "Parser Status",
+          "type": "string"
+        },
+        "prop_facts_omitted_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Prop Facts Omitted Count",
+          "type": "integer"
+        },
+        "prop_facts_truncated": {
+          "default": false,
+          "title": "Prop Facts Truncated",
+          "type": "boolean"
+        },
+        "relation_truncated": {
+          "default": false,
+          "title": "Relation Truncated",
+          "type": "boolean"
+        },
+        "scanned_file_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Scanned File Count",
+          "type": "integer"
+        },
+        "truncated": {
+          "default": false,
+          "title": "Truncated",
+          "type": "boolean"
+        },
+        "unsupported_action_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Unsupported Action Count",
+          "type": "integer"
+        }
+      },
+      "title": "JourneyCoverage",
+      "type": "object"
+    },
+    "JourneyStep": {
+      "$defs": {
+        "Evidence": {
+          "additionalProperties": false,
+          "properties": {
+            "content_hash": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Content Hash",
+              "type": "string"
+            },
+            "end_line": {
+              "exclusiveMinimum": 0,
+              "title": "End Line",
+              "type": "integer"
+            },
+            "evidence_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Evidence Id",
+              "type": "string"
+            },
+            "excerpt": {
+              "maxLength": 50000,
+              "minLength": 1,
+              "title": "Excerpt",
+              "type": "string"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "source",
+                "stacktrace",
+                "metadata"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Start Line",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "start_line",
+            "end_line",
+            "evidence_id",
+            "index_id",
+            "path",
+            "excerpt",
+            "content_hash",
+            "kind"
+          ],
+          "title": "Evidence",
+          "type": "object"
+        },
+        "Symbol": {
+          "additionalProperties": false,
+          "properties": {
+            "end_line": {
+              "exclusiveMinimum": 0,
+              "title": "End Line",
+              "type": "integer"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "module",
+                "file",
+                "class",
+                "function",
+                "test"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "qualified_name": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Qualified Name",
+              "type": "string"
+            },
+            "start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Start Line",
+              "type": "integer"
+            },
+            "symbol_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Symbol Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "start_line",
+            "end_line",
+            "symbol_id",
+            "index_id",
+            "path",
+            "qualified_name",
+            "kind"
+          ],
+          "title": "Symbol",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "One user-language responsibility step with explicitly typed evidence.",
+      "properties": {
+        "certainty": {
+          "enum": [
+            "static",
+            "shape",
+            "unconfirmed"
+          ],
+          "title": "Certainty",
+          "type": "string"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/Evidence"
+          },
+          "maxItems": 8,
+          "title": "Evidence",
+          "type": "array"
+        },
+        "explanation": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Explanation",
+          "type": "string"
+        },
+        "relation_kind": {
+          "enum": [
+            "ui_action",
+            "ui_callback",
+            "calls",
+            "http_shape",
+            "result_display",
+            "unresolved"
+          ],
+          "title": "Relation Kind",
+          "type": "string"
+        },
+        "role": {
+          "enum": [
+            "trigger",
+            "client_processing",
+            "request",
+            "server_processing",
+            "result"
+          ],
+          "title": "Role",
+          "type": "string"
+        },
+        "step_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Step Id",
+          "type": "string"
+        },
+        "symbols": {
+          "items": {
+            "$ref": "#/$defs/Symbol"
+          },
+          "maxItems": 8,
+          "title": "Symbols",
+          "type": "array"
+        },
+        "title": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "step_id",
+        "role",
+        "title",
+        "relation_kind",
+        "certainty",
+        "explanation"
+      ],
+      "title": "JourneyStep",
+      "type": "object"
+    },
+    "JourneySummary": {
+      "additionalProperties": false,
+      "description": "A lightweight, same-index action and HTTP shape match for discovery.",
+      "properties": {
+        "action_label": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Action Label",
+          "type": "string"
+        },
+        "action_path": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Action Path",
+          "type": "string"
+        },
+        "action_start_line": {
+          "exclusiveMinimum": 0,
+          "title": "Action Start Line",
+          "type": "integer"
+        },
+        "event_name": {
+          "enum": [
+            "onSubmit",
+            "onClick"
+          ],
+          "title": "Event Name",
+          "type": "string"
+        },
+        "index_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Index Id",
+          "type": "string"
+        },
+        "journey_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Journey Id",
+          "type": "string"
+        },
+        "label_candidates": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 5,
+          "title": "Label Candidates",
+          "type": "array"
+        },
+        "label_dynamic": {
+          "default": false,
+          "title": "Label Dynamic",
+          "type": "boolean"
+        },
+        "method": {
+          "enum": [
+            "GET",
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE",
+            "OPTIONS",
+            "HEAD",
+            "TRACE"
+          ],
+          "title": "Method",
+          "type": "string"
+        },
+        "path": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "journey_id",
+        "index_id",
+        "action_label",
+        "event_name",
+        "action_path",
+        "action_start_line",
+        "method",
+        "path"
+      ],
+      "title": "JourneySummary",
+      "type": "object"
+    },
     "LocalImportRequest": {
       "additionalProperties": false,
       "description": "A server-local source registration and bounded synchronous import request.",
@@ -22361,6 +22752,1105 @@
         "ok"
       ],
       "title": "McpIndexResponse",
+      "type": "object"
+    },
+    "McpJourneyCatalogResponse": {
+      "$defs": {
+        "IndexSnapshot": {
+          "additionalProperties": false,
+          "properties": {
+            "configuration_hash": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Configuration Hash"
+            },
+            "dirty": {
+              "title": "Dirty",
+              "type": "boolean"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "repository_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Repository Id",
+              "type": "string"
+            },
+            "revision": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Revision",
+              "type": "string"
+            },
+            "rules_version": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Rules Version"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            },
+            "snapshot_hash": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Snapshot Hash",
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "ready",
+                "building",
+                "failed"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "index_id",
+            "repository_id",
+            "revision",
+            "dirty",
+            "snapshot_hash",
+            "status"
+          ],
+          "title": "IndexSnapshot",
+          "type": "object"
+        },
+        "JourneyCoverage": {
+          "additionalProperties": false,
+          "description": "Bounded UI action extraction and route-matching coverage.",
+          "properties": {
+            "action_count": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Action Count",
+              "type": "integer"
+            },
+            "action_facts_omitted_count": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Action Facts Omitted Count",
+              "type": "integer"
+            },
+            "action_facts_truncated": {
+              "default": false,
+              "title": "Action Facts Truncated",
+              "type": "boolean"
+            },
+            "http_association_status": {
+              "default": "not_analyzed",
+              "enum": [
+                "complete",
+                "incomplete",
+                "not_analyzed"
+              ],
+              "title": "Http Association Status",
+              "type": "string"
+            },
+            "journey_count": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Journey Count",
+              "type": "integer"
+            },
+            "limitations": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 20,
+              "title": "Limitations",
+              "type": "array"
+            },
+            "parser_status": {
+              "default": "ready",
+              "enum": [
+                "ready",
+                "unavailable",
+                "invalid",
+                "truncated"
+              ],
+              "title": "Parser Status",
+              "type": "string"
+            },
+            "prop_facts_omitted_count": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Prop Facts Omitted Count",
+              "type": "integer"
+            },
+            "prop_facts_truncated": {
+              "default": false,
+              "title": "Prop Facts Truncated",
+              "type": "boolean"
+            },
+            "relation_truncated": {
+              "default": false,
+              "title": "Relation Truncated",
+              "type": "boolean"
+            },
+            "scanned_file_count": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Scanned File Count",
+              "type": "integer"
+            },
+            "truncated": {
+              "default": false,
+              "title": "Truncated",
+              "type": "boolean"
+            },
+            "unsupported_action_count": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Unsupported Action Count",
+              "type": "integer"
+            }
+          },
+          "title": "JourneyCoverage",
+          "type": "object"
+        },
+        "JourneySummary": {
+          "additionalProperties": false,
+          "description": "A lightweight, same-index action and HTTP shape match for discovery.",
+          "properties": {
+            "action_label": {
+              "maxLength": 300,
+              "minLength": 1,
+              "title": "Action Label",
+              "type": "string"
+            },
+            "action_path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Action Path",
+              "type": "string"
+            },
+            "action_start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Action Start Line",
+              "type": "integer"
+            },
+            "event_name": {
+              "enum": [
+                "onSubmit",
+                "onClick"
+              ],
+              "title": "Event Name",
+              "type": "string"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "journey_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Journey Id",
+              "type": "string"
+            },
+            "label_candidates": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 5,
+              "title": "Label Candidates",
+              "type": "array"
+            },
+            "label_dynamic": {
+              "default": false,
+              "title": "Label Dynamic",
+              "type": "boolean"
+            },
+            "method": {
+              "enum": [
+                "GET",
+                "POST",
+                "PUT",
+                "PATCH",
+                "DELETE",
+                "OPTIONS",
+                "HEAD",
+                "TRACE"
+              ],
+              "title": "Method",
+              "type": "string"
+            },
+            "path": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            }
+          },
+          "required": [
+            "journey_id",
+            "index_id",
+            "action_label",
+            "event_name",
+            "action_path",
+            "action_start_line",
+            "method",
+            "path"
+          ],
+          "title": "JourneySummary",
+          "type": "object"
+        },
+        "McpError": {
+          "additionalProperties": false,
+          "description": "Domain failure returned inside a read-only MCP tool result.",
+          "properties": {
+            "code": {
+              "enum": [
+                "not_found",
+                "invalid_input",
+                "conflict",
+                "budget_exceeded",
+                "internal_error",
+                "forbidden"
+              ],
+              "title": "Code",
+              "type": "string"
+            },
+            "message": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "title": "Message",
+              "type": "string"
+            },
+            "retryable": {
+              "default": false,
+              "title": "Retryable",
+              "type": "boolean"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "title": "McpError",
+          "type": "object"
+        },
+        "ProjectJourneyCatalog": {
+          "additionalProperties": false,
+          "description": "Lightweight action journey summaries for one immutable project index.",
+          "properties": {
+            "coverage": {
+              "$ref": "#/$defs/JourneyCoverage"
+            },
+            "index": {
+              "$ref": "#/$defs/IndexSnapshot"
+            },
+            "journeys": {
+              "items": {
+                "$ref": "#/$defs/JourneySummary"
+              },
+              "maxItems": 40,
+              "title": "Journeys",
+              "type": "array"
+            },
+            "project_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Project Id",
+              "type": "string"
+            },
+            "rules_version": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Rules Version",
+              "type": "string"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            }
+          },
+          "required": [
+            "project_id",
+            "index",
+            "rules_version",
+            "coverage"
+          ],
+          "title": "ProjectJourneyCatalog",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Read-only MCP envelope for lightweight action journey summaries.",
+      "properties": {
+        "catalog": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProjectJourneyCatalog"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/McpError"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "schema_version": {
+          "const": "0.1.0",
+          "default": "0.1.0",
+          "title": "Schema Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ok"
+      ],
+      "title": "McpJourneyCatalogResponse",
+      "type": "object"
+    },
+    "McpJourneyResponse": {
+      "$defs": {
+        "Evidence": {
+          "additionalProperties": false,
+          "properties": {
+            "content_hash": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Content Hash",
+              "type": "string"
+            },
+            "end_line": {
+              "exclusiveMinimum": 0,
+              "title": "End Line",
+              "type": "integer"
+            },
+            "evidence_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Evidence Id",
+              "type": "string"
+            },
+            "excerpt": {
+              "maxLength": 50000,
+              "minLength": 1,
+              "title": "Excerpt",
+              "type": "string"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "source",
+                "stacktrace",
+                "metadata"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Start Line",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "start_line",
+            "end_line",
+            "evidence_id",
+            "index_id",
+            "path",
+            "excerpt",
+            "content_hash",
+            "kind"
+          ],
+          "title": "Evidence",
+          "type": "object"
+        },
+        "EvidenceReference": {
+          "additionalProperties": false,
+          "description": "A stable source citation that can reopen the same project snapshot.",
+          "properties": {
+            "content_hash": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Content Hash",
+              "type": "string"
+            },
+            "end_line": {
+              "exclusiveMinimum": 0,
+              "title": "End Line",
+              "type": "integer"
+            },
+            "evidence_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Evidence Id",
+              "type": "string"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "project_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Project Id",
+              "type": "string"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            },
+            "start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Start Line",
+              "type": "integer"
+            },
+            "url": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "title": "Url",
+              "type": "string"
+            }
+          },
+          "required": [
+            "project_id",
+            "index_id",
+            "path",
+            "start_line",
+            "end_line",
+            "content_hash",
+            "evidence_id",
+            "url"
+          ],
+          "title": "EvidenceReference",
+          "type": "object"
+        },
+        "IndexSnapshot": {
+          "additionalProperties": false,
+          "properties": {
+            "configuration_hash": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Configuration Hash"
+            },
+            "dirty": {
+              "title": "Dirty",
+              "type": "boolean"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "repository_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Repository Id",
+              "type": "string"
+            },
+            "revision": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Revision",
+              "type": "string"
+            },
+            "rules_version": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Rules Version"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            },
+            "snapshot_hash": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Snapshot Hash",
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "ready",
+                "building",
+                "failed"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "index_id",
+            "repository_id",
+            "revision",
+            "dirty",
+            "snapshot_hash",
+            "status"
+          ],
+          "title": "IndexSnapshot",
+          "type": "object"
+        },
+        "JourneyCoverage": {
+          "additionalProperties": false,
+          "description": "Bounded UI action extraction and route-matching coverage.",
+          "properties": {
+            "action_count": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Action Count",
+              "type": "integer"
+            },
+            "action_facts_omitted_count": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Action Facts Omitted Count",
+              "type": "integer"
+            },
+            "action_facts_truncated": {
+              "default": false,
+              "title": "Action Facts Truncated",
+              "type": "boolean"
+            },
+            "http_association_status": {
+              "default": "not_analyzed",
+              "enum": [
+                "complete",
+                "incomplete",
+                "not_analyzed"
+              ],
+              "title": "Http Association Status",
+              "type": "string"
+            },
+            "journey_count": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Journey Count",
+              "type": "integer"
+            },
+            "limitations": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 20,
+              "title": "Limitations",
+              "type": "array"
+            },
+            "parser_status": {
+              "default": "ready",
+              "enum": [
+                "ready",
+                "unavailable",
+                "invalid",
+                "truncated"
+              ],
+              "title": "Parser Status",
+              "type": "string"
+            },
+            "prop_facts_omitted_count": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Prop Facts Omitted Count",
+              "type": "integer"
+            },
+            "prop_facts_truncated": {
+              "default": false,
+              "title": "Prop Facts Truncated",
+              "type": "boolean"
+            },
+            "relation_truncated": {
+              "default": false,
+              "title": "Relation Truncated",
+              "type": "boolean"
+            },
+            "scanned_file_count": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Scanned File Count",
+              "type": "integer"
+            },
+            "truncated": {
+              "default": false,
+              "title": "Truncated",
+              "type": "boolean"
+            },
+            "unsupported_action_count": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Unsupported Action Count",
+              "type": "integer"
+            }
+          },
+          "title": "JourneyCoverage",
+          "type": "object"
+        },
+        "JourneyStep": {
+          "additionalProperties": false,
+          "description": "One user-language responsibility step with explicitly typed evidence.",
+          "properties": {
+            "certainty": {
+              "enum": [
+                "static",
+                "shape",
+                "unconfirmed"
+              ],
+              "title": "Certainty",
+              "type": "string"
+            },
+            "evidence": {
+              "items": {
+                "$ref": "#/$defs/Evidence"
+              },
+              "maxItems": 8,
+              "title": "Evidence",
+              "type": "array"
+            },
+            "explanation": {
+              "maxLength": 1000,
+              "minLength": 1,
+              "title": "Explanation",
+              "type": "string"
+            },
+            "relation_kind": {
+              "enum": [
+                "ui_action",
+                "ui_callback",
+                "calls",
+                "http_shape",
+                "result_display",
+                "unresolved"
+              ],
+              "title": "Relation Kind",
+              "type": "string"
+            },
+            "role": {
+              "enum": [
+                "trigger",
+                "client_processing",
+                "request",
+                "server_processing",
+                "result"
+              ],
+              "title": "Role",
+              "type": "string"
+            },
+            "step_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Step Id",
+              "type": "string"
+            },
+            "symbols": {
+              "items": {
+                "$ref": "#/$defs/Symbol"
+              },
+              "maxItems": 8,
+              "title": "Symbols",
+              "type": "array"
+            },
+            "title": {
+              "maxLength": 300,
+              "minLength": 1,
+              "title": "Title",
+              "type": "string"
+            }
+          },
+          "required": [
+            "step_id",
+            "role",
+            "title",
+            "relation_kind",
+            "certainty",
+            "explanation"
+          ],
+          "title": "JourneyStep",
+          "type": "object"
+        },
+        "JourneySummary": {
+          "additionalProperties": false,
+          "description": "A lightweight, same-index action and HTTP shape match for discovery.",
+          "properties": {
+            "action_label": {
+              "maxLength": 300,
+              "minLength": 1,
+              "title": "Action Label",
+              "type": "string"
+            },
+            "action_path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Action Path",
+              "type": "string"
+            },
+            "action_start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Action Start Line",
+              "type": "integer"
+            },
+            "event_name": {
+              "enum": [
+                "onSubmit",
+                "onClick"
+              ],
+              "title": "Event Name",
+              "type": "string"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "journey_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Journey Id",
+              "type": "string"
+            },
+            "label_candidates": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 5,
+              "title": "Label Candidates",
+              "type": "array"
+            },
+            "label_dynamic": {
+              "default": false,
+              "title": "Label Dynamic",
+              "type": "boolean"
+            },
+            "method": {
+              "enum": [
+                "GET",
+                "POST",
+                "PUT",
+                "PATCH",
+                "DELETE",
+                "OPTIONS",
+                "HEAD",
+                "TRACE"
+              ],
+              "title": "Method",
+              "type": "string"
+            },
+            "path": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            }
+          },
+          "required": [
+            "journey_id",
+            "index_id",
+            "action_label",
+            "event_name",
+            "action_path",
+            "action_start_line",
+            "method",
+            "path"
+          ],
+          "title": "JourneySummary",
+          "type": "object"
+        },
+        "McpError": {
+          "additionalProperties": false,
+          "description": "Domain failure returned inside a read-only MCP tool result.",
+          "properties": {
+            "code": {
+              "enum": [
+                "not_found",
+                "invalid_input",
+                "conflict",
+                "budget_exceeded",
+                "internal_error",
+                "forbidden"
+              ],
+              "title": "Code",
+              "type": "string"
+            },
+            "message": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "title": "Message",
+              "type": "string"
+            },
+            "retryable": {
+              "default": false,
+              "title": "Retryable",
+              "type": "boolean"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "title": "McpError",
+          "type": "object"
+        },
+        "ProjectJourney": {
+          "additionalProperties": false,
+          "description": "A bounded action-to-handler journey derived from one index snapshot.",
+          "properties": {
+            "coverage": {
+              "$ref": "#/$defs/JourneyCoverage"
+            },
+            "index": {
+              "$ref": "#/$defs/IndexSnapshot"
+            },
+            "journey_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Journey Id",
+              "type": "string"
+            },
+            "markers": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 20,
+              "title": "Markers",
+              "type": "array"
+            },
+            "project_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Project Id",
+              "type": "string"
+            },
+            "rules_version": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Rules Version",
+              "type": "string"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            },
+            "steps": {
+              "items": {
+                "$ref": "#/$defs/JourneyStep"
+              },
+              "maxItems": 8,
+              "minItems": 1,
+              "title": "Steps",
+              "type": "array"
+            },
+            "summary": {
+              "$ref": "#/$defs/JourneySummary"
+            }
+          },
+          "required": [
+            "project_id",
+            "index",
+            "rules_version",
+            "journey_id",
+            "summary",
+            "steps",
+            "coverage"
+          ],
+          "title": "ProjectJourney",
+          "type": "object"
+        },
+        "Symbol": {
+          "additionalProperties": false,
+          "properties": {
+            "end_line": {
+              "exclusiveMinimum": 0,
+              "title": "End Line",
+              "type": "integer"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "module",
+                "file",
+                "class",
+                "function",
+                "test"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "qualified_name": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Qualified Name",
+              "type": "string"
+            },
+            "start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Start Line",
+              "type": "integer"
+            },
+            "symbol_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Symbol Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "start_line",
+            "end_line",
+            "symbol_id",
+            "index_id",
+            "path",
+            "qualified_name",
+            "kind"
+          ],
+          "title": "Symbol",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Read-only MCP envelope for one action journey with source citations.",
+      "properties": {
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/McpError"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "journey": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProjectJourney"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "references": {
+          "items": {
+            "$ref": "#/$defs/EvidenceReference"
+          },
+          "title": "References",
+          "type": "array"
+        },
+        "schema_version": {
+          "const": "0.1.0",
+          "default": "0.1.0",
+          "title": "Schema Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ok"
+      ],
+      "title": "McpJourneyResponse",
       "type": "object"
     },
     "McpModuleSymbolsResponse": {
@@ -34077,6 +35567,861 @@
         "depth"
       ],
       "title": "OverviewPath",
+      "type": "object"
+    },
+    "ProjectJourney": {
+      "$defs": {
+        "Evidence": {
+          "additionalProperties": false,
+          "properties": {
+            "content_hash": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Content Hash",
+              "type": "string"
+            },
+            "end_line": {
+              "exclusiveMinimum": 0,
+              "title": "End Line",
+              "type": "integer"
+            },
+            "evidence_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Evidence Id",
+              "type": "string"
+            },
+            "excerpt": {
+              "maxLength": 50000,
+              "minLength": 1,
+              "title": "Excerpt",
+              "type": "string"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "source",
+                "stacktrace",
+                "metadata"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Start Line",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "start_line",
+            "end_line",
+            "evidence_id",
+            "index_id",
+            "path",
+            "excerpt",
+            "content_hash",
+            "kind"
+          ],
+          "title": "Evidence",
+          "type": "object"
+        },
+        "IndexSnapshot": {
+          "additionalProperties": false,
+          "properties": {
+            "configuration_hash": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Configuration Hash"
+            },
+            "dirty": {
+              "title": "Dirty",
+              "type": "boolean"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "repository_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Repository Id",
+              "type": "string"
+            },
+            "revision": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Revision",
+              "type": "string"
+            },
+            "rules_version": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Rules Version"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            },
+            "snapshot_hash": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Snapshot Hash",
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "ready",
+                "building",
+                "failed"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "index_id",
+            "repository_id",
+            "revision",
+            "dirty",
+            "snapshot_hash",
+            "status"
+          ],
+          "title": "IndexSnapshot",
+          "type": "object"
+        },
+        "JourneyCoverage": {
+          "additionalProperties": false,
+          "description": "Bounded UI action extraction and route-matching coverage.",
+          "properties": {
+            "action_count": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Action Count",
+              "type": "integer"
+            },
+            "action_facts_omitted_count": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Action Facts Omitted Count",
+              "type": "integer"
+            },
+            "action_facts_truncated": {
+              "default": false,
+              "title": "Action Facts Truncated",
+              "type": "boolean"
+            },
+            "http_association_status": {
+              "default": "not_analyzed",
+              "enum": [
+                "complete",
+                "incomplete",
+                "not_analyzed"
+              ],
+              "title": "Http Association Status",
+              "type": "string"
+            },
+            "journey_count": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Journey Count",
+              "type": "integer"
+            },
+            "limitations": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 20,
+              "title": "Limitations",
+              "type": "array"
+            },
+            "parser_status": {
+              "default": "ready",
+              "enum": [
+                "ready",
+                "unavailable",
+                "invalid",
+                "truncated"
+              ],
+              "title": "Parser Status",
+              "type": "string"
+            },
+            "prop_facts_omitted_count": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Prop Facts Omitted Count",
+              "type": "integer"
+            },
+            "prop_facts_truncated": {
+              "default": false,
+              "title": "Prop Facts Truncated",
+              "type": "boolean"
+            },
+            "relation_truncated": {
+              "default": false,
+              "title": "Relation Truncated",
+              "type": "boolean"
+            },
+            "scanned_file_count": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Scanned File Count",
+              "type": "integer"
+            },
+            "truncated": {
+              "default": false,
+              "title": "Truncated",
+              "type": "boolean"
+            },
+            "unsupported_action_count": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Unsupported Action Count",
+              "type": "integer"
+            }
+          },
+          "title": "JourneyCoverage",
+          "type": "object"
+        },
+        "JourneyStep": {
+          "additionalProperties": false,
+          "description": "One user-language responsibility step with explicitly typed evidence.",
+          "properties": {
+            "certainty": {
+              "enum": [
+                "static",
+                "shape",
+                "unconfirmed"
+              ],
+              "title": "Certainty",
+              "type": "string"
+            },
+            "evidence": {
+              "items": {
+                "$ref": "#/$defs/Evidence"
+              },
+              "maxItems": 8,
+              "title": "Evidence",
+              "type": "array"
+            },
+            "explanation": {
+              "maxLength": 1000,
+              "minLength": 1,
+              "title": "Explanation",
+              "type": "string"
+            },
+            "relation_kind": {
+              "enum": [
+                "ui_action",
+                "ui_callback",
+                "calls",
+                "http_shape",
+                "result_display",
+                "unresolved"
+              ],
+              "title": "Relation Kind",
+              "type": "string"
+            },
+            "role": {
+              "enum": [
+                "trigger",
+                "client_processing",
+                "request",
+                "server_processing",
+                "result"
+              ],
+              "title": "Role",
+              "type": "string"
+            },
+            "step_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Step Id",
+              "type": "string"
+            },
+            "symbols": {
+              "items": {
+                "$ref": "#/$defs/Symbol"
+              },
+              "maxItems": 8,
+              "title": "Symbols",
+              "type": "array"
+            },
+            "title": {
+              "maxLength": 300,
+              "minLength": 1,
+              "title": "Title",
+              "type": "string"
+            }
+          },
+          "required": [
+            "step_id",
+            "role",
+            "title",
+            "relation_kind",
+            "certainty",
+            "explanation"
+          ],
+          "title": "JourneyStep",
+          "type": "object"
+        },
+        "JourneySummary": {
+          "additionalProperties": false,
+          "description": "A lightweight, same-index action and HTTP shape match for discovery.",
+          "properties": {
+            "action_label": {
+              "maxLength": 300,
+              "minLength": 1,
+              "title": "Action Label",
+              "type": "string"
+            },
+            "action_path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Action Path",
+              "type": "string"
+            },
+            "action_start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Action Start Line",
+              "type": "integer"
+            },
+            "event_name": {
+              "enum": [
+                "onSubmit",
+                "onClick"
+              ],
+              "title": "Event Name",
+              "type": "string"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "journey_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Journey Id",
+              "type": "string"
+            },
+            "label_candidates": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 5,
+              "title": "Label Candidates",
+              "type": "array"
+            },
+            "label_dynamic": {
+              "default": false,
+              "title": "Label Dynamic",
+              "type": "boolean"
+            },
+            "method": {
+              "enum": [
+                "GET",
+                "POST",
+                "PUT",
+                "PATCH",
+                "DELETE",
+                "OPTIONS",
+                "HEAD",
+                "TRACE"
+              ],
+              "title": "Method",
+              "type": "string"
+            },
+            "path": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            }
+          },
+          "required": [
+            "journey_id",
+            "index_id",
+            "action_label",
+            "event_name",
+            "action_path",
+            "action_start_line",
+            "method",
+            "path"
+          ],
+          "title": "JourneySummary",
+          "type": "object"
+        },
+        "Symbol": {
+          "additionalProperties": false,
+          "properties": {
+            "end_line": {
+              "exclusiveMinimum": 0,
+              "title": "End Line",
+              "type": "integer"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "module",
+                "file",
+                "class",
+                "function",
+                "test"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "qualified_name": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Qualified Name",
+              "type": "string"
+            },
+            "start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Start Line",
+              "type": "integer"
+            },
+            "symbol_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Symbol Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "start_line",
+            "end_line",
+            "symbol_id",
+            "index_id",
+            "path",
+            "qualified_name",
+            "kind"
+          ],
+          "title": "Symbol",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "A bounded action-to-handler journey derived from one index snapshot.",
+      "properties": {
+        "coverage": {
+          "$ref": "#/$defs/JourneyCoverage"
+        },
+        "index": {
+          "$ref": "#/$defs/IndexSnapshot"
+        },
+        "journey_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Journey Id",
+          "type": "string"
+        },
+        "markers": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Markers",
+          "type": "array"
+        },
+        "project_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Project Id",
+          "type": "string"
+        },
+        "rules_version": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Rules Version",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "0.1.0",
+          "default": "0.1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "steps": {
+          "items": {
+            "$ref": "#/$defs/JourneyStep"
+          },
+          "maxItems": 8,
+          "minItems": 1,
+          "title": "Steps",
+          "type": "array"
+        },
+        "summary": {
+          "$ref": "#/$defs/JourneySummary"
+        }
+      },
+      "required": [
+        "project_id",
+        "index",
+        "rules_version",
+        "journey_id",
+        "summary",
+        "steps",
+        "coverage"
+      ],
+      "title": "ProjectJourney",
+      "type": "object"
+    },
+    "ProjectJourneyCatalog": {
+      "$defs": {
+        "IndexSnapshot": {
+          "additionalProperties": false,
+          "properties": {
+            "configuration_hash": {
+              "anyOf": [
+                {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Configuration Hash"
+            },
+            "dirty": {
+              "title": "Dirty",
+              "type": "boolean"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "repository_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Repository Id",
+              "type": "string"
+            },
+            "revision": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Revision",
+              "type": "string"
+            },
+            "rules_version": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Rules Version"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            },
+            "snapshot_hash": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Snapshot Hash",
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "ready",
+                "building",
+                "failed"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "index_id",
+            "repository_id",
+            "revision",
+            "dirty",
+            "snapshot_hash",
+            "status"
+          ],
+          "title": "IndexSnapshot",
+          "type": "object"
+        },
+        "JourneyCoverage": {
+          "additionalProperties": false,
+          "description": "Bounded UI action extraction and route-matching coverage.",
+          "properties": {
+            "action_count": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Action Count",
+              "type": "integer"
+            },
+            "action_facts_omitted_count": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Action Facts Omitted Count",
+              "type": "integer"
+            },
+            "action_facts_truncated": {
+              "default": false,
+              "title": "Action Facts Truncated",
+              "type": "boolean"
+            },
+            "http_association_status": {
+              "default": "not_analyzed",
+              "enum": [
+                "complete",
+                "incomplete",
+                "not_analyzed"
+              ],
+              "title": "Http Association Status",
+              "type": "string"
+            },
+            "journey_count": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Journey Count",
+              "type": "integer"
+            },
+            "limitations": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 20,
+              "title": "Limitations",
+              "type": "array"
+            },
+            "parser_status": {
+              "default": "ready",
+              "enum": [
+                "ready",
+                "unavailable",
+                "invalid",
+                "truncated"
+              ],
+              "title": "Parser Status",
+              "type": "string"
+            },
+            "prop_facts_omitted_count": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Prop Facts Omitted Count",
+              "type": "integer"
+            },
+            "prop_facts_truncated": {
+              "default": false,
+              "title": "Prop Facts Truncated",
+              "type": "boolean"
+            },
+            "relation_truncated": {
+              "default": false,
+              "title": "Relation Truncated",
+              "type": "boolean"
+            },
+            "scanned_file_count": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Scanned File Count",
+              "type": "integer"
+            },
+            "truncated": {
+              "default": false,
+              "title": "Truncated",
+              "type": "boolean"
+            },
+            "unsupported_action_count": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Unsupported Action Count",
+              "type": "integer"
+            }
+          },
+          "title": "JourneyCoverage",
+          "type": "object"
+        },
+        "JourneySummary": {
+          "additionalProperties": false,
+          "description": "A lightweight, same-index action and HTTP shape match for discovery.",
+          "properties": {
+            "action_label": {
+              "maxLength": 300,
+              "minLength": 1,
+              "title": "Action Label",
+              "type": "string"
+            },
+            "action_path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Action Path",
+              "type": "string"
+            },
+            "action_start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Action Start Line",
+              "type": "integer"
+            },
+            "event_name": {
+              "enum": [
+                "onSubmit",
+                "onClick"
+              ],
+              "title": "Event Name",
+              "type": "string"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "journey_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Journey Id",
+              "type": "string"
+            },
+            "label_candidates": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 5,
+              "title": "Label Candidates",
+              "type": "array"
+            },
+            "label_dynamic": {
+              "default": false,
+              "title": "Label Dynamic",
+              "type": "boolean"
+            },
+            "method": {
+              "enum": [
+                "GET",
+                "POST",
+                "PUT",
+                "PATCH",
+                "DELETE",
+                "OPTIONS",
+                "HEAD",
+                "TRACE"
+              ],
+              "title": "Method",
+              "type": "string"
+            },
+            "path": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            }
+          },
+          "required": [
+            "journey_id",
+            "index_id",
+            "action_label",
+            "event_name",
+            "action_path",
+            "action_start_line",
+            "method",
+            "path"
+          ],
+          "title": "JourneySummary",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Lightweight action journey summaries for one immutable project index.",
+      "properties": {
+        "coverage": {
+          "$ref": "#/$defs/JourneyCoverage"
+        },
+        "index": {
+          "$ref": "#/$defs/IndexSnapshot"
+        },
+        "journeys": {
+          "items": {
+            "$ref": "#/$defs/JourneySummary"
+          },
+          "maxItems": 40,
+          "title": "Journeys",
+          "type": "array"
+        },
+        "project_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Project Id",
+          "type": "string"
+        },
+        "rules_version": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Rules Version",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "0.1.0",
+          "default": "0.1.0",
+          "title": "Schema Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "project_id",
+        "index",
+        "rules_version",
+        "coverage"
+      ],
+      "title": "ProjectJourneyCatalog",
       "type": "object"
     },
     "ProjectOverview": {

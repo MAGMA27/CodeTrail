@@ -349,6 +349,13 @@ def test_http_request_shape_rejects_shadowed_or_mutable_fetch_wrappers(tmp_path:
         wrapper + "function getHealth({ requestJson }) { requestJson('/api/health', undefined); }\n",
         encoding="utf-8",
     )
+    nested_fetch_wrapper = wrapper.replace(
+        "  return fetch(`", '  setTimeout(() => fetch("/api/nested-callback"), 0);\n  return fetch(`', 1
+    )
+    (tmp_path / "web" / "nested-fetch.ts").write_text(
+        nested_fetch_wrapper + clients,
+        encoding="utf-8",
+    )
     (tmp_path / "web" / "body-shadow.ts").write_text(
         wrapper.replace("  return fetch", "  const { init } = options;\n  return fetch") + clients,
         encoding="utf-8",
@@ -374,10 +381,12 @@ def test_http_request_shape_rejects_shadowed_or_mutable_fetch_wrappers(tmp_path:
 
     definitions = extract_definitions(build_source_snapshot(tmp_path, repository_id="ts", revision="test"))
     requests = {path: fact for path, fact in definitions.typescript_http_requests}
-    assert set(requests) == {"web/duplicate.ts", "web/computed.ts", "web/shorthand.ts"}
+    assert set(requests) == {"web/duplicate.ts", "web/computed.ts", "web/shorthand.ts", "web/nested-fetch.ts"}
     assert all(requests[path].method is None and requests[path].unknown_reason == "dynamic_method" for path in ("web/duplicate.ts", "web/computed.ts"))
     assert requests["web/shorthand.ts"].method == "GET"
     assert requests["web/shorthand.ts"].unknown_reason is None
+    assert requests["web/nested-fetch.ts"].method == "GET"
+    assert requests["web/nested-fetch.ts"].unknown_reason is None
 
 
 def test_parameterized_paths_require_unshadowed_globals_and_top_level_query_params(tmp_path: Path) -> None:
@@ -639,7 +648,7 @@ def test_typescript_rule_upgrade_changes_index_identity_and_preserves_v1_snapsho
         ).fetchone()
         assert preserved["snapshot_hash"] == old_hash
         assert "typescript-facts-v3" in preserved["rules_version"]
-        assert "typescript-facts-v4" in current["rules_version"]
+        assert "typescript-facts-v5" in current["rules_version"]
         assert store.read_evidence(old_index_id, "web/api.ts", 1, 1).excerpt.startswith("const apiBaseUrl")
 
 

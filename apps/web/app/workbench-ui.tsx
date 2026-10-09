@@ -43,6 +43,8 @@ import type {
   OverviewGroup,
   OverviewModule,
   OverviewModuleRelation,
+  ProjectJourneyCatalog,
+  ProjectJourney,
   ProjectOverview,
   ProjectRecord,
   TrashListResponse,
@@ -244,6 +246,17 @@ type KnowledgeUi = {
   onSelectModuleSymbol: (symbol: SymbolRecord) => void;
   onOpenArchitectureSource: (location: { indexId: string; path: string; startLine: number; endLine: number; expectedContentHash?: string }) => void;
   onRetryOverview: Action;
+  journeyCatalog: ProjectJourneyCatalog | null;
+  journeyCatalogStatus: UiAsyncStatus;
+  journeyCatalogError: string | null;
+  selectedJourneyId: string | null;
+  journey: ProjectJourney | null;
+  journeyStatus: UiAsyncStatus;
+  journeyError: string | null;
+  onLoadJourneyCatalog: Action;
+  onSelectJourney: (journeyId: string) => void;
+  onRetryJourneyCatalog: Action;
+  onSelectJourneyEvidence: (evidence: Evidence) => void;
   featureStatus: UiAsyncStatus;
   featureGeneration: FeatureGeneration | null;
   featureError: string | null;
@@ -1158,6 +1171,11 @@ function KnowledgeView({
   const [view, setView] = useState<"architecture" | "features">("architecture");
   const [detailRequest, setDetailRequest] = useState(0);
   const [detail, setDetail] = useState<"search" | "http" | "coverage" | null>(null);
+  useEffect(() => {
+    if (view === "features" && knowledge.journeyCatalogStatus === "idle") {
+      knowledge.onLoadJourneyCatalog();
+    }
+  }, [knowledge.journeyCatalogStatus, knowledge.onLoadJourneyCatalog, view]);
   return (
     <div className="ct-page ct-knowledge-page">
       {!project.selectedProject ? (
@@ -1990,6 +2008,10 @@ function FeatureSection({ knowledge }: { knowledge: KnowledgeUi }) {
           <span className="ct-count-label">{generation?.features.length ?? "—"}</span>
         </div>
       </div>
+      <FeatureJourneySection knowledge={knowledge} />
+      <details className="ct-ai-feature-details">
+        <summary>AI 功能说明与已保存语义（可选）</summary>
+        <div className="ct-ai-feature-content">
       <p className="ct-section-lede">工作台内置识别使用服务端模型，并按预算发送当前索引的源码证据。Codex 外部 Agent 也可通过 MCP 自行识别并保存结果；它使用宿主模型，服务端不会为此再调用模型。</p>
       {knowledge.modelApiKeyConfigured === false ? <div className="ct-model-config-needed" role="status"><span>还没有配置模型密钥。保存配置不会测试供应商或发送源码。</span><button type="button" className="ct-link-button" onClick={() => void knowledge.onOpenModelSettings()}>打开设置</button></div> : null}
       <div className="ct-history-block">
@@ -2019,8 +2041,111 @@ function FeatureSection({ knowledge }: { knowledge: KnowledgeUi }) {
       {knowledge.featureStatus === "loading" ? <LoadingNote>正在收集有界证据并生成语义摘要…</LoadingNote> : null}
       {knowledge.featureError && !generation ? <div className="ct-error-block compact" role="alert"><span>{knowledge.featureError}</span><button type="button" className="ct-link-button" onClick={() => void knowledge.onRunFeatureGeneration()}>重试</button></div> : null}
       {generation ? <FeatureGenerationResult generation={generation} knowledge={knowledge} /> : null}
+        </div>
+      </details>
     </section>
   );
+}
+
+function FeatureJourneySection({ knowledge }: { knowledge: KnowledgeUi }) {
+  const catalog = knowledge.journeyCatalog;
+  const selected = knowledge.journey;
+  return (
+    <section className="ct-journey-section" aria-label="用户操作旅程">
+      <div className="ct-journey-heading">
+        <div><p className="ct-overline">从操作到结果</p><h4>功能旅程</h4></div>
+        <span className="ct-count-label">{catalog ? `${catalog.journeys.length} 条` : "—"}</span>
+      </div>
+      <p className="ct-card-note">从界面操作开始，按同一固定索引查看前端处理、服务端入口和结果状态。源码关系不代表实际运行过程。</p>
+      {knowledge.journeyCatalogStatus === "loading" ? <LoadingNote>正在读取当前固定索引中的操作摘要…</LoadingNote> : null}
+      {knowledge.journeyCatalogStatus === "error" ? (
+        <div className="ct-error-block compact" role="alert"><span>{knowledge.journeyCatalogError ?? "操作旅程读取失败。"}</span><button type="button" className="ct-link-button" onClick={() => void knowledge.onRetryJourneyCatalog()}>重试</button></div>
+      ) : null}
+      {catalog && catalog.journeys.length > 0 ? (
+        <div className="ct-journey-layout">
+          <div className="ct-journey-list" aria-label="可读功能旅程">
+            {catalog.journeys.map((item) => (
+              <button
+                type="button"
+                key={item.journey_id}
+                className={`ct-journey-choice${knowledge.selectedJourneyId === item.journey_id ? " is-selected" : ""}`}
+                onClick={() => knowledge.onSelectJourney(item.journey_id)}
+                aria-pressed={knowledge.selectedJourneyId === item.journey_id}
+              >
+                <strong>{item.action_label}</strong>
+                <span>{item.event_name === "onSubmit" ? "提交表单" : "页面操作"}{item.label_dynamic ? " · 标签会按状态变化" : ""}</span>
+              </button>
+            ))}
+          </div>
+          <div className="ct-journey-detail" aria-live="polite">
+            {knowledge.journeyStatus === "loading" ? <LoadingNote>正在展开这条旅程的职责步骤和源码…</LoadingNote> : null}
+            {knowledge.journeyStatus === "error" ? <div className="ct-error-block compact" role="alert"><span>{knowledge.journeyError ?? "旅程详情读取失败。"}</span></div> : null}
+            {selected ? (
+              <>
+                <ol className="ct-journey-steps">
+                  {selected.steps.map((step, index) => (
+                    <li className="ct-journey-step" key={step.step_id}>
+                      <span className="ct-journey-step-index">{String(index + 1).padStart(2, "0")}</span>
+                      <div className="ct-journey-step-copy">
+                        <div className="ct-journey-step-heading">
+                          <strong>{step.title}</strong>
+                          <span className={`ct-journey-certainty is-${step.certainty}`}>{journeyCertaintyLabel(step.certainty)}</span>
+                        </div>
+                        <p>{step.explanation}</p>
+                        {step.certainty === "unconfirmed" ? (
+                          <small className="ct-journey-break">
+                            {step.evidence.length > 0
+                              ? "当前规则不能确认两端的实际绑定。"
+                              : "当前没有足够证据确认这一步。"}
+                          </small>
+                        ) : null}
+                        {step.evidence.length > 0 || step.symbols.length > 0 ? (
+                          <details className="ct-journey-sources">
+                            <summary>查看源码与职责符号 · {step.evidence.length + step.symbols.length}</summary>
+                            {step.evidence.map((evidence) => (
+                              <button type="button" key={evidence.evidence_id} onClick={() => knowledge.onSelectJourneyEvidence(evidence)}>
+                                {evidence.path}:L{evidence.start_line}–L{evidence.end_line}
+                              </button>
+                            ))}
+                            {step.symbols.map((symbol) => (
+                              <span className="ct-journey-symbol" key={symbol.symbol_id}>{symbol.qualified_name} · {symbol.path}:L{symbol.start_line}</span>
+                            ))}
+                          </details>
+                        ) : null}
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+                {selected.markers.length > 0 ? (
+                  <details className="ct-journey-markers">
+                    <summary>旅程断点 · {selected.markers.length}</summary>
+                    {selected.markers.map((marker) => <p key={marker}>{marker}</p>)}
+                  </details>
+                ) : null}
+              </>
+            ) : knowledge.journeyStatus !== "loading" ? <p className="ct-muted">选择一条操作旅程查看步骤；源码会在展开时按需读取。</p> : null}
+          </div>
+        </div>
+      ) : catalog && knowledge.journeyCatalogStatus === "empty" ? (
+        <p className="ct-muted">当前索引没有找到可连接到服务端入口的用户操作旅程。</p>
+      ) : null}
+      {catalog && (catalog.coverage.unsupported_action_count > 0 || catalog.coverage.truncated || catalog.coverage.limitations.length > 0) ? (
+        <details className="ct-journey-coverage">
+          <summary>覆盖范围与限制{catalog.coverage.unsupported_action_count > 0 ? ` · ${catalog.coverage.unsupported_action_count} 个操作未能连到服务端入口` : ""}</summary>
+          {catalog.coverage.truncated ? <p>操作扫描达到上限，未显示部分不代表不存在。</p> : null}
+          {catalog.coverage.action_facts_omitted_count > 0 ? <p>动作候选省略 {catalog.coverage.action_facts_omitted_count} 项。</p> : null}
+          {catalog.coverage.prop_facts_omitted_count > 0 ? <p>回调属性候选省略 {catalog.coverage.prop_facts_omitted_count} 项。</p> : null}
+          {catalog.coverage.limitations.map((limitation) => <p key={limitation}>{limitation}</p>)}
+        </details>
+      ) : null}
+    </section>
+  );
+}
+
+function journeyCertaintyLabel(certainty: "static" | "shape" | "unconfirmed"): string {
+  if (certainty === "static") return "源码有明确关系";
+  if (certainty === "shape") return "接口形状相符";
+  return "关系待确认";
 }
 
 function FeatureGenerationResult({ generation, knowledge }: { generation: FeatureGeneration; knowledge: KnowledgeUi }) {

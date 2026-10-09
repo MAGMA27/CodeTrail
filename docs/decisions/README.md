@@ -2,6 +2,8 @@
 
 - [外部 Agent 功能结果提交](2026-10-09-external-agent-feature-submission.md)
 
+- [从固定索引事实组装功能旅程](2026-10-09-feature-journeys.md)
+
 - [工作台管理服务端模型配置](2026-10-09-workbench-model-provider-settings.md)
 
 - [项目知识采用画布与按需详情工作区](2026-10-08-project-knowledge-workspace.md)

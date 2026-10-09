@@ -20,6 +20,7 @@
 - [issue_analysis.py](app/issue_analysis.py)：real Run 的结构化模型输出、有限工具循环、预算和引用校验。
 - [indexing.py](app/indexing.py)、[typescript_parser.cjs](app/typescript_parser.cjs) 与 [relations.py](app/relations.py)：Python/TypeScript 快照、TypeScript AST 定义/导入/保守调用、Python 文件级缓存和静态关系目标解析；TypeScript 每次有界冷解析，不伪装成 Python cache hit。
 - [overview.py](app/overview.py)、[feature_generation.py](app/feature_generation.py) 与 [feature_graph.py](app/feature_graph.py)：同快照入口概览、唯一静态 HTTP method/path shape association、功能生成和功能图；HTTP 形状匹配不证明运行时请求目的地。
+- [journeys.py](app/journeys.py)：从固定索引 TSX action、调用关系、HTTP shape association 与 API handler 组装有界职责旅程；动态组件回调和结果界面更新保留未确认状态。
 - [mcp_server.py](app/mcp_server.py)：本地 MCP stdio 适配器，包含可选 Codex external Run 与宿主功能结果提交工具。
 - [config.py](app/config.py)：服务数据目录中的持久化模型供应商配置。
 

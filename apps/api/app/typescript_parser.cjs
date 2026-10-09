@@ -21,6 +21,8 @@ let importCount = 0;
 let requestCount = 0;
 let callCount = 0;
 let callBudgetTruncated = false;
+let uiActionBudgetTruncated = false;
+let uiPropBindingBudgetTruncated = false;
 const files = input.files.map(({ path: filePath, text }) => {
   if (typeof filePath !== "string" || typeof text !== "string") throw new Error("invalid source record");
   const source = ts.createSourceFile(
@@ -42,6 +44,10 @@ const files = input.files.map(({ path: filePath, text }) => {
   const definitions = [];
   const imports = [];
   const http_requests = [];
+  const ui_actions = [];
+  const ui_prop_bindings = [];
+  let ui_actions_omitted = 0;
+  let ui_prop_bindings_omitted = 0;
   const calls = [];
   const exports = [];
   const range = (node) => {
@@ -414,18 +420,6 @@ const files = input.files.map(({ path: filePath, text }) => {
     inspect(root.body, true);
     return found;
   };
-  const hasNestedFunction = (root) => {
-    let found = false;
-    const inspect = (node) => {
-      if (ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node) || ts.isArrowFunction(node) || ts.isMethodDeclaration(node)) {
-        found = true;
-        return;
-      }
-      ts.forEachChild(node, inspect);
-    };
-    ts.forEachChild(root.body, inspect);
-    return found;
-  };
   const queryParamsName = (fn, name) => {
     const declarations = [];
     let validUses = true;
@@ -560,18 +554,63 @@ const files = input.files.map(({ path: filePath, text }) => {
   ) {
     const wrapper = requestWrappers[0];
     const calls = [];
-    const inspectFetch = (node) => {
+    const inspectFetch = (node, isRoot = false) => {
       if (!node) return;
+      if (!isRoot && isCallableNode(node)) return;
       if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "fetch") calls.push(node);
-      ts.forEachChild(node, inspectFetch);
+      ts.forEachChild(node, (child) => inspectFetch(child));
     };
-    inspectFetch(wrapper.body);
+    inspectFetch(wrapper.body, true);
     const fetchCall = calls[0];
     const template = fetchCall && fetchCall.arguments[0];
     const options = fetchCall && fetchCall.arguments[1];
     const forwardedInit = options && ts.isObjectLiteralExpression(options) &&
       options.properties.length >= 1 && ts.isSpreadAssignment(options.properties[0]) &&
       ts.isIdentifier(options.properties[0].expression) && options.properties[0].expression.text === "init" &&
+      options.properties.filter(ts.isSpreadAssignment).length === 1 &&
+      options.properties.slice(1).every((property) =>
+        ts.isShorthandPropertyAssignment(property)
+          ? property.name.text !== "method"
+          : ts.isPropertyAssignment(property) &&
+            property.name && !ts.isComputedPropertyName(property.name) &&
+            (ts.isIdentifier(property.name) || ts.isStringLiteral(property.name)) &&
+            property.name.text !== "method"
+      );
+    const initRestName = options && ts.isObjectLiteralExpression(options) &&
+      options.properties.length >= 1 && ts.isSpreadAssignment(options.properties[0]) &&
+      ts.isIdentifier(options.properties[0].expression) && options.properties[0].expression.text;
+    const initRestBinding = (name) => {
+      if (!name || !wrapper.body || !ts.isBlock(wrapper.body)) return false;
+      const matches = [];
+      for (const statement of wrapper.body.statements) {
+        if (!ts.isVariableStatement(statement)) continue;
+        for (const declaration of statement.declarationList.declarations) {
+          if (bindingNames(declaration.name).includes(name)) matches.push({ statement, declaration });
+        }
+      }
+      if (matches.length !== 1) return false;
+      const { statement, declaration } = matches[0];
+      const pattern = declaration.name;
+      if (!(statement.declarationList.flags & ts.NodeFlags.Const) || !ts.isObjectBindingPattern(pattern) ||
+        !declaration.initializer || !ts.isIdentifier(declaration.initializer) || declaration.initializer.text !== "init" ||
+        pattern.elements.length !== 2) return false;
+      const [timeoutBinding, requestInitRest] = pattern.elements;
+      if (!ts.isBindingElement(timeoutBinding) || timeoutBinding.dotDotDotToken || timeoutBinding.propertyName ||
+        !ts.isIdentifier(timeoutBinding.name) || timeoutBinding.name.text !== "timeoutMs" || timeoutBinding.initializer ||
+        !ts.isBindingElement(requestInitRest) || !requestInitRest.dotDotDotToken || requestInitRest.propertyName ||
+        !ts.isIdentifier(requestInitRest.name) || requestInitRest.name.text !== name || requestInitRest.initializer) return false;
+      let otherBindings = 0;
+      const countOtherBindings = (node) => {
+        if (node !== wrapper.body && isCallableNode(node)) return;
+        if (ts.isVariableDeclaration(node) && bindingNames(node.name).includes(name) && node !== declaration) otherBindings++;
+        if (ts.isParameter(node) && bindingNames(node.name).includes(name)) otherBindings++;
+        if (ts.isCatchClause(node) && node.variableDeclaration && bindingNames(node.variableDeclaration.name).includes(name)) otherBindings++;
+        ts.forEachChild(node, countOtherBindings);
+      };
+      countOtherBindings(wrapper.body);
+      return otherBindings === 0 && !hasWrites(wrapper.body, new Set([name]));
+    };
+    const forwardedRestInit = initRestName && initRestBinding(initRestName) &&
       options.properties.filter(ts.isSpreadAssignment).length === 1 &&
       options.properties.slice(1).every((property) =>
         ts.isShorthandPropertyAssignment(property)
@@ -599,10 +638,9 @@ const files = input.files.map(({ path: filePath, text }) => {
     const immutableApiBase = ts.isVariableDeclaration(baseBindings[0]) &&
       baseBindings[0].parent.flags & ts.NodeFlags.Const && Boolean(baseBindings[0].initializer);
     if (
-      wrapperHasBody && calls.length === 1 && fetchCall.arguments.length === 2 && forwardedInit && templateForwardsPath &&
+      wrapperHasBody && calls.length === 1 && fetchCall.arguments.length === 2 && (forwardedInit || forwardedRestInit) && templateForwardsPath &&
       defaultsToEmptyInit && stableBindings && immutableApiBase &&
       !hasLocalBinding(wrapper, "fetch") && !hasLocalBinding(wrapper, "apiBaseUrl") &&
-      !hasNestedFunction(wrapper) &&
       !hasWrites(source, new Set(["fetch"])) &&
       !hasWrites(source, new Set(["requestJson", "apiBaseUrl"]))
     ) wrapperName = "requestJson";
@@ -698,11 +736,193 @@ const files = input.files.map(({ path: filePath, text }) => {
     ts.forEachChild(node, visitModuleReferences);
   };
   visitModuleReferences(source);
+  const jsxAttributeValue = (attribute) => {
+    if (!attribute.initializer || !ts.isJsxExpression(attribute.initializer)) return null;
+    return attribute.initializer.expression ?? null;
+  };
+  const staticJsxText = (node) => {
+    const parts = [];
+    const candidates = new Set();
+    let dynamic = false;
+    const collectLiterals = (expression) => {
+      if (ts.isStringLiteral(expression) || ts.isNoSubstitutionTemplateLiteral(expression)) {
+        const value = expression.text.trim();
+        if (value) candidates.add(value);
+        return;
+      }
+      if (ts.isConditionalExpression(expression)) {
+        collectLiterals(expression.whenTrue);
+        collectLiterals(expression.whenFalse);
+      }
+    };
+    const collect = (child) => {
+      if (ts.isJsxText(child)) {
+        const value = child.text.replace(/\s+/g, " ").trim();
+        if (value) { parts.push(value); candidates.add(value); }
+      } else if (ts.isJsxExpression(child)) {
+        const expression = child.expression;
+        if (expression && (ts.isStringLiteral(expression) || ts.isNoSubstitutionTemplateLiteral(expression))) {
+          parts.push(expression.text.trim());
+          if (expression.text.trim()) candidates.add(expression.text.trim());
+        } else if (expression) {
+          dynamic = true;
+          collectLiterals(expression);
+        }
+      } else if (ts.isJsxElement(child)) {
+        child.children.forEach(collect);
+      }
+    };
+    if (ts.isJsxElement(node)) node.children.forEach(collect);
+    return { text: parts.join(" ").replace(/\s+/g, " ").trim(), candidates: [...candidates].slice(0, 5), dynamic };
+  };
+  const formSubmitLabel = (element) => {
+    const buttons = [];
+    const visit = (node) => {
+      if (ts.isJsxElement(node) || ts.isJsxSelfClosingElement(node)) {
+        const opening = ts.isJsxElement(node) ? node.openingElement : node;
+        if (opening.tagName.getText(source).toLowerCase() === "button") {
+          const typeAttribute = opening.attributes.properties.find((attribute) =>
+            ts.isJsxAttribute(attribute) && attribute.name.getText(source) === "type",
+          );
+          const typeValue = typeAttribute && typeAttribute.initializer && ts.isStringLiteral(typeAttribute.initializer)
+            ? typeAttribute.initializer.text.toLowerCase()
+            : null;
+          if (typeValue !== "button" && typeValue !== "reset") {
+            const text = ts.isJsxElement(node) ? staticJsxText(node) : { text: "", dynamic: false };
+            buttons.push(text);
+          }
+        }
+      }
+      if (ts.isJsxElement(node)) node.children.forEach(visit);
+      else if (ts.isJsxFragment(node)) node.children.forEach(visit);
+    };
+    if (ts.isJsxElement(element)) element.children.forEach(visit);
+    if (buttons.length === 1 && buttons[0].text) return {
+      label: buttons[0].text.slice(0, 200),
+      label_candidates: buttons[0].candidates,
+      dynamic: buttons[0].dynamic,
+    };
+    const candidates = [...new Set(buttons.flatMap((item) => item.candidates ?? []))].slice(0, 5);
+    return { label: "表单提交", label_candidates: candidates, dynamic: buttons.length !== 1 || buttons.some((item) => item.dynamic) };
+  };
+  const jsxOwner = (node) => {
+    const owners = functionInfos.filter((info) => {
+      const start = info.function_node.getStart(source);
+      return start <= node.getStart(source) && info.function_node.end >= node.end;
+    }).sort((left, right) => (left.function_node.end - left.function_node.getStart(source)) -
+      (right.function_node.end - right.function_node.getStart(source)));
+    return owners[0] ?? null;
+  };
+  const visitUiActions = (node) => {
+    if (ts.isJsxAttribute(node) && ["onSubmit", "onClick"].includes(node.name.getText(source))) {
+      const opening = node.parent.parent;
+      const element = ts.isJsxSelfClosingElement(opening) ? opening : opening.parent;
+      const expression = jsxAttributeValue(node);
+      const owner = jsxOwner(node);
+      const handlerExpression = expression ? expression.getText(source).slice(0, 500) : "<missing handler>";
+      let receiver_name = null;
+      let callback_property = null;
+      let handler_name = null;
+      let handler_qualified_name = null;
+      let handler_start_line = null;
+      let handler_binding_static = false;
+      if (expression && ts.isPropertyAccessExpression(expression) && ts.isIdentifier(expression.expression)) {
+        receiver_name = expression.expression.text;
+        callback_property = expression.name.text;
+      } else if (expression && (ts.isArrowFunction(expression) || ts.isFunctionExpression(expression))) {
+        const callbackReferences = new Set();
+        const collectCallbackReferences = (candidate) => {
+          if (ts.isPropertyAccessExpression(candidate) && ts.isIdentifier(candidate.expression) &&
+            candidate.name.text === node.name.getText(source)) {
+            callbackReferences.add(`${candidate.expression.text}\0${candidate.name.text}`);
+          }
+          ts.forEachChild(candidate, collectCallbackReferences);
+        };
+        collectCallbackReferences(expression.body);
+        if (callbackReferences.size === 1) {
+          [receiver_name, callback_property] = [...callbackReferences][0].split("\0");
+        }
+      } else if (expression && ts.isIdentifier(expression)) {
+        handler_name = expression.text;
+        if (owner) {
+          const target = localTarget(handler_name, callerScopePaths(owner)).target;
+          if (target && !hasWrites(owner.function_node.body, new Set([handler_name]))) {
+            handler_qualified_name = target.qualified_name;
+            handler_start_line = target.start_line;
+            handler_binding_static = true;
+          }
+        }
+      }
+      let label = "";
+      let labelCandidates = [];
+      let label_dynamic = false;
+      const tag = opening.tagName.getText(source).toLowerCase();
+      if (node.name.getText(source) === "onSubmit" && tag === "form") {
+        const described = formSubmitLabel(element);
+        label = described.label;
+        labelCandidates = described.label_candidates;
+        label_dynamic = described.dynamic;
+      } else {
+        const described = ts.isJsxElement(element) ? staticJsxText(element) : { text: "", candidates: [], dynamic: false };
+        label = described.text.slice(0, 200);
+        labelCandidates = described.candidates;
+        label_dynamic = described.dynamic;
+        if (!label) label = node.name.getText(source) === "onSubmit" ? "表单提交" : "页面操作";
+      }
+      if (ui_actions.length < 1000) ui_actions.push({
+        event_name: node.name.getText(source),
+        element_name: tag.slice(0, 100),
+        label,
+        label_candidates: labelCandidates,
+        label_dynamic,
+        handler_expression: handlerExpression,
+        receiver_name,
+        callback_property,
+        handler_name,
+        handler_qualified_name,
+        handler_start_line,
+        handler_binding_static,
+        owner_qualified_name: owner?.qualified_name ?? null,
+        owner_start_line: owner?.start_line ?? null,
+        element_start_line: range(element).start_line,
+        element_end_line: range(element).end_line,
+        ...range(node),
+      });
+      else { uiActionBudgetTruncated = true; ui_actions_omitted += 1; }
+    }
+    if (ts.isJsxAttribute(node) && ts.isIdentifier(node.name)) {
+      const expression = jsxAttributeValue(node);
+      if (expression && ts.isObjectLiteralExpression(expression)) {
+        for (const property of expression.properties) {
+          if (!ts.isPropertyAssignment(property) || !property.name || !ts.isIdentifier(property.name) && !ts.isStringLiteral(property.name)) continue;
+          const value = property.initializer;
+          if (!ts.isIdentifier(value)) continue;
+          const owner = jsxOwner(node);
+          if (ui_prop_bindings.length < 2000) ui_prop_bindings.push({
+            prop_name: node.name.text,
+            callback_property: property.name.text,
+            target_name: value.text,
+            owner_qualified_name: owner?.qualified_name ?? null,
+            ...range(property),
+          });
+          else { uiPropBindingBudgetTruncated = true; ui_prop_bindings_omitted += 1; }
+        }
+      }
+    }
+    ts.forEachChild(node, visitUiActions);
+  };
+  if (filePath.toLowerCase().endsWith(".tsx")) visitUiActions(source);
   return {
     path: filePath,
     definitions,
     imports,
     http_requests,
+    ui_actions,
+    ui_prop_bindings,
+    ui_actions_truncated: uiActionBudgetTruncated,
+    ui_prop_bindings_truncated: uiPropBindingBudgetTruncated,
+    ui_actions_omitted,
+    ui_prop_bindings_omitted,
     calls,
     exports,
     calls_truncated: callBudgetTruncated,

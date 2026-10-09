@@ -347,7 +347,7 @@ def build_project_overview(
     path_analysis = (
         "parameterized"
         if "+typescript-facts-v2" in rules_version or "+typescript-facts-v3" in rules_version or
-        "+typescript-facts-v4" in rules_version
+        "+typescript-facts-v4" in rules_version or "+typescript-facts-v5" in rules_version
         else "literal_only"
         if "+typescript-facts-v1" in rules_version
         else "not_analyzed"
