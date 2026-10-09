@@ -575,14 +575,18 @@ function ProjectRail({
   project,
   session,
   viewMode,
+  settingsOpen,
   onOpenOperation,
   onViewKnowledge,
+  onOpenSettings,
 }: {
   project: ProjectUi;
   session: SessionUi;
   viewMode: "overview" | "session";
+  settingsOpen: boolean;
   onOpenOperation: OpenOperation;
   onViewKnowledge: () => void;
+  onOpenSettings: Action;
 }) {
   const [sessionFormOpen, setSessionFormOpen] = useState(false);
   const [trashOpen, setTrashOpen] = useState(false);
@@ -803,6 +807,19 @@ function ProjectRail({
           </section>
         ) : null}
       <div className="ct-sidebar-footer">
+        <button
+          type="button"
+          className="ct-sidebar-action ct-sidebar-settings"
+          onClick={() => {
+            closeProjectPicker();
+            void onOpenSettings();
+          }}
+          aria-haspopup="dialog"
+          aria-expanded={settingsOpen}
+        >
+          <span><span className="ct-sidebar-settings-icon" aria-hidden="true">⚙</span>设置</span>
+          <span aria-hidden="true">›</span>
+        </button>
         <button type="button" className="ct-sidebar-action" onClick={() => onOpenOperation("project-management", "source")}>
           <span>源代码与索引</span><span aria-hidden="true">↗</span>
         </button>
@@ -1773,7 +1790,7 @@ function FeatureSection({ knowledge }: { knowledge: KnowledgeUi }) {
         </div>
       </div>
       <p className="ct-section-lede">点击识别后，服务端模型结合当前索引的入口、模块、符号和源码证据生成主要功能描述。相关源码会发送给已配置的模型服务，可能产生调用费用。</p>
-      {knowledge.modelApiKeyConfigured === false ? <div className="ct-model-config-needed" role="status"><span>还没有配置模型密钥。保存配置不会测试供应商或发送源码。</span><button type="button" className="ct-link-button" onClick={() => void knowledge.onOpenModelSettings()}>打开模型设置</button></div> : null}
+      {knowledge.modelApiKeyConfigured === false ? <div className="ct-model-config-needed" role="status"><span>还没有配置模型密钥。保存配置不会测试供应商或发送源码。</span><button type="button" className="ct-link-button" onClick={() => void knowledge.onOpenModelSettings()}>打开设置</button></div> : null}
       <div className="ct-history-block">
         <div className="ct-history-heading"><strong>已保存版本 · 当前快照</strong><span data-state={knowledge.featureHistoryStatus}>{knowledge.featureHistoryStatus === "loading" ? "载入中" : `${knowledge.featureHistory.length} 个版本`}</span></div>
         {knowledge.featureHistoryError ? <div className="ct-error-block compact" role="alert"><span>{knowledge.featureHistoryError}</span><button type="button" className="ct-link-button" onClick={() => void knowledge.onRetryFeatureHistory()}>重试</button></div> : null}
@@ -2177,7 +2194,7 @@ function RunPanel({ session }: { session: SessionUi }) {
         <span className="ct-count-label">{session.runs.length} 次</span>
       </div>
       <p className="ct-run-lede">显式启动后，服务端只冻结当前已保存消息到一个不可变快照；当前草稿不会进入本次 Run，也不会隐式触发分析。</p>
-      {session.modelApiKeyConfigured === false ? <div className="ct-model-config-needed" role="status"><span>尚未配置模型密钥。先完成配置，再开始分析。</span><button type="button" className="ct-link-button" onClick={() => void session.onOpenModelSettings()}>打开模型设置</button></div> : null}
+      {session.modelApiKeyConfigured === false ? <div className="ct-model-config-needed" role="status"><span>尚未配置模型密钥。先完成配置，再开始分析。</span><button type="button" className="ct-link-button" onClick={() => void session.onOpenModelSettings()}>打开设置</button></div> : null}
       {draftPending ? <p className="ct-run-draft-warning" role="status">当前有未保存草稿：启动 Run 不会包含它，请先保存消息。</p> : null}
       <div className="ct-run-start-row">
         <button type="button" className="ct-button ct-button-primary" onClick={() => void session.onStartRun()} disabled={active || session.runWriteStatus === "loading" || session.messagesStatus === "loading"}>{session.runWriteStatus === "loading" ? "处理中…" : session.modelApiKeyConfigured === false ? "配置模型后分析" : "开始分析"}</button>
@@ -2453,7 +2470,7 @@ function GraphFitController({
   return null;
 }
 
-function ModelSettingsDialog({ modelSettings }: { modelSettings: WorkbenchUiProps["modelSettings"] }) {
+function SettingsDialog({ modelSettings }: { modelSettings: WorkbenchUiProps["modelSettings"] }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [provider, setProvider] = useState("deepseek");
   const [baseUrl, setBaseUrl] = useState("https://api.deepseek.com");
@@ -2500,8 +2517,8 @@ function ModelSettingsDialog({ modelSettings }: { modelSettings: WorkbenchUiProp
   return (
     <dialog
       ref={dialogRef}
-      className="ct-model-settings-dialog"
-      aria-labelledby="model-settings-title"
+      className="ct-settings-dialog"
+      aria-labelledby="settings-dialog-title"
       onCancel={(event) => {
         event.preventDefault();
         if (!modelSettings.saving) modelSettings.onClose();
@@ -2511,40 +2528,44 @@ function ModelSettingsDialog({ modelSettings }: { modelSettings: WorkbenchUiProp
       }}
     >
       <div className="ct-form-heading">
-        <div><p className="ct-overline">SERVER MODEL CONFIG</p><h2 id="model-settings-title">模型设置</h2></div>
+        <div><p className="ct-overline">GLOBAL SETTINGS</p><h2 id="settings-dialog-title">设置</h2></div>
         <button type="button" className="ct-close-button" onClick={() => modelSettings.onClose()} disabled={modelSettings.saving}>关闭</button>
       </div>
-      <p className="ct-form-help">配置保存在运行 API 的电脑上。保存不会连接供应商或发送源码；后续新任务会读取新配置，运行中的任务继续使用启动时配置。</p>
-      {modelSettings.settings ? <p className="ct-model-key-status" role="status">已保存密钥：{modelSettings.settings.has_api_key ? "已配置" : "未配置"}</p> : null}
-      {modelSettings.error ? <div className="ct-error-block compact" role="alert"><span>{modelSettings.error}</span><button type="button" className="ct-link-button" onClick={() => void modelSettings.onRetry()}>重试读取</button></div> : null}
-      {modelSettings.saved ? <p className="ct-model-config-saved" role="status">配置已保存；网络连通性尚未验证。</p> : null}
-      <form className="ct-model-settings-form" onSubmit={(event) => void submit(event)}>
-        <label htmlFor="model-config-provider">供应商标识</label>
-        <input id="model-config-provider" value={provider} onChange={(event) => setProvider(event.target.value)} maxLength={100} required disabled={disabled} />
-        <label htmlFor="model-config-base-url">兼容 API 地址</label>
-        <input id="model-config-base-url" type="url" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} maxLength={2_000} required disabled={disabled} />
-        <label htmlFor="model-config-model">模型名称</label>
-        <input id="model-config-model" value={model} onChange={(event) => setModel(event.target.value)} maxLength={200} required disabled={disabled} />
-        <label htmlFor="model-config-api-key">API Key</label>
-        <input
-          id="model-config-api-key"
-          type="password"
-          autoComplete="off"
-          value={apiKey}
-          onChange={(event) => {
-            setApiKey(event.target.value);
-            setRemoveApiKey(false);
-          }}
-          maxLength={500}
-          placeholder={modelSettings.settings?.has_api_key ? "留空以保留已保存的密钥" : "输入服务端模型密钥"}
-          disabled={disabled || removeApiKey}
-        />
-        {modelSettings.settings?.has_api_key ? <label className="ct-model-remove-key"><input type="checkbox" checked={removeApiKey} onChange={(event) => { setRemoveApiKey(event.target.checked); setApiKey(""); }} disabled={disabled} />明确移除已保存的密钥</label> : null}
-        <p className="ct-form-help">密钥不会返回给浏览器或写入浏览器存储。新密钥只在本次表单提交时发送；保存成功后输入会清空。</p>
-        <div className="ct-form-actions">
-          <button type="submit" className="ct-button ct-button-primary" disabled={disabled}>{modelSettings.saving ? "保存中…" : "保存配置"}</button>
-        </div>
-      </form>
+      <section className="ct-settings-section" aria-labelledby="model-service-heading">
+        <h3 id="model-service-heading">模型服务</h3>
+        <p className="ct-form-help">适用于所有项目和会话中的内置 AI 分析，配置保存在当前连接的 CodeTrail 服务。Codex 外部 Agent 使用宿主模型，无需在这里配置。</p>
+        <p className="ct-form-help">保存不会连接供应商或发送源码；后续新任务读取新配置，运行中的任务继续使用启动时配置。</p>
+        {modelSettings.settings ? <p className="ct-model-key-status" role="status">已保存密钥：{modelSettings.settings.has_api_key ? "已配置" : "未配置"}</p> : null}
+        {modelSettings.error ? <div className="ct-error-block compact" role="alert"><span>{modelSettings.error}</span><button type="button" className="ct-link-button" onClick={() => void modelSettings.onRetry()}>重试读取</button></div> : null}
+        {modelSettings.saved ? <p className="ct-model-config-saved" role="status">配置已保存；网络连通性尚未验证。</p> : null}
+        <form className="ct-model-settings-form" onSubmit={(event) => void submit(event)}>
+          <label htmlFor="model-config-provider">供应商标识</label>
+          <input id="model-config-provider" value={provider} onChange={(event) => setProvider(event.target.value)} maxLength={100} required disabled={disabled} />
+          <label htmlFor="model-config-base-url">兼容 API 地址</label>
+          <input id="model-config-base-url" type="url" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} maxLength={2_000} required disabled={disabled} />
+          <label htmlFor="model-config-model">模型名称</label>
+          <input id="model-config-model" value={model} onChange={(event) => setModel(event.target.value)} maxLength={200} required disabled={disabled} />
+          <label htmlFor="model-config-api-key">API Key</label>
+          <input
+            id="model-config-api-key"
+            type="password"
+            autoComplete="off"
+            value={apiKey}
+            onChange={(event) => {
+              setApiKey(event.target.value);
+              setRemoveApiKey(false);
+            }}
+            maxLength={500}
+            placeholder={modelSettings.settings?.has_api_key ? "留空以保留已保存的密钥" : "输入服务端模型密钥"}
+            disabled={disabled || removeApiKey}
+          />
+          {modelSettings.settings?.has_api_key ? <label className="ct-model-remove-key"><input type="checkbox" checked={removeApiKey} onChange={(event) => { setRemoveApiKey(event.target.checked); setApiKey(""); }} disabled={disabled} />明确移除已保存的密钥</label> : null}
+          <p className="ct-form-help">密钥不会返回给浏览器或写入浏览器存储。新密钥只在本次表单提交时发送；保存成功后输入会清空。</p>
+          <div className="ct-form-actions">
+            <button type="submit" className="ct-button ct-button-primary" disabled={disabled}>{modelSettings.saving ? "保存中…" : "保存配置"}</button>
+          </div>
+        </form>
+      </section>
     </dialog>
   );
 }
@@ -2563,13 +2584,6 @@ export default function WorkbenchUi(props: WorkbenchUiProps) {
   const graphScopeKey = `${props.project.selectedProject?.project_id ?? ""}:${props.index.response?.index.index_id ?? ""}`;
   const previousGraphScopeKey = useRef(graphScopeKey);
   const previousPanelMode = useRef(props.panelMode);
-  const modelSettingsLabel = props.modelSettings.status === "loading"
-    ? "载入中"
-    : props.modelSettings.settings?.has_api_key
-      ? "已配置"
-      : props.modelSettings.settings
-        ? "未配置"
-        : "状态未知";
   const inlineArchitectureGraph = props.viewMode === "overview" && Boolean(props.knowledge.architectureGraphRootId);
   const showSideGraphPanel = (props.panelMode === "graph" || props.panelMode === "feature_graph" || props.panelMode === "impact") && !inlineArchitectureGraph;
   useEffect(() => {
@@ -2677,6 +2691,10 @@ export default function WorkbenchUi(props: WorkbenchUiProps) {
     setOperationPanel({ mode, tab });
     setMobileSidebarOpen(false);
   };
+  const openSettingsFromSidebar = () => {
+    void props.modelSettings.onOpen();
+    setMobileSidebarOpen(false);
+  };
   const selectProject = (projectId: string) => {
     props.onImportFlowLeave();
     props.knowledge.onCloseArchitectureGraph();
@@ -2711,11 +2729,11 @@ export default function WorkbenchUi(props: WorkbenchUiProps) {
         <button type="button" className="ct-mobile-menu" onClick={() => setMobileSidebarOpen(true)}>项目</button>
         <div className="ct-brand"><span className="ct-brand-mark">CT</span><span><strong>CODETRAIL</strong><small>CODE INTELLIGENCE WORKSPACE</small></span></div>
         <div className="ct-topbar-project"><span>当前项目</span><strong>{props.project.selectedProject?.name ?? "未选择项目"}</strong></div>
-        <div className="ct-connection" data-state={props.connection.state}><span className="ct-status-dot" aria-hidden="true" /><span>{props.connection.state === "connected" ? "API ONLINE" : props.connection.state === "checking" ? "API CHECKING" : "API OFFLINE"}</span>{props.connection.health ? <small>v{props.connection.health.version}</small> : null}<button type="button" className="ct-model-settings-trigger" onClick={() => void props.modelSettings.onOpen()} aria-haspopup="dialog" aria-expanded={props.modelSettings.open}>模型设置 · {modelSettingsLabel}</button><button type="button" onClick={() => void props.connection.onCheck()} disabled={props.connection.state === "checking"}>{props.connection.state === "checking" ? "检查中" : "重试"}</button></div>
+        <div className="ct-connection" data-state={props.connection.state}><span className="ct-status-dot" aria-hidden="true" /><span>{props.connection.state === "connected" ? "API ONLINE" : props.connection.state === "checking" ? "API CHECKING" : "API OFFLINE"}</span>{props.connection.health ? <small>v{props.connection.health.version}</small> : null}<button type="button" onClick={() => void props.connection.onCheck()} disabled={props.connection.state === "checking"}>{props.connection.state === "checking" ? "检查中" : "重试"}</button></div>
       </header>
       <div className="ct-workspace-frame" ref={workspaceFrameRef}>
         {mobileSidebarOpen ? <button type="button" className="ct-mobile-scrim" aria-label="关闭项目导航" onClick={() => setMobileSidebarOpen(false)} /> : null}
-        <div className={`ct-sidebar-slot${mobileSidebarOpen ? " is-open" : ""}`} id="workspace-sidebar"><ProjectRail project={{ ...props.project, onSelectProject: selectProject }} session={{ ...props.session, onSelectSession: selectSession }} viewMode={props.viewMode} onOpenOperation={openOperation} onViewKnowledge={openKnowledge} />
+        <div className={`ct-sidebar-slot${mobileSidebarOpen ? " is-open" : ""}`} id="workspace-sidebar"><ProjectRail project={{ ...props.project, onSelectProject: selectProject }} session={{ ...props.session, onSelectSession: selectSession }} viewMode={props.viewMode} settingsOpen={props.modelSettings.open} onOpenOperation={openOperation} onViewKnowledge={openKnowledge} onOpenSettings={openSettingsFromSidebar} />
           <div
             className="ct-sidebar-resize-handle"
             role="separator"
@@ -2745,7 +2763,7 @@ export default function WorkbenchUi(props: WorkbenchUiProps) {
       </div>
       {props.panelMode === "source" ? <div className="ct-panel-width-control"><label htmlFor="panel-width">面板宽度</label><input id="panel-width" type="range" min="300" max="440" step="10" value={panelWidth} onChange={(event) => setPanelWidth(Number(event.target.value))} /><output>{panelWidth}px</output></div> : null}
       <footer className="ct-footer"><span>STATIC FACTS / FIXED EVIDENCE</span><span>AI 分析或 Codex 外部 Agent · 有界工具循环 · SSE 事件流与轮询回退</span><span>{props.index.response ? `${props.graph.codeSymbolCount} nodes · ${props.graph.codeEdgeCount} edges` : "No snapshot loaded"}</span></footer>
-      <ModelSettingsDialog modelSettings={props.modelSettings} />
+      <SettingsDialog modelSettings={props.modelSettings} />
     </main>
   );
 }

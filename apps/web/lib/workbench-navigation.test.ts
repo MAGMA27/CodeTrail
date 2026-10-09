@@ -114,3 +114,34 @@ test("row trash actions keep an accessible disclosure and explicit close behavio
   assert.match(component, /onBlur=\{/);
   assert.match(component, /<button[\s\S]*?disabled=\{disabled\}[\s\S]*?onMoveToTrash\(\)[\s\S]*?>移到回收站<\/button>/);
 });
+
+test("global settings stay in the sidebar footer and explain their shared scope", () => {
+  const source = ts.createSourceFile("workbench-ui.tsx", readFileSync(new URL("../app/workbench-ui.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const ui = source.text;
+  const workbench = readFileSync(new URL("../app/workbench.tsx", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
+  const railStart = ui.indexOf("function ProjectRail(");
+  const railEnd = ui.indexOf("function OperationPanel(", railStart);
+  const rail = ui.slice(railStart, railEnd);
+  const footerStart = rail.indexOf('<div className="ct-sidebar-footer">');
+  const footerEnd = rail.indexOf("</div>", footerStart);
+  const footer = rail.slice(footerStart, footerEnd);
+  const dialogStart = ui.indexOf("function SettingsDialog(");
+  const dialogEnd = ui.indexOf("export default function WorkbenchUi(", dialogStart);
+  const dialog = ui.slice(dialogStart, dialogEnd);
+
+  assert.ok(footerStart >= 0, "the project rail always renders the settings footer");
+  assert.match(footer, /ct-sidebar-settings[\s\S]*?onOpenSettings[\s\S]*?>[\s\S]*?设置/);
+  assert.match(footer, /aria-haspopup="dialog"[\s\S]*?aria-expanded=\{settingsOpen\}/);
+  assert.match(css, /\.ct-sidebar-footer \{[^}]*margin-top:\s*auto/);
+  assert.doesNotMatch(ui, /ct-model-settings-trigger|modelSettingsLabel/);
+  assert.match(ui, /onOpenSettings=\{openSettingsFromSidebar\}/);
+  assert.match(ui, /const openSettingsFromSidebar = \(\) => \{\s*void props\.modelSettings\.onOpen\(\);\s*setMobileSidebarOpen\(false\);/);
+  assert.equal((workbench.match(/onOpenModelSettings: openModelSettings/g) ?? []).length, 2, "feature and session prompts share the same settings action");
+  assert.match(ui, /<ProjectRail[\s\S]*?settingsOpen=\{props\.modelSettings\.open\}/);
+  assert.match(ui, /<SettingsDialog modelSettings=\{props\.modelSettings\} \/>/);
+  assert.match(dialog, /<h2 id="settings-dialog-title">设置<\/h2>/);
+  assert.match(dialog, /<h3 id="model-service-heading">模型服务<\/h3>/);
+  assert.match(dialog, /所有项目和会话中的内置 AI 分析/);
+  assert.match(dialog, /Codex 外部 Agent 使用宿主模型，无需在这里配置/);
+});
