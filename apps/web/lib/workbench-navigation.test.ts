@@ -5,6 +5,7 @@ import ts from "typescript";
 
 import { canShowKnowledgeInspector, readWorkbenchRoute, resolveGraphReturnPanel, resolveWorkbenchProject, workbenchLocation } from "./workbench-navigation.ts";
 import { clampSidebarWidth, normalizeSidebarWidth, readSidebarWidth, resolveSidebarWidthRange } from "./sidebar-width.ts";
+import { clampStructureDetailWidth, normalizeStructureDetailWidth, readStructureDetailWidth, resolveStructureDetailWidthRange } from "./structure-detail-width.ts";
 
 test("sidebar width preferences reject invalid values and stay within the saved range", () => {
   assert.equal(readSidebarWidth(null), null);
@@ -23,6 +24,21 @@ test("sidebar width range preserves central space when the workspace is constrai
   assert.deepEqual(narrow, { min: 88, max: 88 });
   assert.equal(clampSidebarWidth(220, narrow), 88);
   assert.equal(clampSidebarWidth(Number.NaN, narrow), 88);
+});
+
+test("structure detail width persists valid preferences and yields space to the architecture canvas", () => {
+  assert.equal(readStructureDetailWidth(null), null);
+  assert.equal(readStructureDetailWidth("Infinity"), null);
+  assert.equal(readStructureDetailWidth("240"), 280);
+  assert.equal(readStructureDetailWidth("600"), 560);
+  assert.equal(normalizeStructureDetailWidth(Number.NaN), 360);
+
+  assert.deepEqual(resolveStructureDetailWidthRange(1_600), { min: 280, max: 560 });
+  const constrained = resolveStructureDetailWidthRange(768);
+  assert.deepEqual(constrained, { min: 274, max: 274 });
+  assert.equal(768 - constrained.max, 494, "the detail panel leaves the canvas minimum and grid gap available");
+  assert.equal(clampStructureDetailWidth(360, constrained), 274);
+  assert.equal(clampStructureDetailWidth(Number.NaN, constrained), 274);
 });
 
 test("knowledge details yield to evidence and external graphs, then resume on return", () => {

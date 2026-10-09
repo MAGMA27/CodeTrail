@@ -73,6 +73,15 @@ import {
   SIDEBAR_WIDTH_STORAGE_KEY,
   type SidebarWidthRange,
 } from "../lib/sidebar-width";
+import {
+  clampStructureDetailWidth,
+  DEFAULT_STRUCTURE_DETAIL_WIDTH,
+  normalizeStructureDetailWidth,
+  readStructureDetailWidth,
+  resolveStructureDetailWidthRange,
+  STRUCTURE_DETAIL_WIDTH_STORAGE_KEY,
+  type StructureDetailWidthRange,
+} from "../lib/structure-detail-width";
 import { graphFitNodeIds, moduleDefinitionRows as buildModuleDefinitionRows, type DirectImportTarget, type GraphState } from "../lib/graph";
 import { architectureEntryModule, architectureEntrySummary, architectureOverviewEdgeVisible, architectureEdgeSides, buildArchitectureGraph, visibleArchitectureRelations, type ArchitectureDirectory, type ArchitecturePosition } from "../lib/architecture-graph";
 
@@ -1194,10 +1203,13 @@ function KnowledgeView({
   );
 }
 
+type StructureDetailsTab = "modules" | "entries" | "dependencies";
+type StructureTabSelection = { groupId: string | null; tab: StructureDetailsTab };
+
 type ArchitectureDirectoryNodeData = {
   directory: ArchitectureDirectory;
   selected: boolean;
-  onSelect: (group: OverviewGroup) => void;
+  onSelect: (group: OverviewGroup, initialTab?: "entries") => void;
   onToggle: (group: OverviewGroup) => void;
 };
 
@@ -1230,7 +1242,7 @@ function overviewEntryStart(overview: ProjectOverview, entry: OverviewEntryPoint
 }
 
 function overviewEntryKindLabel(entry: OverviewEntryPoint): string {
-  return entry.kind === "fastapi_route" ? "HTTP入口" : entry.kind === "python_main_module" ? "Python启动文件" : "__main__启动块";
+  return entry.kind === "fastapi_route" ? "HTTP 入口" : entry.kind === "python_main_module" ? "Python 启动文件" : "Python 启动块";
 }
 
 const classificationLabels = {
@@ -1275,7 +1287,7 @@ function ArchitectureDirectoryNode({ data }: NodeProps<Node<ArchitectureDirector
       <Handle id="source-right" type="source" position={Position.Right} className="ct-architecture-handle" />
       <Handle id="source-left" type="source" position={Position.Left} className="ct-architecture-handle" />
       <div className="ct-architecture-directory-heading">
-        <button type="button" className="ct-architecture-directory-title nodrag nopan" onClick={() => data.onSelect(directory.group)} title={directory.group.group_key} aria-label={entrySummary ? `查看入口清单：${entrySummary} · ${groupTitle}` : undefined}>
+        <button type="button" className="ct-architecture-directory-title nodrag nopan" onClick={() => data.onSelect(directory.group, entrySummary ? "entries" : undefined)} title={directory.group.group_key} aria-label={entrySummary ? `查看入口清单：${entrySummary} · ${groupTitle}` : undefined}>
           <span>{directory.group.group_kind === "responsibility" ? "RESPONSIBILITY" : "SOURCE DIRECTORY"}</span>
           <strong title={detail}>{groupTitle}</strong>
           {entrySummary ? <span className="ct-architecture-entry-badge">入口清单 · {entrySummary}</span> : null}
@@ -1331,6 +1343,87 @@ const architectureNodeTypes: NodeTypes = {
 };
 
 function ArchitectureSection({ overview, knowledge, graph, panelMode, onPanelModeChange, detail, detailRequest, active, onDetailChange }: { overview: ProjectOverview; knowledge: KnowledgeUi; graph: GraphUi; panelMode: UiPanelMode; onPanelModeChange: (mode: UiPanelMode) => void; detail: "search" | "http" | "coverage" | null; detailRequest: number; active: boolean; onDetailChange: (detail: "search" | "http" | "coverage" | null) => void }) {
+  const structureWorkspaceRef = useRef<HTMLDivElement>(null);
+  const [structureDetailWidth, setStructureDetailWidth] = useState(DEFAULT_STRUCTURE_DETAIL_WIDTH);
+  const [structureDetailRange, setStructureDetailRange] = useState<StructureDetailWidthRange>({ min: 0, max: 0 });
+  const structureDetailRangeRef = useRef(structureDetailRange);
+  const structureDetailDragRef = useRef<{ pointerId: number; startX: number; startWidth: number; width: number } | null>(null);
+  const effectiveStructureDetailWidth = clampStructureDetailWidth(structureDetailWidth, structureDetailRange);
+  structureDetailRangeRef.current = structureDetailRange;
+  useEffect(() => {
+    try {
+      const savedWidth = readStructureDetailWidth(window.localStorage.getItem(STRUCTURE_DETAIL_WIDTH_STORAGE_KEY));
+      if (savedWidth !== null) setStructureDetailWidth(savedWidth);
+    } catch {
+      // Storage can be unavailable in restricted browser contexts.
+    }
+  }, []);
+  useEffect(() => {
+    const workspace = structureWorkspaceRef.current;
+    if (!workspace) return;
+    const updateRange = () => {
+      const next = resolveStructureDetailWidthRange(workspace.clientWidth);
+      structureDetailRangeRef.current = next;
+      setStructureDetailRange((current) => current.min === next.min && current.max === next.max ? current : next);
+    };
+    updateRange();
+    const observer = new ResizeObserver(updateRange);
+    observer.observe(workspace);
+    return () => observer.disconnect();
+  }, []);
+  useEffect(() => {
+    structureWorkspaceRef.current?.style.setProperty("--ct-structure-detail-width", `${effectiveStructureDetailWidth}px`);
+  }, [effectiveStructureDetailWidth]);
+  const saveStructureDetailWidth = (width: number) => {
+    const preferredWidth = normalizeStructureDetailWidth(width);
+    setStructureDetailWidth(preferredWidth);
+    try {
+      window.localStorage.setItem(STRUCTURE_DETAIL_WIDTH_STORAGE_KEY, String(preferredWidth));
+    } catch {
+      // Resizing remains available when storage is unavailable.
+    }
+  };
+  const finishStructureDetailResize = () => {
+    const drag = structureDetailDragRef.current;
+    if (!drag) return;
+    structureDetailDragRef.current = null;
+    structureWorkspaceRef.current?.classList.remove("is-resizing-structure-detail");
+    saveStructureDetailWidth(drag.width);
+  };
+  const onStructureDetailKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const range = structureDetailRangeRef.current;
+    if (range.max <= range.min) return;
+    let next: number | null = null;
+    if (event.key === "ArrowLeft") next = effectiveStructureDetailWidth + 16;
+    else if (event.key === "ArrowRight") next = effectiveStructureDetailWidth - 16;
+    else if (event.key === "Home") next = range.min;
+    else if (event.key === "End") next = range.max;
+    if (next === null) return;
+    event.preventDefault();
+    saveStructureDetailWidth(clampStructureDetailWidth(next, range));
+  };
+  const onStructureDetailPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || !event.isPrimary || structureDetailRangeRef.current.max <= structureDetailRangeRef.current.min) return;
+    event.preventDefault();
+    structureDetailDragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startWidth: effectiveStructureDetailWidth,
+      width: effectiveStructureDetailWidth,
+    };
+    structureWorkspaceRef.current?.classList.add("is-resizing-structure-detail");
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+  const onStructureDetailPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = structureDetailDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    const width = clampStructureDetailWidth(drag.startWidth + drag.startX - event.clientX, structureDetailRangeRef.current);
+    drag.width = width;
+    structureWorkspaceRef.current?.style.setProperty("--ct-structure-detail-width", `${width}px`);
+    event.currentTarget.setAttribute("aria-valuenow", String(width));
+    event.currentTarget.setAttribute("aria-valuetext", `${width} 像素`);
+  };
   const [expandedGroupIds, setExpandedGroupIds] = useState<string[]>([]);
   const [focusedGroupId, setFocusedGroupId] = useState<string | null>(null);
   const expandedBeforeFocus = useRef<string[] | null>(null);
@@ -1343,6 +1436,7 @@ function ArchitectureSection({ overview, knowledge, graph, panelMode, onPanelMod
   useEffect(() => { setSelectedEdgeId(null); }, [detailRequest]);
   const [activeArchitectureModuleId, setActiveArchitectureModuleId] = useState<string | null>(null);
   const [focusedEntryId, setFocusedEntryId] = useState<string | null>(null);
+  const [structureTabSelection, setStructureTabSelection] = useState<StructureTabSelection>({ groupId: null, tab: "modules" });
   const [moduleViewState, setModuleViewState] = useState<{ rootId: string; mode: "definitions" | "imports" | "calls"; callSymbol: SymbolRecord | null } | null>(null);
   const [flow, setFlow] = useState<ReactFlowInstance<Node, Edge> | null>(null);
   const architectureScope = `${overview.project_id}:${overview.index.index_id}`;
@@ -1400,6 +1494,11 @@ function ArchitectureSection({ overview, knowledge, graph, panelMode, onPanelMod
   const displayedHttpAssociations = selectedHttpRelation ? overview.http_associations.filter((association) => endpointContains(selectedHttpRelation.source, association.client_module.symbol_id) && endpointContains(selectedHttpRelation.target, association.server_module.symbol_id)) : overview.http_associations;
   const focusedGroup = model.directories.find((directory) => directory.group.group_id === focusedGroupId)?.group ?? null;
   const selectedArchitectureGroup = model.directories.find((directory) => directory.group.group_id === knowledge.selectedOverviewGroupId)?.group ?? null;
+  const selectedOverviewGroup = overview.groups.find((group) => group.group_id === knowledge.selectedOverviewGroupId) ?? null;
+  const selectedDetailTitle = selectedOverviewGroup
+    ? `${selectedOverviewGroup.label} · ${selectedOverviewGroup.group_kind === "responsibility" ? "职责详情" : selectedOverviewGroup.group_kind === "source_directory" ? "目录详情" : "HTTP 详情"}`
+    : selectedEdgeId ? "依赖详情" : "结构详情";
+  const inspectorTitle = detail === "search" ? "搜索符号" : detail === "http" ? "HTTP 关联" : detail === "coverage" ? "版本与覆盖" : selectedDetailTitle;
   useEffect(() => {
     if (focusedGroupId && !focusedGroup) {
       setFocusedGroupId(null);
@@ -1438,11 +1537,12 @@ function ArchitectureSection({ overview, knowledge, graph, panelMode, onPanelMod
       data: {
         directory,
         selected: knowledge.selectedOverviewGroupId === directory.group.group_id,
-        onSelect: (group: OverviewGroup) => {
+        onSelect: (group: OverviewGroup, initialTab?: "entries") => {
           setSelectedHttpGroupId(null);
           setFocusedEntryId(null);
           onDetailChange(null);
           setSelectedEdgeId(null);
+          setStructureTabSelection({ groupId: group.group_id, tab: initialTab ?? "modules" });
           knowledge.onSelectOverviewGroup(group);
         },
         onToggle: (group: OverviewGroup) => {
@@ -1450,6 +1550,7 @@ function ArchitectureSection({ overview, knowledge, graph, panelMode, onPanelMod
           setFocusedEntryId(null);
           onDetailChange(null);
           setSelectedEdgeId(null);
+          setStructureTabSelection({ groupId: group.group_id, tab: "modules" });
           knowledge.onSelectOverviewGroup(group);
           setExpandedGroupIds((current) => current.includes(group.group_id) ? [] : [group.group_id]);
         },
@@ -1612,7 +1713,10 @@ function ArchitectureSection({ overview, knowledge, graph, panelMode, onPanelMod
     const group = (module && groups.find((candidate) => candidate.group_kind === "responsibility" && candidate.module_ids.includes(module.module_id)))
       ?? groups.find((candidate) => candidate.entry_point_ids.includes(entry.entry_point_id))
       ?? (module ? groups.find((candidate) => candidate.module_ids.includes(module.module_id)) : undefined);
-    if (group) focusArchitectureGroup(group);
+    if (group) {
+      setStructureTabSelection({ groupId: group.group_id, tab: "entries" });
+      focusArchitectureGroup(group);
+    }
     knowledge.onFocusOverviewEntry(entry);
     setFocusedEntryId(entry.entry_point_id);
     setActiveArchitectureModuleId(null);
@@ -1639,7 +1743,7 @@ function ArchitectureSection({ overview, knowledge, graph, panelMode, onPanelMod
   };
 
   return (
-    <div className={`ct-knowledge-workspace${inspectorVisible ? " has-detail" : ""}`}>
+    <div ref={structureWorkspaceRef} className={`ct-knowledge-workspace${inspectorVisible ? " has-detail" : ""}`}>
     <section className="ct-architecture-section" aria-label="项目架构画布">
       <div className="ct-architecture-heading">
         <div><p className="ct-overline">ARCHITECTURE / FIXED INDEX</p><h3>项目架构</h3><p>职责与未归属源码目录作为容器，静态 imports/calls 保持 source → target；HTTP 客户端到服务路由以独立方法与路径形状关联展示。</p></div>
@@ -1780,9 +1884,28 @@ function ArchitectureSection({ overview, knowledge, graph, panelMode, onPanelMod
         </div>
       )}
     </section>
-    {inspectorVisible ? <aside className="ct-knowledge-inspector" aria-label="架构详情">
-      <div className="ct-knowledge-inspector-heading"><strong>{detail === "search" ? "搜索符号" : detail === "http" ? "HTTP 关联" : detail === "coverage" ? "版本与覆盖" : selectedEdgeId ? "依赖详情" : "结构详情"}</strong><button type="button" className="ct-link-button" onClick={() => { onDetailChange(null); setSelectedEdgeId(null); knowledge.onClearOverviewGroup(); }}>关闭详情</button></div>
-      <div className="ct-knowledge-inspector-content">
+    {inspectorVisible ? <aside id="knowledge-structure-inspector" className="ct-knowledge-inspector" aria-label={inspectorTitle}>
+      {selectedArchitectureGroup && !detail && !selectedEdgeId ? <div
+        className="ct-structure-detail-resize-handle"
+        role="separator"
+        aria-label="调整结构详情宽度"
+        aria-controls="knowledge-structure-inspector"
+        aria-orientation="vertical"
+        aria-valuemin={structureDetailRange.min}
+        aria-valuemax={structureDetailRange.max}
+        aria-valuenow={effectiveStructureDetailWidth}
+        aria-valuetext={`${effectiveStructureDetailWidth} 像素`}
+        aria-disabled={structureDetailRange.max <= structureDetailRange.min}
+        tabIndex={0}
+        onKeyDown={onStructureDetailKeyDown}
+        onPointerDown={onStructureDetailPointerDown}
+        onPointerMove={onStructureDetailPointerMove}
+        onPointerUp={finishStructureDetailResize}
+        onPointerCancel={finishStructureDetailResize}
+        onLostPointerCapture={finishStructureDetailResize}
+      /> : null}
+      <div className="ct-knowledge-inspector-heading"><strong>{inspectorTitle}</strong><button type="button" className="ct-link-button" onClick={() => { onDetailChange(null); setSelectedEdgeId(null); knowledge.onClearOverviewGroup(); }}>关闭详情</button></div>
+      <div className={`ct-knowledge-inspector-content${selectedArchitectureGroup && !detail && !selectedEdgeId ? " is-structure-details" : ""}`}>
       {detail === "search" ? <SearchBlock knowledge={knowledge} disabled={false} /> : detail === "http" ? <>
       <section className="ct-http-associations" aria-label="HTTP 客户端与服务路由形状关联">
         <div className="ct-http-associations-heading">
@@ -1831,7 +1954,7 @@ function ArchitectureSection({ overview, knowledge, graph, panelMode, onPanelMod
       {reactFlowModel.foldedEdgeCount > 0 ? <p className="ct-architecture-filter-note" role="status">为保持总览清晰，折叠了 {reactFlowModel.foldedEdgeCount} 条跨越其他卡片的聚合依赖。选中职责或目录后点击聚焦按钮查看相关依赖；模块可打开关系图查看详情。此显示折叠不改变索引。</p> : null}
       <div className="ct-architecture-legend"><span><i className="is-directory" />职责或目录容器（可展开）</span><span><i className="is-architecture-edge" />静态导入 / 静态调用</span><span><i className="is-http-architecture-edge" />HTTP method/path 形状关联</span><span>HTTP 关联单独筛选与聚合，不写入 CodeEdge</span><small>静态箭头只表示 source → target，不代表运行时数据流；依赖只展示当前快照已有关系。职责来自文件 manifest，不是模型推断。HTTP 匹配不等同于运行时拓扑。</small></div>        <OverviewSummary overview={overview} />
         <section className="ct-boundaries"><h3>边界与限制</h3>{overview.notes.map((note) => <p key={note}>{note}</p>)}</section>
-      </> : selectedStaticRelation ? <section className="ct-section"><h3>静态依赖</h3><p>{selectedStaticRelation.relationCount} 对模块 · {selectedStaticRelation.edgeCount} 条 {selectedStaticRelation.relationKinds.join(" / ")}</p><p className="ct-muted">依赖属于当前固定快照，不代表运行时数据流。</p>{selectedStaticRelation.representative ? <button type="button" className="ct-link-button" onClick={() => knowledge.onOpenArchitectureSource({ indexId: overview.index.index_id, ...selectedStaticRelation.representative! })}>查看源码依据</button> : <p className="ct-muted">当前概览未返回源码位置；可聚焦职责并打开模块关系。</p>}</section> : <OverviewSections overview={overview} knowledge={knowledge} onFocusEntry={focusOverviewEntry} />}
+      </> : selectedStaticRelation ? <section className="ct-section"><h3>静态依赖</h3><p>{selectedStaticRelation.relationCount} 对模块 · {selectedStaticRelation.edgeCount} 条 {selectedStaticRelation.relationKinds.join(" / ")}</p><p className="ct-muted">依赖属于当前固定快照，不代表运行时数据流。</p>{selectedStaticRelation.representative ? <button type="button" className="ct-link-button" onClick={() => knowledge.onOpenArchitectureSource({ indexId: overview.index.index_id, ...selectedStaticRelation.representative! })}>查看源码依据</button> : <p className="ct-muted">当前概览未返回源码位置；可聚焦职责并打开模块关系。</p>}</section> : <OverviewSections overview={overview} knowledge={knowledge} onFocusEntry={focusOverviewEntry} tabSelection={structureTabSelection} onSelectTab={(tab) => setStructureTabSelection({ groupId: knowledge.selectedOverviewGroupId, tab })} />}
       </div>
     </aside> : null}
     </div>
@@ -1935,13 +2058,16 @@ function FeatureGenerationResult({ generation, knowledge }: { generation: Featur
 
 function OverviewEntryRow({ entry, knowledge, onFocus, canOpenCalls }: { entry: OverviewEntryPoint; knowledge: KnowledgeUi; onFocus: (entry: OverviewEntryPoint) => void; canOpenCalls: boolean }) {
   const isRoute = entry.kind === "fastapi_route";
+  const fileName = entry.path.split(/[\\/]/).at(-1) ?? entry.path;
+  const title = isRoute ? `${entry.http_method} ${entry.declared_path}` : entry.kind === "python_main_guard" ? `${fileName} 中的启动块` : overviewEntryKindLabel(entry);
+  const location = `${entry.path}:L${entry.start_line}–L${entry.end_line}`;
   return (
     <div className={`ct-entry-row${knowledge.selectedOverviewEntryId === entry.entry_point_id ? " is-selected" : ""}`}>
       <button type="button" className="ct-entry-main" onClick={() => onFocus(entry)} title="聚焦入口所在组并在画布中标出所属模块">
-        <span className="ct-kind-chip">{overviewEntryKindLabel(entry)}</span>
+        <span className="ct-kind-chip">{isRoute ? overviewEntryKindLabel(entry) : "入口"}</span>
         <span>
-          <strong>{isRoute ? `${entry.http_method} ${entry.declared_path}` : entry.label}</strong>
-          <small>{isRoute ? `处理函数 ${entry.handler_symbol?.qualified_name ?? entry.label} · ${entry.path}:L${entry.start_line}–L${entry.end_line} · 声明路径（未解析挂载前缀）` : `${entry.path}:L${entry.start_line}–L${entry.end_line} · 模块起点${entry.kind === "python_main_guard" ? "；guard 本身不是可解析 handler" : ""}${canOpenCalls ? "" : "；当前概览未返回模块符号"} · ${entry.rule_id}`}</small>
+          <strong>{title}</strong>
+          <small>{isRoute ? `处理函数 ${entry.handler_symbol?.qualified_name ?? entry.label} · ${location} · 声明路径（未解析挂载前缀）` : `${location} · 模块起点${canOpenCalls ? "" : " · 当前概览未返回模块符号"}`}</small>
         </span>
       </button>
       <div className="ct-entry-actions">
@@ -1952,27 +2078,17 @@ function OverviewEntryRow({ entry, knowledge, onFocus, canOpenCalls }: { entry: 
   );
 }
 
+function shortModuleName(qualifiedName: string): string {
+  const parts = qualifiedName.split(/[./]/);
+  return parts[parts.length - 1] || qualifiedName;
+}
+
 function OverviewModuleRow({ module, knowledge }: { module: OverviewModule; knowledge: KnowledgeUi }) {
   return (
-    <div className="ct-module-row-container">
-      <button type="button" className="ct-module-row" onClick={() => knowledge.onOpenOverviewModule(module)} title="打开模块内部结构">
-        <span className={`ct-reachability${module.entry_reachable ? " is-reachable" : ""}`}>{module.entry_reachable ? "应用入口可达" : "未从已识别应用入口到达"}</span>
-        <span>
-          <strong>{module.symbol.qualified_name}</strong>
-          <small>{module.entry_reachable ? module.entry_point_ids.length > 0 ? `可从 ${module.entry_point_ids.length} 个应用入口到达` : "可达入口；入口明细未返回" : "未从已识别应用入口到达"}</small>
-          <ClassificationCounts counts={module.classification_counts} />
-        </span>
-        <span aria-hidden="true">↗</span>
-      </button>
-      <button
-        type="button"
-        className={`ct-module-symbols-action${knowledge.moduleSymbolsRoot?.symbol_id === module.symbol.symbol_id ? " is-selected" : ""}`}
-        onClick={() => knowledge.onOpenModuleSymbols(module)}
-        aria-pressed={knowledge.moduleSymbolsRoot?.symbol_id === module.symbol.symbol_id}
-      >
-        定义
-      </button>
-    </div>
+    <article className="ct-structure-module-row">
+      <div><strong>{shortModuleName(module.symbol.qualified_name)}</strong><code>{module.symbol.path}</code></div>
+      <button type="button" className="ct-link-button" onClick={() => knowledge.onOpenOverviewModule(module)} title={`打开 ${module.symbol.path} 的固定索引定义`}>进入定义</button>
+    </article>
   );
 }
 
@@ -1996,12 +2112,14 @@ function OverviewClassificationList({
   const evidenceErrorFor = (classification: OverviewClassification) => classification.category === "application_entry"
     ? entryById.get(classification.entry_point_id ?? "")?.evidence_error ?? classification.evidence_error
     : classification.evidence_error;
+  const unreturnedClassificationCount = Math.max(0, overview.classification_coverage.total - overview.classification_coverage.visible);
   return (
     <section className="ct-structure-classifications" aria-label="当前规则分类">
-      <div className="ct-structure-subheading"><strong>当前规则分类</strong><span>{visible.length}/{classifications.length} 条已返回分类</span></div>
+      <div className="ct-structure-subheading"><strong>规则分类</strong><span>当前组返回 {classifications.length} 条 · 全项目分类记录 {overview.classification_coverage.visible}/{overview.classification_coverage.total}</span></div>
       <div className="ct-classification-summary"><ClassificationCounts counts={counts} /></div>
-      <p className="ct-muted">分类只表示当前规则已识别的源码声明；“未识别”表示本次规则没有归类。</p>
-      {overview.classification_coverage.truncated ? <p className="ct-warning">分类记录已返回，但部分角色尚未识别或分析受限： {overview.classification_coverage.visible}/{overview.classification_coverage.total} 条，当前结构明细可能不完整。</p> : null}
+      <p className="ct-muted">当前组只统计本次固定快照返回且匹配该组的分类记录；全项目覆盖数字不表示当前组已完整。分类只表示规则识别到的源码声明，“未识别”表示本次规则没有归类。</p>
+      {unreturnedClassificationCount > 0 ? <p className="ct-warning">全项目分类记录有 {unreturnedClassificationCount} 条未返回（{overview.classification_coverage.visible}/{overview.classification_coverage.total}）。</p> : null}
+      {overview.classification_coverage.truncated ? <p className="ct-warning">全项目角色分析仍有未知或受限项{unreturnedClassificationCount === 0 ? `；分类记录已返回全部 ${overview.classification_coverage.visible}/${overview.classification_coverage.total} 条` : ""}，不能据此推断当前组有未返回的分类记录。</p> : null}
       {classifications.length > 0 ? (
         <div className="ct-classification-list">
           {visible.map((classification) => {
@@ -2027,39 +2145,9 @@ function OverviewClassificationList({
           })}
         </div>
       ) : (
-        <p className="ct-muted">{overview.classification_coverage.truncated ? "当前规则分类覆盖不完整，未返回明细不能据此判断没有分类。" : "当前规则未识别可展示分类。"}</p>
+        <p className="ct-muted">{overview.classification_coverage.truncated ? "项目分类记录覆盖不完整，当前组未显示的分类不能据此判断为不存在。" : "当前组没有已返回的规则分类记录。"}</p>
       )}
-      {classifications.length > visible.length ? <p className="ct-muted">仅显示前 {visible.length} 项；当前结构收到 {classifications.length} 条分类。</p> : null}
-    </section>
-  );
-}
-
-function ModuleSymbolList({ knowledge }: { knowledge: KnowledgeUi }) {
-  const root = knowledge.moduleSymbolsRoot;
-  if (!root) return null;
-  const page = knowledge.moduleSymbolsPage?.module.symbol_id === root.symbol_id ? knowledge.moduleSymbolsPage : null;
-  return (
-    <section className="ct-module-symbols" aria-label="模块定义列表">
-      <div className="ct-structure-subheading">
-        <strong>{root.qualified_name} · 索引定义</strong>
-        {page ? <span>{page.symbols.length} 项已加载</span> : null}
-      </div>
-      <p className="ct-muted">仅列出固定快照中捕获的类、函数和测试定义；不代表解析覆盖完整。</p>
-      {knowledge.moduleSymbolsStatus === "loading" && !page ? <p className="ct-muted">正在读取固定索引…</p> : null}
-      {knowledge.moduleSymbolsError ? <div className="ct-error-block compact" role="alert"><span>{knowledge.moduleSymbolsError}</span><button type="button" className="ct-link-button" onClick={knowledge.onRetryModuleSymbols}>重试</button></div> : null}
-      {page && page.symbols.length > 0 ? (
-        <div className="ct-module-symbol-list">
-          {page.symbols.map((symbol) => (
-            <button type="button" className="ct-module-symbol-row" key={symbol.symbol_id} onClick={() => knowledge.onSelectModuleSymbol(symbol)}>
-              <span className="ct-kind-chip">{symbol.kind}</span>
-              <span><strong>{symbol.qualified_name}</strong><small>{symbol.path}:L{symbol.start_line}–L{symbol.end_line}</small></span>
-              <span aria-hidden="true">↗</span>
-            </button>
-          ))}
-        </div>
-      ) : null}
-      {knowledge.moduleSymbolsStatus === "empty" ? <p className="ct-muted">当前模块没有捕获到类、函数或测试定义。</p> : null}
-      {page?.has_more ? <button type="button" className="ct-link-button" onClick={knowledge.onLoadMoreModuleSymbols} disabled={knowledge.moduleSymbolsStatus === "loading"}>{knowledge.moduleSymbolsStatus === "loading" ? "正在加载…" : "继续加载定义"}</button> : null}
+      {classifications.length > visible.length ? <p className="ct-muted">当前组仅显示前 {visible.length} 项分类记录。</p> : null}
     </section>
   );
 }
@@ -2080,15 +2168,15 @@ function OverviewModuleRelationList({ relations, onOpenSource }: { relations: Ov
         return (
           <article className="ct-structure-relation" key={relation.relation_id}>
             <div className="ct-structure-relation-main">
-              <strong>{relation.source_module.qualified_name}</strong>
+              <span className="ct-structure-relation-endpoint"><strong>{shortModuleName(relation.source_module.qualified_name)}</strong><code>{relation.source_module.path}</code></span>
               <span aria-hidden="true">→</span>
-              <strong>{relation.target_module.qualified_name}</strong>
+              <span className="ct-structure-relation-endpoint"><strong>{shortModuleName(relation.target_module.qualified_name)}</strong><code>{relation.target_module.path}</code></span>
             </div>
             <div className="ct-structure-relation-meta">
               <span className="ct-kind-chip">{relation.relation_kinds.join(" + ")}</span>
               <small>{relation.edge_count} 条静态边 · {locations}{extraLocations > 0 ? ` · 代表位置 +${extraLocations}` : ""}</small>
-              {representative ? <button type="button" className="ct-link-button" onClick={() => onOpenSource({ path: representative.source_location.path, startLine: representative.source_location.start_line, endLine: representative.source_location.end_line })}>打开代表源码</button> : null}
             </div>
+            {representative ? <div className="ct-structure-relation-actions"><button type="button" className="ct-link-button" onClick={() => onOpenSource({ path: representative.source_location.path, startLine: representative.source_location.start_line, endLine: representative.source_location.end_line })}>打开代表源码</button></div> : null}
           </article>
         );
       })}
@@ -2096,10 +2184,11 @@ function OverviewModuleRelationList({ relations, onOpenSource }: { relations: Ov
   );
 }
 
-function OverviewSections({ overview, knowledge, onFocusEntry }: { overview: ProjectOverview; knowledge: KnowledgeUi; onFocusEntry: (entry: OverviewEntryPoint) => void }) {
+function OverviewSections({ overview, knowledge, onFocusEntry, tabSelection, onSelectTab }: { overview: ProjectOverview; knowledge: KnowledgeUi; onFocusEntry: (entry: OverviewEntryPoint) => void; tabSelection: StructureTabSelection; onSelectTab: (tab: StructureDetailsTab) => void }) {
+  const selectedGroup = overview.groups.find((group) => group.group_id === knowledge.selectedOverviewGroupId) ?? null;
+  const activeTab = tabSelection.groupId === selectedGroup?.group_id ? tabSelection.tab : "modules";
   const entryById = new Map(overview.entries.map((entry) => [entry.entry_point_id, entry]));
   const moduleById = new Map(overview.modules.map((module) => [module.module_id, module]));
-  const selectedGroup = overview.groups.find((group) => group.group_id === knowledge.selectedOverviewGroupId) ?? null;
   const selectedModules = selectedGroup
     ? selectedGroup.module_ids.map((moduleId) => moduleById.get(moduleId)).filter((module): module is OverviewModule => module !== undefined)
     : [];
@@ -2117,49 +2206,50 @@ function OverviewSections({ overview, knowledge, onFocusEntry }: { overview: Pro
   const selectedClassifications = selectedGroup
     ? overview.classifications.filter((classification) => selectedGroup.module_ids.includes(classification.module_id) || (classification.entry_point_id !== null && selectedGroup.entry_point_ids.includes(classification.entry_point_id)))
     : [];
-  const selectedClassificationCounts = selectedModules.reduce<OverviewClassificationCounts>((counts, module) => ({
-    application_entry: counts.application_entry + module.classification_counts.application_entry,
-    public_api: counts.public_api + module.classification_counts.public_api,
-    extension_point: counts.extension_point + module.classification_counts.extension_point,
-    unknown: counts.unknown + module.classification_counts.unknown,
-  }), { application_entry: 0, public_api: 0, extension_point: 0, unknown: 0 });
+  const selectedClassificationCounts = selectedClassifications.reduce<OverviewClassificationCounts>((counts, classification) => {
+    counts[classification.category] += 1;
+    return counts;
+  }, { application_entry: 0, public_api: 0, extension_point: 0, unknown: 0 });
   const relatedRelations = selectedGroup
     ? overview.module_relations.filter((relation) => selectedGroup.module_ids.includes(relation.source_module_id) || selectedGroup.module_ids.includes(relation.target_module_id))
     : overview.module_relations;
+  const relatedEdgeCount = relatedRelations.reduce((count, relation) => count + relation.edge_count, 0);
+  if (!selectedGroup) return null;
   return (
-    <>
-      <section className="ct-section ct-structure-section" aria-label="所选结构详情">
-        <div className="ct-section-heading">
-          <div><p className="ct-overline">STRUCTURE DETAILS / FIXED INDEX</p><h3>结构详情</h3></div>
-          <span className="ct-count-label">{overview.coverage.visible_groups}/{overview.coverage.total_groups} 组可见</span>
+    <div className="ct-structure-details">
+      <div className="ct-structure-tabbar">
+        <div className="ct-structure-tabs" role="group" aria-label="结构详情页签">
+          <button type="button" className={activeTab === "modules" ? "is-active" : ""} aria-pressed={activeTab === "modules"} onClick={() => onSelectTab("modules")}>模块 <span>{selectedModules.length}</span></button>
+          <button type="button" className={activeTab === "entries" ? "is-active" : ""} aria-pressed={activeTab === "entries"} onClick={() => onSelectTab("entries")}>入口 <span>{selectedEntries.length}</span></button>
+          <button type="button" className={activeTab === "dependencies" ? "is-active" : ""} aria-pressed={activeTab === "dependencies"} onClick={() => onSelectTab("dependencies")}>依赖 <span>{relatedRelations.length}</span></button>
         </div>
-        {selectedGroup ? (
-          <div className="ct-structure-detail">
-            <div className="ct-structure-detail-heading">
-              <div><p className="ct-overline">SELECTED GROUP</p><h4>{selectedGroup.label}</h4></div>
-              <button type="button" className="ct-link-button" onClick={knowledge.onClearOverviewGroup}>返回结构总览</button>
-            </div>
-            {selectedEntryIds.size > 0 ? <section className="ct-structure-entry-points">
-              <div className="ct-structure-subheading"><strong>入口清单</strong><span>{selectedEntries.length} 条已返回{unreturnedEntryCount > 0 ? ` · ${unreturnedEntryCount} 条明细未返回` : ""}</span></div>
-              {selectedEntries.length > 0 ? <div className="ct-entry-list">{selectedEntries.slice(0, 8).map((entry) => <OverviewEntryRow entry={entry} knowledge={knowledge} onFocus={onFocusEntry} canOpenCalls={overviewEntryStart(overview, entry) !== null} key={entry.entry_point_id} />)}</div> : <p className="ct-muted">入口引用已返回，但当前概览预算没有返回入口明细。</p>}
-              {selectedEntries.length > 8 ? <details className="ct-entry-more"><summary>展开其余 {selectedEntries.length - 8} 条入口</summary><div className="ct-entry-list">{selectedEntries.slice(8).map((entry) => <OverviewEntryRow entry={entry} knowledge={knowledge} onFocus={onFocusEntry} canOpenCalls={overviewEntryStart(overview, entry) !== null} key={entry.entry_point_id} />)}</div></details> : null}
-              {unreturnedEntryCount > 0 ? <p className="ct-muted">有 {unreturnedEntryCount} 个入口引用没有匹配到当前概览返回的明细，无法分类或打开。</p> : null}
-            </section> : null}
-            {selectedGroup.group_kind !== "http_path" ? (
-              selectedModules.length > 0 ? <div className="ct-module-list">{selectedModules.map((module) => <OverviewModuleRow module={module} knowledge={knowledge} key={module.module_id} />)}</div> : <p className="ct-muted">{selectedGroup.group_kind === "responsibility" && selectedGroup.module_ids.length === 0 ? "该职责的 owner 路径未匹配到已索引模块。" : selectedGroup.module_ids.length > 0 ? `该组 ${selectedGroup.module_ids.length} 个模块被当前概览模块预算省略。` : "该源码目录没有可见模块。"}</p>
-            ) : selectedEntryIds.size === 0 ? <p className="ct-muted">该组入口因当前概览预算未返回。</p> : null}
-            <OverviewClassificationList classifications={selectedClassifications} entryById={entryById} overview={overview} counts={selectedClassificationCounts} knowledge={knowledge} />
-            {selectedGroup.group_kind !== "http_path" ? <ModuleSymbolList knowledge={knowledge} /> : null}
-            <div className="ct-structure-related">
-              <div className="ct-structure-subheading"><strong>相关模块依赖</strong><span>{relatedRelations.length} 条可见关系</span></div>
-              <OverviewModuleRelationList relations={relatedRelations.slice(0, 12)} onOpenSource={(location) => knowledge.onOpenArchitectureSource({ indexId: overview.index.index_id, ...location })} />
-              {relatedRelations.length > 12 ? <p className="ct-muted">仅显示 12 条关系；可见关系仍受模块关系预算限制。</p> : null}
-            </div>
-          </div>
-        ) : null}
-      </section>
-
-    </>
+        <button type="button" className="ct-link-button" onClick={knowledge.onClearOverviewGroup}>返回总览</button>
+      </div>
+      <div className="ct-structure-tab-panel" aria-label="模块详情" hidden={activeTab !== "modules"}>
+        <div className="ct-structure-tab-summary"><strong>当前组模块</strong><span>{selectedModules.length}/{selectedGroup.module_ids.length} 个已返回</span></div>
+        {selectedGroup.group_kind !== "http_path" && selectedModules.length > 0 ? <div className="ct-structure-module-list">{selectedModules.map((module) => <OverviewModuleRow module={module} knowledge={knowledge} key={module.module_id} />)}</div> : <p className="ct-muted">{selectedGroup.group_kind === "responsibility" && selectedGroup.module_ids.length === 0 ? "该职责的 owner 路径未匹配到已索引模块。" : selectedGroup.module_ids.length > selectedModules.length ? `当前概览模块预算省略了 ${selectedGroup.module_ids.length - selectedModules.length} 个模块。` : selectedGroup.group_kind === "http_path" ? "HTTP 路径组不属于源码模块详情。" : "该源码目录没有可见模块。"}</p>}
+      </div>
+      <div className="ct-structure-tab-panel" aria-label="入口详情" hidden={activeTab !== "entries"}>
+        <section className="ct-structure-entry-points">
+          <div className="ct-structure-subheading"><strong>当前组入口</strong><span>{selectedEntries.length} 条已返回{unreturnedEntryCount > 0 ? ` · ${unreturnedEntryCount} 条明细未返回` : ""}</span></div>
+          {selectedEntries.length > 0 ? <div className="ct-entry-list">{selectedEntries.slice(0, 8).map((entry) => <OverviewEntryRow entry={entry} knowledge={knowledge} onFocus={onFocusEntry} canOpenCalls={overviewEntryStart(overview, entry) !== null} key={entry.entry_point_id} />)}</div> : <p className="ct-muted">{selectedEntryIds.size > 0 ? "入口引用已返回，但当前概览预算没有返回入口明细。" : "当前组没有已返回的入口。"}</p>}
+          {selectedEntries.length > 8 ? <details className="ct-entry-more"><summary>展开其余 {selectedEntries.length - 8} 条入口</summary><div className="ct-entry-list">{selectedEntries.slice(8).map((entry) => <OverviewEntryRow entry={entry} knowledge={knowledge} onFocus={onFocusEntry} canOpenCalls={overviewEntryStart(overview, entry) !== null} key={entry.entry_point_id} />)}</div></details> : null}
+          {unreturnedEntryCount > 0 ? <p className="ct-muted">有 {unreturnedEntryCount} 个入口引用没有匹配到当前概览返回的明细，无法分类或打开。</p> : null}
+        </section>
+        <details className="ct-structure-parse-details">
+          <summary>解析详情 · 规则分类、源码依据与限制</summary>
+          <OverviewClassificationList classifications={selectedClassifications} entryById={entryById} overview={overview} counts={selectedClassificationCounts} knowledge={knowledge} />
+          {selectedEntries.length > 0 ? <section className="ct-structure-entry-rules" aria-label="入口规则依据"><strong>入口规则依据</strong>{selectedEntries.map((entry) => <div key={entry.entry_point_id}><span>{overviewEntryKindLabel(entry)}</span><code>{entry.rule_id}</code>{entry.evidence ? <button type="button" className="ct-link-button" onClick={() => knowledge.onOpenArchitectureSource({ indexId: overview.index.index_id, path: entry.evidence!.path, startLine: entry.evidence!.start_line, endLine: entry.evidence!.end_line, expectedContentHash: entry.evidence!.content_hash })}>打开源码依据 · {entry.path}:L{entry.start_line}</button> : <small>{entry.evidence_error ?? "当前快照没有可展示的源码依据"}</small>}</div>)}</section> : null}
+          <p className="ct-muted">当前组记录只来自本次固定 index 中匹配该组的返回分类；全项目当前分类记录已返回 {overview.classification_coverage.visible}/{overview.classification_coverage.total} 条。依赖页只使用当前概览已返回关系，并最多展示前 12 组。</p>
+        </details>
+      </div>
+      <div className="ct-structure-tab-panel" aria-label="依赖详情" hidden={activeTab !== "dependencies"}>
+        <div className="ct-structure-tab-summary"><strong>当前组相关模块关系</strong><span>{relatedRelations.length} 组 · {relatedEdgeCount} 条静态边</span></div>
+        <p className="ct-muted">仅表示固定 index 中已返回的静态 imports/calls；不代表运行时数据流或必然执行。</p>
+        <OverviewModuleRelationList relations={relatedRelations.slice(0, 12)} onOpenSource={(location) => knowledge.onOpenArchitectureSource({ indexId: overview.index.index_id, ...location })} />
+        {relatedRelations.length > 12 ? <p className="ct-muted">仅显示前 12 组；关系总量受当前概览模块关系预算限制。</p> : null}
+      </div>
+    </div>
   );
 }
 
