@@ -202,6 +202,24 @@ test("call-chain shared-target, cross-layer, back, and same-layer edges retain i
   }
 });
 
+test("parallel callsites for one tree pair reuse a single forward path", () => {
+  const calls = [
+    edge("parallel-one", root.symbol_id, child.symbol_id),
+    edge("parallel-two", root.symbol_id, child.symbol_id),
+  ];
+  const layout = layoutCallChain(root.symbol_id, [root, child], calls);
+  const firstRoute = layout.routes.get("parallel-one")!;
+  const secondRoute = layout.routes.get("parallel-two")!;
+  assert.equal(layout.routes.size, calls.length);
+  assert.deepEqual(firstRoute, { type: "forward", bend: 8 });
+  assert.deepEqual(secondRoute, firstRoute);
+  const source = layout.nodes.get(root.symbol_id)!.position;
+  const target = layout.nodes.get(child.symbol_id)!.position;
+  const sourcePort = { x: source.x + CALL_CHAIN_NODE_WIDTH, y: source.y + CALL_CHAIN_NODE_HEIGHT / 2 };
+  const targetPort = { x: target.x, y: target.y + CALL_CHAIN_NODE_HEIGHT / 2 };
+  assert.equal(callChainEdgePath(firstRoute, sourcePort, targetPort), callChainEdgePath(secondRoute, sourcePort, targetPort));
+});
+
 test("conditional calls remain visible separately when a static graph is empty", () => {
   const conditional: ContextualCall = {
     context_id: "context-one",

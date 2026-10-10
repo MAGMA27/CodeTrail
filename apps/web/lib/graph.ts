@@ -44,6 +44,10 @@ export const CALL_CHAIN_NODE_HEIGHT = 68;
 export const CALL_CHAIN_COLUMN_STEP = CALL_CHAIN_NODE_WIDTH + 112;
 export const CALL_CHAIN_ROW_STEP = CALL_CHAIN_NODE_HEIGHT + 64;
 
+function callPairKey(sourceId: string, targetId: string) {
+  return `${sourceId}\u0000${targetId}`;
+}
+
 export function layoutCallChain(
   rootId: string,
   symbols: SymbolRecord[],
@@ -68,7 +72,7 @@ export function layoutCallChain(
 
   const depthById = new Map([[rootId, 0]]);
   const treeChildren = new Map<string, string[]>();
-  const treeEdgeIds = new Set<string>();
+  const treeCallPairs = new Set<string>();
   for (let depth = 0; depth < 2; depth += 1) {
     const parents = [...depthById.entries()]
       .filter(([, nodeDepth]) => nodeDepth === depth)
@@ -78,7 +82,7 @@ export function layoutCallChain(
       for (const edge of outgoing.get(sourceId) ?? []) {
         if (depthById.has(edge.target_id)) continue;
         depthById.set(edge.target_id, depth + 1);
-        treeEdgeIds.add(edge.edge_id);
+        treeCallPairs.add(callPairKey(edge.source_id, edge.target_id));
         const children = treeChildren.get(sourceId) ?? [];
         children.push(edge.target_id);
         treeChildren.set(sourceId, children);
@@ -114,28 +118,45 @@ export function layoutCallChain(
       left.edge_id.localeCompare(right.edge_id),
     );
   const routes = new Map<string, CallChainEdgeRoute>();
+  const routeByPair = new Map<string, CallChainEdgeRoute>();
+  const forwardBendByPair = new Map<string, number>();
   const fanoutBySource = new Map<string, number>();
   const outerLanes = { top: 0, bottom: 0 };
   let outerIndex = 0;
   for (const edge of validEdges) {
+    const pairKey = callPairKey(edge.source_id, edge.target_id);
     const sourceDepth = nodes.get(edge.source_id)!.depth;
     const targetDepth = nodes.get(edge.target_id)!.depth;
-    if (treeEdgeIds.has(edge.edge_id) && targetDepth === sourceDepth + 1) {
-      const fanout = fanoutBySource.get(edge.source_id) ?? 0;
-      fanoutBySource.set(edge.source_id, fanout + 1);
-      routes.set(edge.edge_id, { type: "forward", bend: fanout % 2 === 0 ? 8 : -8 });
+    if (treeCallPairs.has(pairKey) && targetDepth === sourceDepth + 1) {
+      let bend = forwardBendByPair.get(pairKey);
+      if (bend === undefined) {
+        const fanout = fanoutBySource.get(edge.source_id) ?? 0;
+        fanoutBySource.set(edge.source_id, fanout + 1);
+        bend = fanout % 2 === 0 ? 8 : -8;
+        forwardBendByPair.set(pairKey, bend);
+      }
+      const route = { type: "forward", bend } as const;
+      routes.set(edge.edge_id, route);
+      routeByPair.set(pairKey, route);
+      continue;
+    }
+    const existingRoute = routeByPair.get(pairKey);
+    if (existingRoute) {
+      routes.set(edge.edge_id, existingRoute);
       continue;
     }
     const side = outerIndex++ % 2 === 0 ? "top" : "bottom";
     const lane = outerLanes[side]++;
-    routes.set(edge.edge_id, {
+    const route: CallChainEdgeRoute = {
       type: "outer",
       side,
       lane,
       sourceEscapeX: nodes.get(edge.source_id)!.position.x + CALL_CHAIN_NODE_WIDTH + 28,
       targetEscapeX: nodes.get(edge.target_id)!.position.x - 28,
       routeY: side === "top" ? minY - 28 - lane * 18 : maxY + 28 + lane * 18,
-    });
+    };
+    routes.set(edge.edge_id, route);
+    routeByPair.set(pairKey, route);
   }
   return { nodes, routes };
 }
