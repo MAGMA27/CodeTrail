@@ -72,7 +72,6 @@ export function layoutCallChain(
 
   const depthById = new Map([[rootId, 0]]);
   const treeChildren = new Map<string, string[]>();
-  const treeCallPairs = new Set<string>();
   for (let depth = 0; depth < 2; depth += 1) {
     const parents = [...depthById.entries()]
       .filter(([, nodeDepth]) => nodeDepth === depth)
@@ -82,7 +81,6 @@ export function layoutCallChain(
       for (const edge of outgoing.get(sourceId) ?? []) {
         if (depthById.has(edge.target_id)) continue;
         depthById.set(edge.target_id, depth + 1);
-        treeCallPairs.add(callPairKey(edge.source_id, edge.target_id));
         const children = treeChildren.get(sourceId) ?? [];
         children.push(edge.target_id);
         treeChildren.set(sourceId, children);
@@ -127,7 +125,7 @@ export function layoutCallChain(
     const pairKey = callPairKey(edge.source_id, edge.target_id);
     const sourceDepth = nodes.get(edge.source_id)!.depth;
     const targetDepth = nodes.get(edge.target_id)!.depth;
-    if (treeCallPairs.has(pairKey) && targetDepth === sourceDepth + 1) {
+    if (targetDepth === sourceDepth + 1) {
       let bend = forwardBendByPair.get(pairKey);
       if (bend === undefined) {
         const fanout = fanoutBySource.get(edge.source_id) ?? 0;

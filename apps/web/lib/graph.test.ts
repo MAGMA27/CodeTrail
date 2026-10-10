@@ -159,7 +159,7 @@ test("call-chain layout separates two branches and keeps four target edges clear
   }
 });
 
-test("call-chain shared-target, cross-layer, back, and same-layer edges retain independent outer routes", () => {
+test("call-chain shared targets stay forward while back and same-layer edges use outer routes", () => {
   const symbols = [
     symbol("lane-root", "app.py", "app.start", 1),
     symbol("lane-a", "app.py", "app.alpha", 10),
@@ -178,12 +178,12 @@ test("call-chain shared-target, cross-layer, back, and same-layer edges retain i
   assert.equal(layout.nodes.get("lane-shared")?.depth, 2);
   assert.equal(layout.routes.size, calls.length);
   assert.equal(layout.routes.get("lane-a-shared")?.type, "forward");
+  assert.equal(layout.routes.get("lane-b-shared")?.type, "forward");
   const outer = [
-    layout.routes.get("lane-b-shared")!,
     layout.routes.get("lane-a-root")!,
     layout.routes.get("lane-a-b")!,
   ];
-  assert.deepEqual(outer.map((route) => route.type), ["outer", "outer", "outer"]);
+  assert.deepEqual(outer.map((route) => route.type), ["outer", "outer"]);
   assert.equal(new Set(outer.map((route) => route.type === "outer" ? route.routeY : null)).size, outer.length);
   for (const route of outer) {
     assert.equal(route.type, "outer");
