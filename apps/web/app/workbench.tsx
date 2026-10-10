@@ -133,6 +133,7 @@ import {
   CALL_CHAIN_NODE_HEIGHT,
   CALL_CHAIN_NODE_WIDTH,
   callChainEdgePath,
+  callChainTraceTargetId,
   emptyGraphState,
   edgeKindLabel,
   groupSymbolsByDirectory,
@@ -204,6 +205,7 @@ type EntryTrace = {
   isEntry: boolean;
   direction: "callers" | "callees";
   edgeKinds: EdgeKind[];
+  sourceReturnSelectionId: string | null;
   entry: EntryTraceSnapshot;
   history: EntryTraceSnapshot[];
   retry: EntryTraceRequest | null;
@@ -667,12 +669,17 @@ export default function Workbench() {
   const [flowInstance, setFlowInstance] = useState<ReactFlowInstance<Node, Edge> | null>(null);
   const [featureFlowInstance, setFeatureFlowInstance] = useState<ReactFlowInstance<Node, Edge> | null>(null);
   const captureEntryTraceViewport = useCallback(() => {
-    const viewport = flowInstance?.getViewport();
-    if (!viewport) return;
+    const viewport = flowInstance?.getViewport() ?? null;
     setEntryTrace((previous) => previous
-      ? { ...previous, viewportRestore: { ...viewport, revision: ++viewportRevision.current } }
+      ? {
+          ...previous,
+          sourceReturnSelectionId: selectedId && graph.symbols.some((symbol) => symbol.symbol_id === selectedId)
+            ? selectedId
+            : previous.focusId,
+          viewportRestore: viewport ? { ...viewport, revision: ++viewportRevision.current } : previous.viewportRestore,
+        }
       : previous);
-  }, [flowInstance]);
+  }, [flowInstance, graph.symbols, selectedId]);
 
   const activeSessionDraftKey = selectedProjectId && selectedSessionId
     ? sessionDraftStorageKey(selectedProjectId, selectedSessionId)
@@ -3495,6 +3502,7 @@ export default function Workbench() {
               isEntry: true,
               direction: "callees",
               edgeKinds: ["calls"],
+              sourceReturnSelectionId: null,
               entry,
               history: [],
               retry: null,
@@ -3628,6 +3636,7 @@ export default function Workbench() {
           isEntry: false,
           direction: requestedDirection,
           edgeKinds: [...requestedEdgeKinds],
+          sourceReturnSelectionId: null,
           entry,
           history,
           retry: null,
@@ -3659,6 +3668,7 @@ export default function Workbench() {
       isEntry: snapshot.isEntry,
       direction: snapshot.direction,
       edgeKinds: [...snapshot.edgeKinds],
+      sourceReturnSelectionId: null,
       history,
       retry: null,
       viewportRestore: snapshot.viewport ? { ...snapshot.viewport, revision: ++viewportRevision.current } : null,
@@ -3676,6 +3686,19 @@ export default function Workbench() {
     if (!entryTrace) return;
     restoreEntryTraceSnapshot(entryTrace.entry, [], entryTrace);
   }, [entryTrace, restoreEntryTraceSnapshot]);
+
+  const returnFromEntryTraceEvidence = useCallback(() => {
+    const savedSelectionId = entryTrace?.sourceReturnSelectionId;
+    const fallbackId = entryTrace?.focusId ?? overviewEntryCallChain?.root.symbol_id ?? httpEntryChain?.handler.symbol_id;
+    const restoreSelectionId = savedSelectionId && graph.symbols.some((symbol) => symbol.symbol_id === savedSelectionId)
+      ? savedSelectionId
+      : fallbackId && graph.symbols.some((symbol) => symbol.symbol_id === fallbackId)
+        ? fallbackId
+        : null;
+    if (restoreSelectionId) setSelectedId(restoreSelectionId);
+    setEntryTrace((previous) => previous ? { ...previous, sourceReturnSelectionId: null } : previous);
+    setPanelMode("graph");
+  }, [entryTrace, graph.symbols, httpEntryChain, overviewEntryCallChain]);
 
   const onEntryTraceViewportRestored = useCallback((revision: number) => {
     setEntryTrace((previous) => previous?.viewportRestore?.revision === revision
@@ -3841,6 +3864,7 @@ export default function Workbench() {
       ) {
         return;
       }
+      if (httpEntryChain || overviewEntryCallChain) captureEntryTraceViewport();
       void openArchitectureSource({
         indexId: call.index_id,
         path: location.path,
@@ -3848,7 +3872,7 @@ export default function Workbench() {
         endLine: location.end_line,
       });
     },
-    [graphIndexId, httpEntryChain, openArchitectureSource],
+    [captureEntryTraceViewport, graphIndexId, httpEntryChain, openArchitectureSource, overviewEntryCallChain],
   );
 
   const selectOverviewGroup = useCallback((group: OverviewGroup) => {
@@ -4855,7 +4879,7 @@ export default function Workbench() {
             void loadNeighborhood(selectedSymbol.index_id, selectedSymbol.symbol_id, false);
           }
         },
-        onReturnEntryChain: () => setPanelMode("graph"),
+        onReturnEntryChain: returnFromEntryTraceEvidence,
         onClose: () => {
           if (httpEntryChain || overviewEntryCallChain) {
             exitEntryChain();
@@ -4888,6 +4912,7 @@ export default function Workbench() {
         entryTrace: entryTrace && entryTraceFocusSymbol ? {
           focusId: entryTrace.focusId,
           focusSymbol: entryTraceFocusSymbol,
+          selectedSymbolId: callChainTraceTargetId(graph.symbols, selectedId, entryTrace.focusId),
           isEntry: entryTrace.isEntry,
           direction: entryTrace.direction,
           edgeKinds: entryTrace.edgeKinds,
@@ -4895,7 +4920,10 @@ export default function Workbench() {
           retry: entryTrace.retry,
           viewportRestore: entryTrace.viewportRestore,
         } : null,
-        onSelectHttpChainEvidence: selectFeatureEvidence,
+        onSelectHttpChainEvidence: (evidence) => {
+          captureEntryTraceViewport();
+          selectFeatureEvidence(evidence);
+        },
         onSelectEntryChainSource: openEntryCallChainSource,
         onRetryHttpChain: () => {
           if (httpEntryChain) {

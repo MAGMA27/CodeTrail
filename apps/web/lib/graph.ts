@@ -44,6 +44,14 @@ export type CallChainEdgeRoute =
   | { type: "forward"; bend: number }
   | { type: "outer"; side: "top" | "bottom"; lane: number; sourceEscapeX: number; targetEscapeX: number; routeY: number };
 
+export function callChainTraceTargetId(
+  symbols: SymbolRecord[],
+  selectedId: string | null,
+  focusId: string,
+): string {
+  return selectedId && symbols.some((symbol) => symbol.symbol_id === selectedId) ? selectedId : focusId;
+}
+
 export const CALL_CHAIN_NODE_WIDTH = 196;
 export const CALL_CHAIN_NODE_HEIGHT = 80;
 export const CALL_CHAIN_COLUMN_STEP = CALL_CHAIN_NODE_WIDTH + 112;

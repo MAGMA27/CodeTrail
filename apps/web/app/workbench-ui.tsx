@@ -327,6 +327,7 @@ type GraphUi = {
   entryTrace: {
     focusId: string;
     focusSymbol: SymbolRecord;
+    selectedSymbolId: string | null;
     isEntry: boolean;
     direction: "callers" | "callees";
     edgeKinds: EdgeKind[];
@@ -2695,7 +2696,7 @@ function GraphPanel({ graph }: { graph: GraphUi }) {
     };
   }, [graph.codeFocusNodeIds, graph.codeModel, graph.selectedId, hasEntryCallChain]);
   const codeFitNodeIds = hasEntryCallChain ? [] : codeFocusNodeIds;
-  const traceTargetId = graph.selectedId ?? graph.entryTrace?.focusId ?? graph.entryCallChain?.root.symbol_id ?? graph.httpChain?.handler.symbol_id ?? null;
+  const traceTargetId = graph.entryTrace?.selectedSymbolId ?? graph.entryTrace?.focusId ?? graph.entryCallChain?.root.symbol_id ?? graph.httpChain?.handler.symbol_id ?? null;
   const entryTraceIsInitial = !graph.entryTrace || graph.entryTrace.isEntry;
   const toggleTraceEdgeKind = (kind: EdgeKind) => {
     if (!graph.entryTrace || !traceTargetId || graph.codeStatus === "loading") return;
@@ -3207,7 +3208,7 @@ export default function WorkbenchUi(props: WorkbenchUiProps) {
           {alert ? <div className="ct-global-alert" role="alert"><span>{alert}</span>{props.project.status === "error" && props.project.projects.length > 0 && props.connection.state !== "error" ? <button type="button" className="ct-link-button" onClick={() => void props.project.onReload()}>重试项目列表</button> : null}{props.connection.state === "error" ? <button type="button" className="ct-link-button" onClick={() => void props.connection.onCheck()}>重新检查</button> : null}</div> : null}
           {operationPanel ? <OperationPanel mode={operationPanel.mode} initialTab={operationPanel.tab} onClose={closeOperation} project={props.project} localImport={props.localImport} githubImport={props.githubImport} index={props.index} /> : props.viewMode === "session" ? <SessionView session={props.session} onBack={openKnowledge} /> : <KnowledgeView key={graphScopeKey} project={props.project} index={props.index} knowledge={props.knowledge} graph={props.graph} panelMode={props.panelMode} onPanelModeChange={props.onPanelModeChange} onOpenOperation={openOperation} />}
         </section>
-        {props.panelMode === "source" ? <EvidencePanel evidence={props.evidence} returnPanel={returnPanel} onReturnToPanel={() => props.onPanelModeChange(returnPanel ?? "graph")} /> : showSideGraphPanel ? <GraphPanel graph={props.graph} /> : null}
+        {props.panelMode === "source" ? <EvidencePanel evidence={props.evidence} returnPanel={returnPanel} onReturnToPanel={() => props.evidence.entryChainLabel ? props.evidence.onReturnEntryChain() : props.onPanelModeChange(returnPanel ?? "graph")} /> : showSideGraphPanel ? <GraphPanel graph={props.graph} /> : null}
       </div>
       {props.panelMode === "source" ? <div className="ct-panel-width-control"><label htmlFor="panel-width">面板宽度</label><input id="panel-width" type="range" min="300" max="440" step="10" value={panelWidth} onChange={(event) => setPanelWidth(Number(event.target.value))} /><output>{panelWidth}px</output></div> : null}
       <footer className="ct-footer"><span>STATIC FACTS / FIXED EVIDENCE</span><span>AI 分析或 Codex 外部 Agent · 有界工具循环 · SSE 事件流与轮询回退</span><span>{props.index.response ? `${props.graph.codeSymbolCount} nodes · ${props.graph.codeEdgeCount} edges` : "No snapshot loaded"}</span></footer>

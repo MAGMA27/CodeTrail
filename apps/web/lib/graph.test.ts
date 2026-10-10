@@ -8,6 +8,7 @@ import {
   CALL_CHAIN_ROW_STEP,
   callChainEdgePath,
   layoutCallChain,
+  callChainTraceTargetId,
   emptyGraphState,
   directImportTargets,
   groupUnresolvedReferences,
@@ -250,6 +251,11 @@ test("one-hop callers render left-to-right while retaining the real source-to-ta
   assert.ok(layout.nodes.get(caller.symbol_id)!.position.x < layout.nodes.get(focus.symbol_id)!.position.x);
   assert.deepEqual([relation.source_id, relation.target_id], [caller.symbol_id, focus.symbol_id]);
   assert.deepEqual(layout.routes.get(relation.edge_id), { type: "forward", bend: 8 });
+});
+
+test("entry trace falls back to its focus when evidence selected a non-graph file", () => {
+  assert.equal(callChainTraceTargetId([root, child], child.symbol_id, root.symbol_id), child.symbol_id);
+  assert.equal(callChainTraceTargetId([root, child], "evidence-route-file", root.symbol_id), root.symbol_id);
 });
 
 test("conditional calls remain visible separately when a static graph is empty", () => {
