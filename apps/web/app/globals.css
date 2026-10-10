@@ -53,6 +53,8 @@ code { font-family: var(--ct-mono); }
 .ct-workspace-frame { display: grid; min-height: 0; flex: 1; grid-template-columns: min(var(--ct-sidebar-width, 264px), max(0px, calc(100% - 480px))) minmax(480px, 1fr); }
 .ct-app.has-side-panel .ct-workspace-frame { grid-template-columns: min(var(--ct-sidebar-width, 264px), max(0px, calc(100% - 360px - var(--ct-panel-width, 360px)))) minmax(360px, 1fr) var(--ct-panel-width, 360px); }
 .ct-app.has-main-graph-panel .ct-workspace-frame { grid-template-columns: min(var(--ct-sidebar-width, 264px), max(0px, calc(100% - 480px))) minmax(0, .72fr) minmax(0, 1.28fr); }
+.ct-app.has-entry-call-chain .ct-workspace-frame { grid-template-columns: min(var(--ct-sidebar-width, 264px), max(0px, calc(100% - 480px))) minmax(0, 1fr); }
+.ct-app.has-entry-call-chain .ct-center-column { display: none; }
 .ct-sidebar-slot { position: relative; min-width: 0; min-height: 0; border-right: 1px solid var(--ct-border); background: var(--ct-surface); }
 .ct-sidebar-resize-handle { position: absolute; top: 0; right: -6px; z-index: 6; width: 12px; height: 100%; touch-action: none; cursor: col-resize; }
 .ct-sidebar-resize-handle::before { position: absolute; top: 0; bottom: 0; left: 5px; width: 1px; background: var(--ct-border); content: ""; }
@@ -375,6 +377,7 @@ code { font-family: var(--ct-mono); }
 .ct-entry-call-context > div:last-child { display: flex; flex-wrap: wrap; gap: 12px; }
 .ct-http-chain-toolbar { align-items: center; justify-content: space-between; color: var(--ct-muted); font-size: 10px; }
 .ct-http-chain-unresolved { display: grid; gap: 5px; padding: 8px 12px; border-left: 3px solid var(--ct-warning); background: var(--ct-warning-soft); color: var(--ct-warning); font-size: 10px; }
+.ct-http-chain-unresolved summary { cursor: pointer; font-weight: 600; }
 .ct-http-chain-unresolved span { overflow-wrap: anywhere; }
 .ct-http-chain-unresolved code { font-family: var(--ct-mono); }
 .ct-contextual-calls { display: grid; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--ct-border); background: var(--ct-subtle); }
@@ -782,6 +785,9 @@ code { font-family: var(--ct-mono); }
 .ct-graph-canvas .react-flow__edge-textbg { fill: var(--ct-surface); }
 .flow-symbol-card, .flow-feature-card { position: relative; display: grid; gap: 5px; min-height: 60px; padding: 10px 11px; border: 1px solid var(--ct-border-strong); border-left: 3px solid #7790c7; border-radius: 6px; background: var(--ct-surface); box-shadow: 0 3px 10px rgb(32 38 51 / 12%); color: var(--ct-text); cursor: pointer; transition: border-color 140ms ease, transform 140ms ease, background 140ms ease; }
 .flow-symbol-card:hover, .flow-symbol-card.is-selected, .flow-feature-card:hover, .flow-feature-card:focus-visible { border-color: var(--ct-blue); border-left-color: var(--ct-blue); background: var(--ct-blue-soft); outline: none; transform: translateY(-1px); }
+.ct-graph-panel.is-entry-call-chain .flow-symbol-card:hover, .ct-graph-panel.is-entry-call-chain .flow-symbol-card.is-selected { transform: none; }
+/* Keep the call-chain card box aligned with CALL_CHAIN_NODE_WIDTH/HEIGHT in graph.ts. */
+.flow-symbol-card[data-call-chain="true"] { box-sizing: border-box; width: 100%; height: 68px; min-height: 68px; }
 .flow-symbol-card[data-kind="module"] { border-left-color: #5e76b7; }
 .flow-symbol-name, .flow-feature-card strong { overflow: hidden; font-size: 11px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
 .flow-symbol-line, .flow-feature-card small { overflow: hidden; color: var(--ct-muted); font-family: var(--ct-mono); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }

@@ -3,6 +3,11 @@ import test from "node:test";
 
 import type { CodeEdge, ContextualCall, NeighborsResponse, SymbolRecord } from "./api.ts";
 import {
+  CALL_CHAIN_NODE_HEIGHT,
+  CALL_CHAIN_NODE_WIDTH,
+  CALL_CHAIN_ROW_STEP,
+  callChainEdgePath,
+  layoutCallChain,
   emptyGraphState,
   directImportTargets,
   graphFitNodeIds,
@@ -77,6 +82,124 @@ test("mergeNeighborGraph deduplicates symbols and edges while preserving truncat
   assert.equal(twice.indexTruncationReason, null);
   assert.equal(twice.indexUnresolvedTruncated, true);
   assert.equal(twice.indexUnresolvedTruncationReason, "max_unresolved reached");
+});
+
+test("call-chain layout separates two branches and keeps four target edges clear of other cards", () => {
+  const symbols = [
+    symbol("chain-root", "app.py", "app.start", 1),
+    symbol("chain-a", "app.py", "app.branch_a", 10),
+    symbol("chain-b", "app.py", "app.branch_b", 20),
+    symbol("chain-a1", "app.py", "app.a_one", 30),
+    symbol("chain-a2", "app.py", "app.a_two", 40),
+    symbol("chain-b1", "app.py", "app.b_one", 50),
+    symbol("chain-b2", "app.py", "app.b_two", 60),
+  ];
+  const calls = [
+    edge("chain-root-a", "chain-root", "chain-a"),
+    edge("chain-root-b", "chain-root", "chain-b"),
+    edge("chain-a-a1", "chain-a", "chain-a1"),
+    edge("chain-a-a2", "chain-a", "chain-a2"),
+    edge("chain-b-b1", "chain-b", "chain-b1"),
+    edge("chain-b-b2", "chain-b", "chain-b2"),
+  ];
+  const layout = layoutCallChain("chain-root", symbols, calls);
+  assert.equal(layout.nodes.size, symbols.length);
+  const boxes = [...layout.nodes].map(([id, node]) => ({ id, x: node.position.x, y: node.position.y }));
+  for (let left = 0; left < boxes.length; left += 1) {
+    for (let right = left + 1; right < boxes.length; right += 1) {
+      const a = boxes[left];
+      const b = boxes[right];
+      const overlap = a.x < b.x + CALL_CHAIN_NODE_WIDTH && b.x < a.x + CALL_CHAIN_NODE_WIDTH &&
+        a.y < b.y + CALL_CHAIN_NODE_HEIGHT && b.y < a.y + CALL_CHAIN_NODE_HEIGHT;
+      assert.equal(overlap, false, `${a.id} overlaps ${b.id}`);
+    }
+  }
+  assert.ok(Math.abs(layout.nodes.get("chain-a")!.position.y - (layout.nodes.get("chain-a1")!.position.y + layout.nodes.get("chain-a2")!.position.y) / 2) < 1);
+  assert.ok(Math.abs(layout.nodes.get("chain-b")!.position.y - (layout.nodes.get("chain-b1")!.position.y + layout.nodes.get("chain-b2")!.position.y) / 2) < 1);
+  assert.ok(layout.nodes.get("chain-b")!.position.y - layout.nodes.get("chain-a")!.position.y >= CALL_CHAIN_ROW_STEP);
+
+  for (const call of calls.slice(2)) {
+    const route = layout.routes.get(call.edge_id)!;
+    assert.equal(route.type, "forward");
+    const source = layout.nodes.get(call.source_id)!.position;
+    const target = layout.nodes.get(call.target_id)!.position;
+    const corridor = { left: source.x + CALL_CHAIN_NODE_WIDTH, right: target.x };
+    assert.ok(corridor.right > corridor.left);
+    for (const box of boxes.filter(({ id }) => id !== call.source_id && id !== call.target_id)) {
+      assert.equal(box.x < corridor.right && box.x + CALL_CHAIN_NODE_WIDTH > corridor.left, false, `${call.edge_id} crosses ${box.id}`);
+    }
+    const path = callChainEdgePath(
+      route,
+      { x: corridor.left, y: source.y + CALL_CHAIN_NODE_HEIGHT / 2 },
+      { x: target.x, y: target.y + CALL_CHAIN_NODE_HEIGHT / 2 },
+    );
+    const coordinates = path.match(/^M (-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?) C (-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?) (-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?) (-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)$/);
+    assert.ok(coordinates, `${call.edge_id} uses a forward cubic path`);
+    const sx = Number(coordinates[1]);
+    const sy = Number(coordinates[2]);
+    const c1x = Number(coordinates[3]);
+    const c1y = Number(coordinates[4]);
+    const c2x = Number(coordinates[5]);
+    const c2y = Number(coordinates[6]);
+    const tx = Number(coordinates[7]);
+    const ty = Number(coordinates[8]);
+    for (let step = 1; step < 100; step += 1) {
+      const t = step / 100;
+      const inverse = 1 - t;
+      const point = {
+        x: inverse ** 3 * sx + 3 * inverse ** 2 * t * c1x + 3 * inverse * t ** 2 * c2x + t ** 3 * tx,
+        y: inverse ** 3 * sy + 3 * inverse ** 2 * t * c1y + 3 * inverse * t ** 2 * c2y + t ** 3 * ty,
+      };
+      for (const box of boxes.filter(({ id }) => id !== call.source_id && id !== call.target_id)) {
+        const crossesCard = point.x >= box.x && point.x <= box.x + CALL_CHAIN_NODE_WIDTH &&
+          point.y >= box.y && point.y <= box.y + CALL_CHAIN_NODE_HEIGHT;
+        assert.equal(crossesCard, false, `${call.edge_id} path enters ${box.id}`);
+      }
+    }
+  }
+});
+
+test("call-chain shared-target, cross-layer, back, and same-layer edges retain independent outer routes", () => {
+  const symbols = [
+    symbol("lane-root", "app.py", "app.start", 1),
+    symbol("lane-a", "app.py", "app.alpha", 10),
+    symbol("lane-b", "app.py", "app.beta", 20),
+    symbol("lane-shared", "app.py", "app.shared", 30),
+  ];
+  const calls = [
+    edge("lane-root-a", "lane-root", "lane-a"),
+    edge("lane-root-b", "lane-root", "lane-b"),
+    edge("lane-a-shared", "lane-a", "lane-shared"),
+    edge("lane-b-shared", "lane-b", "lane-shared"),
+    edge("lane-a-root", "lane-a", "lane-root"),
+    edge("lane-a-b", "lane-a", "lane-b"),
+  ];
+  const layout = layoutCallChain("lane-root", symbols, calls);
+  assert.equal(layout.nodes.get("lane-shared")?.depth, 2);
+  assert.equal(layout.routes.size, calls.length);
+  assert.equal(layout.routes.get("lane-a-shared")?.type, "forward");
+  const outer = [
+    layout.routes.get("lane-b-shared")!,
+    layout.routes.get("lane-a-root")!,
+    layout.routes.get("lane-a-b")!,
+  ];
+  assert.deepEqual(outer.map((route) => route.type), ["outer", "outer", "outer"]);
+  assert.equal(new Set(outer.map((route) => route.type === "outer" ? route.routeY : null)).size, outer.length);
+  for (const route of outer) {
+    assert.equal(route.type, "outer");
+    const positions = [...layout.nodes.values()].map(({ position }) => position);
+    if (route.type === "outer" && route.side === "top") {
+      assert.ok(route.routeY < Math.min(...positions.map(({ y }) => y)));
+    } else if (route.type === "outer") {
+      assert.ok(route.routeY > Math.max(...positions.map(({ y }) => y + CALL_CHAIN_NODE_HEIGHT)));
+    }
+  }
+  for (const call of calls.filter((item) => layout.routes.get(item.edge_id)?.type === "outer")) {
+    const route = layout.routes.get(call.edge_id)!;
+    if (route.type !== "outer") assert.fail(`${call.edge_id} should use an outer route`);
+    assert.equal(route.sourceEscapeX, layout.nodes.get(call.source_id)!.position.x + CALL_CHAIN_NODE_WIDTH + 28);
+    assert.equal(route.targetEscapeX, layout.nodes.get(call.target_id)!.position.x - 28);
+  }
 });
 
 test("conditional calls remain visible separately when a static graph is empty", () => {

@@ -8,6 +8,7 @@ import {
   Position,
   useReactFlow,
   type Edge,
+  type EdgeTypes,
   type Node,
   type NodeProps,
   type NodeTypes,
@@ -84,7 +85,7 @@ import {
   STRUCTURE_DETAIL_WIDTH_STORAGE_KEY,
   type StructureDetailWidthRange,
 } from "../lib/structure-detail-width";
-import { graphFitNodeIds, moduleDefinitionRows as buildModuleDefinitionRows, type DirectImportTarget, type GraphState } from "../lib/graph";
+import { graphFitNodeIds, moduleDefinitionRows as buildModuleDefinitionRows, type CallChainEdgeRoute, type DirectImportTarget, type GraphState } from "../lib/graph";
 import { architectureEntryModule, architectureEntrySummary, architectureOverviewEdgeVisible, architectureEdgeSides, architectureRelationEdgeType, architectureRelationsForFocusedModule, buildArchitectureGraph, type ArchitectureDirectory, type ArchitecturePosition } from "../lib/architecture-graph";
 
 export type UiAsyncStatus = "idle" | "loading" | "success" | "empty" | "error";
@@ -304,6 +305,7 @@ type EvidenceUi = {
 type GraphUi = {
   panelMode: Exclude<UiPanelMode, "none" | "source">;
   codeModel: { nodes: Node[]; edges: Edge[] };
+  codeEdgeTypes: EdgeTypes | undefined;
   codeEdges: CodeEdge[];
   directImportTargets: DirectImportTarget[];
   codeStatus: UiAsyncStatus;
@@ -2615,7 +2617,7 @@ function GraphPanel({ graph }: { graph: GraphUi }) {
     ? graph.codeFocusNodeIds
     : graph.codeModel.nodes.map((node) => node.id);
   const codeViewModel = useMemo(() => {
-    if (graph.codeFocusNodeIds.length === 0 || !graph.selectedId) {
+    if (hasEntryCallChain || graph.codeFocusNodeIds.length === 0 || !graph.selectedId) {
       return graph.codeModel;
     }
     const focusedIds = new Set(graph.codeFocusNodeIds);
@@ -2646,9 +2648,10 @@ function GraphPanel({ graph }: { graph: GraphUi }) {
         };
       }),
     };
-  }, [graph.codeFocusNodeIds, graph.codeModel, graph.selectedId]);
+  }, [graph.codeFocusNodeIds, graph.codeModel, graph.selectedId, hasEntryCallChain]);
+  const codeFitNodeIds = hasEntryCallChain ? [] : codeFocusNodeIds;
   return (
-    <aside className="ct-side-panel ct-graph-panel" aria-label={isFeature ? "功能图面板" : isImpact ? "候选影响面板" : "代码关系面板"}>
+    <aside className={`ct-side-panel ct-graph-panel${hasEntryCallChain ? " is-entry-call-chain" : ""}`} aria-label={isFeature ? "功能图面板" : isImpact ? "候选影响面板" : "代码关系面板"}>
       <div className="ct-side-panel-header"><div><p className="ct-overline">{isFeature ? "FEATURE TOPOLOGY" : isImpact ? "RUN IMPACT" : "STATIC TOPOLOGY"}</p><h2>{isFeature ? "功能图" : isImpact ? "候选影响" : "代码关系"}</h2></div><button type="button" className="ct-close-button" onClick={graph.httpChain ? graph.onExitHttpChain : graph.entryCallChain ? graph.onExitEntryCallChain : graph.onClose}>关闭</button></div>
       <div className="ct-panel-switch"><button type="button" className={!isFeature && !isImpact ? "is-active" : ""} onClick={() => graph.onPanelModeChange("graph")}>代码关系</button><button type="button" className={isFeature ? "is-active" : ""} onClick={() => graph.onPanelModeChange("feature_graph")} disabled={!graph.featureGeneration}>功能图</button><button type="button" className={isImpact ? "is-active" : ""} onClick={() => graph.onPanelModeChange("impact")} disabled={graph.impactStatus === "idle"}>影响范围</button><button type="button" onClick={() => graph.onPanelModeChange("source")} disabled={!graph.selectedId}>源码证据</button></div>
       {!isFeature && !isImpact ? <>
@@ -2688,7 +2691,7 @@ function GraphPanel({ graph }: { graph: GraphUi }) {
             </div>
           </article>)}
         </section> : null}
-        {hasEntryCallChain ? <div className="ct-graph-toolbar ct-http-chain-toolbar"><span>向下 · calls only · 深度 2 · 最多 40 个节点</span><button type="button" className="ct-link-button" onClick={() => graph.flowInstance?.fitView({ padding: 0.18, duration: 240 })} disabled={graph.codeModel.nodes.length === 0}>聚焦</button></div> : <div className="ct-graph-toolbar"><label>方向<select value={graph.direction} onChange={(event) => graph.onChangeDirection(event.target.value as NeighborDirection)} disabled={!graph.selectedId}><option value="both">双向</option><option value="callers">调用方</option><option value="callees">被调用方</option></select></label><label className="ct-check-field"><input type="checkbox" checked={graph.edgeKinds.includes("calls")} onChange={() => graph.onToggleEdgeKind("calls")} disabled={!graph.selectedId} /><span>calls</span></label><label className="ct-check-field"><input type="checkbox" checked={graph.edgeKinds.includes("imports")} onChange={() => graph.onToggleEdgeKind("imports")} disabled={!graph.selectedId} /><span>imports</span></label><button type="button" className="ct-link-button" onClick={() => { if (graph.flowInstance) { void graph.flowInstance.fitBounds(graph.flowInstance.getNodesBounds(codeFocusNodeIds), { padding: 0.18, duration: 240 }); } }} disabled={graph.codeModel.nodes.length === 0}>聚焦</button></div>}
+        {hasEntryCallChain ? <div className="ct-graph-toolbar ct-http-chain-toolbar"><span>向下 · calls only · 深度 2 · 最多 40 个节点</span><button type="button" className="ct-link-button" onClick={() => { if (graph.flowInstance) void graph.flowInstance.fitBounds(graphCanvasFitBounds(graph.flowInstance, codeViewModel, codeFitNodeIds), { padding: 0.18, duration: 240 }); }} disabled={graph.codeModel.nodes.length === 0}>聚焦</button></div> : <div className="ct-graph-toolbar"><label>方向<select value={graph.direction} onChange={(event) => graph.onChangeDirection(event.target.value as NeighborDirection)} disabled={!graph.selectedId}><option value="both">双向</option><option value="callers">调用方</option><option value="callees">被调用方</option></select></label><label className="ct-check-field"><input type="checkbox" checked={graph.edgeKinds.includes("calls")} onChange={() => graph.onToggleEdgeKind("calls")} disabled={!graph.selectedId} /><span>calls</span></label><label className="ct-check-field"><input type="checkbox" checked={graph.edgeKinds.includes("imports")} onChange={() => graph.onToggleEdgeKind("imports")} disabled={!graph.selectedId} /><span>imports</span></label><button type="button" className="ct-link-button" onClick={() => { if (graph.flowInstance) { void graph.flowInstance.fitBounds(graphCanvasFitBounds(graph.flowInstance, codeViewModel, codeFitNodeIds), { padding: 0.18, duration: 240 }); } }} disabled={graph.codeModel.nodes.length === 0}>聚焦</button></div>}
         <div className="ct-panel-status"><span data-state={graph.codeStatus}>{graph.codeStatus === "loading" ? hasEntryCallChain ? "载入入口下游静态 calls" : "载入关系中" : graph.codeStatus === "error" ? "关系请求失败" : graph.codeStatus === "empty" ? hasEntryCallChain ? "当前有界入口查询没有返回静态 calls" : graph.codeIndexTruncated ? "当前结果为空（索引关系未完整分析）" : graph.codeIndexUnresolvedTruncated === true ? "当前结果为空（unresolved 详情不完整）" : "当前方向没有静态边" : graph.codeStatus === "success" ? `${graph.codeSymbolCount} 个节点 · ${graph.codeEdgeCount} 条边` : "选择搜索命中后载入关系"}</span>{graph.codeTruncated ? <small>查询已截断 · {graph.codeTruncationReason}</small> : null}</div>
         {graph.codeIndexTruncated ? <p className="ct-graph-coverage-warning" role="status">当前固定索引的关系提取未完成 · {graph.codeIndexTruncationReason}；空邻接不能证明没有关系。</p> : null}
         {graph.codeIndexUnresolvedTruncated === true ? <p className="ct-graph-coverage-warning" role="status">当前固定索引的 unresolved 详情已截断 · {graph.codeIndexUnresolvedTruncationReason}；未返回的 unresolved 不能被当作不存在。</p> : null}
@@ -2696,9 +2699,9 @@ function GraphPanel({ graph }: { graph: GraphUi }) {
         {graph.codeError ? <p className="ct-inline-error" role="alert">{graph.codeError}{graph.httpChain ? <button type="button" className="ct-link-button" onClick={graph.onRetryHttpChain}>重试</button> : graph.entryCallChain ? <button type="button" className="ct-link-button" onClick={graph.onRetryEntryCallChain}>重试</button> : null}</p> : null}
         {graph.codeStatus === "empty" && hasEntryCallChain ? <p className="ct-graph-coverage-warning" role="status">空结果只表示当前固定快照的有界 calls 查询没有返回边，不能证明入口没有下游服务或存储调用。</p> : null}
         {hasEntryCallChain && graph.codeHasCycle ? <p className="ct-graph-coverage-warning" role="status">当前返回的 calls 中检测到循环边；相同符号按 ID 合并显示，循环边保留。</p> : null}
-        {hasEntryCallChain && graph.codeUnresolved.length > 0 ? <div className="ct-http-chain-unresolved"><strong>未解析引用 · {graph.codeUnresolved.length}</strong>{graph.codeUnresolved.map((item) => <span key={item.unresolved_id}><code>{item.expression}</code> · {item.reason} · {item.path}:L{item.start_line}</span>)}</div> : null}
+        {hasEntryCallChain && graph.codeUnresolved.length > 0 ? <details className="ct-http-chain-unresolved"><summary>未解析引用 · {graph.codeUnresolved.length}</summary>{graph.codeUnresolved.map((item) => <span key={item.unresolved_id}><code>{item.expression}</code> · {item.reason} · {item.path}:L{item.start_line}</span>)}</details> : null}
         <div className="ct-graph-legend"><span><i className="is-calls" />calls</span>{hasEntryCallChain ? <small>入口起点的有界静态 calls 子图 · 点击符号后可切换到源码证据</small> : <><span><i className="is-imports" />imports</span><small>局部静态子图 · 视口聚焦 {graph.codeFocusNodeIds.length > 0 ? `${codeFocusNodeIds.length} 个节点` : "全部节点"}</small></>}</div>
-        <GraphCanvas model={codeViewModel} nodeTypes={graph.codeNodeTypes} onInit={graph.onCodeInit} onNodeClick={graph.onCodeNodeClick} focusNodeIds={graph.codeFocusNodeIds} emptyTitle="建立或打开索引后，这里会显示关系图。" />
+        <GraphCanvas model={codeViewModel} nodeTypes={graph.codeNodeTypes} edgeTypes={hasEntryCallChain ? graph.codeEdgeTypes : undefined} showMiniMap={!hasEntryCallChain} onInit={graph.onCodeInit} onNodeClick={graph.onCodeNodeClick} focusNodeIds={codeFitNodeIds} emptyTitle="建立或打开索引后，这里会显示关系图。" />
       </> : isFeature ? <>
         <div className="ct-graph-toolbar"><span className="ct-graph-legend"><span><i className="is-semantic" />语义关联</span><span><i className="is-static" />静态 CodeEdge</span></span><button type="button" className="ct-link-button" onClick={() => graph.featureFlowInstance?.fitView({ padding: 0.18, duration: 240 })} disabled={graph.featureModel.nodes.length === 0}>聚焦</button></div>
         <div className="ct-panel-status"><span data-state={graph.featureStatus}>{graph.featureStatus === "loading" ? "功能图载入中" : graph.featureStatus === "error" ? "功能图请求失败" : graph.featureStatus === "empty" ? "当前版本没有可展开节点" : graph.featureStatus === "success" ? `${featureGraph?.nodes.length ?? 0} 个节点 · 语义 / 静态关系已分开` : "选择一个已保存版本载入功能图"}</span>{featureGraph?.truncated ? <small>已截断 · {featureGraph.truncation_reason}</small> : null}</div>
@@ -2726,17 +2729,21 @@ function GraphPanel({ graph }: { graph: GraphUi }) {
 function GraphCanvas({
   model,
   nodeTypes,
+  edgeTypes,
   onInit,
   onNodeClick,
   emptyTitle,
   focusNodeIds = [],
+  showMiniMap = true,
 }: {
   model: { nodes: Node[]; edges: Edge[] };
   nodeTypes: NodeTypes;
+  edgeTypes?: EdgeTypes;
   onInit: (instance: ReactFlowInstance<Node, Edge>) => void;
   onNodeClick: (nodeId: string) => void;
   emptyTitle: string;
   focusNodeIds?: string[];
+  showMiniMap?: boolean;
 }) {
   const [hoveredEdgeId, setHoveredEdgeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
@@ -2748,11 +2755,12 @@ function GraphCanvas({
     return <div className="ct-graph-empty"><span className="ct-empty-index" aria-hidden="true">∅</span><strong>{emptyTitle}</strong><p>图中只表示当前已加载的受限关系，不代表全仓架构。</p></div>;
   }
   return (
-    <div className="ct-graph-canvas">
+    <div className={`ct-graph-canvas${!showMiniMap ? " is-entry-call-chain" : ""}`}>
       <ReactFlow<Node, Edge>
         nodes={model.nodes}
         edges={visibleEdges}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         onInit={onInit}
         onNodeClick={(_event, node) => onNodeClick(node.id)}
         onEdgeMouseEnter={(_event, edge) => setHoveredEdgeId(edge.id)}
@@ -2767,7 +2775,7 @@ function GraphCanvas({
         <GraphFitController model={model} focusNodeIds={focusNodeIds} />
         <Background color="#d7dee8" gap={24} size={1} />
         <Controls showInteractive={false} position="bottom-left" />
-        <MiniMap pannable zoomable nodeColor={(node) => node.type === "group" ? "#aab5c4" : node.type === "feature" ? "#3158d9" : "#7790c7"} maskColor="rgba(247, 248, 250, 0.78)" position="bottom-right" />
+        {showMiniMap ? <MiniMap pannable zoomable nodeColor={(node) => node.type === "group" ? "#aab5c4" : node.type === "feature" ? "#3158d9" : "#7790c7"} maskColor="rgba(247, 248, 250, 0.78)" position="bottom-right" /> : null}
       </ReactFlow>
     </div>
   );
@@ -2787,8 +2795,7 @@ function GraphFitController({
       return;
     }
     const timer = window.setTimeout(() => {
-      const nodeIds = graphFitNodeIds(model.nodes, focusNodeIds);
-      const bounds = flow.getNodesBounds(nodeIds);
+      const bounds = graphCanvasFitBounds(flow, model, focusNodeIds);
       if (bounds.width === 0 && bounds.height === 0) {
         return;
       }
@@ -2798,6 +2805,25 @@ function GraphFitController({
   }, [flow, focusNodeIds, model.nodes]);
 
   return null;
+}
+
+function graphCanvasFitBounds(
+  flow: ReactFlowInstance<Node, Edge>,
+  model: { nodes: Node[]; edges: Edge[] },
+  focusNodeIds: string[],
+) {
+  const nodeIds = graphFitNodeIds(model.nodes, focusNodeIds);
+  const bounds = flow.getNodesBounds(nodeIds);
+  const visibleIds = new Set(nodeIds);
+  const routeYs = model.edges.flatMap((edge) => {
+    if (!visibleIds.has(edge.source) || !visibleIds.has(edge.target)) return [];
+    const route = edge.data?.route as CallChainEdgeRoute | undefined;
+    return route?.type === "outer" ? [route.routeY] : [];
+  });
+  if (routeYs.length === 0) return bounds;
+  const top = Math.min(bounds.y, ...routeYs);
+  const bottom = Math.max(bounds.y + bounds.height, ...routeYs);
+  return { ...bounds, y: top, height: bottom - top };
 }
 
 function SettingsDialog({ modelSettings }: { modelSettings: WorkbenchUiProps["modelSettings"] }) {
@@ -2915,7 +2941,8 @@ export default function WorkbenchUi(props: WorkbenchUiProps) {
   const previousGraphScopeKey = useRef(graphScopeKey);
   const previousPanelMode = useRef(props.panelMode);
   const inlineArchitectureGraph = props.viewMode === "overview" && Boolean(props.knowledge.architectureGraphRootId);
-  const showSideGraphPanel = (props.panelMode === "graph" || props.panelMode === "feature_graph" || props.panelMode === "impact") && !inlineArchitectureGraph;
+  const hasEntryCallChain = props.graph.httpChain !== null || props.graph.entryCallChain !== null;
+  const showSideGraphPanel = (props.panelMode === "graph" || props.panelMode === "feature_graph" || props.panelMode === "impact") && (!inlineArchitectureGraph || hasEntryCallChain);
   useEffect(() => {
     const sameScope = previousGraphScopeKey.current === graphScopeKey;
     const returnTarget = resolveGraphReturnPanel(props.panelMode, previousPanelMode.current, sameScope);
@@ -3054,7 +3081,7 @@ export default function WorkbenchUi(props: WorkbenchUiProps) {
   const alert = props.index.error ?? props.project.error ?? props.session.error ?? props.localImport.error ?? props.githubImport.error ?? props.connection.error;
   const style = { "--ct-panel-width": `${panelWidth}px`, "--ct-sidebar-width": `${effectiveSidebarWidth}px` } as CSSProperties;
   return (
-    <main ref={appRef} className={`ct-app${props.panelMode === "source" || showSideGraphPanel ? " has-side-panel" : ""}${showSideGraphPanel ? " has-main-graph-panel" : ""}`} style={style}>
+    <main ref={appRef} className={`ct-app${props.panelMode === "source" || showSideGraphPanel ? " has-side-panel" : ""}${showSideGraphPanel ? " has-main-graph-panel" : ""}${showSideGraphPanel && hasEntryCallChain ? " has-entry-call-chain" : ""}`} style={style}>
       <header className="ct-topbar">
         <button type="button" className="ct-mobile-menu" onClick={() => setMobileSidebarOpen(true)}>项目</button>
         <div className="ct-brand"><span className="ct-brand-mark">CT</span><span><strong>CODETRAIL</strong><small>CODE INTELLIGENCE WORKSPACE</small></span></div>

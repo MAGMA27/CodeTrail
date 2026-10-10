@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  BaseEdge,
   Background,
   Controls,
   Handle,
@@ -9,6 +10,8 @@ import {
   Position,
   ReactFlow,
   type Edge,
+  type EdgeProps,
+  type EdgeTypes,
   type Node,
   type NodeProps,
   type ReactFlowInstance,
@@ -127,6 +130,9 @@ import {
   waitForImportStatus,
 } from "../lib/import-status";
 import {
+  CALL_CHAIN_NODE_HEIGHT,
+  CALL_CHAIN_NODE_WIDTH,
+  callChainEdgePath,
   emptyGraphState,
   edgeKindLabel,
   directImportTargets,
@@ -134,11 +140,13 @@ import {
   hasDirectedCallCycle,
   isCallsOnlyChainResponse,
   isLatestRequest,
+  layoutCallChain,
   layoutSymbolGroups,
   mergeContextualCalls,
   mergeNeighborGraph,
   unresolvedForSymbol,
   type DirectImportTarget,
+  type CallChainEdgeRoute,
   type GraphState,
 } from "../lib/graph";
 import {
@@ -173,6 +181,7 @@ type OverviewEntryCallChain = {
 type SymbolNodeData = {
   symbol: SymbolRecord;
   selected: boolean;
+  callChain?: boolean;
   onSelect: (symbolId: string) => void;
   onExpand: ((symbolId: string) => void) | null;
 };
@@ -188,7 +197,7 @@ type GroupNodeData = {
 type SymbolFlowNode = Node<SymbolNodeData, "symbol">;
 type GroupFlowNode = Node<GroupNodeData, "group">;
 type FlowNode = SymbolFlowNode | GroupFlowNode;
-type FlowEdge = Edge<{ kind: EdgeKind }>;
+type FlowEdge = Edge<{ kind: EdgeKind; route?: CallChainEdgeRoute }>;
 
 const AUTO_EXPAND_GROUP_SYMBOL_LIMIT = 12;
 const FOCUS_NODE_LIMIT = 8;
@@ -206,14 +215,25 @@ const nodeTypes = {
   group: GroupFlowNodeView,
 };
 
+const callChainEdgeTypes: EdgeTypes = { callChain: CallChainFlowEdgeView };
+
+function CallChainFlowEdgeView(props: EdgeProps<FlowEdge>) {
+  const route = props.data?.route;
+  const path = route
+    ? callChainEdgePath(route, { x: props.sourceX, y: props.sourceY }, { x: props.targetX, y: props.targetY })
+    : `M ${props.sourceX},${props.sourceY} L ${props.targetX},${props.targetY}`;
+  return <BaseEdge id={props.id} path={path} markerEnd={props.markerEnd} style={props.style} />;
+}
+
 function SymbolFlowNodeView({ data, selected }: NodeProps<SymbolFlowNode>) {
   const shortName = data.symbol.qualified_name.split(".").at(-1) ?? data.symbol.qualified_name;
   return (
     <div
       className={`flow-symbol-card${selected || data.selected ? " is-selected" : ""}`}
       data-kind={data.symbol.kind}
+      data-call-chain={data.callChain ? "true" : undefined}
       onClick={() => data.onSelect(data.symbol.symbol_id)}
-      >
+    >
       <Handle type="target" position={Position.Left} id="target" />
       <span className="flow-handle-label">{data.symbol.kind}</span>
       <span className="flow-symbol-name" title={data.symbol.qualified_name}>
@@ -3802,39 +3822,31 @@ export default function Workbench() {
   const flowModel = useMemo(() => {
     const callRoot = httpEntryChain?.handler ?? overviewEntryCallChain?.root;
     if (callRoot) {
-      const depthById = new Map<string, number>([[callRoot.symbol_id, 0]]);
-      for (let depth = 0; depth < 2; depth += 1) {
-        for (const edge of graph.edges) {
-          if (edge.kind === "calls" && depthById.get(edge.source_id) === depth && !depthById.has(edge.target_id)) {
-            depthById.set(edge.target_id, depth + 1);
-          }
-        }
-      }
-      const rowsByDepth = new Map<number, number>();
+      const callLayout = layoutCallChain(callRoot.symbol_id, graph.symbols, graph.edges);
       const nodes: SymbolFlowNode[] = graph.symbols
-        .filter((symbol) => depthById.has(symbol.symbol_id))
-        .sort((left, right) =>
-          (depthById.get(left.symbol_id) ?? 0) - (depthById.get(right.symbol_id) ?? 0) ||
-          left.qualified_name.localeCompare(right.qualified_name),
-        )
+        .filter((symbol) => callLayout.nodes.has(symbol.symbol_id))
+        .sort((left, right) => {
+          const leftLayout = callLayout.nodes.get(left.symbol_id)!;
+          const rightLayout = callLayout.nodes.get(right.symbol_id)!;
+          return leftLayout.depth - rightLayout.depth || leftLayout.position.y - rightLayout.position.y || left.qualified_name.localeCompare(right.qualified_name);
+        })
         .map((symbol) => {
-          const depth = depthById.get(symbol.symbol_id) ?? 0;
-          const row = rowsByDepth.get(depth) ?? 0;
-          rowsByDepth.set(depth, row + 1);
+          const { position } = callLayout.nodes.get(symbol.symbol_id)!;
           return {
             id: symbol.symbol_id,
             type: "symbol",
-            position: { x: 28 + depth * 226, y: 28 + row * 104 },
+            position,
             data: {
               symbol,
               selected: symbol.symbol_id === selectedId,
+              callChain: true,
               onSelect: (symbolId) => {
                 const next = graph.symbols.find((candidate) => candidate.symbol_id === symbolId);
                 if (next) selectSymbol(next);
               },
               onExpand: null,
             },
-            style: { width: 196 },
+            style: { width: CALL_CHAIN_NODE_WIDTH, height: CALL_CHAIN_NODE_HEIGHT },
             draggable: false,
           };
         });
@@ -3847,14 +3859,10 @@ export default function Workbench() {
           target: edge.target_id,
           sourceHandle: "source",
           targetHandle: "target",
-          type: "smoothstep",
-          label: "calls",
-          data: { kind: "calls" },
+          type: "callChain",
+          data: { kind: "calls", route: callLayout.routes.get(edge.edge_id) },
           markerEnd: { type: MarkerType.ArrowClosed },
           style: { stroke: "#f3a65b", strokeWidth: 2 },
-          labelStyle: { fill: "#e7ece8", fontSize: 10, fontWeight: 700 },
-          labelBgStyle: { fill: "#152421", fillOpacity: 0.92 },
-          labelBgPadding: [5, 3] as [number, number],
         }));
       return { nodes, edges };
     }
@@ -4681,6 +4689,7 @@ export default function Workbench() {
         onCodeInit: setFlowInstance,
         onFeatureInit: setFeatureFlowInstance,
         codeNodeTypes: nodeTypes,
+        codeEdgeTypes: httpEntryChain || overviewEntryCallChain ? callChainEdgeTypes : undefined,
         featureNodeTypes,
         flowInstance,
         featureFlowInstance,
