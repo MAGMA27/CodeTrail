@@ -107,6 +107,17 @@ export function architectureRelationEdgeType(focused: boolean, internalModuleEdg
   return focused && !internalModuleEdge ? "smoothstep" : "straight";
 }
 
+export function architectureRelationsForFocusedModule(
+  relations: ArchitectureRelation[],
+  visibleModuleIds: ReadonlySet<string>,
+  focusedModuleId: string | null,
+): ArchitectureRelation[] {
+  return relations.filter((relation) => {
+    const internalModuleEdge = visibleModuleIds.has(relation.source) && visibleModuleIds.has(relation.target);
+    return !internalModuleEdge || Boolean(focusedModuleId && (relation.source === focusedModuleId || relation.target === focusedModuleId));
+  });
+}
+
 export type ArchitectureDirectory = {
   group: OverviewGroup;
   expanded: boolean;

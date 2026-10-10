@@ -85,7 +85,7 @@ import {
   type StructureDetailWidthRange,
 } from "../lib/structure-detail-width";
 import { graphFitNodeIds, moduleDefinitionRows as buildModuleDefinitionRows, type DirectImportTarget, type GraphState } from "../lib/graph";
-import { architectureEntryModule, architectureEntrySummary, architectureOverviewEdgeVisible, architectureEdgeSides, architectureRelationEdgeType, buildArchitectureGraph, type ArchitectureDirectory, type ArchitecturePosition } from "../lib/architecture-graph";
+import { architectureEntryModule, architectureEntrySummary, architectureOverviewEdgeVisible, architectureEdgeSides, architectureRelationEdgeType, architectureRelationsForFocusedModule, buildArchitectureGraph, type ArchitectureDirectory, type ArchitecturePosition } from "../lib/architecture-graph";
 
 export type UiAsyncStatus = "idle" | "loading" | "success" | "empty" | "error";
 export type UiIndexStatus = "unindexed" | "creating" | "loading" | "ready" | "partial" | "error";
@@ -1333,7 +1333,7 @@ function ArchitectureModuleNode({ data }: NodeProps<Node<ArchitectureModuleNodeD
       type="button"
       className={`ct-architecture-module nodrag nopan${data.highlighted ? " is-highlighted" : " is-dimmed"}${data.entryFocused ? " is-entry-focused" : ""}`}
       onClick={() => data.onOpen(data.module)}
-      title={`${module.symbol.path}:L${module.symbol.start_line} · ${entrySummary ? `识别入口：${entrySummary}` : module.entry_reachable ? "入口可达" : "未命中入口"} · ${classification} · 当前画布返回 ${data.relatedRelationCount} 组相邻模块关系、${data.relatedEdgeCount} 条静态边；展开后保留真实内部边 · 打开模块关系图`}
+      title={`${module.symbol.path}:L${module.symbol.start_line} · ${entrySummary ? `识别入口：${entrySummary}` : module.entry_reachable ? "入口可达" : "未命中入口"} · ${classification} · 当前画布返回 ${data.relatedRelationCount} 组相邻模块关系、${data.relatedEdgeCount} 条静态边；架构定位入口后显示其相邻组内边 · 打开模块关系图`}
     >
       <Handle id="target-top" type="target" position={Position.Top} className="ct-architecture-handle" />
       <Handle id="target-bottom" type="target" position={Position.Bottom} className="ct-architecture-handle" />
@@ -1594,6 +1594,7 @@ function ArchitectureSection({ overview, knowledge, graph, panelMode, onPanelMod
     return nodes;
   }, [focusedEntryModuleId, knowledge, model, onDetailChange, visibleModuleIds]);
   const reactFlowModel = useMemo(() => {
+    const displayedRelations = architectureRelationsForFocusedModule(model.relations, visibleModuleIds, focusedEntryModuleId);
     const moduleGroupById = new Map(model.directories.flatMap((directory) =>
       directory.visibleModules.map(({ module }) => [module.module_id, directory.group.group_id] as const),
     ));
@@ -1617,7 +1618,7 @@ function ArchitectureSection({ overview, knowledge, graph, panelMode, onPanelMod
       const sides = sourcePoint && targetPoint ? architectureEdgeSides(sourcePoint, targetPoint) : { source: "right", target: "left" };
       return { sourceHandle: `source-${sides.source}`, targetHandle: `target-${sides.target}` };
     };
-    const staticEdges: Edge[] = model.relations.map((relation) => ({
+    const staticEdges: Edge[] = displayedRelations.map((relation) => ({
       id: relation.id,
       source: relation.source,
       target: relation.target,
@@ -1656,7 +1657,7 @@ function ArchitectureSection({ overview, knowledge, graph, panelMode, onPanelMod
       label: edge.id === hoveredEdgeId || edge.id === selectedEdgeId ? edge.label : undefined,
     }));
     return { edges, foldedEdgeCount };
-  }, [focusedGroupId, hoveredEdgeId, model, selectedEdgeId]);
+  }, [focusedEntryModuleId, focusedGroupId, hoveredEdgeId, model, selectedEdgeId, visibleModuleIds]);
   const coverageWarnings = [
     overview.truncated ? "概览路径、未知边界或扫描分析存在截断" : null,
     overview.coverage.visible_groups < overview.coverage.total_groups ? `概览仅返回 ${overview.coverage.visible_groups}/${overview.coverage.total_groups} 组（含 HTTP 路由组）` : null,
@@ -1959,7 +1960,7 @@ function ArchitectureSection({ overview, knowledge, graph, panelMode, onPanelMod
           return <span key={reason}>{translated} · 原因 <code>{reason}</code></span>;
         }) : null}
       </details> : null}
-      <p className="ct-architecture-filter-note">类型筛选只影响静态 imports/calls 画布。HTTP method/path shape 关联单独列示，不混入静态调用边，也不证明请求实际发送到本地服务。职责聚焦按当前筛选保留一跳双向邻接；邻接职责初始折叠，聚焦范围外事实计数与服务端截断分开显示。{model.directories.some((directory) => directory.expanded && directory.internalRelationCount > 0) ? " 容器显示组内已返回关系计数；展开组后模块边保持显示，悬停或键盘聚焦只改变模块卡片外观。" : ""}</p>
+      <p className="ct-architecture-filter-note">类型筛选只影响静态 imports/calls 画布。HTTP method/path shape 关联单独列示，不混入静态调用边，也不证明请求实际发送到本地服务。职责聚焦按当前筛选保留一跳双向邻接；邻接职责初始折叠，聚焦范围外事实计数与服务端截断分开显示。{model.directories.some((directory) => directory.expanded && directory.internalRelationCount > 0) ? " 容器显示组内已返回关系计数；普通展开仅保留容器间聚合边，架构定位入口后显示其相邻组内模块边。模块悬停或键盘聚焦只改变卡片外观。" : ""}</p>
       {reactFlowModel.foldedEdgeCount > 0 ? <p className="ct-architecture-filter-note" role="status">为保持总览清晰，折叠了 {reactFlowModel.foldedEdgeCount} 条跨越其他卡片的聚合依赖。选中职责或目录后点击聚焦按钮查看相关依赖；模块可打开关系图查看详情。此显示折叠不改变索引。</p> : null}
       <div className="ct-architecture-legend"><span><i className="is-directory" />职责或目录容器（可展开）</span><span><i className="is-architecture-edge" />静态导入 / 静态调用</span><span><i className="is-http-architecture-edge" />HTTP method/path 形状关联</span><span>HTTP 关联单独筛选与聚合，不写入 CodeEdge</span><small>静态箭头只表示 source → target，不代表运行时数据流；依赖只展示当前快照已有关系。职责来自文件 manifest，不是模型推断。HTTP 匹配不等同于运行时拓扑。</small></div>        <OverviewSummary overview={overview} />
         <section className="ct-boundaries"><h3>边界与限制</h3>{overview.notes.map((note) => <p key={note}>{note}</p>)}</section>

@@ -12,7 +12,7 @@ import type {
   ProjectOverview,
   SymbolRecord,
 } from "./api.ts";
-import { ARCHITECTURE_MODULE_LIMIT, architectureEdgeSides, architectureEntrySummary, architectureOverviewEdgeVisible, architectureRelationEdgeType, buildArchitectureGraph } from "./architecture-graph.ts";
+import { ARCHITECTURE_MODULE_LIMIT, architectureEdgeSides, architectureEntrySummary, architectureOverviewEdgeVisible, architectureRelationEdgeType, architectureRelationsForFocusedModule, buildArchitectureGraph } from "./architecture-graph.ts";
 
 const indexId = "index-architecture-test";
 
@@ -633,7 +633,7 @@ test("focused dependency view centers the responsibility and keeps one-hop edge 
   }
 });
 
-test("cross-responsibility edges aggregate at containers while expanded internals keep module endpoints", () => {
+test("expanded internal edges require an explicitly focused module", () => {
   const a2 = moduleRecord("a2", "api/handlers.py");
   const b2 = moduleRecord("b2", "web/routes.py");
   const value = overview(
@@ -657,6 +657,15 @@ test("cross-responsibility edges aggregate at containers while expanded internal
   assert.equal(model.relations.some(({ source, target }) => source === "a1" && target === "a2"), true);
   assert.equal(model.relations.some(({ source, target }) => source === "a1" && target === "b1"), false);
   assert.deepEqual(model.relations.map(({ source, target }) => [source, target]), [["a1", "a2"], ["role-api", "role-web"]]);
+  const visibleModuleIds = new Set(model.directories.flatMap((directory) => directory.visibleModules.map(({ module }) => module.module_id)));
+  assert.deepEqual(
+    architectureRelationsForFocusedModule(model.relations, visibleModuleIds, null).map(({ source, target }) => [source, target]),
+    [["role-api", "role-web"]],
+  );
+  assert.deepEqual(
+    architectureRelationsForFocusedModule(model.relations, visibleModuleIds, "a1").map(({ source, target }) => [source, target]),
+    [["a1", "a2"], ["role-api", "role-web"]],
+  );
 });
 
 test("HTTP focus neighbors stay independent from static filters and preserve folded endpoints", () => {
