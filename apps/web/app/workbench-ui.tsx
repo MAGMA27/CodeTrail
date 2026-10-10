@@ -2791,7 +2791,7 @@ function GraphPanel({ graph }: { graph: GraphUi }) {
             <span>焦点</span>
             <strong title={focusSymbol?.qualified_name}>{focusSymbol?.qualified_name ?? entrySummary}</strong>
             {focusSymbol ? <code>{focusSymbol.path}:L{focusSymbol.start_line}</code> : null}
-            {selectedDiffersFromFocus && graph.selectedSymbol ? <small title={graph.selectedSymbol.qualified_name}>所选 · {graph.selectedSymbol.name}</small> : null}
+            {selectedDiffersFromFocus && graph.selectedSymbol ? <small title={graph.selectedSymbol.qualified_name}>所选 · {graph.selectedSymbol.qualified_name}</small> : null}
           </div>
           <div className="ct-entry-trace-actions" role="group" aria-label="关系追踪">
             <button type="button" className={`ct-link-button${direction === "callees" ? " is-selected" : ""}`} aria-pressed={direction === "callees"} onClick={() => traceTargetId && graph.onNavigateEntryTrace(traceTargetId, "callees", edgeKinds)} disabled={!graph.entryTrace || !traceTargetId || graph.codeStatus === "loading"}>引用谁</button>
