@@ -107,6 +107,7 @@ type ProjectUi = {
   selectedProject: ProjectRecord | null;
   status: UiAsyncStatus;
   error: string | null;
+  onReload: Action;
   onSelectProject: (projectId: string) => void;
   trash: TrashListResponse | null;
   trashStatus: UiAsyncStatus;
@@ -737,8 +738,14 @@ function ProjectRail({
             <span className="ct-nav-arrow" aria-hidden="true">›</span>
           </button> : null}
         </div>
-      ) : project.status === "loading" ? (
+      ) : project.status === "loading" || project.status === "idle" ? (
         <div className="ct-sidebar-loading"><span /><span /><span /></div>
+      ) : project.status === "error" ? (
+        <div className="ct-sidebar-empty" role="alert">
+          <strong>服务连接失败</strong>
+          <span>项目列表未能读取，暂时无法确认是否已有项目。</span>
+          <button type="button" className="ct-link-button" onClick={() => void project.onReload()}>重试项目列表</button>
+        </div>
       ) : (
         <div className="ct-sidebar-empty"><strong>还没有项目</strong><span>导入本地目录或 GitHub 仓库，建立一个固定快照。</span></div>
       )}
@@ -1102,12 +1109,19 @@ function ContextHeader({
   index: IndexUi;
   viewMode: "overview" | "session";
 }) {
+  const emptyProjectTitle = project.status === "error"
+    ? "项目列表不可用"
+    : project.status === "loading" || project.status === "idle"
+      ? "正在读取项目列表"
+      : project.status === "empty"
+        ? "建立一个代码理解工作区"
+        : "请选择项目";
   return (
     <div className="ct-context-header">
       <div className="ct-context-copy">
         <p className="ct-overline">{viewMode === "session" ? "ISSUE SESSION" : "PROJECT KNOWLEDGE"}</p>
-        <h1 title={project.selectedProject?.name ?? "建立一个代码理解工作区"}>{project.selectedProject?.name ?? "建立一个代码理解工作区"}</h1>
-        <p>{project.selectedProject ? "浏览固定快照、入口和代码关系。" : "导入本地目录或 GitHub 仓库，开始代码理解工作区。"}</p>
+        <h1 title={project.selectedProject?.name ?? emptyProjectTitle}>{project.selectedProject?.name ?? emptyProjectTitle}</h1>
+        <p>{project.selectedProject ? "浏览固定快照、入口和代码关系。" : project.status === "error" ? "服务连接失败，暂时无法确认是否已有项目。" : project.status === "loading" || project.status === "idle" ? "正在连接 CodeTrail 服务并读取项目列表。" : project.status === "empty" ? "导入本地目录或 GitHub 仓库，开始代码理解工作区。" : "请从项目列表选择一个项目。"}</p>
       </div>
       {project.selectedProject ? (
         <div className="ct-context-actions">
@@ -1179,11 +1193,23 @@ function KnowledgeView({
   return (
     <div className="ct-page ct-knowledge-page">
       {!project.selectedProject ? (
-        <EmptyState
-          title="还没有选中的项目"
-          detail="项目是所有索引、Session 和证据的归属边界。"
-          action={<button type="button" className="ct-button ct-button-primary" onClick={() => onOpenOperation("create-project")}>创建项目</button>}
-        />
+        project.status === "error" ? (
+          <EmptyState
+            title="项目列表读取失败"
+            detail="服务连接失败，暂时无法确认是否已有项目。"
+            action={<button type="button" className="ct-button ct-button-secondary" onClick={() => void project.onReload()}>重试项目列表</button>}
+          />
+        ) : project.status === "loading" || project.status === "idle" ? (
+          <EmptyState title="正在读取项目列表" detail="正在连接 CodeTrail 服务。" />
+        ) : project.status === "empty" ? (
+          <EmptyState
+            title="还没有项目"
+            detail="项目是所有索引、Session 和证据的归属边界。导入一个本地目录或 GitHub 仓库开始使用。"
+            action={<button type="button" className="ct-button ct-button-primary" onClick={() => onOpenOperation("create-project")}>创建项目</button>}
+          />
+        ) : (
+          <EmptyState title="请选择项目" detail="从左侧项目列表中选择一个项目。" />
+        )
       ) : !index.response ? (
         <EmptyState
           title="当前项目还没有可用快照"
@@ -3060,7 +3086,7 @@ export default function WorkbenchUi(props: WorkbenchUiProps) {
         </div>
         <section className="ct-center-column" aria-label={props.viewMode === "session" ? "Issue 会话" : "项目知识页"}>
           <ContextHeader project={props.project} index={props.index} viewMode={props.viewMode} />
-          {alert ? <div className="ct-global-alert" role="alert"><span>{alert}</span>{props.connection.state === "error" ? <button type="button" className="ct-link-button" onClick={() => void props.connection.onCheck()}>重新检查</button> : null}</div> : null}
+          {alert ? <div className="ct-global-alert" role="alert"><span>{alert}</span>{props.project.status === "error" && props.project.projects.length > 0 && props.connection.state !== "error" ? <button type="button" className="ct-link-button" onClick={() => void props.project.onReload()}>重试项目列表</button> : null}{props.connection.state === "error" ? <button type="button" className="ct-link-button" onClick={() => void props.connection.onCheck()}>重新检查</button> : null}</div> : null}
           {operationPanel ? <OperationPanel mode={operationPanel.mode} initialTab={operationPanel.tab} onClose={closeOperation} project={props.project} localImport={props.localImport} githubImport={props.githubImport} index={props.index} /> : props.viewMode === "session" ? <SessionView session={props.session} onBack={openKnowledge} /> : <KnowledgeView key={graphScopeKey} project={props.project} index={props.index} knowledge={props.knowledge} graph={props.graph} panelMode={props.panelMode} onPanelModeChange={props.onPanelModeChange} onOpenOperation={openOperation} />}
         </section>
         {props.panelMode === "source" ? <EvidencePanel evidence={props.evidence} returnPanel={returnPanel} onReturnToPanel={() => props.onPanelModeChange(returnPanel ?? "graph")} /> : showSideGraphPanel ? <GraphPanel graph={props.graph} /> : null}

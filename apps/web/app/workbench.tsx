@@ -865,6 +865,9 @@ export default function Workbench() {
       }
       setProjects(response.projects);
       setProjectStatus(response.projects.length > 0 ? "success" : "empty");
+      if (selectedProjectIdRef.current && response.projects.some((project) => project.project_id === selectedProjectIdRef.current)) {
+        return;
+      }
       const parsedEvidenceLink = readEvidenceLink();
       const route = readWorkbenchRoute(window.location.search);
       evidenceLink.current = parsedEvidenceLink.link;
@@ -882,17 +885,14 @@ export default function Workbench() {
         window.localStorage.getItem("codetrail.selectedProjectId"),
       );
       if (conflictingLinks) {
-        setProjectStatus("error");
         setProjectError("工作台链接同时包含源码证据和会话引用，已拒绝打开。请只保留一种引用。");
       } else if (linkError) {
-        setProjectStatus("error");
         setProjectError(linkError);
       }
       const nextProject = linkError || conflictingLinks
         ? null
         : response.projects.find((project) => project.project_id === resolution.projectId) ?? null;
       if (resolution.requestedProjectId && !nextProject) {
-        setProjectStatus("error");
         setProjectError("引用的 project_id 不存在，已拒绝打开。");
       }
       setSelectedProjectId(nextProject?.project_id ?? null);
@@ -2566,6 +2566,8 @@ export default function Workbench() {
     mayNavigate: boolean,
     keepOperationPanel = false,
   ) => {
+    projectController.current?.abort();
+    projectRequestId.current += 1;
     setProjects((previous) => [
       ...previous.filter((item) => item.project_id !== project.project_id),
       project,
@@ -4296,7 +4298,10 @@ export default function Workbench() {
         state: connectionState,
         health,
         error: connectionError,
-        onCheck: checkHealth,
+        onCheck: () => {
+          void checkHealth();
+          void loadProjects();
+        },
       }}
       modelSettings={{
         open: modelSettingsOpen,
@@ -4316,6 +4321,7 @@ export default function Workbench() {
         selectedProject,
         status: projectStatus,
         error: projectError,
+        onReload: loadProjects,
         trash,
         trashStatus,
         trashError,
