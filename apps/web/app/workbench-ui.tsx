@@ -1899,7 +1899,7 @@ function ArchitectureSection({ overview, knowledge, graph, panelMode, onPanelMod
             <div className="ct-architecture-import-direction">
               <span>{graph.moduleImportDirection === "callers" ? "导入者 → 当前文件" : "当前文件 → 被导入文件"}</span>
             </div>
-            <p className="ct-muted">此处只查询模块符号的一跳静态导入边。按名称导入文件内 class/function（如 <code>from service import WorkspaceService</code>）不会出现在模块“引用谁”的反向结果中；可对具体定义查询 imports。箭头保留真实 source → target 原方向，不表示运行时数据流。</p>
+            <p className="ct-muted">此处只查询模块符号的一跳静态导入边。按名称导入文件内 class/function（如 <code>from service import WorkspaceService</code>）不会出现在模块“被谁引用”的结果中；可对具体定义查询 imports。箭头保留真实 source → target 原方向，不表示运行时数据流。</p>
             {graph.directImportTargets.map((target) => <article className="ct-architecture-import-target" key={target.path}>
               <strong><code>{graph.moduleImportDirection === "callers" ? target.path : architectureRoot?.symbol.path}</code><span aria-hidden="true">→</span><code>{graph.moduleImportDirection === "callers" ? architectureRoot?.symbol.path : target.path}</code></strong>
               <details><summary>{target.edges.length} 条原始静态边 · 查看源码依据</summary>{target.edges.map((edge) => <button type="button" className="ct-link-button" key={edge.edge_id} onClick={() => knowledge.onOpenArchitectureSource({ indexId: overview.index.index_id, path: edge.source_location.path, startLine: edge.source_location.start_line, endLine: edge.source_location.end_line })}>{edge.source_location.path}:L{edge.source_location.start_line}–L{edge.source_location.end_line}</button>)}</details>
