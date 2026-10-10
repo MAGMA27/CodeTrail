@@ -103,6 +103,10 @@ export function architectureEdgeSides(source: ArchitecturePosition, target: Arch
   return dy >= 0 ? { source: "bottom", target: "top" } : { source: "top", target: "bottom" };
 }
 
+export function architectureRelationEdgeType(focused: boolean, internalModuleEdge: boolean): "straight" | "smoothstep" {
+  return focused && !internalModuleEdge ? "smoothstep" : "straight";
+}
+
 export type ArchitectureDirectory = {
   group: OverviewGroup;
   expanded: boolean;
@@ -160,19 +164,6 @@ export type ArchitectureGraphModel = {
   supportingDirectoryCount: number;
   dependencyCycleCount: number;
 };
-
-export function visibleArchitectureRelations(
-  relations: ArchitectureRelation[],
-  visibleModuleIds: ReadonlySet<string>,
-  activeModuleId?: string | null,
-): ArchitectureRelation[] {
-  return relations.filter((relation) => {
-    const sourceIsModule = visibleModuleIds.has(relation.source);
-    const targetIsModule = visibleModuleIds.has(relation.target);
-    if (!sourceIsModule || !targetIsModule) return true;
-    return Boolean(activeModuleId && (relation.source === activeModuleId || relation.target === activeModuleId));
-  });
-}
 
 function isSupportingDirectory(group: OverviewGroup): boolean {
   return group.group_kind === "source_directory" && group.group_key.split(/[\\/]+/).some((part) => AUXILIARY_DIRECTORY_NAMES.has(part.toLowerCase()));

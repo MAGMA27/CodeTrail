@@ -12,7 +12,7 @@ import type {
   ProjectOverview,
   SymbolRecord,
 } from "./api.ts";
-import { ARCHITECTURE_MODULE_LIMIT, architectureEntrySummary, architectureOverviewEdgeVisible, architectureEdgeSides, buildArchitectureGraph, visibleArchitectureRelations } from "./architecture-graph.ts";
+import { ARCHITECTURE_MODULE_LIMIT, architectureEdgeSides, architectureEntrySummary, architectureOverviewEdgeVisible, architectureRelationEdgeType, buildArchitectureGraph } from "./architecture-graph.ts";
 
 const indexId = "index-architecture-test";
 
@@ -468,8 +468,15 @@ test("dependency layout keeps cycles honest, layers real direction, and contains
 
 test("architecture edges choose center handles along the dominant dependency direction", () => {
   assert.deepEqual(architectureEdgeSides({ x: 0, y: 0 }, { x: 200, y: 30 }), { source: "right", target: "left" });
+  assert.deepEqual(architectureEdgeSides({ x: 100, y: 100 }, { x: 142, y: 114 }), { source: "right", target: "left" });
   assert.deepEqual(architectureEdgeSides({ x: 0, y: 0 }, { x: 20, y: 180 }), { source: "bottom", target: "top" });
   assert.deepEqual(architectureEdgeSides({ x: 200, y: 0 }, { x: 0, y: 0 }), { source: "left", target: "right" });
+});
+
+test("focused architecture keeps short internal module edges straight", () => {
+  assert.equal(architectureRelationEdgeType(true, true), "straight");
+  assert.equal(architectureRelationEdgeType(true, false), "smoothstep");
+  assert.equal(architectureRelationEdgeType(false, false), "straight");
 });
 
 test("HTTP entry focus highlights its source module without changing static relation counts", () => {
@@ -649,11 +656,7 @@ test("cross-responsibility edges aggregate at containers while expanded internal
   assert.deepEqual(boundary?.relationKinds, ["calls", "imports"]);
   assert.equal(model.relations.some(({ source, target }) => source === "a1" && target === "a2"), true);
   assert.equal(model.relations.some(({ source, target }) => source === "a1" && target === "b1"), false);
-  const visibleModuleIds = new Set(model.directories.flatMap(({ visibleModules }) => visibleModules.map(({ module }) => module.module_id)));
-  assert.deepEqual(visibleArchitectureRelations(model.relations, visibleModuleIds).map(({ source, target }) => [source, target]), [["role-api", "role-web"]]);
-  const inspectingApiModule = visibleArchitectureRelations(model.relations, visibleModuleIds, "a1");
-  assert.deepEqual(inspectingApiModule.map(({ source, target }) => [source, target]), [["a1", "a2"], ["role-api", "role-web"]]);
-  assert.equal(inspectingApiModule.find(({ source }) => source === "a1")?.edgeCount, 1);
+  assert.deepEqual(model.relations.map(({ source, target }) => [source, target]), [["a1", "a2"], ["role-api", "role-web"]]);
 });
 
 test("HTTP focus neighbors stay independent from static filters and preserve folded endpoints", () => {
