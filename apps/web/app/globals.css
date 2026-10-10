@@ -376,6 +376,11 @@ code { font-family: var(--ct-mono); }
 .ct-entry-call-context strong, .ct-entry-call-context code { max-width: 100%; overflow-wrap: anywhere; color: var(--ct-text); font-family: var(--ct-mono); font-size: 11px; line-height: 1.4; white-space: normal; }
 .ct-entry-call-context > div:last-child { display: flex; flex-wrap: wrap; gap: 12px; }
 .ct-http-chain-toolbar { align-items: center; justify-content: space-between; color: var(--ct-muted); font-size: 10px; }
+.ct-call-chain-selection { display: grid; min-width: 0; flex: 1; grid-template-columns: auto minmax(0, 1fr); align-items: baseline; gap: 2px 8px; }
+.ct-call-chain-selection > span { grid-row: 1 / span 2; color: var(--ct-faint); font-size: 9px; }
+.ct-call-chain-selection > strong, .ct-call-chain-selection > code { min-width: 0; overflow-wrap: anywhere; white-space: normal; }
+.ct-call-chain-selection > strong { color: var(--ct-text); font-size: 10px; line-height: 1.25; }
+.ct-call-chain-selection > code { color: var(--ct-muted); font-size: 9px; line-height: 1.2; }
 .ct-http-chain-unresolved { display: grid; gap: 5px; padding: 8px 12px; border-left: 3px solid var(--ct-warning); background: var(--ct-warning-soft); color: var(--ct-warning); font-size: 10px; }
 .ct-http-chain-unresolved summary { cursor: pointer; font-weight: 600; }
 .ct-http-chain-unresolved span { overflow-wrap: anywhere; }
@@ -787,7 +792,10 @@ code { font-family: var(--ct-mono); }
 .flow-symbol-card:hover, .flow-symbol-card.is-selected, .flow-feature-card:hover, .flow-feature-card:focus-visible { border-color: var(--ct-blue); border-left-color: var(--ct-blue); background: var(--ct-blue-soft); outline: none; transform: translateY(-1px); }
 .ct-graph-panel.is-entry-call-chain .flow-symbol-card:hover, .ct-graph-panel.is-entry-call-chain .flow-symbol-card.is-selected { transform: none; }
 /* Keep the call-chain card box aligned with CALL_CHAIN_NODE_WIDTH/HEIGHT in graph.ts. */
-.flow-symbol-card[data-call-chain="true"] { box-sizing: border-box; width: 100%; height: 68px; min-height: 68px; }
+.flow-symbol-card[data-call-chain="true"] { box-sizing: border-box; width: 100%; height: 80px; min-height: 80px; grid-template-rows: 10px minmax(0, 1fr) 12px; gap: 4px; padding: 8px 10px; }
+.flow-symbol-card[data-call-chain="true"] .flow-handle-label { min-height: 0; line-height: 10px; }
+.flow-symbol-card[data-call-chain="true"] .flow-symbol-name { display: -webkit-box; min-height: 0; overflow: hidden; overflow-wrap: anywhere; line-height: 1.25; text-overflow: clip; white-space: normal; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.flow-symbol-card[data-call-chain="true"] .flow-symbol-line { min-height: 0; line-height: 12px; }
 .flow-symbol-card[data-kind="module"] { border-left-color: #5e76b7; }
 .flow-symbol-name, .flow-feature-card strong { overflow: hidden; font-size: 11px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
 .flow-symbol-line, .flow-feature-card small { overflow: hidden; color: var(--ct-muted); font-family: var(--ct-mono); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }

@@ -232,7 +232,10 @@ function SymbolFlowNodeView({ data, selected }: NodeProps<SymbolFlowNode>) {
       className={`flow-symbol-card${selected || data.selected ? " is-selected" : ""}`}
       data-kind={data.symbol.kind}
       data-call-chain={data.callChain ? "true" : undefined}
-      onClick={() => data.onSelect(data.symbol.symbol_id)}
+      onClick={(event) => {
+        if (data.callChain) event.stopPropagation();
+        data.onSelect(data.symbol.symbol_id);
+      }}
     >
       <Handle type="target" position={Position.Left} id="target" />
       <span className="flow-handle-label">{data.symbol.kind}</span>
@@ -3840,10 +3843,7 @@ export default function Workbench() {
               symbol,
               selected: symbol.symbol_id === selectedId,
               callChain: true,
-              onSelect: (symbolId) => {
-                const next = graph.symbols.find((candidate) => candidate.symbol_id === symbolId);
-                if (next) selectSymbol(next);
-              },
+              onSelect: setSelectedId,
               onExpand: null,
             },
             style: { width: CALL_CHAIN_NODE_WIDTH, height: CALL_CHAIN_NODE_HEIGHT },
@@ -4675,6 +4675,10 @@ export default function Workbench() {
         onToggleEdgeKind: toggleEdgeKind,
         onChangeDirection: changeDirection,
         onCodeNodeClick: (nodeId) => {
+          if (httpEntryChain || overviewEntryCallChain) {
+            setSelectedId(nodeId);
+            return;
+          }
           const symbol = graph.symbols.find((candidate) => candidate.symbol_id === nodeId);
           if (symbol) {
             selectSymbol(symbol);
@@ -4694,6 +4698,10 @@ export default function Workbench() {
         flowInstance,
         featureFlowInstance,
         selectedId,
+        selectedSymbol,
+        onOpenSelectedSource: () => {
+          if (selectedSymbol) selectSymbol(selectedSymbol);
+        },
         onPanelModeChange: setPanelMode,
         onClose: () => {
           if (httpEntryChain || overviewEntryCallChain) {

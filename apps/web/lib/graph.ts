@@ -40,9 +40,30 @@ export type CallChainEdgeRoute =
   | { type: "outer"; side: "top" | "bottom"; lane: number; sourceEscapeX: number; targetEscapeX: number; routeY: number };
 
 export const CALL_CHAIN_NODE_WIDTH = 196;
-export const CALL_CHAIN_NODE_HEIGHT = 68;
+export const CALL_CHAIN_NODE_HEIGHT = 80;
 export const CALL_CHAIN_COLUMN_STEP = CALL_CHAIN_NODE_WIDTH + 112;
 export const CALL_CHAIN_ROW_STEP = CALL_CHAIN_NODE_HEIGHT + 64;
+
+export function graphViewportLayoutKey(
+  model: {
+    nodes: Array<{
+      id: string;
+      position: { x: number; y: number };
+      style?: { width?: number | string; height?: number | string };
+      parentId?: string | null;
+    }>;
+    edges: Array<{ id: string; source: string; target: string; data?: Record<string, unknown> }>;
+  },
+  focusNodeIds: string[],
+): string {
+  const nodes = model.nodes
+    .map((node) => [node.id, node.position.x, node.position.y, node.style?.width ?? null, node.style?.height ?? null, node.parentId ?? null])
+    .sort((left, right) => String(left[0]).localeCompare(String(right[0])));
+  const edges = model.edges
+    .map((edge) => [edge.id, edge.source, edge.target, edge.data?.route ?? null])
+    .sort((left, right) => String(left[0]).localeCompare(String(right[0])));
+  return JSON.stringify([nodes, edges, [...focusNodeIds].sort()]);
+}
 
 function callPairKey(sourceId: string, targetId: string) {
   return `${sourceId}\u0000${targetId}`;

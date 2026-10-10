@@ -11,6 +11,7 @@ import {
   emptyGraphState,
   directImportTargets,
   graphFitNodeIds,
+  graphViewportLayoutKey,
   groupSymbolsByDirectory,
   hasDirectedCallCycle,
   isCallsOnlyChainResponse,
@@ -21,6 +22,24 @@ import {
   moduleDefinitionRows,
   unresolvedForSymbol,
 } from "./graph.ts";
+
+test("graph viewport layout identity ignores node selection data", () => {
+  const model = {
+    nodes: [
+      { id: "root", position: { x: 28, y: 40 }, style: { width: CALL_CHAIN_NODE_WIDTH, height: CALL_CHAIN_NODE_HEIGHT }, data: { selected: false } },
+      { id: "child", position: { x: 336, y: 40 }, style: { width: CALL_CHAIN_NODE_WIDTH, height: CALL_CHAIN_NODE_HEIGHT }, data: { selected: false } },
+    ],
+    edges: [{ id: "call", source: "root", target: "child", data: { route: { type: "forward", bend: 8 } } }],
+  };
+  const identity = graphViewportLayoutKey(model, []);
+  const selected = {
+    ...model,
+    nodes: model.nodes.map((node) => ({ ...node, data: { selected: node.id === "child" } })),
+  };
+  assert.equal(graphViewportLayoutKey(selected, []), identity);
+  assert.notEqual(graphViewportLayoutKey({ ...model, nodes: model.nodes.map((node) => node.id === "child" ? { ...node, position: { x: 336, y: 80 } } : node) }, []), identity);
+  assert.notEqual(graphViewportLayoutKey({ ...model, edges: [{ ...model.edges[0], data: { route: { type: "forward", bend: 16 } } }] }, []), identity);
+});
 
 const indexId = "index-timeout-demo-test";
 
