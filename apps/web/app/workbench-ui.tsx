@@ -1899,13 +1899,13 @@ function ArchitectureSection({ overview, knowledge, graph, panelMode, onPanelMod
             <div className="ct-architecture-import-direction">
               <span>{graph.moduleImportDirection === "callers" ? "导入者 → 当前文件" : "当前文件 → 被导入文件"}</span>
             </div>
-            <p className="ct-muted">只聚合固定索引实际返回的一跳静态 imports；箭头保留 source → target 原方向，不表示运行时数据流。</p>
+            <p className="ct-muted">此处只查询模块符号的一跳静态导入边。按名称导入文件内 class/function（如 <code>from service import WorkspaceService</code>）不会出现在模块“引用谁”的反向结果中；可对具体定义查询 imports。箭头保留真实 source → target 原方向，不表示运行时数据流。</p>
             {graph.directImportTargets.map((target) => <article className="ct-architecture-import-target" key={target.path}>
               <strong><code>{graph.moduleImportDirection === "callers" ? target.path : architectureRoot?.symbol.path}</code><span aria-hidden="true">→</span><code>{graph.moduleImportDirection === "callers" ? architectureRoot?.symbol.path : target.path}</code></strong>
               <details><summary>{target.edges.length} 条原始静态边 · 查看源码依据</summary>{target.edges.map((edge) => <button type="button" className="ct-link-button" key={edge.edge_id} onClick={() => knowledge.onOpenArchitectureSource({ indexId: overview.index.index_id, path: edge.source_location.path, startLine: edge.source_location.start_line, endLine: edge.source_location.end_line })}>{edge.source_location.path}:L{edge.source_location.start_line}–L{edge.source_location.end_line}</button>)}</details>
             </article>)}
             {graph.codeUnresolved.length > 0 ? <UnresolvedReferenceSummary unresolved={graph.codeUnresolved} /> : null}
-            {graph.codeStatus === "empty" ? <p className="ct-muted">未返回静态导入边；索引覆盖和查询预算见上方状态。</p> : null}
+            {graph.codeStatus === "empty" ? <p className="ct-muted">当前模块符号查询未返回边；这不表示整个文件无人导入。按名称导入文件内定义的关系可对具体定义查询 imports。</p> : null}
           </section> : <section className="ct-architecture-module-relations is-calls" aria-label="所选符号静态调用关系">
             <div className="ct-architecture-drilldown-status" role="status">
               <strong>{graph.codeStatus === "loading" ? `正在读取 ${callRoot?.qualified_name ?? "所选符号"} 的静态调用` : graph.codeStatus === "error" ? "静态调用读取失败" : graph.codeStatus === "empty" ? "当前符号没有返回静态调用边" : `${graph.codeSymbolCount} 个符号 · ${graph.codeEdgeCount} 条静态 calls`}</strong>
