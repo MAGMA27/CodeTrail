@@ -34,6 +34,11 @@ export type DirectImportTarget = {
   edges: CodeEdge[];
 };
 
+export type UnresolvedReferenceGroups = {
+  external: UnresolvedReference[];
+  internal: UnresolvedReference[];
+};
+
 export type CallChainPosition = { x: number; y: number };
 export type CallChainEdgeRoute =
   | { type: "forward"; bend: number }
@@ -73,38 +78,43 @@ export function layoutCallChain(
   rootId: string,
   symbols: SymbolRecord[],
   edges: CodeEdge[],
+  direction: "callees" | "callers" = "callees",
+  edgeKinds: CodeEdge["kind"][] = ["calls"],
+  maxDepth = 2,
 ): { nodes: Map<string, { depth: number; position: CallChainPosition }>; routes: Map<string, CallChainEdgeRoute> } {
   const symbolById = new Map(symbols.map((symbol) => [symbol.symbol_id, symbol]));
   if (!symbolById.has(rootId)) return { nodes: new Map(), routes: new Map() };
 
-  const outgoing = new Map<string, CodeEdge[]>();
+  const adjacent = new Map<string, Array<{ edge: CodeEdge; neighborId: string }>>();
   for (const edge of edges) {
-    if (edge.kind !== "calls" || !symbolById.has(edge.source_id) || !symbolById.has(edge.target_id)) continue;
-    const from = outgoing.get(edge.source_id) ?? [];
-    from.push(edge);
-    outgoing.set(edge.source_id, from);
+    if (!edgeKinds.includes(edge.kind) || !symbolById.has(edge.source_id) || !symbolById.has(edge.target_id)) continue;
+    const anchorId = direction === "callees" ? edge.source_id : edge.target_id;
+    const neighborId = direction === "callees" ? edge.target_id : edge.source_id;
+    const from = adjacent.get(anchorId) ?? [];
+    from.push({ edge, neighborId });
+    adjacent.set(anchorId, from);
   }
-  for (const calls of outgoing.values()) {
-    calls.sort((left, right) =>
-      symbolById.get(left.target_id)!.qualified_name.localeCompare(symbolById.get(right.target_id)!.qualified_name) ||
-      left.edge_id.localeCompare(right.edge_id),
+  for (const neighbors of adjacent.values()) {
+    neighbors.sort((left, right) =>
+      symbolById.get(left.neighborId)!.qualified_name.localeCompare(symbolById.get(right.neighborId)!.qualified_name) ||
+      left.edge.edge_id.localeCompare(right.edge.edge_id),
     );
   }
 
   const depthById = new Map([[rootId, 0]]);
   const treeChildren = new Map<string, string[]>();
-  for (let depth = 0; depth < 2; depth += 1) {
+  for (let depth = 0; depth < maxDepth; depth += 1) {
     const parents = [...depthById.entries()]
       .filter(([, nodeDepth]) => nodeDepth === depth)
       .map(([id]) => id)
       .sort((left, right) => symbolById.get(left)!.qualified_name.localeCompare(symbolById.get(right)!.qualified_name));
-    for (const sourceId of parents) {
-      for (const edge of outgoing.get(sourceId) ?? []) {
-        if (depthById.has(edge.target_id)) continue;
-        depthById.set(edge.target_id, depth + 1);
-        const children = treeChildren.get(sourceId) ?? [];
-        children.push(edge.target_id);
-        treeChildren.set(sourceId, children);
+    for (const parentId of parents) {
+      for (const { neighborId } of adjacent.get(parentId) ?? []) {
+        if (depthById.has(neighborId)) continue;
+        depthById.set(neighborId, depth + 1);
+        const children = treeChildren.get(parentId) ?? [];
+        children.push(neighborId);
+        treeChildren.set(parentId, children);
       }
     }
   }
@@ -123,14 +133,14 @@ export function layoutCallChain(
   const nodes = new Map([...depthById].map(([id, depth]) => [id, {
     depth,
     position: {
-      x: 28 + depth * CALL_CHAIN_COLUMN_STEP,
+      x: 28 + (direction === "callees" ? depth : maxDepth - depth) * CALL_CHAIN_COLUMN_STEP,
       y: 64 + (rowById.get(id) ?? 0) * CALL_CHAIN_ROW_STEP,
     },
   }]));
   const minY = Math.min(...[...nodes.values()].map(({ position }) => position.y));
   const maxY = Math.max(...[...nodes.values()].map(({ position }) => position.y + CALL_CHAIN_NODE_HEIGHT));
   const validEdges = edges
-    .filter((edge) => edge.kind === "calls" && nodes.has(edge.source_id) && nodes.has(edge.target_id))
+    .filter((edge) => edgeKinds.includes(edge.kind) && nodes.has(edge.source_id) && nodes.has(edge.target_id))
     .sort((left, right) =>
       symbolById.get(left.source_id)!.qualified_name.localeCompare(symbolById.get(right.source_id)!.qualified_name) ||
       symbolById.get(left.target_id)!.qualified_name.localeCompare(symbolById.get(right.target_id)!.qualified_name) ||
@@ -144,9 +154,9 @@ export function layoutCallChain(
   let outerIndex = 0;
   for (const edge of validEdges) {
     const pairKey = callPairKey(edge.source_id, edge.target_id);
-    const sourceDepth = nodes.get(edge.source_id)!.depth;
-    const targetDepth = nodes.get(edge.target_id)!.depth;
-    if (targetDepth === sourceDepth + 1) {
+    const sourcePosition = nodes.get(edge.source_id)!.position;
+    const targetPosition = nodes.get(edge.target_id)!.position;
+    if (targetPosition.x - sourcePosition.x === CALL_CHAIN_COLUMN_STEP) {
       let bend = forwardBendByPair.get(pairKey);
       if (bend === undefined) {
         const fanout = fanoutBySource.get(edge.source_id) ?? 0;
@@ -398,12 +408,18 @@ export function moduleDefinitionRows(symbols: SymbolRecord[]): ModuleDefinitionR
   return rows;
 }
 
-export function directImportTargets(state: GraphState, module: SymbolRecord): DirectImportTarget[] {
+export function moduleImportRelations(
+  state: GraphState,
+  module: SymbolRecord,
+  direction: "callers" | "callees" = "callees",
+): DirectImportTarget[] {
   const symbols = new Map(state.symbols.map((symbol) => [symbol.symbol_id, symbol]));
   const targets = new Map<string, CodeEdge[]>();
   for (const edge of state.edges) {
-    if (edge.kind !== "imports" || edge.index_id !== module.index_id || edge.source_id !== module.symbol_id) continue;
-    const target = symbols.get(edge.target_id);
+    const relatedId = direction === "callers" ? edge.source_id : edge.target_id;
+    if (edge.kind !== "imports" || edge.index_id !== module.index_id ||
+      (direction === "callers" ? edge.target_id !== module.symbol_id : edge.source_id !== module.symbol_id)) continue;
+    const target = symbols.get(relatedId);
     if (!target || target.index_id !== module.index_id) continue;
     const edges = targets.get(target.path) ?? [];
     if (!edges.some((item) => item.edge_id === edge.edge_id)) edges.push(edge);
@@ -412,6 +428,10 @@ export function directImportTargets(state: GraphState, module: SymbolRecord): Di
   return [...targets.entries()]
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([path, edges]) => ({ path, edges }));
+}
+
+export function directImportTargets(state: GraphState, module: SymbolRecord): DirectImportTarget[] {
+  return moduleImportRelations(state, module, "callees");
 }
 
 export function layoutSymbolGroups(groups: SymbolGroup[], expandedKeys: Set<string>): Array<{ position: { x: number; y: number }; height: number }> {
@@ -440,6 +460,15 @@ export function unresolvedForSymbol(
   symbolId: string,
 ): UnresolvedReference[] {
   return unresolved.filter((reference) => reference.source_symbol_id === symbolId);
+}
+
+export function groupUnresolvedReferences(
+  unresolved: UnresolvedReference[],
+): UnresolvedReferenceGroups {
+  return unresolved.reduce<UnresolvedReferenceGroups>((groups, reference) => {
+    (reference.reason === "external_import" ? groups.external : groups.internal).push(reference);
+    return groups;
+  }, { external: [], internal: [] });
 }
 
 export function edgeKindLabel(kind: CodeEdge["kind"]): string {

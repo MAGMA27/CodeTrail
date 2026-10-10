@@ -85,7 +85,7 @@ import {
   STRUCTURE_DETAIL_WIDTH_STORAGE_KEY,
   type StructureDetailWidthRange,
 } from "../lib/structure-detail-width";
-import { graphFitNodeIds, graphViewportLayoutKey, moduleDefinitionRows as buildModuleDefinitionRows, type CallChainEdgeRoute, type DirectImportTarget, type GraphState } from "../lib/graph";
+import { graphFitNodeIds, graphViewportLayoutKey, groupUnresolvedReferences, moduleDefinitionRows as buildModuleDefinitionRows, type CallChainEdgeRoute, type DirectImportTarget, type GraphState } from "../lib/graph";
 import { architectureEntryModule, architectureEntrySummary, architectureOverviewEdgeVisible, architectureEdgeSides, architectureRelationEdgeType, architectureRelationsForFocusedModule, buildArchitectureGraph, type ArchitectureDirectory, type ArchitecturePosition } from "../lib/architecture-graph";
 
 export type UiAsyncStatus = "idle" | "loading" | "success" | "empty" | "error";
@@ -241,7 +241,7 @@ type KnowledgeUi = {
   onOpenHttpChain: (association: OverviewHttpAssociation) => void;
   onOpenOverviewModule: (module: OverviewModule) => void;
   onOpenModuleSymbols: (module: OverviewModule) => void;
-  onOpenModuleImports: (module: OverviewModule) => void;
+  onOpenModuleImports: (module: OverviewModule, direction?: "callers" | "callees") => Promise<boolean>;
   onOpenSymbolCalls: (symbol: SymbolRecord) => void;
   onLoadMoreModuleSymbols: Action;
   onRetryModuleSymbols: Action;
@@ -308,6 +308,8 @@ type GraphUi = {
   codeEdgeTypes: EdgeTypes | undefined;
   codeEdges: CodeEdge[];
   directImportTargets: DirectImportTarget[];
+  moduleImportDirection: "callers" | "callees";
+  moduleImportRetryDirection: "callers" | "callees" | null;
   codeStatus: UiAsyncStatus;
   codeError: string | null;
   codeTruncated: boolean;
@@ -322,10 +324,25 @@ type GraphUi = {
   codeHasCycle: boolean;
   httpChain: { association: OverviewHttpAssociation; handler: SymbolRecord } | null;
   entryCallChain: { entry: OverviewEntryPoint; root: SymbolRecord; startKind: "handler" | "module" } | null;
+  entryTrace: {
+    focusId: string;
+    focusSymbol: SymbolRecord;
+    isEntry: boolean;
+    direction: "callers" | "callees";
+    edgeKinds: EdgeKind[];
+    canGoBack: boolean;
+    retry: { symbolId: string; direction: "callers" | "callees"; edgeKinds: EdgeKind[] } | null;
+    viewportRestore: { x: number; y: number; zoom: number; revision: number } | null;
+  } | null;
   onSelectHttpChainEvidence: (evidence: Evidence) => void;
   onSelectEntryChainSource: Action;
   onRetryHttpChain: Action;
   onRetryEntryCallChain: Action;
+  onNavigateEntryTrace: (symbolId: string, direction: "callers" | "callees", edgeKinds: EdgeKind[]) => void;
+  onRetryEntryTrace: Action;
+  onBackEntryTrace: Action;
+  onReturnEntryTrace: Action;
+  onEntryTraceViewportRestored: (revision: number) => void;
   onExitHttpChain: Action;
   onExitEntryCallChain: Action;
   codeFocusNodeIds: string[];
@@ -1835,11 +1852,16 @@ function ArchitectureSection({ overview, knowledge, graph, panelMode, onPanelMod
         <div className="ct-architecture-drilldown-actions">
           <div className="ct-architecture-drilldown-modes" role="group" aria-label="模块视图">
             <button type="button" className={`ct-link-button${moduleViewMode === "definitions" ? " is-selected" : ""}`} aria-pressed={moduleViewMode === "definitions"} onClick={() => architectureRoot && setModuleViewState({ rootId: architectureRoot.symbol.symbol_id, mode: "definitions", callSymbol: null })}>内部定义</button>
-            <button type="button" className={`ct-link-button${moduleViewMode === "imports" ? " is-selected" : ""}`} aria-pressed={moduleViewMode === "imports"} onClick={() => {
+            <button type="button" className={`ct-link-button${moduleViewMode === "imports" && graph.moduleImportDirection === "callees" ? " is-selected" : ""}`} aria-pressed={moduleViewMode === "imports" && graph.moduleImportDirection === "callees"} onClick={() => {
               if (!architectureRoot) return;
               setModuleViewState({ rootId: architectureRoot.symbol.symbol_id, mode: "imports", callSymbol: null });
-              knowledge.onOpenModuleImports(architectureRoot);
-            }}>静态导入依赖</button>
+              void knowledge.onOpenModuleImports(architectureRoot, "callees");
+            }} disabled={graph.codeStatus === "loading"}>引用谁</button>
+            <button type="button" className={`ct-link-button${moduleViewMode === "imports" && graph.moduleImportDirection === "callers" ? " is-selected" : ""}`} aria-pressed={moduleViewMode === "imports" && graph.moduleImportDirection === "callers"} onClick={() => {
+              if (!architectureRoot) return;
+              setModuleViewState({ rootId: architectureRoot.symbol.symbol_id, mode: "imports", callSymbol: null });
+              void knowledge.onOpenModuleImports(architectureRoot, "callers");
+            }} disabled={graph.codeStatus === "loading"}>被谁引用</button>
             {moduleViewMode === "calls" ? <span className="ct-architecture-focus-status" role="status">静态调用 · {callRoot?.qualified_name ?? "所选符号"}</span> : null}
           </div>
           <button type="button" className="ct-button ct-button-secondary" onClick={() => onPanelModeChange("source")} disabled={!graph.selectedId}>查看所选源码</button>
@@ -1868,16 +1890,20 @@ function ArchitectureSection({ overview, knowledge, graph, panelMode, onPanelMod
             {moduleSymbolsPage?.has_more ? <button type="button" className="ct-link-button" onClick={knowledge.onLoadMoreModuleSymbols} disabled={knowledge.moduleSymbolsStatus === "loading"}>{knowledge.moduleSymbolsStatus === "loading" ? "正在加载…" : "继续加载定义"}</button> : null}
           </section> : moduleViewMode === "imports" ? <section className="ct-architecture-module-relations" aria-label="静态导入依赖">
             <div className="ct-architecture-drilldown-status" role="status">
-              <strong>{graph.codeStatus === "loading" ? "正在读取静态导入依赖" : graph.codeStatus === "error" ? "静态导入依赖读取失败" : graph.codeStatus === "empty" ? "当前查询没有返回静态导入" : `${graph.directImportTargets.length} 个目标文件 · ${graph.codeEdgeCount} 条已返回静态边`}</strong>
+              <strong>{graph.codeStatus === "loading" ? "正在读取一跳静态 imports" : graph.codeStatus === "error" ? "静态 imports 读取失败" : graph.codeStatus === "empty" ? "当前查询没有返回静态 imports" : `${graph.directImportTargets.length} 个关联文件 · ${graph.codeEdgeCount} 条已返回静态边`}</strong>
               {graph.codeTruncated ? <span>导入查询已截断 · {graph.codeTruncationReason}；未显示的目标文件仍可能存在。</span> : null}
               {graph.codeIndexTruncated ? <span>固定索引关系提取未完成 · {graph.codeIndexTruncationReason}；空结果不能证明没有依赖。</span> : null}
-              {graph.codeError ? <span role="alert">{graph.codeError}<button type="button" className="ct-link-button" onClick={() => architectureRoot && knowledge.onOpenModuleImports(architectureRoot)}>重试</button></span> : null}
+              {graph.codeError ? <span role="alert">{graph.codeError}<button type="button" className="ct-link-button" onClick={() => architectureRoot && void knowledge.onOpenModuleImports(architectureRoot, graph.moduleImportRetryDirection ?? graph.moduleImportDirection)}>重试</button></span> : null}
             </div>
-            <p className="ct-muted">静态 imports 以目标文件聚合；箭头表示当前文件 → 目标文件，不表示运行时数据流。</p>
+            <div className="ct-architecture-import-direction">
+              <span>{graph.moduleImportDirection === "callers" ? "导入者 → 当前文件" : "当前文件 → 被导入文件"}</span>
+            </div>
+            <p className="ct-muted">只聚合固定索引实际返回的一跳静态 imports；箭头保留 source → target 原方向，不表示运行时数据流。</p>
             {graph.directImportTargets.map((target) => <article className="ct-architecture-import-target" key={target.path}>
-              <strong><code>{architectureRoot?.symbol.path}</code><span aria-hidden="true">→</span><code>{target.path}</code></strong>
+              <strong><code>{graph.moduleImportDirection === "callers" ? target.path : architectureRoot?.symbol.path}</code><span aria-hidden="true">→</span><code>{graph.moduleImportDirection === "callers" ? architectureRoot?.symbol.path : target.path}</code></strong>
               <details><summary>{target.edges.length} 条原始静态边 · 查看源码依据</summary>{target.edges.map((edge) => <button type="button" className="ct-link-button" key={edge.edge_id} onClick={() => knowledge.onOpenArchitectureSource({ indexId: overview.index.index_id, path: edge.source_location.path, startLine: edge.source_location.start_line, endLine: edge.source_location.end_line })}>{edge.source_location.path}:L{edge.source_location.start_line}–L{edge.source_location.end_line}</button>)}</details>
             </article>)}
+            {graph.codeUnresolved.length > 0 ? <UnresolvedReferenceSummary unresolved={graph.codeUnresolved} /> : null}
             {graph.codeStatus === "empty" ? <p className="ct-muted">未返回静态导入边；索引覆盖和查询预算见上方状态。</p> : null}
           </section> : <section className="ct-architecture-module-relations is-calls" aria-label="所选符号静态调用关系">
             <div className="ct-architecture-drilldown-status" role="status">
@@ -1890,7 +1916,7 @@ function ArchitectureSection({ overview, knowledge, graph, panelMode, onPanelMod
             <div className="ct-graph-legend"><span><i className="is-calls" />静态调用 source → target</span><small>箭头只表示调用方向，不代表数据流。</small></div>
             {graph.codeStatus === "loading" && graph.codeModel.nodes.length === 0 ? <p className="ct-muted">正在读取所选符号的固定索引关系…</p> : null}
             <GraphCanvas model={graph.codeModel} nodeTypes={graph.codeNodeTypes} onInit={graph.onCodeInit} onNodeClick={graph.onCodeNodeClick} focusNodeIds={graph.codeFocusNodeIds} emptyTitle="当前符号没有可显示的静态 calls。" />
-            {graph.codeUnresolved.length > 0 ? <details className="ct-architecture-drilldown-unresolved"><summary>未知关系引用 · {graph.codeUnresolved.length}</summary>{graph.codeUnresolved.map((item) => <span key={item.unresolved_id}><code>{item.expression}</code> · {item.reason} · {item.path}:L{item.start_line}</span>)}</details> : null}
+            {graph.codeUnresolved.length > 0 ? <UnresolvedReferenceSummary unresolved={graph.codeUnresolved} /> : null}
             {graph.codeEdges.length > 0 ? <details className="ct-architecture-drilldown-unresolved"><summary>已返回静态边源码依据 · {graph.codeEdges.length}</summary>{graph.codeEdges.map((edge) => <button type="button" className="ct-link-button" key={edge.edge_id} onClick={() => knowledge.onOpenArchitectureSource({ indexId: overview.index.index_id, path: edge.source_location.path, startLine: edge.source_location.start_line, endLine: edge.source_location.end_line })}>{edge.source_location.path}:L{edge.source_location.start_line}–L{edge.source_location.end_line}</button>)}</details> : null}
           </section>}
         </div>
@@ -2610,6 +2636,23 @@ function EvidencePanel({ evidence, returnPanel, onReturnToPanel }: { evidence: E
   );
 }
 
+function UnresolvedReferenceSummary({ unresolved }: { unresolved: UnresolvedReference[] }) {
+  const groups = groupUnresolvedReferences(unresolved);
+  if (unresolved.length === 0) return null;
+  return (
+    <section className="ct-unresolved-summary" aria-label="未解析关系">
+      {groups.internal.length > 0 ? <details className="ct-unresolved-summary-internal">
+        <summary>内部未知 · {groups.internal.length}</summary>
+        <ul>{groups.internal.map((item) => <li key={item.unresolved_id}><code>{item.expression}</code><span>{item.reason} · {item.path}:L{item.start_line}</span></li>)}</ul>
+      </details> : null}
+      {groups.external.length > 0 ? <details className="ct-unresolved-summary-external">
+        <summary>外部依赖 · {groups.external.length}</summary>
+        <ul>{groups.external.map((item) => <li key={item.unresolved_id}><code>{item.expression}</code><span>{item.reason} · {item.path}:L{item.start_line}</span></li>)}</ul>
+      </details> : null}
+    </section>
+  );
+}
+
 function GraphPanel({ graph }: { graph: GraphUi }) {
   const isFeature = graph.panelMode === "feature_graph";
   const isImpact = graph.panelMode === "impact";
@@ -2652,6 +2695,15 @@ function GraphPanel({ graph }: { graph: GraphUi }) {
     };
   }, [graph.codeFocusNodeIds, graph.codeModel, graph.selectedId, hasEntryCallChain]);
   const codeFitNodeIds = hasEntryCallChain ? [] : codeFocusNodeIds;
+  const traceTargetId = graph.selectedId ?? graph.entryTrace?.focusId ?? graph.entryCallChain?.root.symbol_id ?? graph.httpChain?.handler.symbol_id ?? null;
+  const entryTraceIsInitial = !graph.entryTrace || graph.entryTrace.isEntry;
+  const toggleTraceEdgeKind = (kind: EdgeKind) => {
+    if (!graph.entryTrace || !traceTargetId || graph.codeStatus === "loading") return;
+    const next = graph.entryTrace.edgeKinds.includes(kind)
+      ? graph.entryTrace.edgeKinds.filter((item) => item !== kind)
+      : [...graph.entryTrace.edgeKinds, kind];
+    if (next.length > 0) graph.onNavigateEntryTrace(traceTargetId, graph.entryTrace.direction, next);
+  };
   return (
     <aside className={`ct-side-panel ct-graph-panel${hasEntryCallChain ? " is-entry-call-chain" : ""}`} aria-label={isFeature ? "功能图面板" : isImpact ? "候选影响面板" : "代码关系面板"}>
       <div className="ct-side-panel-header"><div><p className="ct-overline">{isFeature ? "FEATURE TOPOLOGY" : isImpact ? "RUN IMPACT" : "STATIC TOPOLOGY"}</p><h2>{isFeature ? "功能图" : isImpact ? "候选影响" : "代码关系"}</h2></div><button type="button" className="ct-close-button" onClick={graph.httpChain ? graph.onExitHttpChain : graph.entryCallChain ? graph.onExitEntryCallChain : graph.onClose}>关闭</button></div>
@@ -2665,12 +2717,12 @@ function GraphPanel({ graph }: { graph: GraphUi }) {
             <span className="ct-http-chain-arrow" aria-hidden="true">→</span>
             <div className="ct-http-chain-step"><small>FastAPI handler</small><strong title={graph.httpChain.handler.qualified_name}>{graph.httpChain.handler.qualified_name}</strong><code>{graph.httpChain.handler.path}:L{graph.httpChain.handler.start_line}–L{graph.httpChain.handler.end_line}</code><button type="button" onClick={() => graph.onSelectHttpChainEvidence(graph.httpChain!.association.route_evidence)}>查看路由证据</button></div>
           </div>
-          <p>客户端函数只作入口锚点；下图从该 handler 查询同一 index 的静态 calls，最多向下 2 层、40 个符号。深度之外、未解析或未提取的关系不会补猜。</p>
+          <p>客户端函数只作入口锚点；入口图初始从该 handler 查询同一 index 的静态 calls，最多向下 2 层、40 个符号。选中节点后可按该符号查询 callers/callees 的一跳关系。深度之外、未解析或未提取的关系不会补猜。</p>
           <button type="button" className="ct-link-button" onClick={graph.onExitHttpChain}>退出链路</button>
         </div> : null}
         {graph.entryCallChain ? <div className="ct-entry-call-context">
           <div><small>{overviewEntryKindLabel(graph.entryCallChain.entry)} · {graph.entryCallChain.startKind === "handler" ? "handler 起点" : "模块起点"}</small><strong title={graph.entryCallChain.root.qualified_name}>{graph.entryCallChain.root.qualified_name}</strong><code>{graph.entryCallChain.root.path}:L{graph.entryCallChain.root.start_line}–L{graph.entryCallChain.root.end_line}</code></div>
-          <p>仅查询此入口起点向下 2 层、最多 40 个符号的同快照静态 calls。模块入口从模块符号起查；没有可解析 handler 时不补造入口函数。静态可达不代表运行时必然执行，也不表示数据流。</p>
+          <p>入口图初始查询此起点向下 2 层、最多 40 个符号的同快照静态 calls；后续可从选中符号追踪 callers/callees 一跳关系。模块入口从模块符号起查；没有可解析 handler 时不补造入口函数。静态可达不代表运行时必然执行，也不表示数据流。</p>
           <div><button type="button" className="ct-link-button" onClick={graph.onSelectEntryChainSource} disabled={!graph.entryCallChain.entry.evidence}>查看入口源码</button><button type="button" className="ct-link-button" onClick={graph.onExitEntryCallChain}>返回项目架构</button></div>
         </div> : null}
         {graph.httpChain || graph.contextualCalls.length > 0 ? <section className="ct-contextual-calls" aria-label="指定构造上下文调用">
@@ -2693,17 +2745,33 @@ function GraphPanel({ graph }: { graph: GraphUi }) {
             </div>
           </article>)}
         </section> : null}
-        {hasEntryCallChain ? <div className="ct-graph-toolbar ct-http-chain-toolbar"><div className="ct-call-chain-selection" role="status" aria-live="polite"><span>所选符号</span><strong>{graph.selectedSymbol?.qualified_name ?? "选择一个节点"}</strong>{graph.selectedSymbol ? <code>{graph.selectedSymbol.path}:L{graph.selectedSymbol.start_line}</code> : null}</div><button type="button" className="ct-link-button" onClick={() => { if (graph.flowInstance) void graph.flowInstance.fitBounds(graphCanvasFitBounds(graph.flowInstance, codeViewModel, codeFitNodeIds), { padding: 0.18, duration: 240 }); }} disabled={graph.codeModel.nodes.length === 0}>聚焦</button></div> : <div className="ct-graph-toolbar"><label>方向<select value={graph.direction} onChange={(event) => graph.onChangeDirection(event.target.value as NeighborDirection)} disabled={!graph.selectedId}><option value="both">双向</option><option value="callers">调用方</option><option value="callees">被调用方</option></select></label><label className="ct-check-field"><input type="checkbox" checked={graph.edgeKinds.includes("calls")} onChange={() => graph.onToggleEdgeKind("calls")} disabled={!graph.selectedId} /><span>calls</span></label><label className="ct-check-field"><input type="checkbox" checked={graph.edgeKinds.includes("imports")} onChange={() => graph.onToggleEdgeKind("imports")} disabled={!graph.selectedId} /><span>imports</span></label><button type="button" className="ct-link-button" onClick={() => { if (graph.flowInstance) { void graph.flowInstance.fitBounds(graphCanvasFitBounds(graph.flowInstance, codeViewModel, codeFitNodeIds), { padding: 0.18, duration: 240 }); } }} disabled={graph.codeModel.nodes.length === 0}>聚焦</button></div>}
-        <div className="ct-panel-status"><span data-state={graph.codeStatus}>{graph.codeStatus === "loading" ? hasEntryCallChain ? "载入入口下游静态 calls" : "载入关系中" : graph.codeStatus === "error" ? "关系请求失败" : graph.codeStatus === "empty" ? hasEntryCallChain ? "当前有界入口查询没有返回静态 calls" : graph.codeIndexTruncated ? "当前结果为空（索引关系未完整分析）" : graph.codeIndexUnresolvedTruncated === true ? "当前结果为空（unresolved 详情不完整）" : "当前方向没有静态边" : graph.codeStatus === "success" ? `${graph.codeSymbolCount} 个节点 · ${graph.codeEdgeCount} 条边` : "选择搜索命中后载入关系"}</span>{graph.codeTruncated ? <small>查询已截断 · {graph.codeTruncationReason}</small> : null}</div>
+        {hasEntryCallChain && graph.entryTrace ? <div className="ct-graph-toolbar ct-entry-trace-toolbar">
+          <div className="ct-call-chain-selection" role="status" aria-live="polite">
+            <span>当前追踪焦点</span>
+            <strong>{graph.entryTrace.focusSymbol.qualified_name}</strong>
+            <code>{graph.entryTrace.focusSymbol.path}:L{graph.entryTrace.focusSymbol.start_line}</code>
+            {graph.selectedSymbol ? <code>所选 · {graph.selectedSymbol.qualified_name} · {graph.selectedSymbol.path}:L{graph.selectedSymbol.start_line}</code> : null}
+          </div>
+          <div className="ct-entry-trace-actions" role="group" aria-label="关系追踪">
+            <button type="button" className={`ct-link-button${graph.entryTrace.direction === "callees" ? " is-selected" : ""}`} aria-pressed={graph.entryTrace.direction === "callees"} onClick={() => traceTargetId && graph.onNavigateEntryTrace(traceTargetId, "callees", graph.entryTrace!.edgeKinds)} disabled={!traceTargetId || graph.codeStatus === "loading"}>引用谁</button>
+            <button type="button" className={`ct-link-button${graph.entryTrace.direction === "callers" ? " is-selected" : ""}`} aria-pressed={graph.entryTrace.direction === "callers"} onClick={() => traceTargetId && graph.onNavigateEntryTrace(traceTargetId, "callers", graph.entryTrace!.edgeKinds)} disabled={!traceTargetId || graph.codeStatus === "loading"}>被谁引用</button>
+            <label className="ct-check-field"><input type="checkbox" checked={graph.entryTrace.edgeKinds.includes("calls")} onChange={() => toggleTraceEdgeKind("calls")} disabled={graph.codeStatus === "loading" || graph.entryTrace.edgeKinds.length === 1 && graph.entryTrace.edgeKinds.includes("calls")} /><span>calls</span></label>
+            <label className="ct-check-field"><input type="checkbox" checked={graph.entryTrace.edgeKinds.includes("imports")} onChange={() => toggleTraceEdgeKind("imports")} disabled={graph.codeStatus === "loading" || graph.entryTrace.edgeKinds.length === 1 && graph.entryTrace.edgeKinds.includes("imports")} /><span>imports</span></label>
+            <button type="button" className="ct-link-button" onClick={graph.onBackEntryTrace} disabled={!graph.entryTrace.canGoBack || graph.codeStatus === "loading"}>上一步</button>
+            <button type="button" className="ct-link-button" onClick={graph.onReturnEntryTrace} disabled={graph.codeStatus === "loading"}>返回入口</button>
+          </div>
+          <button type="button" className="ct-link-button" onClick={() => { if (graph.flowInstance) void graph.flowInstance.fitBounds(graphCanvasFitBounds(graph.flowInstance, codeViewModel, codeFitNodeIds), { padding: 0.18, duration: 240 }); }} disabled={graph.codeModel.nodes.length === 0}>聚焦</button>
+        </div> : hasEntryCallChain ? <div className="ct-graph-toolbar ct-http-chain-toolbar"><div className="ct-call-chain-selection" role="status" aria-live="polite"><span>所选符号</span><strong>{graph.selectedSymbol?.qualified_name ?? "选择一个节点"}</strong>{graph.selectedSymbol ? <code>{graph.selectedSymbol.path}:L{graph.selectedSymbol.start_line}</code> : null}</div><button type="button" className="ct-link-button" onClick={() => { if (graph.flowInstance) void graph.flowInstance.fitBounds(graphCanvasFitBounds(graph.flowInstance, codeViewModel, codeFitNodeIds), { padding: 0.18, duration: 240 }); }} disabled={graph.codeModel.nodes.length === 0}>聚焦</button></div> : <div className="ct-graph-toolbar"><label>方向<select value={graph.direction} onChange={(event) => graph.onChangeDirection(event.target.value as NeighborDirection)} disabled={!graph.selectedId}><option value="both">双向</option><option value="callers">调用方</option><option value="callees">被调用方</option></select></label><label className="ct-check-field"><input type="checkbox" checked={graph.edgeKinds.includes("calls")} onChange={() => graph.onToggleEdgeKind("calls")} disabled={!graph.selectedId} /><span>calls</span></label><label className="ct-check-field"><input type="checkbox" checked={graph.edgeKinds.includes("imports")} onChange={() => graph.onToggleEdgeKind("imports")} disabled={!graph.selectedId} /><span>imports</span></label><button type="button" className="ct-link-button" onClick={() => { if (graph.flowInstance) { void graph.flowInstance.fitBounds(graphCanvasFitBounds(graph.flowInstance, codeViewModel, codeFitNodeIds), { padding: 0.18, duration: 240 }); } }} disabled={graph.codeModel.nodes.length === 0}>聚焦</button></div>}
+        <div className="ct-panel-status"><span data-state={graph.codeStatus}>{graph.codeStatus === "loading" ? hasEntryCallChain ? entryTraceIsInitial ? "载入入口初始的两层静态关系" : "载入当前焦点的一跳静态关系" : "载入关系中" : graph.codeStatus === "error" ? "关系请求失败" : graph.codeStatus === "empty" ? hasEntryCallChain ? entryTraceIsInitial ? "入口初始两层查询没有返回关系" : "当前焦点的一跳查询没有返回关系" : graph.codeIndexTruncated ? "当前结果为空（索引关系未完整分析）" : graph.codeIndexUnresolvedTruncated === true ? "当前结果为空（unresolved 详情不完整）" : "当前方向没有静态边" : graph.codeStatus === "success" ? `${graph.codeSymbolCount} 个节点 · ${graph.codeEdgeCount} 条边` : "选择搜索命中后载入关系"}</span>{graph.codeTruncated ? <small>查询已截断 · {graph.codeTruncationReason}</small> : null}</div>
         {graph.codeIndexTruncated ? <p className="ct-graph-coverage-warning" role="status">当前固定索引的关系提取未完成 · {graph.codeIndexTruncationReason}；空邻接不能证明没有关系。</p> : null}
         {graph.codeIndexUnresolvedTruncated === true ? <p className="ct-graph-coverage-warning" role="status">当前固定索引的 unresolved 详情已截断 · {graph.codeIndexUnresolvedTruncationReason}；未返回的 unresolved 不能被当作不存在。</p> : null}
         {graph.codeSymbolCount > 0 && graph.codeIndexUnresolvedTruncated === null ? <p className="ct-graph-coverage-warning" role="status">当前旧索引未记录 unresolved 覆盖状态；不把缺失的 unresolved 当作不存在。</p> : null}
-        {graph.codeError ? <p className="ct-inline-error" role="alert">{graph.codeError}{graph.httpChain ? <button type="button" className="ct-link-button" onClick={graph.onRetryHttpChain}>重试</button> : graph.entryCallChain ? <button type="button" className="ct-link-button" onClick={graph.onRetryEntryCallChain}>重试</button> : null}</p> : null}
-        {graph.codeStatus === "empty" && hasEntryCallChain ? <p className="ct-graph-coverage-warning" role="status">空结果只表示当前固定快照的有界 calls 查询没有返回边，不能证明入口没有下游服务或存储调用。</p> : null}
+        {graph.codeError ? <p className="ct-inline-error" role="alert">{graph.codeError}{graph.entryTrace?.retry ? <button type="button" className="ct-link-button" onClick={graph.onRetryEntryTrace}>重试这次追踪</button> : graph.httpChain ? <button type="button" className="ct-link-button" onClick={graph.onRetryHttpChain}>重试</button> : graph.entryCallChain ? <button type="button" className="ct-link-button" onClick={graph.onRetryEntryCallChain}>重试</button> : null}</p> : null}
+        {graph.codeStatus === "empty" && hasEntryCallChain ? <p className="ct-graph-coverage-warning" role="status">空结果只表示当前固定快照的{entryTraceIsInitial ? "入口初始两层" : "一跳"}关系查询没有返回边；不能证明不存在其他关系或未解析目标。</p> : null}
         {hasEntryCallChain && graph.codeHasCycle ? <p className="ct-graph-coverage-warning" role="status">当前返回的 calls 中检测到循环边；相同符号按 ID 合并显示，循环边保留。</p> : null}
-        {hasEntryCallChain && graph.codeUnresolved.length > 0 ? <details className="ct-http-chain-unresolved"><summary>未解析引用 · {graph.codeUnresolved.length}</summary>{graph.codeUnresolved.map((item) => <span key={item.unresolved_id}><code>{item.expression}</code> · {item.reason} · {item.path}:L{item.start_line}</span>)}</details> : null}
-        <div className="ct-graph-legend"><span><i className="is-calls" />calls</span>{hasEntryCallChain ? <small>入口起点的有界静态 calls 子图 · 单击只选中；“查看所选源码”打开证据</small> : <><span><i className="is-imports" />imports</span><small>局部静态子图 · 视口聚焦 {graph.codeFocusNodeIds.length > 0 ? `${codeFocusNodeIds.length} 个节点` : "全部节点"}</small></>}</div>
-        <GraphCanvas model={codeViewModel} nodeTypes={graph.codeNodeTypes} edgeTypes={hasEntryCallChain ? graph.codeEdgeTypes : undefined} showMiniMap={!hasEntryCallChain} preserveViewportOnSelection={hasEntryCallChain} onInit={graph.onCodeInit} onNodeClick={graph.onCodeNodeClick} focusNodeIds={codeFitNodeIds} emptyTitle="建立或打开索引后，这里会显示关系图。" />
+        {hasEntryCallChain && graph.codeUnresolved.length > 0 ? <UnresolvedReferenceSummary unresolved={graph.codeUnresolved} /> : null}
+        <div className="ct-graph-legend"><span><i className="is-calls" />calls</span>{hasEntryCallChain ? <><span><i className="is-imports" />imports</span><small>{entryTraceIsInitial ? "入口初始两层静态关系" : "当前焦点一跳静态关系"} · 单击只选中；“查看所选源码”打开证据</small></> : <><span><i className="is-imports" />imports</span><small>局部静态子图 · 视口聚焦 {graph.codeFocusNodeIds.length > 0 ? `${codeFocusNodeIds.length} 个节点` : "全部节点"}</small></>}</div>
+        <GraphCanvas model={codeViewModel} nodeTypes={graph.codeNodeTypes} edgeTypes={hasEntryCallChain ? graph.codeEdgeTypes : undefined} showMiniMap={!hasEntryCallChain} preserveViewportOnSelection={hasEntryCallChain} viewportRestore={graph.entryTrace?.viewportRestore ?? null} onViewportRestored={graph.onEntryTraceViewportRestored} onInit={graph.onCodeInit} onNodeClick={graph.onCodeNodeClick} focusNodeIds={codeFitNodeIds} emptyTitle="建立或打开索引后，这里会显示关系图。" />
       </> : isFeature ? <>
         <div className="ct-graph-toolbar"><span className="ct-graph-legend"><span><i className="is-semantic" />语义关联</span><span><i className="is-static" />静态 CodeEdge</span></span><button type="button" className="ct-link-button" onClick={() => graph.featureFlowInstance?.fitView({ padding: 0.18, duration: 240 })} disabled={graph.featureModel.nodes.length === 0}>聚焦</button></div>
         <div className="ct-panel-status"><span data-state={graph.featureStatus}>{graph.featureStatus === "loading" ? "功能图载入中" : graph.featureStatus === "error" ? "功能图请求失败" : graph.featureStatus === "empty" ? "当前版本没有可展开节点" : graph.featureStatus === "success" ? `${featureGraph?.nodes.length ?? 0} 个节点 · 语义 / 静态关系已分开` : "选择一个已保存版本载入功能图"}</span>{featureGraph?.truncated ? <small>已截断 · {featureGraph.truncation_reason}</small> : null}</div>
@@ -2738,6 +2806,8 @@ function GraphCanvas({
   focusNodeIds = [],
   showMiniMap = true,
   preserveViewportOnSelection = false,
+  viewportRestore = null,
+  onViewportRestored,
 }: {
   model: { nodes: Node[]; edges: Edge[] };
   nodeTypes: NodeTypes;
@@ -2748,6 +2818,8 @@ function GraphCanvas({
   focusNodeIds?: string[];
   showMiniMap?: boolean;
   preserveViewportOnSelection?: boolean;
+  viewportRestore?: { x: number; y: number; zoom: number; revision: number } | null;
+  onViewportRestored?: (revision: number) => void;
 }) {
   const [hoveredEdgeId, setHoveredEdgeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
@@ -2776,7 +2848,7 @@ function GraphCanvas({
         minZoom={0.25}
         maxZoom={1.8}
       >
-        <GraphFitController model={model} focusNodeIds={focusNodeIds} preserveViewportOnSelection={preserveViewportOnSelection} />
+        <GraphFitController model={model} focusNodeIds={focusNodeIds} preserveViewportOnSelection={preserveViewportOnSelection} viewportRestore={viewportRestore} onViewportRestored={onViewportRestored} />
         <Background color="#d7dee8" gap={24} size={1} />
         <Controls showInteractive={false} position="bottom-left" />
         {showMiniMap ? <MiniMap pannable zoomable nodeColor={(node) => node.type === "group" ? "#aab5c4" : node.type === "feature" ? "#3158d9" : "#7790c7"} maskColor="rgba(247, 248, 250, 0.78)" position="bottom-right" /> : null}
@@ -2789,16 +2861,26 @@ function GraphFitController({
   model,
   focusNodeIds,
   preserveViewportOnSelection,
+  viewportRestore,
+  onViewportRestored,
 }: {
   model: { nodes: Node[]; edges: Edge[] };
   focusNodeIds: string[];
   preserveViewportOnSelection: boolean;
+  viewportRestore: { x: number; y: number; zoom: number; revision: number } | null;
+  onViewportRestored?: (revision: number) => void;
 }) {
   const flow = useReactFlow<Node, Edge>();
   const layoutKey = preserveViewportOnSelection ? graphViewportLayoutKey(model, focusNodeIds) : null;
   const lastFittedLayoutKey = useRef<string | null>(null);
 
   useEffect(() => {
+    if (viewportRestore) {
+      void flow.setViewport({ x: viewportRestore.x, y: viewportRestore.y, zoom: viewportRestore.zoom }, { duration: 0 });
+      if (preserveViewportOnSelection) lastFittedLayoutKey.current = layoutKey;
+      onViewportRestored?.(viewportRestore.revision);
+      return;
+    }
     if (model.nodes.length === 0 || (preserveViewportOnSelection && layoutKey === lastFittedLayoutKey.current)) {
       return;
     }
@@ -2811,7 +2893,7 @@ function GraphFitController({
       if (preserveViewportOnSelection) lastFittedLayoutKey.current = layoutKey;
     }, 100);
     return () => window.clearTimeout(timer);
-  }, [flow, focusNodeIds, layoutKey, model.nodes, preserveViewportOnSelection]);
+  }, [flow, focusNodeIds, layoutKey, model.nodes, onViewportRestored, preserveViewportOnSelection, viewportRestore]);
 
   return null;
 }

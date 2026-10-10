@@ -10,6 +10,7 @@ import {
   layoutCallChain,
   emptyGraphState,
   directImportTargets,
+  groupUnresolvedReferences,
   graphFitNodeIds,
   graphViewportLayoutKey,
   groupSymbolsByDirectory,
@@ -20,6 +21,7 @@ import {
   mergeContextualCalls,
   mergeNeighborGraph,
   moduleDefinitionRows,
+  moduleImportRelations,
   unresolvedForSymbol,
 } from "./graph.ts";
 
@@ -239,6 +241,17 @@ test("parallel callsites for one tree pair reuse a single forward path", () => {
   assert.equal(callChainEdgePath(firstRoute, sourcePort, targetPort), callChainEdgePath(secondRoute, sourcePort, targetPort));
 });
 
+test("one-hop callers render left-to-right while retaining the real source-to-target edge", () => {
+  const caller = symbol("caller", "api.py", "api.invoke", 4);
+  const focus = symbol("focus", "service.py", "service.run", 20);
+  const relation = edge("caller-focus", caller.symbol_id, focus.symbol_id);
+  const layout = layoutCallChain(focus.symbol_id, [caller, focus], [relation], "callers", ["calls"], 1);
+
+  assert.ok(layout.nodes.get(caller.symbol_id)!.position.x < layout.nodes.get(focus.symbol_id)!.position.x);
+  assert.deepEqual([relation.source_id, relation.target_id], [caller.symbol_id, focus.symbol_id]);
+  assert.deepEqual(layout.routes.get(relation.edge_id), { type: "forward", bend: 8 });
+});
+
 test("conditional calls remain visible separately when a static graph is empty", () => {
   const conditional: ContextualCall = {
     context_id: "context-one",
@@ -339,6 +352,27 @@ test("direct imports aggregate by target file and retain every source edge", () 
   assert.deepEqual(targets[0]?.edges.map(({ source_location }) => source_location.start_line), [4, 9]);
 });
 
+test("incoming imports group real source modules without reversing edges", () => {
+  const module = { ...root, kind: "module" as const };
+  const importer = { ...child, kind: "module" as const };
+  const importEdge: CodeEdge = {
+    ...edge("incoming-import", importer.symbol_id, module.symbol_id),
+    kind: "imports",
+    source_location: { path: importer.path, start_line: 8, end_line: 8 },
+  };
+  const state = mergeNeighborGraph(emptyGraphState, {
+    ...response,
+    root: module,
+    nodes: [module, importer],
+    neighbors: [{ symbol: importer, edge: importEdge }],
+  });
+
+  const relations = moduleImportRelations(state, module, "callers");
+  assert.deepEqual(relations.map(({ path }) => path), [importer.path]);
+  assert.deepEqual(relations[0]?.edges.map(({ source_id, target_id }) => [source_id, target_id]), [[importer.symbol_id, module.symbol_id]]);
+  assert.deepEqual(moduleImportRelations(state, module, "callees"), []);
+});
+
 test("symbol directory containers grow with their children and stay disjoint", () => {
   const groups = [4, 3, 2, 5, 1].map((count, groupIndex) => ({
     key: `dir-${groupIndex}`,
@@ -398,6 +432,13 @@ test("stale request IDs and unresolved references stay explicit", () => {
   };
   assert.deepEqual(unresolvedForSymbol([unresolved], root.symbol_id), [unresolved]);
   assert.deepEqual(unresolvedForSymbol([unresolved], child.symbol_id), []);
+  const groups = groupUnresolvedReferences([
+    { ...unresolved, reason: "external_import" },
+    { ...unresolved, unresolved_id: "missing-relative", reason: "missing_relative_import" },
+    { ...unresolved, unresolved_id: "ambiguous-alias", reason: "external_import_or_path_alias" },
+  ]);
+  assert.deepEqual(groups.external.map(({ reason }) => reason), ["external_import"]);
+  assert.deepEqual(groups.internal.map(({ reason }) => reason), ["missing_relative_import", "external_import_or_path_alias"]);
 });
 
 test("calls-only entry chains stay on the requested graph and expose bounded cycles", () => {

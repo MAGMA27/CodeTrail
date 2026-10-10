@@ -337,6 +337,8 @@ code { font-family: var(--ct-mono); }
 .ct-architecture-import-target code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ct-architecture-import-target details { display: grid; gap: 3px; color: var(--ct-muted); font-size: 10px; }
 .ct-architecture-import-target summary { cursor: pointer; }
+.ct-architecture-import-direction { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ct-architecture-import-direction > span { color: var(--ct-muted); font-size: 10px; }
 .ct-http-associations { display: grid; gap: 9px; padding: 13px; border: 1px solid var(--ct-border-strong); border-radius: 8px; background: var(--ct-surface); }
 .ct-http-associations-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
 .ct-http-associations-heading > div { display: grid; gap: 3px; }
@@ -381,10 +383,13 @@ code { font-family: var(--ct-mono); }
 .ct-call-chain-selection > strong, .ct-call-chain-selection > code { min-width: 0; overflow-wrap: anywhere; white-space: normal; }
 .ct-call-chain-selection > strong { color: var(--ct-text); font-size: 10px; line-height: 1.25; }
 .ct-call-chain-selection > code { color: var(--ct-muted); font-size: 9px; line-height: 1.2; }
-.ct-http-chain-unresolved { display: grid; gap: 5px; padding: 8px 12px; border-left: 3px solid var(--ct-warning); background: var(--ct-warning-soft); color: var(--ct-warning); font-size: 10px; }
-.ct-http-chain-unresolved summary { cursor: pointer; font-weight: 600; }
-.ct-http-chain-unresolved span { overflow-wrap: anywhere; }
-.ct-http-chain-unresolved code { font-family: var(--ct-mono); }
+.ct-unresolved-summary { display: grid; gap: 6px; max-height: 150px; overflow: auto; padding: 7px 10px; border-left: 3px solid var(--ct-warning); background: var(--ct-warning-soft); color: var(--ct-warning); font-size: 10px; }
+.ct-unresolved-summary-internal, .ct-unresolved-summary-external { display: grid; gap: 5px; }
+.ct-unresolved-summary-internal summary, .ct-unresolved-summary-external summary { cursor: pointer; font-weight: 600; }
+.ct-unresolved-summary details[open] ul { display: grid; gap: 5px; margin: 0; padding: 0 0 0 16px; }
+.ct-unresolved-summary li { display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+.ct-unresolved-summary li code { font-family: var(--ct-mono); }
+.ct-unresolved-summary li span { color: var(--ct-muted); }
 .ct-contextual-calls { display: grid; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--ct-border); background: var(--ct-subtle); }
 .ct-contextual-calls > p, .ct-contextual-calls > small { margin: 0; color: var(--ct-muted); font-size: 10px; line-height: 1.5; }
 .ct-contextual-budget { color: var(--ct-warning) !important; }
@@ -791,6 +796,9 @@ code { font-family: var(--ct-mono); }
 .flow-symbol-card, .flow-feature-card { position: relative; display: grid; gap: 5px; min-height: 60px; padding: 10px 11px; border: 1px solid var(--ct-border-strong); border-left: 3px solid #7790c7; border-radius: 6px; background: var(--ct-surface); box-shadow: 0 3px 10px rgb(32 38 51 / 12%); color: var(--ct-text); cursor: pointer; transition: border-color 140ms ease, transform 140ms ease, background 140ms ease; }
 .flow-symbol-card:hover, .flow-symbol-card.is-selected, .flow-feature-card:hover, .flow-feature-card:focus-visible { border-color: var(--ct-blue); border-left-color: var(--ct-blue); background: var(--ct-blue-soft); outline: none; transform: translateY(-1px); }
 .ct-graph-panel.is-entry-call-chain .flow-symbol-card:hover, .ct-graph-panel.is-entry-call-chain .flow-symbol-card.is-selected { transform: none; }
+.ct-entry-trace-toolbar { align-items: flex-start; flex-wrap: wrap; }
+.ct-entry-trace-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 10px; }
+.ct-entry-trace-actions .ct-check-field { margin: 0; }
 /* Keep the call-chain card box aligned with CALL_CHAIN_NODE_WIDTH/HEIGHT in graph.ts. */
 .flow-symbol-card[data-call-chain="true"] { box-sizing: border-box; width: 100%; height: 80px; min-height: 80px; grid-template-rows: 10px minmax(0, 1fr) 12px; gap: 4px; padding: 8px 10px; }
 .flow-symbol-card[data-call-chain="true"] .flow-handle-label { min-height: 0; line-height: 10px; }

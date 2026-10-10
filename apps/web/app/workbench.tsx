@@ -135,7 +135,6 @@ import {
   callChainEdgePath,
   emptyGraphState,
   edgeKindLabel,
-  directImportTargets,
   groupSymbolsByDirectory,
   hasDirectedCallCycle,
   isCallsOnlyChainResponse,
@@ -144,6 +143,7 @@ import {
   layoutSymbolGroups,
   mergeContextualCalls,
   mergeNeighborGraph,
+  moduleImportRelations,
   unresolvedForSymbol,
   type DirectImportTarget,
   type CallChainEdgeRoute,
@@ -176,6 +176,46 @@ type OverviewEntryCallChain = {
   entry: OverviewEntryPoint;
   root: SymbolRecord;
   startKind: "handler" | "module";
+};
+
+type GraphViewport = { x: number; y: number; zoom: number };
+
+type EntryTraceSnapshot = {
+  focusId: string;
+  selectedId: string;
+  isEntry: boolean;
+  direction: "callers" | "callees";
+  edgeKinds: EdgeKind[];
+  graph: GraphState;
+  contextualCalls: ContextualCall[];
+  status: AsyncStatus;
+  viewport: GraphViewport | null;
+};
+
+type EntryTraceRequest = {
+  symbolId: string;
+  direction: "callers" | "callees";
+  edgeKinds: EdgeKind[];
+};
+
+type EntryTrace = {
+  rootId: string;
+  focusId: string;
+  isEntry: boolean;
+  direction: "callers" | "callees";
+  edgeKinds: EdgeKind[];
+  entry: EntryTraceSnapshot;
+  history: EntryTraceSnapshot[];
+  retry: EntryTraceRequest | null;
+  viewportRestore: (GraphViewport & { revision: number }) | null;
+};
+
+type NeighborhoodRequestOptions = {
+  depth?: number;
+  preserveGraphUntilSuccess?: boolean;
+  preserveEntryContext?: boolean;
+  preserveEntryTrace?: boolean;
+  expectedRoot?: SymbolRecord;
 };
 
 type SymbolNodeData = {
@@ -569,6 +609,10 @@ export default function Workbench() {
   const [selectedOverviewGroupId, setSelectedOverviewGroupId] = useState<string | null>(null);
   const [httpEntryChain, setHttpEntryChain] = useState<HttpEntryChain | null>(null);
   const [overviewEntryCallChain, setOverviewEntryCallChain] = useState<OverviewEntryCallChain | null>(null);
+  const [entryTrace, setEntryTrace] = useState<EntryTrace | null>(null);
+  const [architectureImportDirection, setArchitectureImportDirection] = useState<"callers" | "callees">("callees");
+  const [architectureImportRetryDirection, setArchitectureImportRetryDirection] = useState<"callers" | "callees" | null>(null);
+  const viewportRevision = useRef(0);
   const [featureStatus, setFeatureStatus] = useState<AsyncStatus>("idle");
   const [featureGeneration, setFeatureGeneration] = useState<FeatureGeneration | null>(null);
   const [featureError, setFeatureError] = useState<string | null>(null);
@@ -622,6 +666,13 @@ export default function Workbench() {
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [flowInstance, setFlowInstance] = useState<ReactFlowInstance<Node, Edge> | null>(null);
   const [featureFlowInstance, setFeatureFlowInstance] = useState<ReactFlowInstance<Node, Edge> | null>(null);
+  const captureEntryTraceViewport = useCallback(() => {
+    const viewport = flowInstance?.getViewport();
+    if (!viewport) return;
+    setEntryTrace((previous) => previous
+      ? { ...previous, viewportRestore: { ...viewport, revision: ++viewportRevision.current } }
+      : previous);
+  }, [flowInstance]);
 
   const activeSessionDraftKey = selectedProjectId && selectedSessionId
     ? sessionDraftStorageKey(selectedProjectId, selectedSessionId)
@@ -1040,6 +1091,9 @@ export default function Workbench() {
     setSelectedOverviewGroupId(null);
     setHttpEntryChain(null);
     setOverviewEntryCallChain(null);
+    setEntryTrace(null);
+    setArchitectureImportDirection("callees");
+    setArchitectureImportRetryDirection(null);
     featureRequestId.current += 1;
     featureIdempotencyKey.current = null;
     setFeatureStatus("idle");
@@ -3352,22 +3406,29 @@ export default function Workbench() {
       requestedEdgeKinds = edgeKinds,
       requestedHttpChain: HttpEntryChain | null = null,
       requestedEntryCallChain: OverviewEntryCallChain | null = null,
-    ) => {
+      options: NeighborhoodRequestOptions = {},
+    ): Promise<GraphState | null> => {
       if (!selectedProjectId) {
-        return;
+        return null;
       }
-      setHttpEntryChain(requestedHttpChain);
-      setOverviewEntryCallChain(requestedEntryCallChain);
+      if (!options.preserveEntryContext) {
+        setHttpEntryChain(requestedHttpChain);
+        setOverviewEntryCallChain(requestedEntryCallChain);
+      }
+      if (!options.preserveEntryTrace) setEntryTrace(null);
       graphController.current?.abort();
       const controller = new AbortController();
       graphController.current = controller;
       const requestId = ++graphRequestId.current;
       const graphIndexChanged = graphIndexId !== indexId;
-      setGraphIndexId(indexId);
-      setSelectedId(symbolId);
+      const preserveGraphUntilSuccess = options.preserveGraphUntilSuccess === true;
+      if (!preserveGraphUntilSuccess) {
+        setGraphIndexId(indexId);
+        setSelectedId(symbolId);
+      }
       setGraphStatus("loading");
       setGraphError(null);
-      if (replace || graphIndexChanged) {
+      if ((replace || graphIndexChanged) && !preserveGraphUntilSuccess) {
         setGraph(emptyGraphState);
         setContextualCalls([]);
         setExpandedGroups(new Set());
@@ -3381,9 +3442,18 @@ export default function Workbench() {
           requestedDirection,
           requestedEdgeKinds,
           controller.signal,
+          options.depth,
         );
         if (!isLatestRequest(requestId, graphRequestId.current)) {
-          return;
+          return null;
+        }
+        if (options.expectedRoot && (
+          response.index_id !== indexId ||
+          response.root.index_id !== indexId ||
+          response.root.symbol_id !== options.expectedRoot.symbol_id ||
+          response.root.path !== options.expectedRoot.path
+        )) {
+          throw new Error("关系响应与当前焦点、项目或固定索引不匹配。");
         }
         if (requestedHttpChain && !isCallsOnlyChainResponse(response, indexId, requestedHttpChain.handler.symbol_id)) {
           throw new Error("链路响应与选定 HTTP 关联、handler 或静态 calls 快照不一致。");
@@ -3391,44 +3461,90 @@ export default function Workbench() {
         if (requestedEntryCallChain && !isCallsOnlyChainResponse(response, indexId, requestedEntryCallChain.root.symbol_id)) {
           throw new Error("入口 calls 响应与选定入口、起点或静态 calls 快照不一致。");
         }
-        setGraph((previous) =>
-          mergeNeighborGraph(replace || graphIndexChanged ? emptyGraphState : previous, response),
+        const shouldReplace = replace || graphIndexChanged || preserveGraphUntilSuccess;
+        const nextGraph = mergeNeighborGraph(shouldReplace ? emptyGraphState : graph, response);
+        const nextContextualCalls = mergeContextualCalls(
+          shouldReplace ? [] : contextualCalls,
+          response,
+          shouldReplace,
         );
-        setContextualCalls((previous) => mergeContextualCalls(previous, response, replace || graphIndexChanged));
-        setGraphStatus(
-          response.truncated ? "success" : response.neighbors.length === 0 ? "empty" : "success",
-        );
+        setGraph(nextGraph);
+        setContextualCalls(nextContextualCalls);
+        setGraphIndexId(indexId);
+        setSelectedId(symbolId);
+        const nextStatus: AsyncStatus =
+          response.truncated ? "success" : response.neighbors.length === 0 ? "empty" : "success";
+        setGraphStatus(nextStatus);
+        if (!options.preserveEntryTrace && (requestedHttpChain || requestedEntryCallChain)) {
+          const root = requestedHttpChain?.handler ?? requestedEntryCallChain?.root;
+          if (root) {
+            const entry: EntryTraceSnapshot = {
+              focusId: root.symbol_id,
+              selectedId: root.symbol_id,
+              isEntry: true,
+              direction: "callees",
+              edgeKinds: ["calls"],
+              graph: nextGraph,
+              contextualCalls: nextContextualCalls,
+              status: nextStatus,
+              viewport: null,
+            };
+            setEntryTrace({
+              rootId: root.symbol_id,
+              focusId: root.symbol_id,
+              isEntry: true,
+              direction: "callees",
+              edgeKinds: ["calls"],
+              entry,
+              history: [],
+              retry: null,
+              viewportRestore: null,
+            });
+          }
+        }
+        return nextGraph;
       } catch (error) {
         if (isAbortError(error) || !isLatestRequest(requestId, graphRequestId.current)) {
-          return;
+          return null;
         }
         setGraphStatus("error");
         setGraphError(errorMessage(error));
+        return null;
       }
     },
-    [direction, edgeKinds, graphIndexId, selectedProjectId],
+    [contextualCalls, direction, edgeKinds, graph, graphIndexId, selectedProjectId],
   );
 
   const loadArchitectureRelations = useCallback(
-    async (root: SymbolRecord, requestedDirection: NeighborDirection, requestedEdgeKinds: EdgeKind[]) => {
+    async (
+      root: SymbolRecord,
+      requestedDirection: NeighborDirection,
+      requestedEdgeKinds: EdgeKind[],
+      preserveGraphUntilSuccess = false,
+    ): Promise<boolean> => {
       if (!selectedProjectId || !indexResponse || root.index_id !== indexResponse.index.index_id) {
-        return;
+        return false;
       }
+      setEntryTrace(null);
       graphController.current?.abort();
       const controller = new AbortController();
       graphController.current = controller;
       const requestId = ++graphRequestId.current;
       const indexId = indexResponse.index.index_id;
-      setGraphIndexId(indexId);
-      setSelectedId(root.symbol_id);
+      if (!preserveGraphUntilSuccess) {
+        setGraphIndexId(indexId);
+        setSelectedId(root.symbol_id);
+      }
       setGraphStatus("loading");
       setGraphError(null);
-      setGraph(emptyGraphState);
-      setContextualCalls([]);
-      setExpandedGroups(new Set());
-      knownGroupKeys.current.clear();
+      if (!preserveGraphUntilSuccess) {
+        setGraph(emptyGraphState);
+        setContextualCalls([]);
+        setExpandedGroups(new Set());
+        knownGroupKeys.current.clear();
+      }
       try {
-        // ponytail: the existing neighbor endpoint caps each query at 40 edges; add paging if larger modules need full inventories.
+        // The endpoint caps distinct symbols at 40; storage also applies edge and output-size budgets, so large inventories may need paging.
         const response = await getProjectNeighbors(
           selectedProjectId,
           indexId,
@@ -3438,7 +3554,7 @@ export default function Workbench() {
           controller.signal,
           1,
         );
-        if (!isLatestRequest(requestId, graphRequestId.current)) return;
+        if (!isLatestRequest(requestId, graphRequestId.current)) return false;
         if (
           response.index_id !== indexId ||
           response.root.index_id !== indexId ||
@@ -3448,15 +3564,124 @@ export default function Workbench() {
           throw new Error("关系响应与当前固定索引、模块或符号不匹配。");
         }
         setGraph(mergeNeighborGraph(emptyGraphState, response));
+        setContextualCalls([]);
+        setGraphIndexId(indexId);
+        setSelectedId(root.symbol_id);
         setGraphStatus(response.truncated ? "success" : response.neighbors.length === 0 ? "empty" : "success");
+        return true;
       } catch (error) {
-        if (isAbortError(error) || !isLatestRequest(requestId, graphRequestId.current)) return;
+        if (isAbortError(error) || !isLatestRequest(requestId, graphRequestId.current)) return false;
         setGraphStatus("error");
         setGraphError(errorMessage(error));
+        return false;
       }
     },
     [indexResponse, selectedProjectId],
   );
+
+  const navigateEntryTrace = useCallback(
+    async (symbolId: string, requestedDirection: "callers" | "callees", requestedEdgeKinds: EdgeKind[]) => {
+      if (!entryTrace || graphStatus === "loading" || requestedEdgeKinds.length === 0 || !indexResponse || !selectedProjectId) return;
+      const target = graph.symbols.find((symbol) => symbol.symbol_id === symbolId);
+      if (!target || target.index_id !== indexResponse.index.index_id || graphIndexId !== target.index_id) return;
+      const request: EntryTraceRequest = { symbolId, direction: requestedDirection, edgeKinds: [...requestedEdgeKinds] };
+      const viewport = flowInstance?.getViewport() ?? null;
+      const current: EntryTraceSnapshot = {
+        focusId: entryTrace.focusId,
+        selectedId: selectedId ?? entryTrace.focusId,
+        isEntry: entryTrace.isEntry,
+        direction: entryTrace.direction,
+        edgeKinds: [...entryTrace.edgeKinds],
+        graph,
+        contextualCalls,
+        status: graph.truncated || graph.edges.length > 0 ? "success" : "empty",
+        viewport,
+      };
+      setEntryTrace((previous) => previous ? { ...previous, retry: request } : previous);
+      const nextGraph = await loadNeighborhood(
+        target.index_id,
+        target.symbol_id,
+        true,
+        requestedDirection,
+        requestedEdgeKinds,
+        null,
+        null,
+        {
+          depth: 1,
+          preserveGraphUntilSuccess: true,
+          preserveEntryContext: true,
+          preserveEntryTrace: true,
+          expectedRoot: target,
+        },
+      );
+      if (!nextGraph) return;
+      const nextStatus: AsyncStatus = nextGraph.truncated || nextGraph.edges.length > 0 ? "success" : "empty";
+      setEntryTrace((previous) => {
+        if (!previous || previous.rootId !== entryTrace.rootId) return previous;
+        const history = [...previous.history, current].slice(-8);
+        const entry = previous.history.length === 0 && previous.focusId === previous.rootId
+          ? { ...previous.entry, viewport }
+          : previous.entry;
+        return {
+          ...previous,
+          focusId: symbolId,
+          isEntry: false,
+          direction: requestedDirection,
+          edgeKinds: [...requestedEdgeKinds],
+          entry,
+          history,
+          retry: null,
+          viewportRestore: null,
+        };
+      });
+      setGraphStatus(nextStatus);
+    },
+    [contextualCalls, entryTrace, flowInstance, graph, graphIndexId, graphStatus, indexResponse, loadNeighborhood, selectedId, selectedProjectId],
+  );
+
+  const retryEntryTrace = useCallback(() => {
+    const retry = entryTrace?.retry;
+    if (retry) void navigateEntryTrace(retry.symbolId, retry.direction, retry.edgeKinds);
+  }, [entryTrace?.retry, navigateEntryTrace]);
+
+  const restoreEntryTraceSnapshot = useCallback((snapshot: EntryTraceSnapshot, history: EntryTraceSnapshot[], entryTraceState: EntryTrace) => {
+    graphController.current?.abort();
+    graphRequestId.current += 1;
+    setGraph(snapshot.graph);
+    setContextualCalls(snapshot.contextualCalls);
+    setSelectedId(snapshot.selectedId);
+    setGraphIndexId(indexResponse?.index.index_id ?? null);
+    setGraphStatus(snapshot.status);
+    setGraphError(null);
+    setEntryTrace({
+      ...entryTraceState,
+      focusId: snapshot.focusId,
+      isEntry: snapshot.isEntry,
+      direction: snapshot.direction,
+      edgeKinds: [...snapshot.edgeKinds],
+      history,
+      retry: null,
+      viewportRestore: snapshot.viewport ? { ...snapshot.viewport, revision: ++viewportRevision.current } : null,
+    });
+  }, [indexResponse?.index.index_id]);
+
+  const backEntryTrace = useCallback(() => {
+    if (!entryTrace || entryTrace.history.length === 0) return;
+    const history = [...entryTrace.history];
+    const snapshot = history.pop()!;
+    restoreEntryTraceSnapshot(snapshot, history, entryTrace);
+  }, [entryTrace, restoreEntryTraceSnapshot]);
+
+  const returnToEntryTrace = useCallback(() => {
+    if (!entryTrace) return;
+    restoreEntryTraceSnapshot(entryTrace.entry, [], entryTrace);
+  }, [entryTrace, restoreEntryTraceSnapshot]);
+
+  const onEntryTraceViewportRestored = useCallback((revision: number) => {
+    setEntryTrace((previous) => previous?.viewportRestore?.revision === revision
+      ? { ...previous, viewportRestore: null }
+      : previous);
+  }, []);
 
   const selectRunSymbol = useCallback(
     (symbolId: string) => {
@@ -3478,6 +3703,7 @@ export default function Workbench() {
       if (!indexResponse || !overview || !selectedProjectId || overview.project_id !== selectedProjectId || overview.index.index_id !== indexResponse.index.index_id || entry.index_id !== indexResponse.index.index_id) return;
       setHttpEntryChain(null);
       setOverviewEntryCallChain(null);
+      setEntryTrace(null);
       resetModuleSymbols();
       setSelectedOverviewEntryId(entry.entry_point_id);
       if (!entry.evidence) {
@@ -3534,6 +3760,7 @@ export default function Workbench() {
     const entry = overviewEntryCallChain?.entry;
     const evidence = entry?.evidence;
     if (!entry || !evidence || !indexResponse || !overview || !selectedProjectId || overview.project_id !== selectedProjectId || overview.index.index_id !== indexResponse.index.index_id || entry.index_id !== indexResponse.index.index_id || evidence.index_id !== indexResponse.index.index_id) return;
+    captureEntryTraceViewport();
     void loadLinkedEvidence({
       projectId: selectedProjectId,
       indexId: evidence.index_id,
@@ -3543,7 +3770,7 @@ export default function Workbench() {
       contentHash: evidence.content_hash,
       evidenceId: evidence.evidence_id,
     });
-  }, [indexResponse, loadLinkedEvidence, overview, overviewEntryCallChain, selectedProjectId]);
+  }, [captureEntryTraceViewport, indexResponse, loadLinkedEvidence, overview, overviewEntryCallChain, selectedProjectId]);
 
   const openHttpEntryChain = useCallback(
     (association: OverviewHttpAssociation) => {
@@ -3570,6 +3797,7 @@ export default function Workbench() {
         graphRequestId.current += 1;
         setHttpEntryChain(null);
         setOverviewEntryCallChain(null);
+        setEntryTrace(null);
         setGraph(emptyGraphState);
         setGraphIndexId(null);
         setContextualCalls([]);
@@ -3596,6 +3824,7 @@ export default function Workbench() {
     graphRequestId.current += 1;
     setHttpEntryChain(null);
     setOverviewEntryCallChain(null);
+    setEntryTrace(null);
     setGraph(emptyGraphState);
     setGraphIndexId(null);
     setContextualCalls([]);
@@ -3630,6 +3859,7 @@ export default function Workbench() {
     setSelectedOverviewEntryId(null);
     setHttpEntryChain(null);
     setOverviewEntryCallChain(null);
+    setEntryTrace(null);
     setGraphIndexId(null);
     setContextualCalls([]);
     setPanelMode("none");
@@ -3655,6 +3885,9 @@ export default function Workbench() {
       setContextualCalls([]);
       setHttpEntryChain(null);
       setOverviewEntryCallChain(null);
+      setEntryTrace(null);
+      setArchitectureImportDirection("callees");
+      setArchitectureImportRetryDirection(null);
       setExpandedGroups(new Set());
       knownGroupKeys.current.clear();
       openModuleSymbols(module);
@@ -3667,8 +3900,14 @@ export default function Workbench() {
     [indexResponse, openModuleSymbols, selectSymbol],
   );
 
-  const openModuleImports = useCallback((module: OverviewModule) => {
-    void loadArchitectureRelations(module.symbol, "callees", ["imports"]);
+  const openModuleImports = useCallback(async (module: OverviewModule, requestedDirection: "callers" | "callees" = "callees") => {
+    setArchitectureImportRetryDirection(requestedDirection);
+    const succeeded = await loadArchitectureRelations(module.symbol, requestedDirection, ["imports"], true);
+    if (succeeded) {
+      setArchitectureImportDirection(requestedDirection);
+      setArchitectureImportRetryDirection(null);
+    }
+    return succeeded;
   }, [loadArchitectureRelations]);
 
   const openSymbolCalls = useCallback((symbol: SymbolRecord) => {
@@ -3780,6 +4019,9 @@ export default function Workbench() {
     },
     [graph.unresolved, runImpact?.nodes, runImpact?.unresolved, selectedId],
   );
+  const entryTraceFocusSymbol = entryTrace
+    ? graph.symbols.find((symbol) => symbol.symbol_id === entryTrace.focusId) ?? null
+    : null;
 
   const toggleGroup = useCallback((key: string) => {
     setExpandedGroups((previous) => {
@@ -3795,8 +4037,8 @@ export default function Workbench() {
 
   const groups = useMemo(() => groupSymbolsByDirectory(graph.symbols), [graph.symbols]);
   const architectureImportTargets = useMemo(
-    () => moduleSymbolsRoot ? directImportTargets(graph, moduleSymbolsRoot) : [],
-    [graph, moduleSymbolsRoot],
+    () => moduleSymbolsRoot ? moduleImportRelations(graph, moduleSymbolsRoot, architectureImportDirection) : [],
+    [architectureImportDirection, graph, moduleSymbolsRoot],
   );
 
   useEffect(() => {
@@ -3825,13 +4067,17 @@ export default function Workbench() {
   const flowModel = useMemo(() => {
     const callRoot = httpEntryChain?.handler ?? overviewEntryCallChain?.root;
     if (callRoot) {
-      const callLayout = layoutCallChain(callRoot.symbol_id, graph.symbols, graph.edges);
+      const focusId = entryTrace?.focusId ?? callRoot.symbol_id;
+      const traceDirection = entryTrace?.direction ?? "callees";
+      const traceEdgeKinds = entryTrace?.edgeKinds ?? ["calls"];
+      const traceDepth = entryTrace && !entryTrace.isEntry ? 1 : 2;
+      const callLayout = layoutCallChain(focusId, graph.symbols, graph.edges, traceDirection, traceEdgeKinds, traceDepth);
       const nodes: SymbolFlowNode[] = graph.symbols
         .filter((symbol) => callLayout.nodes.has(symbol.symbol_id))
         .sort((left, right) => {
           const leftLayout = callLayout.nodes.get(left.symbol_id)!;
           const rightLayout = callLayout.nodes.get(right.symbol_id)!;
-          return leftLayout.depth - rightLayout.depth || leftLayout.position.y - rightLayout.position.y || left.qualified_name.localeCompare(right.qualified_name);
+          return leftLayout.position.x - rightLayout.position.x || leftLayout.position.y - rightLayout.position.y || left.qualified_name.localeCompare(right.qualified_name);
         })
         .map((symbol) => {
           const { position } = callLayout.nodes.get(symbol.symbol_id)!;
@@ -3852,7 +4098,7 @@ export default function Workbench() {
         });
       const nodeIds = new Set(nodes.map((node) => node.id));
       const edges: FlowEdge[] = graph.edges
-        .filter((edge) => edge.kind === "calls" && nodeIds.has(edge.source_id) && nodeIds.has(edge.target_id))
+        .filter((edge) => traceEdgeKinds.includes(edge.kind) && nodeIds.has(edge.source_id) && nodeIds.has(edge.target_id))
         .map((edge) => ({
           id: edge.edge_id,
           source: edge.source_id,
@@ -3860,9 +4106,9 @@ export default function Workbench() {
           sourceHandle: "source",
           targetHandle: "target",
           type: "callChain",
-          data: { kind: "calls", route: callLayout.routes.get(edge.edge_id) },
+          data: { kind: edge.kind, route: callLayout.routes.get(edge.edge_id) },
           markerEnd: { type: MarkerType.ArrowClosed },
-          style: { stroke: "#f3a65b", strokeWidth: 2 },
+          style: { stroke: edge.kind === "calls" ? "#f3a65b" : "#79c8c2", strokeWidth: 2 },
         }));
       return { nodes, edges };
     }
@@ -3943,7 +4189,7 @@ export default function Workbench() {
         labelBgPadding: [5, 3] as [number, number],
       }));
     return { nodes, edges };
-  }, [expandedGroups, graph.edges, graph.symbols, groups, httpEntryChain, indexResponse, loadNeighborhood, overviewEntryCallChain, selectedId, selectSymbol, toggleGroup]);
+  }, [entryTrace, expandedGroups, graph.edges, graph.symbols, groups, httpEntryChain, indexResponse, loadNeighborhood, overviewEntryCallChain, selectedId, selectSymbol, toggleGroup]);
 
   const httpChainHasCycle = useMemo(
     () => {
@@ -4345,6 +4591,7 @@ export default function Workbench() {
           graphRequestId.current += 1;
           setHttpEntryChain(null);
           setOverviewEntryCallChain(null);
+          setEntryTrace(null);
           setProjectError(null);
           sessionLink.current = null;
           sessionLinkApplied.current = true;
@@ -4588,8 +4835,10 @@ export default function Workbench() {
         sourceHasNext: Boolean(sourceHasNext),
         connectedEdges,
         selectedUnresolved,
-        entryChainLabel: httpEntryChain
-          ? "返回 HTTP 入口链路"
+        entryChainLabel: entryTrace
+          ? "返回当前追踪"
+          : httpEntryChain
+            ? "返回 HTTP 入口链路"
           : overviewEntryCallChain
             ? "返回入口 calls 链路"
             : null,
@@ -4620,6 +4869,8 @@ export default function Workbench() {
         codeModel: flowModel,
         codeEdges: graph.edges,
         directImportTargets: architectureImportTargets,
+        moduleImportDirection: architectureImportDirection,
+        moduleImportRetryDirection: architectureImportRetryDirection,
         codeStatus: graphStatus,
         codeError: graphError,
         codeTruncated: graph.truncated,
@@ -4634,6 +4885,16 @@ export default function Workbench() {
         codeHasCycle: httpChainHasCycle,
         httpChain: httpEntryChain,
         entryCallChain: overviewEntryCallChain,
+        entryTrace: entryTrace && entryTraceFocusSymbol ? {
+          focusId: entryTrace.focusId,
+          focusSymbol: entryTraceFocusSymbol,
+          isEntry: entryTrace.isEntry,
+          direction: entryTrace.direction,
+          edgeKinds: entryTrace.edgeKinds,
+          canGoBack: entryTrace.history.length > 0,
+          retry: entryTrace.retry,
+          viewportRestore: entryTrace.viewportRestore,
+        } : null,
         onSelectHttpChainEvidence: selectFeatureEvidence,
         onSelectEntryChainSource: openEntryCallChainSource,
         onRetryHttpChain: () => {
@@ -4646,6 +4907,13 @@ export default function Workbench() {
             openOverviewEntryGraph(overviewEntryCallChain.entry);
           }
         },
+        onNavigateEntryTrace: (symbolId, requestedDirection, requestedEdgeKinds) => {
+          void navigateEntryTrace(symbolId, requestedDirection, requestedEdgeKinds);
+        },
+        onRetryEntryTrace: retryEntryTrace,
+        onBackEntryTrace: backEntryTrace,
+        onReturnEntryTrace: returnToEntryTrace,
+        onEntryTraceViewportRestored,
         onExitHttpChain: exitEntryChain,
         onExitEntryCallChain: exitEntryChain,
         codeFocusNodeIds,
@@ -4700,7 +4968,10 @@ export default function Workbench() {
         selectedId,
         selectedSymbol,
         onOpenSelectedSource: () => {
-          if (selectedSymbol) selectSymbol(selectedSymbol);
+          if (selectedSymbol) {
+            captureEntryTraceViewport();
+            selectSymbol(selectedSymbol);
+          }
         },
         onPanelModeChange: setPanelMode,
         onClose: () => {
