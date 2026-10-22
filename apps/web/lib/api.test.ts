@@ -20,6 +20,7 @@ import {
   isSessionMessagesResponse,
   isSessionResponse,
   isTrashListResponse,
+  createProjectSessionRun,
   getProjectNeighbors,
   openProjectIndex,
   requestJson,
@@ -1285,6 +1286,37 @@ test("project neighbor requests support a direct one-hop depth and retain the de
     await getProjectNeighbors("project-a", indexId, moduleId, "callees", ["imports"], undefined, 1);
     await getProjectNeighbors("project-a", indexId, moduleId, "both", ["calls"]);
     assert.deepEqual(depths, ["1", "2"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("project session Run requests send the selected analysis kind", async () => {
+  const originalFetch = globalThis.fetch;
+  const capturedBodies: Record<string, unknown>[] = [];
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    capturedBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+    return new Response(JSON.stringify({
+      schema_version: SCHEMA_VERSION,
+      run_id: "run-understanding",
+      project_id: "project-a",
+      session_id: "session-a",
+      index_id: indexId,
+      status: "queued",
+    }), { status: 200 });
+  }) as typeof fetch;
+
+  try {
+    await createProjectSessionRun("project-a", "session-a", {
+      indexId,
+      issueId: "understanding-session-a",
+      title: "解释代码",
+      body: "解释这个功能的流程",
+      mode: "real",
+      analysisKind: "understanding",
+    });
+    assert.equal(capturedBodies[0]?.analysis_kind, "understanding");
+    assert.equal(capturedBodies[0]?.mode, "real");
   } finally {
     globalThis.fetch = originalFetch;
   }

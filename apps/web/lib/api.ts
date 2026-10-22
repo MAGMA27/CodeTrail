@@ -545,6 +545,7 @@ export type CreateRunInput = {
   title: string;
   body: string;
   mode: RunMode;
+  analysisKind: RunAnalysisKind;
   scenario?: RunScenario;
   messageEndSequence?: number;
   featureGenerationId?: string;
@@ -3394,6 +3395,7 @@ export function createProjectSessionRun(
           body: input.body,
         },
         mode: input.mode,
+        analysis_kind: input.analysisKind,
         ...(input.mode === "fixture" && input.scenario ? { fixture_scenario: input.scenario } : {}),
         ...(input.featureGenerationId ? { feature_generation_id: input.featureGenerationId } : {}),
         ...(input.messageEndSequence ? { message_end_sequence: input.messageEndSequence } : {}),

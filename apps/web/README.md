@@ -35,11 +35,11 @@
 pwsh -File .\scripts\start-local.ps1 -Service web
 ```
 
-打开 `http://localhost:3000`，从本地目录或 GitHub HTTPS 导入项目，或打开已有项目；导入 ready 后会选中项目和索引并打开架构页。导入状态轮询最多 40 次且总等待不超过 35 秒，初次导入及重试请求最多等待 60 秒；超时会保留“服务端可能仍在处理”的状态，可刷新已有 attempt，或用相同表单重新连接初次请求。项目级 URL 刷新保持架构视图，只有完整 Session URL 恢复 Session；固定索引列表可直接打开版本。本地目录未开放时按页面提示更新 API 设置并重启。然后创建 Session 并保存至少一条消息，点击“开始分析”。服务端模型分析要求 API 设置 `CODETRAIL_REAL_RUN_ENABLED=1` 并在服务数据目录配置 `config.json`；未配置或调用失败会显示错误，不自动切换模拟响应。功能视图的“识别主要功能”同样使用服务端模型，保留源码范围选择。普通工作台不提供 fixture 模式或固定场景选择；开发演示使用专用[样本仓库与离线入口](../../fixtures/README.md)，已有演示结果保留明确标识。
+打开 `http://localhost:3000`，从本地目录或 GitHub HTTPS 导入项目，或打开已有项目；导入 ready 后会选中项目和索引并打开架构页。导入状态轮询最多 40 次且总等待不超过 35 秒，初次导入及重试请求最多等待 60 秒；超时会保留“服务端可能仍在处理”的状态，可刷新已有 attempt，或用相同表单重新连接初次请求。项目级 URL 刷新保持架构视图，只有完整 Session URL 恢复 Session；固定索引列表可直接打开版本。本地目录未开放时按页面提示更新 API 设置并重启。然后创建 Session 并保存至少一条消息，在 Run 面板选择“理解代码”或“Issue 调查”并显式启动。服务端模型分析要求 API 设置 `CODETRAIL_REAL_RUN_ENABLED=1` 并在服务数据目录配置 `config.json`；未配置或调用失败会显示错误，不自动切换模拟响应。未配置模型时，理解代码面板提供固定项目、Session、index 和消息 cutoff 的可复制 Codex MCP 任务；复制不会启动 Codex，需用户在 Codex 显式发起。功能视图的“识别主要功能”同样使用服务端模型，保留源码范围选择。普通工作台不提供 fixture 模式或固定场景选择；开发演示使用专用[样本仓库与离线入口](../../fixtures/README.md)，已有演示结果保留明确标识。
 
 CodeTrail 作为自身仓库的 Codex external 验收流程见 [MVP 操作说明](../../docs/mvp-operation.md)；external Run 使用本地 MCP 和固定项目/Session，不需要真实供应商配置。
 
-代码流程理解由 MCP external Run 的 `start_external_run(analysis_kind="understanding")` 发起，网页不创建该 Run，只在发现后展示其 explanation 报告；真实供应商语义质量和完整运行时覆盖仍需单独验证。
+代码理解可在 Session Run 面板显式启动 real `analysis_kind="understanding"`，或使用“解释此功能”从入口/符号创建固定同快照 Session 草稿。未配置模型时，网页只生成带 `project_id`、`session_id`、`index_id` 和 `message_end_sequence` 的 MCP 任务文本；必须先保存消息，再由用户在 Codex 显式调用 `start_external_run`，网页不创建或声称启动外部 Run。real 与 external Run 共用报告展示，历史类型按各自 `analysis_kind` 显示；真实供应商语义质量和完整运行时覆盖仍需单独验证。
 
 历史兼容恢复属于安全扫描确认后的显式更新；若扫描不完整、来源不可用或基准已过期，工作台继续显示失败并保留旧 latest。
 

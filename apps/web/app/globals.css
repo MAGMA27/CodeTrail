@@ -620,6 +620,10 @@ code { font-family: var(--ct-mono); }
 .ct-run-start-row { align-items: end; }
 .ct-run-start-row label { display: grid; flex: 1; gap: 5px; color: var(--ct-muted); font-size: 10px; }
 .ct-run-start-row select { min-height: 34px; padding: 7px 9px; border: 1px solid var(--ct-border-strong); border-radius: 6px; background: var(--ct-bg); color: var(--ct-text); }
+.ct-codex-task { display: grid; justify-items: start; gap: 8px; padding: 10px; border: 1px solid var(--ct-border); border-radius: 7px; background: var(--ct-bg); }
+.ct-codex-task p, .ct-codex-task small { margin: 0; color: var(--ct-muted); font-size: 10px; line-height: 1.55; }
+.ct-codex-task textarea { width: 100%; min-height: 118px; resize: vertical; padding: 8px; border: 1px solid var(--ct-border); border-radius: 5px; background: var(--ct-surface); color: var(--ct-text); font-family: var(--ct-mono); font-size: 9px; line-height: 1.5; }
+.ct-codex-task > .ct-link-button { padding: 0; }
 .ct-run-history { display: grid; gap: 5px; max-height: 170px; overflow: auto; padding-top: 3px; border-top: 1px solid var(--ct-border); }
 .ct-run-history-item { display: grid; gap: 4px; padding: 8px 10px; border: 1px solid var(--ct-border); border-radius: 6px; background: var(--ct-bg); color: var(--ct-text); text-align: left; cursor: pointer; }
 .ct-run-history-item:hover, .ct-run-history-item.is-selected { border-color: var(--ct-blue); background: var(--ct-blue-soft); }
