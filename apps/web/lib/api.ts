@@ -770,8 +770,8 @@ export type JourneySummary = {
   event_name: "onSubmit" | "onClick";
   action_path: string;
   action_start_line: number;
-  method: OverviewHttpAssociation["method"];
-  path: string;
+  method: OverviewHttpAssociation["method"] | null;
+  path: string | null;
 };
 
 export type JourneyCoverage = {
@@ -2516,10 +2516,12 @@ function isJourneySummary(value: unknown, indexId: string): value is JourneySumm
     ["onSubmit", "onClick"].includes(String(value.event_name)) &&
     isString(value.action_path) &&
     isPositiveInteger(value.action_start_line) &&
-    ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD", "TRACE"].includes(String(value.method)) &&
-    isString(value.path) &&
-    value.path.startsWith("/api/") &&
-    !/[?#]/.test(value.path)
+    ((value.method === null && value.path === null) || (
+      ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD", "TRACE"].includes(String(value.method)) &&
+      isString(value.path) &&
+      value.path.startsWith("/api/") &&
+      !/[?#]/.test(value.path)
+    ))
   );
 }
 

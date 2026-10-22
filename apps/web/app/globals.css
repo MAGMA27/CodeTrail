@@ -482,6 +482,11 @@ code { font-family: var(--ct-mono); }
 .ct-journey-choice.is-selected { border-left-color: var(--ct-blue); background: var(--ct-blue-soft); }
 .ct-journey-choice strong { font-size: 11px; }
 .ct-journey-choice span, .ct-journey-step-copy p, .ct-journey-coverage, .ct-journey-symbol { color: var(--ct-muted); font-size: 10px; }
+.ct-journey-choice small { color: var(--ct-faint); font-size: 9px; overflow-wrap: anywhere; }
+.ct-journey-choice .ct-journey-target { font-family: var(--ct-mono); overflow-wrap: anywhere; }
+.ct-journey-route { display: grid; gap: 4px; margin-bottom: 8px; padding: 8px; border: 1px solid var(--ct-border); border-radius: 5px; background: var(--ct-surface); }
+.ct-journey-route strong { font-family: var(--ct-mono); font-size: 10px; overflow-wrap: anywhere; }
+.ct-journey-route small { color: var(--ct-muted); font-size: 9px; line-height: 1.5; }
 .ct-journey-detail { min-width: 0; }
 .ct-journey-step { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 8px; padding: 9px; border: 1px solid var(--ct-border); border-radius: 5px; background: var(--ct-surface); }
 .ct-journey-step-index { color: var(--ct-faint); font-family: var(--ct-mono); font-size: 10px; }
@@ -494,6 +499,8 @@ code { font-family: var(--ct-mono); }
 .ct-journey-sources summary { cursor: pointer; }
 .ct-journey-sources button { padding: 2px 0; border: 0; background: transparent; color: var(--ct-blue); font-family: var(--ct-mono); font-size: 9px; text-align: left; }
 .ct-journey-symbol { font-family: var(--ct-mono); overflow-wrap: anywhere; }
+.ct-journey-symbol-row { display: grid; gap: 3px; padding: 4px 0; }
+.ct-journey-symbol-actions { display: flex; flex-wrap: wrap; gap: 9px; }
 .ct-journey-markers, .ct-journey-coverage { display: grid; gap: 4px; }
 .ct-journey-markers { margin-top: 8px; padding: 8px; border-left: 2px solid var(--ct-warning); background: var(--ct-warning-soft); }
 .ct-journey-markers summary { cursor: pointer; font-size: 10px; }

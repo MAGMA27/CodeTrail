@@ -109,6 +109,23 @@ test("journey response validators bind steps to one index and cap details at eig
   const fixture = journeyFixture();
   assert.equal(isProjectJourneyCatalogResponse(fixture.catalog), true);
   assert.equal(isProjectJourneyResponse(fixture.detail), true);
+  const unlinkedSummary = { ...fixture.summary, method: null, path: null };
+  assert.equal(isProjectJourneyCatalogResponse({
+    ...fixture.catalog,
+    journeys: [unlinkedSummary],
+  }), true);
+  assert.equal(isProjectJourneyResponse({
+    ...fixture.detail,
+    summary: unlinkedSummary,
+  }), true);
+  assert.equal(isProjectJourneyCatalogResponse({
+    ...fixture.catalog,
+    journeys: [{ ...unlinkedSummary, path: "/api/imports/local" }],
+  }), false);
+  assert.equal(isProjectJourneyResponse({
+    ...fixture.detail,
+    summary: { ...unlinkedSummary, method: "POST" },
+  }), false);
   assert.equal(isProjectJourneyCatalogResponse({
     ...fixture.catalog,
     journeys: [{ ...fixture.summary, index_id: "other-index" }],

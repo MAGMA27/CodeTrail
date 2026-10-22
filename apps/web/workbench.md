@@ -62,7 +62,7 @@ Neighbors 查询返回的 `contextual_calls` 在代码关系面板单独列出�
 
 本轮验收以当前 PC 的 MVP 阅读流程为准，不要求固定分辨率矩阵；此前尺寸证据保留为历史。搜索、定义分页、固定快照源码校验、HTTP 链路和功能请求仍复用原编排与服务；后端概览没有改为按展开动作加载，也没有新增运行时数据流分析。
 
-功能页按需读取当前固定 index 的轻量 action journey catalog；选中一条后再请求最多 8 个职责步骤和来源 evidence。步骤优先显示用户动作、前端处理、HTTP 请求及服务端处理，symbols/evidence 默认折叠。动态按钮文字保留候选文本；跨组件 prop handler 和结果界面更新在静态规则无法确认时以断点说明，不将 `calls` 解释成执行或数据流。Coverage limitations 默认折叠。旧 TypeScript facts index 会说明可能缺少 HTTP request facts，显式刷新后才应用新 wrapper 识别规则。
+功能页按需读取当前固定 index 的轻量 action journey catalog；选中一条后再请求最多 8 个职责步骤和来源 evidence。目录为每个已配对请求显示 HTTP method/path 形状，同一界面动作的不同请求可据此区分；无配对 method/path 的本地或未知动作显示“本地操作 · 未连接到服务端”，只表示当前静态事实没有确认服务端关联，不表示没有网络请求或功能。空目录提示“没有识别的界面动作”。步骤标题分别标明界面动作、回调、静态调用、HTTP 形状、结果展示或未解析关系，并区分静态源码关系、接口形状和未确认状态；规则说明与来源 evidence 分开呈现。每个符号可继续调用既有 `onOpenSymbolCalls` 同快照关系查询，或通过 G1 代码理解入口创建只带未保存草稿的 Session，不自动调用模型。动态按钮文字保留候选文本；跨组件 prop handler 和结果界面更新在静态规则无法确认时以断点说明，不将 `calls` 解释成执行或数据流。Coverage limitations 默认折叠。旧 TypeScript facts index 会说明可能缺少 HTTP request facts，显式刷新后才应用新 wrapper 识别规则。
 
 ## 数据与生命周期
 
@@ -72,7 +72,7 @@ Neighbors 查询返回的 `contextual_calls` 在代码关系面板单独列出�
 
 项目架构视图随当前明确选定的项目和固定 index 重建；切换项目会清理旧 Session/证据深链及 URL 参数，避免刷新跳回原项目。刷新后从恢复的项目概览重建图；展开目录、imports/calls 和 HTTP 形状过滤、链路追踪焦点及其历史不持久化。入口调用链初始请求最多两层；后续追踪始终以所选符号为根做一跳查询，方向可选 callers/callees，关系默认 calls 并可筛选 imports。历史最多保留 8 个成功位置，另存初始入口快照；恢复历史时连同选中节点、方向、图与 viewport 一并还原，不重复请求。切换入口、项目或固定 index 清空历史。画布表示该索引实际返回的 Python/TypeScript 静态源码关系和规则确认的 HTTP 方法/路径形状关联；后者不证明实际网络目标、本地部署拓扑或运行时请求行为。
 
-Session 内的 Run 面板默认选择“理解代码”，也支持“Issue 调查”；两者都由用户显式启动 real Run，并分别发送 `analysis_kind=understanding` 或 `analysis_kind=issue`，沿用固定 index、消息冻结和现有报告生命周期。启动前显示会发送对应任务、已保存消息和有界源码证据、可能产生费用的提示；启动前若有草稿也会显示提示，但草稿不进入 Run。模型未配置时，理解代码显示可复制的 Codex MCP 任务，包含准确 `project_id`、`session_id`、`index_id` 和已保存消息 `message_end_sequence`；用户保存消息后需在 Codex 显式发起，网页不会启动宿主。入口或选中符号的“解释此功能”创建绑定来源固定 index 的同项目 Session，并预填包含完整 symbol/path 与入口上下文的未保存消息草稿，不自动启动分析。服务端返回 queued 的 run_id 后，工作台先读取已持久化事件建立历史，再以 `after_sequence` 订阅 SSE 逐项接收新增公开事件；连接失败经过有限退避后回退到有界轮询。`onopen` 只表示握手成功，不清零无进展重连计数；只有连续 sequence 的新事件重置重连预算，达到上限后只保留一个轮询定时器。面板常显当前状态、失败/取消入口、报告 evidence 和限制；事件时间线、工具结果及 Run 历史默认折叠，展开后仍可查看。面板展示任务类型、模式、execution source、固定消息范围、input hash、index 和 execution version，并可从报告 evidence 打开既有源码证据侧栏。
+Session 内的 Run 面板默认选择“理解代码”，也支持“Issue 调查”；两者都由用户显式启动 real Run，并分别发送 `analysis_kind=understanding` 或 `analysis_kind=issue`，沿用固定 index、消息冻结和现有报告生命周期。至少保存一条消息后才可启动 Run；启动前显示会发送对应任务、已保存消息和有界源码证据、可能产生费用的提示，未保存草稿另行提示且不会进入 Run。模型未配置时，理解代码显示可复制的 Codex MCP 任务，包含准确 `project_id`、`session_id`、`index_id` 和已保存消息 `message_end_sequence`；用户保存消息后需在 Codex 显式发起，网页不会启动宿主。入口或选中符号的“解释此功能”创建绑定来源固定 index 的同项目 Session，并预填包含完整 symbol/path 与入口上下文的未保存消息草稿，不自动启动分析。服务端返回 queued 的 run_id 后，工作台先读取已持久化事件建立历史，再以 `after_sequence` 订阅 SSE 逐项接收新增公开事件；连接失败经过有限退避后回退到有界轮询。`onopen` 只表示握手成功，不清零无进展重连计数；只有连续 sequence 的新事件重置重连预算，达到上限后只保留一个轮询定时器。面板常显当前状态、失败/取消入口、报告 evidence 和限制；事件时间线、工具结果及 Run 历史默认折叠，展开后仍可查看。面板展示任务类型、模式、execution source、固定消息范围、input hash、index 和 execution version，并可从报告 evidence 打开既有源码证据侧栏。
 
 切换 Session 或项目会取消/忽略旧的 Run 请求和轮询，关闭旧 EventSource、取消影响查询并使旧回调失效，清空旧 Run 详情，再读取新 Session 的 Run 历史；刷新后先恢复项目/Session，再从服务端历史选择活动或最新 Run，重新载入状态，不重复创建。Run 事件以 Run/sequence 去重，断线使用最后成功处理的 sequence 续接；连接状态独立于 Run 状态，终态后停止订阅和刷新。Run 取消使用独立写请求，成功后继续读取终态；消息保存仍只保存消息，不会隐式启动 Run。影响节点和源码证据优先使用返回的 symbol.index_id，选择旧 Run 时不会回退到当前 latest index；请求失败、切换和刷新都会清理影响面板。其它项目/索引/功能历史状态继续按既有 project_id/index_id 键隔离。
 
