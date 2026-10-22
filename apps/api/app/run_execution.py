@@ -16,6 +16,8 @@ from typing import Any, Callable
 
 from .contracts import (
     CandidateLink,
+    CodeExplanation,
+    CodeUnderstandingFinal,
     Event,
     Finding,
     FindingCreatedEvent,
@@ -287,6 +289,7 @@ class RunExecutor:
                 index_id=record.run.index_id,
                 issue_id=record.run.issue.issue_id,
                 mode=record.run.mode,
+                analysis_kind=record.run.analysis_kind,
                 execution_source=record.run.execution_source,
                 message_end_sequence=record.run.message_end_sequence,
                 input_hash=record.run.input_hash,
@@ -476,6 +479,7 @@ class RunExecutor:
             index_id=record.run.index_id,
             issue=record.run.issue,
             run_input=record.input,
+            analysis_kind=record.run.analysis_kind,
         )
 
         def ensure_running() -> None:
@@ -516,9 +520,13 @@ class RunExecutor:
             adapter = (
                 self.model_adapter_factory("real")
                 if self.model_adapter_factory is not None
-                else default_issue_adapter("real", model_config=model_config)
+                else default_issue_adapter(
+                    "real",
+                    model_config=model_config,
+                    analysis_kind=record.run.analysis_kind,
+                )
             )
-            result = IssueAnalysisEngine(adapter).run(
+            result = IssueAnalysisEngine(adapter, analysis_kind=record.run.analysis_kind).run(
                 context,
                 model=record.run.model or "",
                 budget=record.run.budget,
@@ -584,7 +592,10 @@ class RunExecutor:
 
         try:
             self._append_stage(record, "analysis", deadline=deadline)
-            for finding in result.final.findings:
+            is_understanding = isinstance(result.final, CodeUnderstandingFinal)
+            findings = [] if is_understanding else list(result.final.findings)
+            candidate_links = [] if is_understanding else list(result.final.candidate_links)
+            for finding in findings:
                 self._append_finding(record, finding, deadline=deadline)
             self._finish_success(
                 record.run,
@@ -593,10 +604,11 @@ class RunExecutor:
                 evidence=list(result.context.evidence.values()),
                 symbols=tuple(result.context.observed_symbols.values()),
                 static_edges=list(result.context.static_edges),
-                candidate_links=list(result.final.candidate_links),
+                candidate_links=candidate_links,
                 deadline=deadline,
                 finding_text=result.final.summary,
-                findings=list(result.final.findings),
+                findings=findings,
+                explanation=result.final.explanation if is_understanding else None,
                 limitations=result.context.limitations,
             )
         except StorageConflictError:
@@ -724,6 +736,7 @@ class RunExecutor:
         deadline: float,
         finding_text: str,
         findings: list[Finding] | None = None,
+        explanation: CodeExplanation | None = None,
         limitations: list[str] | tuple[str, ...] = (),
     ) -> None:
         current = self._load(run)
@@ -745,6 +758,7 @@ class RunExecutor:
             evidence=list(evidence),
             findings=list(findings or []),
             candidate_links=list(candidate_links),
+            explanation=explanation,
             limitations=list(limitations),
         )
 
@@ -762,10 +776,16 @@ class RunExecutor:
     ) -> None:
         try:
             current = self._load(run)
-            finding = Finding(
-                finding_id=f"finding-{current.run.run_id}-failure",
-                kind="observation",
-                text=f"Run stopped before a complete candidate report: {message}",
+            findings = (
+                []
+                if current.run.analysis_kind == "understanding"
+                else [
+                    Finding(
+                        finding_id=f"finding-{current.run.run_id}-failure",
+                        kind="observation",
+                        text=f"Run stopped before a complete candidate report: {message}",
+                    )
+                ]
             )
             self._finish(
                 current.run,
@@ -783,7 +803,7 @@ class RunExecutor:
                     candidate_links=list(candidate_links),
                 ),
                 evidence=list(evidence),
-                findings=[finding],
+                findings=findings,
                 candidate_links=list(candidate_links),
                 limitations=list(limitations),
                 error=RunError(code=code, message=message),
@@ -802,6 +822,7 @@ class RunExecutor:
         evidence: list[Any],
         findings: list[Finding],
         candidate_links: list[CandidateLink],
+        explanation: CodeExplanation | None = None,
         limitations: list[str] | tuple[str, ...] = (),
         error: RunError | None = None,
     ) -> None:
@@ -824,6 +845,7 @@ class RunExecutor:
             evidence=evidence,
             findings=findings,
             candidate_links=candidate_links,
+            explanation=explanation,
             limitations=list(dict.fromkeys(limitations))[:30],
             terminal_sequence=terminal_sequence,
         )

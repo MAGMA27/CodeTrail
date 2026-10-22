@@ -9,7 +9,7 @@ from typing import Annotated, Literal, TypeVar
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
 from mcp.server import MCPServer
-from pydantic import Field
+from pydantic import Field, ValidationError
 
 from .contracts import (
     CandidateLink,
@@ -906,8 +906,10 @@ def create_mcp_server(
                 "Explicitly start one bounded fixture or real analysis for a saved project session. "
                 "The server freezes all saved messages through message_end_sequence (or the current saved cutoff), "
                 "uses only search_code/get_neighbors/read_source. Real mode is separately gated by "
-                "CODETRAIL_MCP_REAL_RUN_ENABLED, may send the frozen Issue/messages and bounded source evidence "
-                "to the configured provider, and can incur cost; fixture mode never invokes a provider. "
+                "CODETRAIL_MCP_REAL_RUN_ENABLED and may send the task-specific frozen context and bounded source "
+                "evidence to the configured provider, which can incur cost. analysis_kind=understanding is allowed "
+                "for real Runs and uses the saved Session messages as the user question; fixture Runs only support "
+                "Issue analysis and never invoke a provider. "
                 "Both modes share the Run write switch, capacity, and budget boundaries."
             ),
             structured_output=True,
@@ -921,6 +923,7 @@ def create_mcp_server(
             body: Annotated[str, Field(min_length=1, max_length=20_000)],
             fixture_scenario: _RunScenario = "success-timeout-missing",
             mode: Literal["fixture", "real"] = "fixture",
+            analysis_kind: Literal["issue", "understanding"] = "issue",
             feature_generation_id: Annotated[str | None, Field(max_length=200)] = None,
             message_end_sequence: Annotated[int | None, Field(ge=1)] = None,
             model: Annotated[str | None, Field(min_length=1, max_length=200)] = None,
@@ -948,6 +951,7 @@ def create_mcp_server(
                         index_id=index_id,
                         issue=Issue(id=issue_id, title=title, body=body),
                         mode=mode,
+                        analysis_kind=analysis_kind,
                         fixture_scenario=fixture_scenario if mode == "fixture" else None,
                         feature_generation_id=feature_generation_id,
                         message_end_sequence=message_end_sequence,
@@ -973,6 +977,11 @@ def create_mcp_server(
                 return McpRunStartResponse(ok=True, result=result)
             except ServiceError as exc:
                 return _failure(McpRunStartResponse, exc)
+            except ValidationError:
+                return _failure(
+                    McpRunStartResponse,
+                    ServiceError("invalid_input", 400, "Run parameters are invalid"),
+                )
             except Exception:
                 return _unexpected_failure("start_session_run", McpRunStartResponse)
 

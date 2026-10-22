@@ -153,7 +153,13 @@ from .feature_generation import (
     new_generation_id,
     resolve_model,
 )
-from .issue_analysis import ISSUE_EXECUTION_VERSION, ISSUE_PROMPT_VERSION, IssueModelAdapter
+from .issue_analysis import (
+    ISSUE_EXECUTION_VERSION,
+    ISSUE_PROMPT_VERSION,
+    UNDERSTANDING_EXECUTION_VERSION,
+    UNDERSTANDING_PROMPT_VERSION,
+    IssueModelAdapter,
+)
 from .feature_graph import build_feature_graph
 from .storage import (
     IndexStore,
@@ -1965,11 +1971,24 @@ class WorkspaceService:
                     fixture_scenario=request.fixture_scenario,
                     model_provider=run_model_config.provider if run_model_config is not None else None,
                     model=resolved_model,
-                    prompt_version=(request.prompt_version or ISSUE_PROMPT_VERSION) if request.mode == "real" else request.prompt_version,
+                    prompt_version=(
+                        request.prompt_version
+                        or (
+                            UNDERSTANDING_PROMPT_VERSION
+                            if request.analysis_kind == "understanding"
+                            else ISSUE_PROMPT_VERSION
+                        )
+                    )
+                    if request.mode == "real"
+                    else request.prompt_version,
                     execution_version=(
                         request.execution_version
                         if request.mode == "fixture" or request.execution_version != "run-fixture-v1"
-                        else ISSUE_EXECUTION_VERSION
+                        else (
+                            UNDERSTANDING_EXECUTION_VERSION
+                            if request.mode == "real" and request.analysis_kind == "understanding"
+                            else ISSUE_EXECUTION_VERSION
+                        )
                     ),
                     status="queued",
                     budget=budget,

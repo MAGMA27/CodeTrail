@@ -1598,6 +1598,23 @@ def test_mcp_run_reads_share_http_state_and_writes_are_separately_opt_in(tmp_pat
             tools = {tool.name for tool in (await client.list_tools()).tools}
             assert {"start_session_run", "cancel_session_run"} <= tools
             assert "create_session" not in tools
+            start_tool = next(tool for tool in (await client.list_tools()).tools if tool.name == "start_session_run")
+            assert "analysis_kind" in start_tool.input_schema["properties"]
+            fixture_understanding = await client.call_tool(
+                "start_session_run",
+                {
+                    "project_id": project_id,
+                    "session_id": session_id,
+                    "index_id": index_id,
+                    "issue_id": "mcp-fixture-understanding",
+                    "title": "understanding is unsupported in fixture mode",
+                    "body": "This request must be rejected before a Run is created.",
+                    "analysis_kind": "understanding",
+                    "fixture_scenario": "insufficient-external-service",
+                },
+            )
+            assert fixture_understanding.structured_content["ok"] is False
+            assert fixture_understanding.structured_content["error"]["code"] == "invalid_input"
             started = await client.call_tool(
                 "start_session_run",
                 {
@@ -1654,6 +1671,7 @@ def test_mcp_run_reads_share_http_state_and_writes_are_separately_opt_in(tmp_pat
                     "title": "real without key",
                     "body": "The configured provider is intentionally absent.",
                     "mode": "real",
+                    "analysis_kind": "understanding",
                 },
             )
             assert real_started.structured_content["ok"] is True
@@ -1668,11 +1686,17 @@ def test_mcp_run_reads_share_http_state_and_writes_are_separately_opt_in(tmp_pat
                     break
                 await asyncio.sleep(0.025)
             assert current_run == "failed"
+            assert current.structured_content["result"]["run"]["analysis_kind"] == "understanding"
             events = await client.call_tool(
                 "list_run_events",
                 {"project_id": project_id, "session_id": session_id, "run_id": real_run_id},
             )
             assert events.structured_content["result"]["events"][-1]["payload"]["error"]["code"] == "model_unavailable"
+            report = await client.call_tool(
+                "get_run_report",
+                {"project_id": project_id, "session_id": session_id, "run_id": real_run_id},
+            )
+            assert report.structured_content["report"]["findings"] == []
 
     asyncio.run(exercise())
 

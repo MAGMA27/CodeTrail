@@ -40,7 +40,7 @@ GitHub 和本地索引更新先登记项目级持久化 update intent；expected
 
 `ProjectOverview` 按 project/index 和全部查询预算参数保存在 8 项进程内 LRU 中；命中前仍验证活动项目与 index 归属，返回独立深拷贝。固定索引不可变，无需基于 freshness 失效；新 index 或不同预算自然隔离。首次计算因时间预算形成的截断/partial 状态会原样缓存，不会在命中时补算或扩大预算覆盖。进程重启或 LRU 淘汰后会重新计算。
 
-Run 的 `analysis_kind` 默认是 `issue`；只有 external Run 可声明 `understanding`。该类型提交 `CodeUnderstandingFinal`，包含最多 12 个有序 `ExplanationStep`、`complete/partial` 覆盖和同一 Run 返回的源码 evidence；confirmed 必须有 evidence，complete 不能含 unknown，服务端不生成 findings/candidate links。旧 Run JSON 缺少该字段时按 Issue 读取，不做存储迁移。
+Run 的 `analysis_kind` 默认是 `issue`；real 与 external Run 可声明 `understanding`，fixture 只支持 Issue。Real understanding 由既有有界模型/工具循环生成 `CodeUnderstandingFinal`，external understanding 仍接收宿主结论；两者复用最多 12 个有序 `ExplanationStep`、`complete/partial` 覆盖和同一 Run 返回的源码 evidence。confirmed 必须有 evidence，complete 不能含 unknown；understanding 报告不生成 findings、candidate links 或 finding 事件。旧 Run JSON 缺少该字段时按 Issue 读取，不做存储迁移。Real understanding 以冻结 Session 消息作为用户问题；HTTP/MCP 共用相同 `analysis_kind` 和服务层校验。取舍见 [Real Run 代码理解决策](../../docs/decisions/2026-10-22-real-code-understanding-runs.md)。
 
 创建 Run 时校验 Session 的固定 ready index、可选同快照 feature generation 和消息 cutoff；省略 cutoff 时以服务端当前保存消息计数为线性化点，并读取完整连续消息前缀，保存 input hash、字符数和范围。Run、RunInput、事件、工具结果和报告由 [IndexStore](app/storage.py) 同一数据库事务保存；Session 最多一个 queued/running Run，幂等键绑定请求指纹。
 

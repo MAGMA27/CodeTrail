@@ -14,6 +14,7 @@ from app.contracts import (
     CodeEdge,
     CodeExplanation,
     CodeUnderstandingFinal,
+    CreateRunRequest,
     ContextualCall,
     EvidenceReference,
     ExplanationStep,
@@ -243,6 +244,27 @@ def test_code_understanding_requires_ordered_supported_steps() -> None:
             explanation=explanation,
             evidence_ids=["evidence-entry", "evidence-unused"],
         )
+
+
+def test_fixture_runs_reject_understanding_while_real_and_external_can_select_it() -> None:
+    request = {
+        "index_id": "index-understanding",
+        "issue": {"id": "question", "title": "Explain a feature", "body": "How does this work?"},
+        "analysis_kind": "understanding",
+    }
+    with pytest.raises(ValidationError, match="fixture requests only support Issue analysis"):
+        CreateRunRequest.model_validate(
+            {
+                **request,
+                "mode": "fixture",
+                "fixture_scenario": "success-timeout-missing",
+            }
+        )
+
+    assert CreateRunRequest.model_validate({**request, "mode": "real"}).analysis_kind == "understanding"
+    assert CreateRunRequest.model_validate(
+        {**request, "mode": "external", "execution_source": "codex"}
+    ).analysis_kind == "understanding"
 
 
 def test_schema_artifact_includes_code_understanding_contracts() -> None:

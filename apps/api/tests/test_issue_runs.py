@@ -210,6 +210,77 @@ class SearchThenEvidenceAdapter:
         raise FeatureGenerationErrorBase("model_failed", "repair not expected in this test")
 
 
+class SearchThenUnderstandingAdapter:
+    """Deterministic real-understanding adapter for HTTP and browser bootstrap reuse."""
+
+    def __init__(self, *, invalid_evidence: bool = False) -> None:
+        self.invalid_evidence = invalid_evidence
+        self.prompts: list[str] = []
+
+    def generate(self, prompt: str, **_: object) -> ModelCall:
+        self.prompts.append(prompt)
+        index_id = re.search(r"^index_id=(\S+)$", prompt, re.MULTILINE).group(1)  # type: ignore[union-attr]
+        if len(self.prompts) == 1:
+            output = {
+                "schema_version": "0.1.0",
+                "kind": "tool_call",
+                "params": {"tool": "search_code", "query": "load_settings", "limit": 8},
+            }
+        elif len(self.prompts) == 2:
+            match = re.search(r"- symbol_id=(\S+) path=(\S+) lines=(\d+)-(\d+)", prompt)
+            assert match is not None
+            output = {
+                "schema_version": "0.1.0",
+                "kind": "tool_call",
+                "params": {
+                    "tool": "read_source",
+                    "path": match.group(2),
+                    "start_line": int(match.group(3)),
+                    "end_line": min(int(match.group(4)), int(match.group(3)) + 5),
+                },
+            }
+        else:
+            symbol_match = re.search(r"- symbol_id=(\S+) path=", prompt)
+            evidence_match = re.search(r"- evidence_id=(\S+) path=", prompt)
+            assert symbol_match is not None and evidence_match is not None
+            evidence_id = "unreturned-evidence" if self.invalid_evidence else evidence_match.group(1)
+            output = {
+                "schema_version": "0.1.0",
+                "kind": "explanation",
+                "index_id": index_id,
+                "outcome": "explanation",
+                "summary": "The indexed entry reads settings; the complete runtime path remains unknown.",
+                "explanation": {
+                    "coverage": "partial",
+                    "steps": [
+                        {
+                            "step_id": "step-read-settings",
+                            "kind": "confirmed",
+                            "title": "Read settings",
+                            "description": "The selected function reads settings in the cited source.",
+                            "evidence_ids": [evidence_id],
+                            "symbol_ids": [symbol_match.group(1)],
+                        },
+                        {
+                            "step_id": "step-runtime-gap",
+                            "kind": "unknown",
+                            "title": "Runtime branch",
+                            "description": "The bounded static evidence does not show which runtime branch executes.",
+                            "evidence_ids": [],
+                            "symbol_ids": [],
+                        },
+                    ],
+                },
+                "evidence_ids": [evidence_id],
+                "limitations": [],
+            }
+        return ModelCall(raw_output=json.dumps(output), input_chars=None)
+
+    def repair(self, prompt: str, invalid_output: str, validation_error: str, **_: object) -> ModelCall:
+        del prompt, validation_error
+        return ModelCall(raw_output=invalid_output, input_chars=None)
+
+
 class FailingAdapter:
     def generate(self, prompt: str, **_: object) -> ModelCall:
         del prompt
@@ -314,6 +385,90 @@ def test_real_run_uses_different_model_selected_tools_and_persists_bounded_usage
     wait_for_terminal(other_app, other_project, other_session, other_run)
     assert adapter.query == "load_settings"
     assert other_adapter.query == "initialize_client"
+
+
+def test_real_understanding_run_saves_explanation_evidence_and_no_issue_findings(tmp_path: Path) -> None:
+    adapter = SearchThenUnderstandingAdapter()
+    application, project_id, index_id = setup_workspace(tmp_path, adapter)
+    session_id = create_session(
+        application,
+        project_id,
+        index_id,
+        "Explain how settings reach client initialization, and say what the snapshot cannot confirm.",
+    )
+    run_id = start_real_run(
+        application,
+        project_id,
+        session_id,
+        index_id,
+        analysis_kind="understanding",
+    )
+
+    terminal = wait_for_terminal(application, project_id, session_id, run_id)
+    assert terminal["run"]["status"] == "succeeded"
+    assert terminal["run"]["analysis_kind"] == "understanding"
+    assert terminal["run"]["prompt_version"] == "code-understanding-real-v1"
+    assert terminal["run"]["execution_version"] == "run-real-understanding-v1"
+    assert len(adapter.prompts) == 3
+    assert "CodeTrail real code understanding request" in adapter.prompts[0]
+    assert "Issue JSON:" not in adapter.prompts[0]
+    assert "Explain how settings reach client initialization" in adapter.prompts[0]
+
+    status, report = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/sessions/{session_id}/runs/{run_id}/report",
+    )
+    assert status == 200
+    assert report["report"]["outcome"] == "explanation"
+    assert report["report"]["explanation"]["coverage"] == "partial"
+    assert [step["kind"] for step in report["report"]["explanation"]["steps"]] == ["confirmed", "unknown"]
+    assert report["report"]["evidence"]
+    assert report["report"]["findings"] == []
+    assert report["report"]["candidate_links"] == []
+
+    status, events = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/sessions/{session_id}/runs/{run_id}/events",
+    )
+    assert status == 200
+    assert events["events"][0]["payload"]["analysis_kind"] == "understanding"
+    assert events["events"][-1]["payload"]["outcome"] == "explanation"
+    assert not any(event["type"] == "finding.created" for event in events["events"])
+
+
+def test_real_understanding_rejects_evidence_not_returned_by_its_run(tmp_path: Path) -> None:
+    adapter = SearchThenUnderstandingAdapter(invalid_evidence=True)
+    application, project_id, index_id = setup_workspace(tmp_path, adapter)
+    session_id = create_session(application, project_id, index_id, "Explain the settings loader.")
+    run_id = start_real_run(
+        application,
+        project_id,
+        session_id,
+        index_id,
+        analysis_kind="understanding",
+    )
+
+    terminal = wait_for_terminal(application, project_id, session_id, run_id)
+    assert terminal["run"]["status"] == "failed"
+    assert terminal["run"]["budget"]["repair_calls_used"] == 1
+    status, events = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/sessions/{session_id}/runs/{run_id}/events",
+    )
+    assert status == 200
+    assert events["events"][-1]["payload"]["error"]["code"] == "invalid_model_output"
+    status, report = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/sessions/{session_id}/runs/{run_id}/report",
+    )
+    assert status == 200
+    assert report["report"]["outcome"] == "failed"
+    assert report["report"]["findings"] == []
+    assert report["report"]["candidate_links"] == []
 
 
 def test_real_run_provider_failure_is_explicit_and_does_not_fallback(tmp_path: Path) -> None:

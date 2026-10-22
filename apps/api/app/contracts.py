@@ -819,8 +819,8 @@ class Run(VersionedModel):
             raise ValueError("external Runs must use the Codex execution source")
         if self.mode != "external" and self.execution_source != "internal":
             raise ValueError("fixture and real Runs must use the internal execution source")
-        if self.mode != "external" and self.analysis_kind != "issue":
-            raise ValueError("understanding Runs must use the external mode")
+        if self.mode == "fixture" and self.analysis_kind != "issue":
+            raise ValueError("fixture Runs only support Issue analysis")
         if self.input_chars != self.budget.input_chars_used:
             raise ValueError("run input usage must be reflected in the run budget")
         if self.input_chars > self.budget.max_input_chars:
@@ -1040,7 +1040,7 @@ class IssueModelFinal(VersionedModel):
 
 
 class CodeUnderstandingFinal(VersionedModel):
-    """A structured code-flow conclusion for an external understanding Run."""
+    """A structured code-flow conclusion for an understanding Run."""
 
     kind: Literal["explanation"] = "explanation"
     index_id: Identifier
@@ -1069,6 +1069,10 @@ ExternalRunFinal: TypeAlias = IssueModelFinal | CodeUnderstandingFinal
 
 IssueModelOutput: TypeAlias = Annotated[
     IssueModelToolCall | IssueModelFinal,
+    Field(discriminator="kind"),
+]
+UnderstandingModelOutput: TypeAlias = Annotated[
+    IssueModelToolCall | CodeUnderstandingFinal,
     Field(discriminator="kind"),
 ]
 
@@ -3585,8 +3589,8 @@ class CreateRunRequest(VersionedModel):
             raise ValueError("external requests must use the Codex execution source")
         if self.mode != "external" and self.execution_source != "internal":
             raise ValueError("fixture and real requests must use the internal execution source")
-        if self.mode != "external" and self.analysis_kind != "issue":
-            raise ValueError("understanding Runs must use the external mode")
+        if self.mode == "fixture" and self.analysis_kind != "issue":
+            raise ValueError("fixture requests only support Issue analysis")
         if self.mode == "external" and self.model is not None:
             raise ValueError("external requests cannot declare an internal model")
         if any(
