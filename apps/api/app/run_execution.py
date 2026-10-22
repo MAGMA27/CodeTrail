@@ -517,15 +517,16 @@ class RunExecutor:
 
         try:
             self._append_stage(record, "retrieval", deadline=deadline)
-            adapter = (
-                self.model_adapter_factory("real")
-                if self.model_adapter_factory is not None
-                else default_issue_adapter(
+            if self.model_adapter_factory is not None:
+                adapter = self.model_adapter_factory("real")
+            elif record.run.analysis_kind == "understanding":
+                adapter = default_issue_adapter(
                     "real",
                     model_config=model_config,
-                    analysis_kind=record.run.analysis_kind,
+                    analysis_kind="understanding",
                 )
-            )
+            else:
+                adapter = default_issue_adapter("real", model_config=model_config)
             result = IssueAnalysisEngine(adapter, analysis_kind=record.run.analysis_kind).run(
                 context,
                 model=record.run.model or "",
