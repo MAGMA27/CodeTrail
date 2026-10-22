@@ -823,7 +823,13 @@ def test_run_execution_exception_and_timeout_release_capacity_with_one_terminal_
 def test_restart_marks_incomplete_run_interrupted(tmp_path: Path) -> None:
     application, project_id, index_id = setup_workspace(tmp_path)
     session_id = create_session(application, project_id, index_id)
-    def leave_run_queued(_run: object, *, reservation: object) -> None:
+    def leave_run_queued(
+        _run: object,
+        *,
+        reservation: object | None = None,
+        model_config: object | None = None,
+    ) -> None:
+        assert reservation is not None
         reservation.release()  # type: ignore[attr-defined]
 
     application.state.workspace_service.run_executor.submit = leave_run_queued  # type: ignore[method-assign]
