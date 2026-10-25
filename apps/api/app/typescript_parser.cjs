@@ -813,6 +813,59 @@ const files = input.files.map(({ path: filePath, text }) => {
       (right.function_node.end - right.function_node.getStart(source)));
     return owners[0] ?? null;
   };
+  const reactUseStateNames = new Set();
+  for (const [name, bindings] of importBindings) {
+    if (bindings.length === 1 && bindings[0].kind === "named_import" &&
+      bindings[0].specifier === "react" && bindings[0].imported_name === "useState" &&
+      !hasWrites(source, new Set([name]))) reactUseStateNames.add(name);
+  }
+  const singleCallBody = (callback) => {
+    if (!callback || !callback.body) return null;
+    if (ts.isCallExpression(callback.body)) return callback.body;
+    if (!ts.isBlock(callback.body) || callback.body.statements.length !== 1) return null;
+    const statement = callback.body.statements[0];
+    if (ts.isExpressionStatement(statement) && ts.isCallExpression(statement.expression)) return statement.expression;
+    if (ts.isReturnStatement(statement) && statement.expression && ts.isCallExpression(statement.expression)) return statement.expression;
+    return null;
+  };
+  const uniqueLocalStateAssignment = (owner, callback) => {
+    if (!owner || !callback || !ts.isBlock(owner.function_node.body)) return null;
+    const call = singleCallBody(callback);
+    if (!call || !ts.isIdentifier(call.expression) || call.arguments.length !== 1 ||
+      ts.isSpreadElement(call.arguments[0])) return null;
+    const setterName = call.expression.text;
+    const matches = [];
+    for (const statement of owner.function_node.body.statements) {
+      if (!ts.isVariableStatement(statement) || !(statement.declarationList.flags & ts.NodeFlags.Const)) continue;
+      for (const declaration of statement.declarationList.declarations) {
+        if (!ts.isArrayBindingPattern(declaration.name) || declaration.name.elements.length !== 2 ||
+          !declaration.initializer || !ts.isCallExpression(declaration.initializer) ||
+          !ts.isIdentifier(declaration.initializer.expression) ||
+          !reactUseStateNames.has(declaration.initializer.expression.text) ||
+          declaration.initializer.arguments.length > 1) continue;
+        const [stateBinding, setterBinding] = declaration.name.elements;
+        if (ts.isBindingElement(stateBinding) && !stateBinding.dotDotDotToken && !stateBinding.initializer &&
+          ts.isIdentifier(stateBinding.name) && ts.isBindingElement(setterBinding) &&
+          !setterBinding.dotDotDotToken && !setterBinding.initializer && ts.isIdentifier(setterBinding.name) &&
+          setterBinding.name.text === setterName) {
+          matches.push({ stateName: stateBinding.name.text, setterName, declaration });
+        }
+      }
+    }
+    if (matches.length !== 1) return null;
+    const { stateName } = matches[0];
+    if (hasWrites(owner.function_node.body, new Set([stateName, setterName])) ||
+      hasLocalBinding(callback, stateName) || hasLocalBinding(callback, setterName)) return null;
+    const argument = call.arguments[0];
+    const expression = argument.getText(source).slice(0, 200);
+    if (!expression || argument.getText(source).length > 200) return null;
+    return {
+      state_name: stateName,
+      setter_name: setterName,
+      expression,
+      ...range(call),
+    };
+  };
   const visitUiActions = (node) => {
     if (ts.isJsxAttribute(node) && ["onSubmit", "onClick"].includes(node.name.getText(source))) {
       const opening = node.parent.parent;
@@ -841,6 +894,17 @@ const files = input.files.map(({ path: filePath, text }) => {
         collectCallbackReferences(expression.body);
         if (callbackReferences.size === 1) {
           [receiver_name, callback_property] = [...callbackReferences][0].split("\0");
+        } else if (owner) {
+          const directCall = singleCallBody(expression);
+          if (directCall && ts.isIdentifier(directCall.expression)) {
+            const target = localTarget(directCall.expression.text, callerScopePaths(owner)).target;
+            if (target && !hasWrites(owner.function_node.body, new Set([directCall.expression.text]))) {
+              handler_name = directCall.expression.text;
+              handler_qualified_name = target.qualified_name;
+              handler_start_line = target.start_line;
+              handler_binding_static = true;
+            }
+          }
         }
       } else if (expression && ts.isIdentifier(expression)) {
         handler_name = expression.text;
@@ -882,6 +946,12 @@ const files = input.files.map(({ path: filePath, text }) => {
         handler_qualified_name,
         handler_start_line,
         handler_binding_static,
+        local_state: (() => {
+          const callback = handler_qualified_name && handler_start_line != null
+            ? functionInfos.find((info) => info.qualified_name === handler_qualified_name && info.start_line === handler_start_line)?.function_node
+            : expression && (ts.isArrowFunction(expression) || ts.isFunctionExpression(expression)) ? expression : null;
+          return uniqueLocalStateAssignment(owner, callback);
+        })(),
         owner_qualified_name: owner?.qualified_name ?? null,
         owner_start_line: owner?.start_line ?? null,
         element_start_line: range(element).start_line,

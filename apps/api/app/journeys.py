@@ -30,7 +30,7 @@ from .indexing import SnapshotFile
 from .relations import RelationIndex, relation_coverage_limitations
 
 
-RULES_VERSION = "ui-action-v1+static-calls-v1+http-shape-v2"
+RULES_VERSION = "ui-action-v2+local-state-v1+static-calls-v1+http-shape-v2"
 _MAX_FILES = 100
 _MAX_INPUT_BYTES = 5_000_000
 _MAX_ACTIONS = 1_000
@@ -44,13 +44,13 @@ _MAX_SOURCE_LINES = 24
 class _JourneySpec:
     summary: JourneySummary
     action: dict[str, Any]
-    callback: Symbol
+    callback: Symbol | None
     callback_certainty: str
     callback_note: str
     call_path: list[Any]
-    client: Symbol
-    association: OverviewHttpAssociation
-    route: OverviewEntryPoint
+    client: Symbol | None
+    association: OverviewHttpAssociation | None
+    route: OverviewEntryPoint | None
 
 
 def build_journey_catalog(
@@ -102,6 +102,7 @@ def build_journey_catalog(
     summaries: list[JourneySummary] = []
     specs: dict[str, _JourneySpec] = {}
     covered_action_keys: set[tuple[str, int, str]] = set()
+    http_action_keys: set[tuple[str, int, str]] = set()
     symbols_by_identity = {
         (symbol.path, symbol.qualified_name, symbol.start_line): symbol
         for symbol in relation.symbols
@@ -128,6 +129,11 @@ def build_journey_catalog(
 
     journey_limit_reached = False
     for action in actions:
+        action_key = (
+            str(action["path"]),
+            int(action.get("element_start_offset", action["element_start_line"])),
+            str(action["event_name"]),
+        )
         handlers: list[tuple[Symbol, str, str]] = []
         handler_name = action.get("handler_name")
         receiver_name = action.get("receiver_name")
@@ -160,6 +166,7 @@ def build_journey_catalog(
                 call_path = _static_call_path(relation, callback.symbol_id, client.symbol_id)
                 if call_path is None:
                     continue
+                http_action_keys.add(action_key)
                 journey_id = _journey_id(
                     relation.snapshot.index.index_id,
                     str(action["path"]),
@@ -171,7 +178,6 @@ def build_journey_catalog(
                 if journey_id in specs:
                     continue
                 if len(summaries) >= _MAX_JOURNEYS:
-                    limitations.append(f"journey summary limit of {_MAX_JOURNEYS} reached; remaining matches were omitted")
                     extraction["parser_status"] = "truncated"
                     journey_limit_reached = True
                     break
@@ -182,7 +188,7 @@ def build_journey_catalog(
                     association,
                 )
                 summaries.append(summary)
-                covered_action_keys.add((str(action["path"]), int(action["start_line"]), str(action["event_name"])))
+                covered_action_keys.add(action_key)
                 specs[journey_id] = _JourneySpec(
                     summary=summary,
                     action=action,
@@ -196,8 +202,72 @@ def build_journey_catalog(
                 )
             if journey_limit_reached:
                 break
+        if journey_limit_reached:
+            break
 
-    is_truncated = extraction["parser_status"] == "truncated" or len(specs) < len(summaries)
+    use_local_action_facts = "+typescript-facts-v6" in (relation.snapshot.index.rules_version or "")
+    if use_local_action_facts and not journey_limit_reached:
+        for action in actions:
+            action_key = (
+                str(action["path"]),
+                int(action.get("element_start_offset", action["element_start_line"])),
+                str(action["event_name"]),
+            )
+            if action_key in http_action_keys:
+                continue
+            if len(summaries) >= _MAX_JOURNEYS:
+                extraction["parser_status"] = "truncated"
+                journey_limit_reached = True
+                break
+            journey_id = _action_journey_id(
+                relation.snapshot.index.index_id,
+                str(action["path"]),
+                int(action.get("element_start_offset", action["element_start_line"])),
+                str(action["event_name"]),
+            )
+            handlers = _action_handlers(action, symbols_by_identity, callback_paths, relation.symbols)
+            selected_handler = handlers[0] if len(handlers) == 1 else None
+            callback = selected_handler[0] if selected_handler is not None else None
+            callback_certainty = selected_handler[1] if selected_handler is not None else "unconfirmed"
+            callback_note = (
+                selected_handler[2]
+                if selected_handler is not None
+                else "事件处理表达式未能唯一绑定到同快照函数；保留操作源码作为追踪入口。"
+            )
+            summary = _summary(
+                journey_id,
+                relation.snapshot.index.index_id,
+                action,
+                None,
+            )
+            summaries.append(summary)
+            covered_action_keys.add(action_key)
+            specs[journey_id] = _JourneySpec(
+                summary=summary,
+                action=action,
+                callback=callback,
+                callback_certainty=callback_certainty,
+                callback_note=callback_note,
+                call_path=(
+                    _reachable_call_edges(relation, callback.symbol_id, depth=1, limit=4)
+                    if callback is not None
+                    else []
+                ),
+                client=None,
+                association=None,
+                route=None,
+            )
+
+    if journey_limit_reached:
+        omitted_action_count = max(0, len({
+            (str(action["path"]), int(action.get("element_start_offset", action["element_start_line"])), str(action["event_name"]))
+            for action in actions
+        }) - len(covered_action_keys))
+        limitations.append(
+            f"journey summary limit of {_MAX_JOURNEYS} reached; {omitted_action_count} action anchors have no visible summary"
+        )
+
+    is_truncated = extraction["parser_status"] == "truncated" or journey_limit_reached
     catalog_coverage = JourneyCoverage(
         **{
             **coverage_base,
@@ -259,7 +329,7 @@ def _summary(
     journey_id: str,
     index_id: str,
     action: dict[str, Any],
-    association: OverviewHttpAssociation,
+    association: OverviewHttpAssociation | None,
 ) -> JourneySummary:
     candidates = [str(item)[:200] for item in action.get("label_candidates", []) if isinstance(item, str)]
     label = str(action.get("label") or "用户操作")
@@ -276,20 +346,20 @@ def _summary(
         event_name=action["event_name"],
         action_path=action["path"],
         action_start_line=action["element_start_line"],
-        method=association.method,
-        path=association.path,
+        method=association.method if association is not None else None,
+        path=association.path if association is not None else None,
     )
 
 
 def _journey_steps(
     action: dict[str, Any],
-    callback: Symbol,
+    callback: Symbol | None,
     callback_certainty: str,
     callback_note: str,
     call_path: list[Any],
-    client: Symbol,
-    association: OverviewHttpAssociation,
-    route: OverviewEntryPoint,
+    client: Symbol | None,
+    association: OverviewHttpAssociation | None,
+    route: OverviewEntryPoint | None,
     relation: RelationIndex,
     read_evidence: Callable[[str, str, int, int], Evidence],
 ) -> tuple[list[JourneyStep], list[str]]:
@@ -304,9 +374,21 @@ def _journey_steps(
     )
     if evidence_action is None:
         markers.append("操作源码证据无法从所选索引读取。")
-    callback_evidence = _symbol_evidence(read_evidence, index_id, callback)
-    if callback_evidence is None:
+    callback_evidence = _symbol_evidence(read_evidence, index_id, callback) if callback is not None else None
+    if callback is not None and callback_evidence is None:
         markers.append("前端处理符号的源码证据无法从所选索引读取。")
+    local_state = action.get("local_state")
+    local_state_evidence = None
+    if isinstance(local_state, dict):
+        local_state_evidence = _read_evidence(
+            read_evidence,
+            index_id,
+            action["path"],
+            local_state["start_line"],
+            local_state["end_line"],
+        )
+        if local_state_evidence is None:
+            markers.append("本地状态赋值源码证据无法从所选索引读取；未将其作为已确认步骤。")
     labels = action.get("label_candidates", [])
     trigger_label = " / ".join(labels) if labels else str(action.get("label") or "用户操作")
     dynamic_note = "标签会按状态切换；源码只给出候选文本。" if action.get("label_dynamic") else ""
@@ -320,89 +402,32 @@ def _journey_steps(
             explanation=f"TSX 快照中识别到 {action.get('event_name')} 动作；{dynamic_note or '标签来自同快照 JSX 文本。'}",
             evidence=[evidence_action] if evidence_action else [],
         ),
+    ]
+    steps.append(
         JourneyStep(
             step_id="journey-step-client-handler",
             role="client_processing",
-            title="前端接收并处理这次提交",
+            title="前端处理动作",
             relation_kind="ui_callback",
-            certainty="static" if callback_certainty == "static" else "unconfirmed",
+            certainty="static" if callback is not None and callback_certainty == "static" else "unconfirmed",
             explanation=callback_note,
-            symbols=[callback],
-            evidence=[callback_evidence] if callback_evidence else [],
-        ),
-    ]
-    markers.append("UI handler 与回调属性关系未被完整跨组件解析，按源码候选标记。" if callback_certainty != "static" else "")
+            symbols=[callback] if callback is not None else [],
+            evidence=[callback_evidence] if callback_evidence else ([evidence_action] if evidence_action else []),
+        )
+    )
+    if callback is not None and callback_certainty != "static":
+        markers.append("UI handler 与回调属性关系未被完整跨组件解析，按源码候选标记。")
+    elif callback is None:
+        markers.append("事件处理表达式没有可确认的函数绑定；保留 JSX 源码入口。")
 
-    path_symbols = [callback]
-    path_evidence: list[Evidence] = []
-    for edge in call_path:
-        target = next((symbol for symbol in relation.symbols if symbol.symbol_id == edge.target_id), None)
-        if target is not None and (not path_symbols or path_symbols[-1].symbol_id != target.symbol_id):
-            path_symbols.append(target)
-        if edge.source_location is not None:
-            evidence = _read_evidence(
-                read_evidence,
-                index_id,
-                edge.source_location.path,
-                edge.source_location.start_line,
-                edge.source_location.end_line,
-            )
-            if evidence is not None and evidence.evidence_id not in {item.evidence_id for item in path_evidence}:
-                path_evidence.append(evidence)
-            elif evidence is None:
-                markers.append("部分前端调用来源证据无法从所选索引读取。")
-    if len(path_symbols) > 8:
-        path_symbols = path_symbols[:8]
-    steps.append(
-        JourneyStep(
-            step_id="journey-step-client-calls",
-            role="client_processing",
-            title="前端沿静态调用关系准备请求",
-            relation_kind="calls",
-            certainty="static",
-            explanation="展示同一索引中的静态调用路径；它说明源码引用关系，不代表浏览器已执行。",
-            symbols=path_symbols,
-            evidence=path_evidence[:8],
-        )
-    )
-    steps.append(
-        JourneyStep(
-            step_id="journey-step-http",
-            role="request",
-            title="前端提交导入请求",
-            relation_kind="http_shape",
-            certainty="shape",
-            explanation="客户端请求声明与服务端入口的接口形状唯一匹配；这不代表浏览器实际发送过请求。",
-            symbols=[client],
-            evidence=[association.client_evidence, association.route_evidence],
-        )
-    )
-    route_symbols = [route.handler_symbol] if route.handler_symbol is not None else []
-    route_evidence = [route.evidence] if route.evidence is not None else [association.route_evidence]
-    steps.append(
-        JourneyStep(
-            step_id="journey-step-route",
-            role="server_processing",
-            title="服务端接收请求",
-            relation_kind="http_shape",
-            certainty="shape",
-            explanation="同一索引中的路由声明指向此处理入口；挂载前缀与运行时分派不由该静态事实证明。",
-            symbols=route_symbols,
-            evidence=route_evidence,
-        )
-    )
-
-    handler = route.handler_symbol
-    backend_edges = []
-    if handler is not None:
-        backend_edges = _reachable_call_edges(relation, handler.symbol_id, depth=2, limit=4)
-    if backend_edges:
-        backend_symbols = [handler] if handler is not None else []
-        backend_evidence: list[Evidence] = []
-        for edge in backend_edges:
+    has_http_shape = client is not None and association is not None and route is not None
+    if has_http_shape:
+        path_symbols = [callback] if callback is not None else []
+        path_evidence: list[Evidence] = []
+        for edge in call_path:
             target = next((symbol for symbol in relation.symbols if symbol.symbol_id == edge.target_id), None)
-            if target is not None and all(item.symbol_id != target.symbol_id for item in backend_symbols):
-                backend_symbols.append(target)
+            if target is not None and all(item.symbol_id != target.symbol_id for item in path_symbols):
+                path_symbols.append(target)
             if edge.source_location is not None:
                 evidence = _read_evidence(
                     read_evidence,
@@ -411,60 +436,188 @@ def _journey_steps(
                     edge.source_location.start_line,
                     edge.source_location.end_line,
                 )
-                if evidence is not None:
-                    backend_evidence.append(evidence)
-                else:
-                    markers.append("部分服务端调用来源证据无法从所选索引读取。")
+                if evidence is not None and evidence.evidence_id not in {item.evidence_id for item in path_evidence}:
+                    path_evidence.append(evidence)
+                elif evidence is None:
+                    markers.append("部分前端调用来源证据无法从所选索引读取。")
         steps.append(
             JourneyStep(
-                step_id="journey-step-backend-calls",
-                role="server_processing",
-                title="服务端继续处理",
+                step_id="journey-step-client-calls",
+                role="client_processing",
+                title="前端沿静态调用关系准备请求",
                 relation_kind="calls",
                 certainty="static",
-                explanation="源码中可见服务端后续调用；这里只列有界样本，未列分支不代表不存在。",
-                symbols=backend_symbols[:8],
-                evidence=backend_evidence[:8],
+                explanation="展示同一索引中的静态调用路径；它说明源码引用关系，不代表浏览器已执行。",
+                symbols=path_symbols[:8],
+                evidence=path_evidence[:8],
+            )
+        )
+        steps.append(
+            JourneyStep(
+                step_id="journey-step-http",
+                role="request",
+                title=f"前端请求 {association.method} {association.path}",
+                relation_kind="http_shape",
+                certainty="shape",
+                explanation="客户端请求声明与服务端入口的 method/path 形状唯一匹配；这不代表浏览器实际发送过请求。",
+                symbols=[client],
+                evidence=[association.client_evidence, association.route_evidence],
+            )
+        )
+        route_symbols = [route.handler_symbol] if route.handler_symbol is not None else []
+        route_evidence = [route.evidence] if route.evidence is not None else [association.route_evidence]
+        steps.append(
+            JourneyStep(
+                step_id="journey-step-route",
+                role="server_processing",
+                title="服务端接收请求",
+                relation_kind="http_shape",
+                certainty="shape",
+                explanation="同一索引中的路由声明指向此处理入口；挂载前缀与运行时分派不由该静态事实证明。",
+                symbols=route_symbols,
+                evidence=route_evidence,
+            )
+        )
+
+        handler = route.handler_symbol
+        backend_edges = (
+            _reachable_call_edges(relation, handler.symbol_id, depth=2, limit=4)
+            if handler is not None
+            else []
+        )
+        if backend_edges:
+            backend_symbols = [handler] if handler is not None else []
+            backend_evidence: list[Evidence] = []
+            for edge in backend_edges:
+                target = next((symbol for symbol in relation.symbols if symbol.symbol_id == edge.target_id), None)
+                if target is not None and all(item.symbol_id != target.symbol_id for item in backend_symbols):
+                    backend_symbols.append(target)
+                if edge.source_location is not None:
+                    evidence = _read_evidence(
+                        read_evidence,
+                        index_id,
+                        edge.source_location.path,
+                        edge.source_location.start_line,
+                        edge.source_location.end_line,
+                    )
+                    if evidence is not None:
+                        backend_evidence.append(evidence)
+                    else:
+                        markers.append("部分服务端调用来源证据无法从所选索引读取。")
+            steps.append(
+                JourneyStep(
+                    step_id="journey-step-backend-calls",
+                    role="server_processing",
+                    title="服务端继续处理",
+                    relation_kind="calls",
+                    certainty="static",
+                    explanation="源码中可见服务端后续调用；这里只列有界样本，未列分支不代表不存在。",
+                    symbols=backend_symbols[:8],
+                    evidence=backend_evidence[:8],
+                )
+            )
+        else:
+            unresolved = [
+                item for item in relation.unresolved
+                if handler is not None and item.source_symbol_id == handler.symbol_id
+            ][:4]
+            unresolved_evidence = [
+                evidence
+                for item in unresolved
+                if (evidence := _read_evidence(read_evidence, index_id, item.path, item.start_line, item.end_line)) is not None
+            ]
+            if unresolved and not unresolved_evidence:
+                markers.append("后端断点的源码证据无法从所选索引读取。")
+            unresolved_names = ", ".join(item.expression for item in unresolved) or "没有可确认的直接调用边"
+            steps.append(
+                JourneyStep(
+                    step_id="journey-step-backend-gap",
+                    role="server_processing",
+                    title="服务端后续处理仍有断点",
+                    relation_kind="unresolved",
+                    certainty="unconfirmed",
+                    explanation=f"静态调用目标没有形成已确认 CodeEdge：{unresolved_names}。请展开源码核对。",
+                    symbols=route_symbols,
+                    evidence=unresolved_evidence,
+                )
+            )
+            markers.append("服务端路由后的部分调用目标没有静态解析；未补造调用边。")
+    elif call_path:
+        local_symbols = [callback] if callback is not None else []
+        local_evidence: list[Evidence] = []
+        for edge in call_path:
+            target = next((symbol for symbol in relation.symbols if symbol.symbol_id == edge.target_id), None)
+            if target is not None and all(item.symbol_id != target.symbol_id for item in local_symbols):
+                local_symbols.append(target)
+            if edge.source_location is not None:
+                evidence = _read_evidence(
+                    read_evidence,
+                    index_id,
+                    edge.source_location.path,
+                    edge.source_location.start_line,
+                    edge.source_location.end_line,
+                )
+                if evidence is not None and evidence.evidence_id not in {item.evidence_id for item in local_evidence}:
+                    local_evidence.append(evidence)
+        steps.append(
+            JourneyStep(
+                step_id="journey-step-client-calls",
+                role="client_processing",
+                title="处理函数中的已确认本地调用",
+                relation_kind="calls",
+                certainty="static",
+                explanation="这里只列处理函数的一跳静态调用；它不是完整业务流程，也不证明 HTTP 请求。",
+                symbols=local_symbols[:8],
+                evidence=local_evidence[:8],
+            )
+        )
+
+    if local_state_evidence is not None and isinstance(local_state, dict):
+        state_name = str(local_state["state_name"])
+        setter_name = str(local_state["setter_name"])
+        expression = str(local_state["expression"])
+        steps.append(
+            JourneyStep(
+                step_id="journey-step-result",
+                role="result",
+                title=f"更新本地状态：{state_name}",
+                relation_kind="result_display",
+                certainty="static",
+                explanation=(
+                    f"同一 TSX 函数中的 React useState setter `{setter_name}` 被直接调用，参数源码为 `{expression}`。"
+                    "这里只确认 setter 与状态变量的绑定及赋值表达式，不求值该表达式或推断运行时结果。"
+                ),
+                evidence=[local_state_evidence],
             )
         )
     else:
-        unresolved = [
-            item for item in relation.unresolved
-            if handler is not None and item.source_symbol_id == handler.symbol_id
-        ][:4]
-        unresolved_evidence = [
-            evidence
-            for item in unresolved
-            if (evidence := _read_evidence(read_evidence, index_id, item.path, item.start_line, item.end_line)) is not None
-        ]
-        if unresolved and not unresolved_evidence:
-            markers.append("后端断点的源码证据无法从所选索引读取。")
-        unresolved_names = ", ".join(item.expression for item in unresolved) or "没有可确认的直接调用边"
-        steps.append(
-            JourneyStep(
-                step_id="journey-step-backend-gap",
-                role="server_processing",
-                title="服务端后续处理仍有断点",
-                relation_kind="unresolved",
-                certainty="unconfirmed",
-                explanation=f"静态调用目标没有形成已确认 CodeEdge：{unresolved_names}。请展开源码核对。",
-                symbols=route_symbols,
-                evidence=unresolved_evidence,
+        result_evidence = callback_evidence or evidence_action
+        if has_http_shape:
+            steps.append(
+                JourneyStep(
+                    step_id="journey-step-result",
+                    role="result",
+                    title="请求结果如何更新页面尚未确认",
+                    relation_kind="result_display",
+                    certainty="unconfirmed",
+                    explanation="当前索引没有足够的静态关系证明请求结果如何更新界面；请从返回的符号继续追踪。",
+                    evidence=[result_evidence] if result_evidence else [],
+                )
             )
-        )
-        markers.append("服务端路由后的部分调用目标没有静态解析；未补造调用边。")
-
-    steps.append(
-        JourneyStep(
-            step_id="journey-step-result",
-            role="result",
-            title="请求结果如何更新页面尚未确认",
-            relation_kind="result_display",
-            certainty="unconfirmed",
-            explanation="当前索引没有足够的静态关系证明请求结果如何更新界面，因此将结果呈现保留为未确认断点。",
-        )
-    )
-    markers.append("当前索引未确认请求结果与界面更新之间的关系。")
+        else:
+            steps.append(
+                JourneyStep(
+                    step_id="journey-step-result",
+                    role="result",
+                    title="本地状态或界面结果尚未确认",
+                    relation_kind="unresolved",
+                    certainty="unconfirmed",
+                    explanation="当前源码未能唯一证明此动作产生的状态或显示结果；没有关联到 HTTP 路由，不补造服务端步骤。",
+                    evidence=[result_evidence] if result_evidence else [],
+                )
+            )
+            markers.append("此动作没有唯一 HTTP method/path 关联；未补造服务端步骤。")
+        markers.append("当前索引未确认动作结果与界面更新之间的关系。")
     markers = [marker for marker in markers if marker]
     if len(steps) > 8:
         steps = steps[:8]
@@ -567,6 +720,11 @@ def _reachable_call_edges(relation: RelationIndex, start_id: str, *, depth: int,
 def _journey_id(index_id: str, path: str, start: int, event: str, method: str, route_path: str) -> str:
     identity = "\0".join((index_id, path, str(start), event, method, route_path))
     return f"journey-{hashlib.sha256(identity.encode('utf-8')).hexdigest()[:32]}"
+
+
+def _action_journey_id(index_id: str, path: str, start: int, event: str) -> str:
+    identity = "\0".join(("action", index_id, path, str(start), event))
+    return f"journey-action-{hashlib.sha256(identity.encode('utf-8')).hexdigest()[:32]}"
 
 
 def _extract_ui_facts(files: tuple[SnapshotFile, ...]) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
@@ -773,6 +931,24 @@ def _extract_ui_facts(files: tuple[SnapshotFile, ...]) -> tuple[list[dict[str, A
     }
 
 
+def _valid_local_state_fact(fact: Any, line_count: int) -> bool:
+    local_state = fact.get("local_state")
+    if local_state is None:
+        return True
+    return (
+        isinstance(local_state, dict)
+        and isinstance(local_state.get("state_name"), str)
+        and 1 <= len(local_state["state_name"]) <= 200
+        and isinstance(local_state.get("setter_name"), str)
+        and 1 <= len(local_state["setter_name"]) <= 200
+        and isinstance(local_state.get("expression"), str)
+        and 1 <= len(local_state["expression"]) <= 200
+        and isinstance(local_state.get("start_line"), int)
+        and isinstance(local_state.get("end_line"), int)
+        and 1 <= local_state["start_line"] <= local_state["end_line"] <= line_count
+    )
+
+
 def _valid_ui_fact(fact: Any, line_count: int, *, action: bool) -> bool:
     if not isinstance(fact, dict):
         return False
@@ -792,6 +968,7 @@ def _valid_ui_fact(fact: Any, line_count: int, *, action: bool) -> bool:
             and isinstance(fact.get("label_dynamic"), bool)
             and isinstance(fact.get("handler_expression"), str)
             and isinstance(fact.get("handler_binding_static"), bool)
+            and _valid_local_state_fact(fact, line_count)
             and (fact.get("handler_qualified_name") is None or isinstance(fact.get("handler_qualified_name"), str))
             and (fact.get("handler_start_line") is None or isinstance(fact.get("handler_start_line"), int))
             and isinstance(fact.get("element_start_line"), int)

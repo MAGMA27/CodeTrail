@@ -7,6 +7,7 @@
 - `repos/timeout-demo/`：被分析的固定 Python 仓库，索引根目录指向这里。只依赖 Python 标准库。
 - `repos/object-method-demo/`：直接构造对象后调用实例方法的正例与重绑定 unresolved 反例，供关系解析测试和人工验收使用。
 - `repos/relation-upgrade-demo/`：关系语义版本升级用的最小 Python 仓库，供旧索引升级验收使用。
+- `repos/preferences-demo/`：TypeScript/TSX 与 FastAPI 混合样本，包含保存偏好、纯本地状态动作、一动作多 HTTP 请求和结果未确认的界面入口，供功能旅程 API 与 UI 验收使用；源码只做静态索引，不执行。
 - `scenarios/issues/`：只包含用户可见的 Issue 输入，不包含预期答案。
 - `scenarios/success-timeout-missing/`：缺少 `timeout` 的成功定位场景。
 - `scenarios/insufficient-external-service/`：样本没有外部服务证据的证据不足场景。

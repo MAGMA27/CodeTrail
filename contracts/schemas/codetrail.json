@@ -17390,7 +17390,7 @@
     },
     "JourneySummary": {
       "additionalProperties": false,
-      "description": "A lightweight, same-index action and HTTP shape match for discovery.",
+      "description": "A lightweight same-index action summary with an optional HTTP shape match.",
       "properties": {
         "action_label": {
           "maxLength": 300,
@@ -17443,24 +17443,38 @@
           "type": "boolean"
         },
         "method": {
-          "enum": [
-            "GET",
-            "POST",
-            "PUT",
-            "PATCH",
-            "DELETE",
-            "OPTIONS",
-            "HEAD",
-            "TRACE"
+          "anyOf": [
+            {
+              "enum": [
+                "GET",
+                "POST",
+                "PUT",
+                "PATCH",
+                "DELETE",
+                "OPTIONS",
+                "HEAD",
+                "TRACE"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
           ],
-          "title": "Method",
-          "type": "string"
+          "title": "Method"
         },
         "path": {
-          "maxLength": 2000,
-          "minLength": 1,
-          "title": "Path",
-          "type": "string"
+          "anyOf": [
+            {
+              "maxLength": 2000,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Path"
         }
       },
       "required": [
@@ -22935,7 +22949,7 @@
         },
         "JourneySummary": {
           "additionalProperties": false,
-          "description": "A lightweight, same-index action and HTTP shape match for discovery.",
+          "description": "A lightweight same-index action summary with an optional HTTP shape match.",
           "properties": {
             "action_label": {
               "maxLength": 300,
@@ -22988,24 +23002,38 @@
               "type": "boolean"
             },
             "method": {
-              "enum": [
-                "GET",
-                "POST",
-                "PUT",
-                "PATCH",
-                "DELETE",
-                "OPTIONS",
-                "HEAD",
-                "TRACE"
+              "anyOf": [
+                {
+                  "enum": [
+                    "GET",
+                    "POST",
+                    "PUT",
+                    "PATCH",
+                    "DELETE",
+                    "OPTIONS",
+                    "HEAD",
+                    "TRACE"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
               ],
-              "title": "Method",
-              "type": "string"
+              "title": "Method"
             },
             "path": {
-              "maxLength": 2000,
-              "minLength": 1,
-              "title": "Path",
-              "type": "string"
+              "anyOf": [
+                {
+                  "maxLength": 2000,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Path"
             }
           },
           "required": [
@@ -23548,7 +23576,7 @@
         },
         "JourneySummary": {
           "additionalProperties": false,
-          "description": "A lightweight, same-index action and HTTP shape match for discovery.",
+          "description": "A lightweight same-index action summary with an optional HTTP shape match.",
           "properties": {
             "action_label": {
               "maxLength": 300,
@@ -23601,24 +23629,38 @@
               "type": "boolean"
             },
             "method": {
-              "enum": [
-                "GET",
-                "POST",
-                "PUT",
-                "PATCH",
-                "DELETE",
-                "OPTIONS",
-                "HEAD",
-                "TRACE"
+              "anyOf": [
+                {
+                  "enum": [
+                    "GET",
+                    "POST",
+                    "PUT",
+                    "PATCH",
+                    "DELETE",
+                    "OPTIONS",
+                    "HEAD",
+                    "TRACE"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
               ],
-              "title": "Method",
-              "type": "string"
+              "title": "Method"
             },
             "path": {
-              "maxLength": 2000,
-              "minLength": 1,
-              "title": "Path",
-              "type": "string"
+              "anyOf": [
+                {
+                  "maxLength": 2000,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Path"
             }
           },
           "required": [
@@ -35897,7 +35939,7 @@
         },
         "JourneySummary": {
           "additionalProperties": false,
-          "description": "A lightweight, same-index action and HTTP shape match for discovery.",
+          "description": "A lightweight same-index action summary with an optional HTTP shape match.",
           "properties": {
             "action_label": {
               "maxLength": 300,
@@ -35950,24 +35992,38 @@
               "type": "boolean"
             },
             "method": {
-              "enum": [
-                "GET",
-                "POST",
-                "PUT",
-                "PATCH",
-                "DELETE",
-                "OPTIONS",
-                "HEAD",
-                "TRACE"
+              "anyOf": [
+                {
+                  "enum": [
+                    "GET",
+                    "POST",
+                    "PUT",
+                    "PATCH",
+                    "DELETE",
+                    "OPTIONS",
+                    "HEAD",
+                    "TRACE"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
               ],
-              "title": "Method",
-              "type": "string"
+              "title": "Method"
             },
             "path": {
-              "maxLength": 2000,
-              "minLength": 1,
-              "title": "Path",
-              "type": "string"
+              "anyOf": [
+                {
+                  "maxLength": 2000,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Path"
             }
           },
           "required": [
@@ -36292,7 +36348,7 @@
         },
         "JourneySummary": {
           "additionalProperties": false,
-          "description": "A lightweight, same-index action and HTTP shape match for discovery.",
+          "description": "A lightweight same-index action summary with an optional HTTP shape match.",
           "properties": {
             "action_label": {
               "maxLength": 300,
@@ -36345,24 +36401,38 @@
               "type": "boolean"
             },
             "method": {
-              "enum": [
-                "GET",
-                "POST",
-                "PUT",
-                "PATCH",
-                "DELETE",
-                "OPTIONS",
-                "HEAD",
-                "TRACE"
+              "anyOf": [
+                {
+                  "enum": [
+                    "GET",
+                    "POST",
+                    "PUT",
+                    "PATCH",
+                    "DELETE",
+                    "OPTIONS",
+                    "HEAD",
+                    "TRACE"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
               ],
-              "title": "Method",
-              "type": "string"
+              "title": "Method"
             },
             "path": {
-              "maxLength": 2000,
-              "minLength": 1,
-              "title": "Path",
-              "type": "string"
+              "anyOf": [
+                {
+                  "maxLength": 2000,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Path"
             }
           },
           "required": [

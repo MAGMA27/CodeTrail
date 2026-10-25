@@ -1896,7 +1896,7 @@ class OverviewCoverage(ContractModel):
 
 
 class JourneySummary(ContractModel):
-    """A lightweight, same-index action and HTTP shape match for discovery."""
+    """A lightweight same-index action summary with an optional HTTP shape match."""
 
     journey_id: Identifier
     index_id: Identifier
@@ -1906,8 +1906,14 @@ class JourneySummary(ContractModel):
     event_name: Literal["onSubmit", "onClick"]
     action_path: RelativePath
     action_start_line: PositiveInt
-    method: OverviewHttpMethod
-    path: str = Field(min_length=1, max_length=2_000)
+    method: OverviewHttpMethod | None
+    path: str | None = Field(min_length=1, max_length=2_000)
+
+    @model_validator(mode="after")
+    def validate_http_shape_pair(self) -> JourneySummary:
+        if (self.method is None) != (self.path is None):
+            raise ValueError("journey HTTP method and path must both be set or both be null")
+        return self
 
 
 class JourneyCoverage(ContractModel):

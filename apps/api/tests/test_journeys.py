@@ -3,7 +3,10 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-from app.contracts import Evidence, JourneyCoverage, IndexSnapshot
+import pytest
+from pydantic import ValidationError
+
+from app.contracts import Evidence, JourneyCoverage, IndexSnapshot, JourneySummary
 from app.indexing import SnapshotFile, SourceSnapshot, extract_definitions
 from app.journeys import _extract_ui_facts, build_journey_catalog, build_project_journey
 from app.mcp_server import _mcp_journey_response
@@ -66,6 +69,73 @@ def _codetrail_source_relation():
         )
 
     return relation, read_evidence
+
+
+def _preferences_source_relation():
+    fixture_root = ROOT / "fixtures" / "repos" / "preferences-demo"
+    files = []
+    for path in sorted(fixture_root.rglob("*")):
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8")
+        relative_path = path.relative_to(fixture_root).as_posix()
+        raw = text.encode("utf-8")
+        files.append(
+            SnapshotFile(
+                path=relative_path,
+                size=len(raw),
+                content_hash=hashlib.sha256(raw).hexdigest(),
+                text=text,
+            )
+        )
+    snapshot_hash = hashlib.sha256("".join(item.content_hash for item in files).encode()).hexdigest()
+    index = IndexSnapshot(
+        index_id="journey-preferences-test",
+        repository_id="preferences-demo",
+        revision="source-test",
+        dirty=True,
+        snapshot_hash=snapshot_hash,
+        status="ready",
+        rules_version="in-memory-source-test+typescript-facts-v5",
+    )
+    snapshot = SourceSnapshot(index=index, files=tuple(files), issues=())
+    relation = extract_relations(extract_definitions(snapshot), max_seconds=8)
+    file_by_path = {item.path: item for item in files}
+
+    def read_evidence(index_id: str, path: str, start_line: int, end_line: int) -> Evidence:
+        assert index_id == index.index_id
+        source = file_by_path[path]
+        lines = source.text.splitlines()
+        excerpt = "\n".join(lines[start_line - 1 : end_line])
+        identity = f"{index_id}\0{path}\0{start_line}\0{end_line}\0{source.content_hash}"
+        return Evidence(
+            evidence_id=f"evidence-{hashlib.sha256(identity.encode()).hexdigest()[:32]}",
+            index_id=index_id,
+            path=path,
+            start_line=start_line,
+            end_line=end_line,
+            excerpt=excerpt,
+            content_hash=source.content_hash,
+            kind="source",
+        )
+
+    return relation, read_evidence
+
+
+def _preferences_journey_catalog():
+    relation, read_evidence = _preferences_source_relation()
+    overview = build_project_overview(
+        "preferences-demo",
+        relation,
+        read_evidence,
+        max_depth=2,
+        max_paths=20,
+        max_modules=100,
+        max_groups=20,
+        max_module_relations=20,
+    )
+    catalog, specs = build_journey_catalog("preferences-demo", relation, overview)
+    return relation, read_evidence, overview, catalog, specs
 
 
 def test_real_local_import_source_builds_bounded_journey_with_explicit_gaps() -> None:
