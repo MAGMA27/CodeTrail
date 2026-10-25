@@ -12,6 +12,8 @@ Status: proposed
 
 Project 拥有来源与多个索引，导入任务管理获取状态及临时内容，Index 保存不可变源码，O1 ProjectOverview 提供入口/模块骨架，O2 FeatureGeneration 独立保存功能与符号映射及证据。语义关系标记生成方式和版本，不混入静态调用边。GitHub 首轮公开仓库；语言解析仍先验证 Python，多语言不是来源支持的隐含承诺。
 
+2026-10-25 补充：上一句“语言解析仍先验证 Python”保留为 2026-09-11 的决定原文，不改写成事后范围。此后 [TypeScript 静态索引与 HTTP 形状关联](2026-10-06-typescript-http-overview.md) 已将 `.py`、`.ts`、`.tsx` 纳入同一有界快照；多语言仍然不是任意来源格式的隐含承诺，当前解析范围以 [索引说明](../../apps/api/indexing.md) 为准。
+
 本地注册校验服务端允许根目录；GitHub 获取固定 commit，受网络、路径、大小和时间限制，仓库内容不执行。失败不覆盖旧快照；概览与报告固定 index_id。既有 allow-list 查询规则在导入功能实施前保持有效，后续只通过受限注册层扩展来源。
 
 ## 替代方案

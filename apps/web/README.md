@@ -65,3 +65,5 @@ CodeTrail 作为自身仓库的 Codex external 验收流程见 [MVP 操作说明
 - [项目结构总览](../../docs/decisions/2026-09-14-project-structure-overview.md)
 - [TypeScript 静态索引与 HTTP 形状关联](../../docs/decisions/2026-10-06-typescript-http-overview.md)
 - [共享本地运行环境与 Codex 联合演示](../../docs/decisions/2026-09-14-shared-runtime-codex-demo.md)
+- [MVP 操作说明](../../docs/mvp-operation.md)
+- [MVP 验收清单](../../docs/mvp-acceptance.md)

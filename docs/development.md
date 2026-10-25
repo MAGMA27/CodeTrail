@@ -21,6 +21,7 @@
 | 设计取舍与替代关系 | [决策记录](decisions/README.md) |
 | 工作区目标 UI 结构与截图验收 | [UI 规范](design/workspace-ui-spec.md)；当前实现仍以工作台子系统为准 |
 | MVP 本地操作流程 | [MVP 操作说明](mvp-operation.md) |
+| MVP 验收清单 | [MVP 验收](mvp-acceptance.md)；状态摘自既有记录，不替代操作步骤 |
 | 本地任务计划、阶段进度与历史记录 | memory-bank/next.md、progress.md 索引及独立日期阶段记录、archive/；保持 Git 忽略 |
 
 进度、设计决策、计划与验收证据的更新职责遵循 [AGENTS.md](../AGENTS.md) 的“进度与设计决策的职责”，本规范不再维护第二份更新规则。

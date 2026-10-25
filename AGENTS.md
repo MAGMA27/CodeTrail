@@ -67,7 +67,8 @@ CodeTrail 的产品目标与设计取舍见 [项目工作区决策](docs/decisio
 - evals/：独立评测集、基线、评分脚本与结果。
 - contracts/：版本化数据契约与供前端使用的 JSON Schema。
 - memory-bank/：本地计划、阶段进度、调研与历史归档；共享设计取舍在 docs/decisions/。
-- .codetrail/：本地运行和索引数据，实施时加入忽略规则。
+- `.codetrail-runtime/`：本地联合脚本使用的服务数据目录。`scripts/start-local.ps1` 与 `scripts/setup-mcp.ps1` 把它传给 `codetrail init --data-dir`；已有用户配置不会被 init 覆盖。
+- `.codetrail/`：未设置 `CODETRAIL_DATA_DIR` 时，进程回退的数据目录是当前工作目录下的 `.codetrail`。索引文件位于对应存储根的 `.codetrail/index.sqlite3`：静态仓库兼容路径用来源根，托管导入写入数据目录内的项目存储，不在来源目录创建该目录。`codetrail init` 不传 `--data-dir` 时，默认数据目录是用户主目录下的 `.local/share/codetrail`。上述目录已由根 `.gitignore` 的 `.codetrail/` 与 `.codetrail*/` 忽略。
 
 # 测试指南
 

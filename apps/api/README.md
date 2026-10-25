@@ -72,6 +72,7 @@ API 健康检查为 `GET /api/health`。前端或测试先创建 Project、建�
 - [外部 Agent 功能结果提交决策](../../docs/decisions/2026-10-09-external-agent-feature-submission.md)
 - [O2 有证据的主要功能语义识别](../../docs/decisions/2026-09-11-feature-semantic-generation.md)
 - [MVP 操作说明](../../docs/mvp-operation.md)
+- [MVP 验收清单](../../docs/mvp-acceptance.md)
 - [Run SSE 决策](../../docs/decisions/2026-09-12-run-sse.md)
 - [关系扫描与 unresolved 覆盖语义](../../docs/decisions/2026-09-13-relation-coverage.md)
 - [FastAPI 路由入口概览](../../docs/decisions/2026-09-14-fastapi-route-overview.md)
