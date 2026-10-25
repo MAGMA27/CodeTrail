@@ -11,7 +11,7 @@ test('gate rejects broken links, missing ownership, invalid states and sections'
   const root = mkdtempSync(resolve(tmpdir(), 'codetrail-doc-gate-'));
   try {
     // A bounded copy excludes dependencies and local runtime data.
-    for (const p of ['docs', '.codex/skills', '.codex/scripts', 'AGENTS.md', 'README.md', 'apps/api', 'apps/web', 'contracts', 'fixtures', 'evals', 'scripts']) {
+    for (const p of ['docs', '.codex/skills', '.codex/scripts', 'AGENTS.md', 'README.md', 'codetrail-subsystems.json', 'apps/api', 'apps/web', 'contracts', 'fixtures', 'evals', 'scripts']) {
       mkdirSync(dirname(resolve(root, p)), { recursive: true });
       cpSync(resolve(source, p), resolve(root, p), { recursive: true,
         filter: path => !/(?:^|[\\/])(?:node_modules|\.venv|\.next|\.runtime|__pycache__|\.pytest_cache)(?:[\\/]|$)/.test(path) });
