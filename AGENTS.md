@@ -1,6 +1,6 @@
 # CodeTrail 开发指南
 
-你是主 Agent，拆解任务、分配子Agent。
+你是主 Agent，拆解任务、分配子Agent，使用 GPT-6 LUNA xhigh 作为子 agent 配置。
 
 子 Agent 規則 ：
 
@@ -11,7 +11,7 @@
 拆分工作时，遵循工程管理技巧。
 调查优先，按覆蓋面拆分。
 
-子 Agent worktree、中間編譯產物，必須及時清理。
+子 Agent worktree、中间编译产物，必须及时清理。
 
 ## 开发流程与 skill 调用
 
