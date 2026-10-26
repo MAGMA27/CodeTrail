@@ -812,6 +812,8 @@ code { font-family: var(--ct-mono); }
 .ct-graph-legend i.is-imports, .ct-graph-legend i.is-static { height: 0; border-top: 2px dotted var(--ct-faint); background: transparent; }
 .ct-graph-legend i.is-semantic { background: var(--ct-blue); }
 .ct-graph-legend i.is-impact-root { width: 10px; height: 10px; border: 2px solid var(--ct-warning); border-radius: 50%; background: transparent; }
+.ct-graph-legend i.is-impact-direct { background: #ee8b55; }
+.ct-graph-legend i.is-impact-indirect { height: 0; border-top: 2px dashed #c9a227; background: transparent; }
 .ct-graph-legend i.is-unknown { height: 0; border-top: 2px dashed var(--ct-warning); background: transparent; }
 .ct-graph-legend small { color: var(--ct-faint); font-size: 9px; }
 .ct-graph-canvas { position: relative; min-height: 0; flex: 1; overflow: hidden; border-top: 1px solid var(--ct-border); background: var(--ct-subtle); }
@@ -822,6 +824,9 @@ code { font-family: var(--ct-mono); }
 .ct-graph-canvas .react-flow__edge-text { fill: var(--ct-muted); font-family: var(--ct-mono); font-size: 9px; }
 .ct-graph-canvas .react-flow__edge-textbg { fill: var(--ct-surface); }
 .flow-symbol-card, .flow-feature-card { position: relative; display: grid; gap: 5px; min-height: 60px; padding: 10px 11px; border: 1px solid var(--ct-border-strong); border-left: 3px solid #7790c7; border-radius: 6px; background: var(--ct-surface); box-shadow: 0 3px 10px rgb(32 38 51 / 12%); color: var(--ct-text); cursor: pointer; transition: border-color 140ms ease, transform 140ms ease, background 140ms ease; }
+.flow-symbol-card[data-impact-layer="report_anchor"] { border-left-color: var(--ct-warning); }
+.flow-symbol-card[data-impact-layer="static_direct"] { border-left-color: #ee8b55; }
+.flow-symbol-card[data-impact-layer="static_indirect"] { border-left-color: #c9a227; }
 .flow-symbol-card:hover, .flow-symbol-card.is-selected, .flow-feature-card:hover, .flow-feature-card:focus-visible { border-color: var(--ct-blue); border-left-color: var(--ct-blue); background: var(--ct-blue-soft); outline: none; transform: translateY(-1px); }
 .ct-graph-panel.is-entry-call-chain .flow-symbol-card:hover, .ct-graph-panel.is-entry-call-chain .flow-symbol-card.is-selected { transform: none; }
 .ct-entry-trace-toolbar, .ct-entry-chain-meta { display: contents; }
@@ -876,6 +881,18 @@ code { font-family: var(--ct-mono); }
 .ct-impact-path { display: grid; gap: 3px; padding: 7px 8px; border-left: 2px solid var(--ct-warning); background: var(--ct-bg); }
 .ct-impact-path code { overflow: hidden; color: var(--ct-text); font-size: 9px; line-height: 1.45; text-overflow: ellipsis; white-space: nowrap; }
 .ct-impact-path small, .ct-impact-unknown small, .ct-impact-unknown span { color: var(--ct-muted); font-size: 9px; line-height: 1.45; }
+.ct-impact-panel { display: flex; min-height: 0; flex: 1; flex-direction: column; overflow: auto; }
+.ct-impact-panel .ct-graph-canvas { min-height: 280px; }
+.ct-impact-layers { display: grid; gap: 6px; margin: 0; padding: 8px 12px; list-style: none; }
+.ct-impact-layers li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; padding: 7px 8px; border-left: 3px solid var(--ct-border-strong); background: var(--ct-bg); }
+.ct-impact-layers li[data-layer="report_anchor"] { border-left-color: var(--ct-warning); }
+.ct-impact-layers li[data-layer="static_direct"] { border-left-color: #ee8b55; }
+.ct-impact-layers li[data-layer="static_indirect"] { border-left-color: #c9a227; }
+.ct-impact-layers li[data-layer="unknown"] { border-left-color: var(--ct-warning); border-left-style: dashed; }
+.ct-impact-layers strong { font-size: 12px; }
+.ct-impact-layers span { color: var(--ct-muted); font-family: var(--ct-mono); font-size: 10px; }
+.ct-impact-layers small { grid-column: 1 / -1; color: var(--ct-muted); font-size: 10px; line-height: 1.45; }
+.ct-impact-failure { display: grid; gap: 8px; padding: 8px 12px 12px; }
 .ct-impact-unknown { background: var(--ct-warning-soft); }
 .ct-impact-unknown strong { color: var(--ct-warning); font-family: var(--ct-mono); font-size: 9px; }
 .ct-graph-scope-note { margin: 0; padding: 10px 12px 14px; color: var(--ct-faint); font-size: 9px; line-height: 1.5; }

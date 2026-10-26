@@ -705,6 +705,36 @@ function runImpact() {
     edges: [edge],
     paths: [{ path_id: "impact-path-1", index_id: indexId, symbol_ids: [root.symbol_id, caller.symbol_id], edges: [edge], depth: 1 }],
     unresolved: [],
+    layers: [
+      {
+        kind: "report_anchor",
+        determination: "saved_report_symbol",
+        symbol_ids: [root.symbol_id],
+        unresolved_ids: [],
+        summary: "报告锚点不是已确认影响。",
+      },
+      {
+        kind: "static_direct",
+        determination: "static_calls",
+        symbol_ids: [caller.symbol_id],
+        unresolved_ids: [],
+        summary: "调用可达不等于已确认影响。",
+      },
+      {
+        kind: "static_indirect",
+        determination: "static_calls",
+        symbol_ids: [],
+        unresolved_ids: [],
+        summary: "调用可达不等于已确认影响。",
+      },
+      {
+        kind: "unknown",
+        determination: "unresolved_reference",
+        symbol_ids: [],
+        unresolved_ids: [],
+        summary: "它们保持未知。",
+      },
+    ],
     reachable_node_count: 1,
     returned_node_count: 2,
     scope_note: "Static calls only.",
@@ -821,7 +851,21 @@ test("Run impact validator accepts an explicitly unmapped empty result", () => {
   value.paths = [];
   value.reachable_node_count = 0;
   value.returned_node_count = 0;
+  value.layers = value.layers.map((layer: { symbol_ids: string[]; unresolved_ids: string[] }) => ({
+    ...layer,
+    symbol_ids: [],
+    unresolved_ids: [],
+  }));
   assert.equal(isRunImpactResponse(value), true);
+  value.layers[0].symbol_ids = ["symbol-root"];
+  assert.equal(isRunImpactResponse(value), false);
+});
+
+test("Run impact validator rejects a symbol placed in the wrong layer", () => {
+  const value = runImpact();
+  value.layers[1].symbol_ids = [];
+  value.layers[2].symbol_ids = ["symbol-caller"];
+  assert.equal(isRunImpactResponse(value), false);
 });
 
 function explanationReport() {

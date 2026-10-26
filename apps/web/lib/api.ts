@@ -485,6 +485,16 @@ export type RunReportResponse = {
 
 export type ImpactDirection = "callers" | "callees";
 export type ImpactMappingStatus = "mapped" | "unmapped";
+export type ImpactLayerKind = "report_anchor" | "static_direct" | "static_indirect" | "unknown";
+export type ImpactLayerDetermination = "saved_report_symbol" | "static_calls" | "unresolved_reference";
+
+export type ImpactLayer = {
+  kind: ImpactLayerKind;
+  determination: ImpactLayerDetermination;
+  symbol_ids: string[];
+  unresolved_ids: string[];
+  summary: string;
+};
 
 export type ImpactPath = {
   path_id: string;
@@ -511,6 +521,7 @@ export type RunImpactResponse = {
   edges: CodeEdge[];
   paths: ImpactPath[];
   unresolved: UnresolvedReference[];
+  layers: ImpactLayer[];
   reachable_node_count: number;
   returned_node_count: number;
   scope_note: string;
@@ -1751,6 +1762,106 @@ function isImpactPath(
   });
 }
 
+const IMPACT_LAYER_KINDS = ["report_anchor", "static_direct", "static_indirect", "unknown"] as const;
+const IMPACT_LAYER_DETERMINATION: Record<(typeof IMPACT_LAYER_KINDS)[number], ImpactLayerDetermination> = {
+  report_anchor: "saved_report_symbol",
+  static_direct: "static_calls",
+  static_indirect: "static_calls",
+  unknown: "unresolved_reference",
+};
+
+function isImpactLayers(
+  layers: unknown,
+  impact: {
+    mapping_status: string;
+    root_symbol_id: string | null;
+    max_depth: number;
+    nodes: { symbol_id: string }[];
+    paths: { symbol_ids?: unknown }[];
+    unresolved: { unresolved_id: string }[];
+  },
+): boolean {
+  if (!Array.isArray(layers) || layers.length !== IMPACT_LAYER_KINDS.length) {
+    return false;
+  }
+  const parsed: { kind: (typeof IMPACT_LAYER_KINDS)[number]; symbolIds: string[]; unresolvedIds: string[] }[] = [];
+  for (const [index, layer] of layers.entries()) {
+    if (!isRecord(layer) || layer.kind !== IMPACT_LAYER_KINDS[index]) {
+      return false;
+    }
+    const kind = IMPACT_LAYER_KINDS[index];
+    if (
+      layer.determination !== IMPACT_LAYER_DETERMINATION[kind] ||
+      !isString(layer.summary) ||
+      layer.summary.length === 0 ||
+      layer.summary.length > 500
+    ) {
+      return false;
+    }
+    const symbolIds = layer.symbol_ids;
+    const unresolvedIds = layer.unresolved_ids;
+    if (!isStringArray(symbolIds) || !isStringArray(unresolvedIds)) {
+      return false;
+    }
+    if (new Set(symbolIds).size !== symbolIds.length || new Set(unresolvedIds).size !== unresolvedIds.length) {
+      return false;
+    }
+    if (kind === "unknown" ? symbolIds.length > 0 : unresolvedIds.length > 0) {
+      return false;
+    }
+    if (kind === "report_anchor" && symbolIds.length > 1) {
+      return false;
+    }
+    parsed.push({ kind, symbolIds, unresolvedIds });
+  }
+  const [anchor, direct, indirect, unknown] = parsed;
+  if (!anchor || !direct || !indirect || !unknown) {
+    return false;
+  }
+  if (impact.mapping_status === "unmapped") {
+    return parsed.every((layer) => layer.symbolIds.length === 0 && layer.unresolvedIds.length === 0);
+  }
+  if (anchor.symbolIds.length !== 1 || anchor.symbolIds[0] !== impact.root_symbol_id) {
+    return false;
+  }
+  if (
+    (impact.root_symbol_id !== null &&
+      (direct.symbolIds.includes(impact.root_symbol_id) || indirect.symbolIds.includes(impact.root_symbol_id))) ||
+    direct.symbolIds.some((symbolId) => indirect.symbolIds.includes(symbolId))
+  ) {
+    return false;
+  }
+  const covered = new Set([...anchor.symbolIds, ...direct.symbolIds, ...indirect.symbolIds]);
+  const nodeIds = new Set(impact.nodes.map((node) => node.symbol_id));
+  if (covered.size !== nodeIds.size || [...nodeIds].some((symbolId) => !covered.has(symbolId))) {
+    return false;
+  }
+  const shortest = new Map<string, number>();
+  for (const path of impact.paths) {
+    if (!Array.isArray(path.symbol_ids)) {
+      return false;
+    }
+    for (const [index, symbolId] of path.symbol_ids.entries()) {
+      if (!isString(symbolId)) {
+        return false;
+      }
+      const current = shortest.get(symbolId);
+      if (current === undefined || index < current) {
+        shortest.set(symbolId, index);
+      }
+    }
+  }
+  if (
+    direct.symbolIds.some((symbolId) => shortest.get(symbolId) !== 1) ||
+    indirect.symbolIds.some((symbolId) => shortest.get(symbolId) !== 2) ||
+    (impact.max_depth === 1 && indirect.symbolIds.length > 0)
+  ) {
+    return false;
+  }
+  return unknown.unresolvedIds.length === impact.unresolved.length &&
+    unknown.unresolvedIds.every((unresolvedId, index) => unresolvedId === impact.unresolved[index]?.unresolved_id);
+}
+
 function isRunImpact(value: unknown): value is RunImpactResponse {
   if (!isRecord(value)) {
     return false;
@@ -1835,19 +1946,36 @@ function isRunImpact(value: unknown): value is RunImpactResponse {
     return false;
   }
   if (value.mapping_status === "unmapped" || value.root_symbol_id === null) {
-    return paths.length === 0;
+    return paths.length === 0 && isImpactLayers(value.layers, {
+      mapping_status: String(value.mapping_status),
+      root_symbol_id: value.root_symbol_id,
+      max_depth: value.max_depth,
+      nodes,
+      paths,
+      unresolved,
+    });
   }
   const indexId = value.index_id as string;
   const direction = value.direction as ImpactDirection;
   const rootSymbolId = value.root_symbol_id as string;
-  return paths.every((path) => isImpactPath(
+  if (!paths.every((path) => isImpactPath(
     path,
     indexId,
     direction,
     rootSymbolId,
     nodeIds,
     edgeIds,
-  ));
+  ))) {
+    return false;
+  }
+  return isImpactLayers(value.layers, {
+    mapping_status: String(value.mapping_status),
+    root_symbol_id: value.root_symbol_id,
+    max_depth: value.max_depth,
+    nodes,
+    paths,
+    unresolved,
+  });
 }
 
 export function isRunImpactResponse(value: unknown): value is RunImpactResponse {

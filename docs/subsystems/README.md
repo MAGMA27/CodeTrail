@@ -8,7 +8,7 @@
 | 快照与关系 | [快照与关系](../../apps/api/indexing.md) | apps/api/app/indexing.py, apps/api/app/relations.py, apps/api/app/typescript_parser.cjs |
 | 存储与查询 | [存储与查询](../../apps/api/storage.md) | apps/api/app/storage.py |
 | API 与工具适配 | [API 与工具适配](../../apps/api/api.md) | apps/api/README.md, apps/api/app/main.py, apps/api/app/mcp_server.py, apps/api/app/service.py, apps/api/app/github.py, apps/api/app/overview.py, apps/api/app/journeys.py, apps/api/app/feature_generation.py, apps/api/app/feature_graph.py, apps/api/app/config.py, apps/api/app/cli.py, apps/api/app/__init__.py |
-| Run 执行 | [Run 执行](../../apps/api/execution.md) | apps/api/app/run_execution.py, apps/api/app/issue_analysis.py, apps/api/app/run_sse.py |
+| Run 执行 | [Run 执行](../../apps/api/execution.md) | apps/api/app/run_execution.py, apps/api/app/issue_analysis.py, apps/api/app/impact_layers.py, apps/api/app/run_sse.py |
 | 工作台 | [工作台](../../apps/web/workbench.md) | apps/web/README.md, apps/web/app/, apps/web/lib/ |
 | 演示样本 | [演示样本](../../fixtures/README.md) | fixtures/ |
 | 独立评测 | [独立评测](../../evals/README.md) | evals/ |

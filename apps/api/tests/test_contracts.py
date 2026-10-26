@@ -377,7 +377,10 @@ def test_schema_artifact_includes_recoverable_trash_contract() -> None:
 def test_schema_artifact_includes_run_impact_contracts() -> None:
     models = build_schema_document()["models"]
 
-    assert {"ImpactPath", "RunImpactResponse", "McpRunImpactResponse"} <= models.keys()
+    assert {"ImpactLayer", "ImpactPath", "RunImpactResponse", "McpRunImpactResponse"} <= models.keys()
+    layer_kinds = models["ImpactLayer"]["properties"]["kind"]["enum"]
+    assert layer_kinds == ["report_anchor", "static_direct", "static_indirect", "unknown"]
+    assert "layers" in models["RunImpactResponse"]["properties"]
 
 
 def test_cross_snapshot_reference_is_rejected() -> None:

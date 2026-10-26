@@ -799,8 +799,9 @@ def create_mcp_server(
         title="Read bounded Run impact",
         description=(
             "Read a bounded static calls impact view for exactly one candidate_id or finding_id from a saved Run report. "
-            "The result stays on the Run's immutable index snapshot, defaults to callers at depth 2, preserves unresolved "
-            "boundaries, and never calls a model or executes repository source."
+            "The result stays on the Run's immutable index snapshot, defaults to callers at depth 2, and classifies four "
+            "layers: report anchor, direct static calls, indirect static calls, and unknown unresolved references. "
+            "Static reachability is not confirmed impact. This tool never calls a model or executes repository source."
         ),
         structured_output=True,
     )

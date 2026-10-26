@@ -1,5 +1,7 @@
 # 决策记录
 
+- [Issue 影响分层](2026-10-26-issue-impact-layering.md)
+
 - [Real Run 直接代码理解](2026-10-22-real-code-understanding-runs.md)
 
 - [外部 Agent 功能结果提交](2026-10-09-external-agent-feature-submission.md)

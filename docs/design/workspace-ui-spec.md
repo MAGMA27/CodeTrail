@@ -106,7 +106,7 @@ UI-S1 不删除任何现有 API 能力；映射是目标信息架构，UI-S2 已
 
 功能图面板的工具栏负责入口、功能、模块和全部筛选；图结果来自当前固定快照的受限接口。面板中可切换到源码证据，节点点击不隐式改变项目或 Session。证据链接不调用模型，已保存结果和历史读取不触发生成。
 
-Run 报告中的 candidate link 或唯一 symbol finding 提供“查看影响范围”入口。影响面板显示报告固定 `index_id` 上的根节点、调用方/被调用方方向、1–2 层深度、静态 `calls` 路径、截断状态和 unresolved 未知边界；root、静态可达和模型候选使用不同文案/图例，不能显示成已确认 Bug 影响。无唯一符号、失败、取消或中断报告显示 unmapped/空态并保留源码 evidence；点击影响节点进入同一节点 snapshot 的源码证据，不回退到当前 latest。
+Run 报告中的 candidate link 或唯一 symbol finding 提供“查看影响范围”入口。影响面板按 [Issue 影响分层](../decisions/2026-10-26-issue-impact-layering.md) 显示四层：报告锚点、直接静态可达、间接静态可达和未知边界。前三层只来自已保存报告的唯一符号和同快照静态 calls 的最短简单路径，未知边界只保留 dynamic/unresolved，不画成确定影响边。方向和 1–2 层深度仍可切换；截断时说明已返回分层不完整。无唯一符号显示 unmapped 空态并保留源码 evidence；请求失败提供重试，且不把失败显示成“没有静态 calls”。点击影响节点进入同一节点 snapshot 的源码证据，不回退到当前 latest。这些分层是提案，静态可达不是已确认 Bug 影响。
 
 代码理解报告的结果区域在 `outcome=explanation` 时显示“流程解释”和 `complete/partial` 覆盖级别，并按 Agent 提交顺序显示最多 12 个步骤。每步显示 confirmed/inferred/unknown 标识、标题、说明和同报告 evidence 按钮；partial 或 unknown 明确提示未确认环节。步骤只有一个有效 symbol 时提供“进入局部关系图”，多个或没有唯一 symbol 时保留源码入口并说明原因；解释步骤不显示候选影响装饰，也不把解释顺序绘成静态 calls 边。
 
@@ -186,5 +186,6 @@ Run 报告中的 candidate link 或唯一 symbol finding 提供“查看影响�
 - [x] 证据面板显示 `project_id/index_id/generation_id` 上下文，图筛选位于图工具栏；合成证据不发起无效关系请求。
 - [x] 生产 Run 面板显示连接与终态状态；本地受限 SSE 生命周期断流后的续接保持事件 sequence 连续且不重复，取消、Run 切换和刷新恢复不启动重复 Run。
 - [x] 视觉使用中性背景、单一强调色、明确焦点和错误状态；无旧网格、装饰渐变、假终端和假精确产品宣传。
-- [x] 原型截图与生产页面分开标记；P3-I1 影响面板明确区分报告候选、静态 calls 可达和 unresolved 未知边界，已实现的 Run SSE 状态不会伪装成隐藏推理或模型质量。
-- [x] 已验证报告 candidate/finding 入口、固定 Run/index 影响结果、方向/深度控制、影响节点到源码证据和图联动，以及失败/取消/无唯一映射的空态；旧 Run 不回退到后续 latest index。
+- [x] 原型截图与生产页面分开标记；P3-I1 影响面板明确区分报告候选、静态 calls 可达和 unresolved 未知边界，已实现的 Run SSE 状态不会伪装成隐藏推理或模型质量。四层读法见 Issue 影响分层提案，不把该勾选升成完整影响范围或未复验边界的浏览器验收。
+- [x] 已验证报告 candidate/finding 入口、固定 Run/index 影响结果、方向/深度控制、影响节点到源码证据和图联动；旧 Run 不回退到后续 latest index。2026-10-01 影响链记录了这些步骤。
+- [ ] unmapped、请求失败/重试和截断的界面状态。2026-10-01 影响链写明未执行。本变更已实现这三种状态；真实网页流程仍未验收。
