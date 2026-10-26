@@ -31,3 +31,10 @@ dev = [
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+
+# Keep the lockfile on the public PyPI CDN so GitHub Actions (and other non-CN
+# runners) are not pinned to a regional mirror that can time out.
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple"
+default = true
