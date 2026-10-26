@@ -1051,7 +1051,15 @@ def _extract_typescript_facts(
     except OSError:
         return {}, [SnapshotIssue("__snapshot__", "parser_unavailable", "TypeScript parser process could not be started")]
     if result.returncode != 0 or len(result.stdout.encode("utf-8")) > _TYPESCRIPT_PARSER_MAX_OUTPUT_BYTES:
-        return {}, [SnapshotIssue("__snapshot__", "parser_error", "TypeScript parser failed or exceeded its output budget")]
+        detail = (result.stderr or "").strip().splitlines()
+        suffix = f": {detail[0][:200]}" if detail else ""
+        return {}, [
+            SnapshotIssue(
+                "__snapshot__",
+                "parser_error",
+                f"TypeScript parser failed or exceeded its output budget{suffix}",
+            )
+        ]
     try:
         decoded = json.loads(result.stdout)
     except (TypeError, json.JSONDecodeError):

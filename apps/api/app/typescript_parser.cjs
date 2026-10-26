@@ -254,19 +254,35 @@ const files = input.files.map(({ path: filePath, text }) => {
     if (fn.parameters.some((parameter) => bindingNames(parameter.name).includes(name))) {
       return { declaration: null, owner: info };
     }
-    let varDeclaration = null;
-    const findVar = (node, isRoot = false) => {
-      if (!isRoot && isCallableNode(node)) return;
-      if (ts.isVariableDeclaration(node) && !(node.parent.flags & ts.NodeFlags.BlockScoped) &&
-        bindingNames(node.name).includes(name)) varDeclaration ??= node;
-      ts.forEachChild(node, (child) => findVar(child));
-    };
-    if (fn.body) findVar(fn.body, true);
-    if (varDeclaration) return { declaration: varDeclaration, owner: info };
+    if (fn.body) {
+      const varDeclaration = varDeclarationInBody(fn.body, name);
+      if (varDeclaration) return { declaration: varDeclaration, owner: info };
+    }
     if ((ts.isFunctionDeclaration(fn) || ts.isFunctionExpression(fn)) && fn.name?.text === name) {
       return { functionInfo: info, owner: info };
     }
     return null;
+  };
+  // Index function-body `var` bindings once. Call sites previously rescanned the
+  // whole body per name, which is O(n²) for large functions and timed out in CI.
+  const varDeclsByBody = new WeakMap();
+  const varDeclarationInBody = (body, name) => {
+    let index = varDeclsByBody.get(body);
+    if (!index) {
+      index = new Map();
+      const collect = (node, isRoot = false) => {
+        if (!isRoot && isCallableNode(node)) return;
+        if (ts.isVariableDeclaration(node) && !(node.parent.flags & ts.NodeFlags.BlockScoped)) {
+          for (const bindingName of bindingNames(node.name)) {
+            if (!index.has(bindingName)) index.set(bindingName, node);
+          }
+        }
+        ts.forEachChild(node, (child) => collect(child));
+      };
+      collect(body, true);
+      varDeclsByBody.set(body, index);
+    }
+    return index.get(name) ?? null;
   };
   const callerScopePaths = (info) => {
     const paths = new Set([moduleName]);
