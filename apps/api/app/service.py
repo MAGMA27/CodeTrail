@@ -635,6 +635,18 @@ _LEGACY_REBUILDABLE_FRESHNESS_REASONS: frozenset[FreshnessReasonCode] = frozense
 )
 
 
+def _windows_last_error() -> int:
+    """Read Win32 last-error when available; Linux unit tests inject fakes without ctypes.get_last_error."""
+
+    getter = getattr(ctypes, "get_last_error", None)
+    if not callable(getter):
+        return 0
+    try:
+        return int(getter())
+    except (TypeError, ValueError):
+        return 0
+
+
 def _windows_process_liveness(pid: int, *, kernel32: Any | None = None) -> _ProcessLiveness:
     """Query a Windows process without generating a console control event."""
 
@@ -662,7 +674,7 @@ def _windows_process_liveness(pid: int, *, kernel32: Any | None = None) -> _Proc
         return "unknown"
 
     if not handle:
-        error_code = ctypes.get_last_error()
+        error_code = _windows_last_error()
         if error_code in {_WINDOWS_ERROR_INVALID_PARAMETER, _WINDOWS_ERROR_NOT_FOUND}:
             return "exited"
         logger.warning(
