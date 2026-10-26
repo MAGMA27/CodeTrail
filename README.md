@@ -77,7 +77,7 @@ codetrail install
 
 - [CLI、共享配置与 MCP](apps/api/mcp.md)：允许导入路径、编译器、GitHub token、模型配置和故障排查。
 - [工作台说明](apps/web/workbench.md) · [API 说明](apps/api/README.md)
-- [开发者联合操作流程](docs/mvp-operation.md)
+- [开发者联合操作流程](docs/mvp-operation.md) · [MVP 验收清单](docs/mvp-acceptance.md)
 - [样本与离线演示](fixtures/README.md) · [评测](evals/README.md)
 - [开发规范](AGENTS.md) · [设计决策](docs/decisions/README.md) · [子系统导航](docs/subsystems/README.md)
 

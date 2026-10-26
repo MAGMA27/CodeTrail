@@ -94,4 +94,4 @@ manifest、路径、Issue、标注、行范围或数据划分不一致时命令�
 
 ## 关联文档
 
-评测隔离和评分取舍见 [独立评测集与离线关键词基线决策](../docs/decisions/2026-09-13-independent-evaluation-baseline.md)，真实 Run 离线适配见 [真实 Run 离线评测决策](../docs/decisions/2026-09-13-real-run-evaluation.md)，外部入口与费用边界见 [外部供应商评测准备决策](../docs/decisions/2026-09-13-external-evaluation-preparation.md)，目录关系见 [子系统索引](../docs/subsystems/README.md)，开发样本边界见 [fixtures README](../fixtures/README.md)。产品阶段计划仍由本地 `memory-bank/next.md` 控制，`memory-bank/` 按项目约定保持 Git 忽略。
+评测隔离和评分取舍见 [独立评测集与离线关键词基线决策](../docs/decisions/2026-09-13-independent-evaluation-baseline.md)，真实 Run 离线适配见 [真实 Run 离线评测决策](../docs/decisions/2026-09-13-real-run-evaluation.md)，外部入口与费用边界见 [外部供应商评测准备决策](../docs/decisions/2026-09-13-external-evaluation-preparation.md)，目录关系见 [子系统索引](../docs/subsystems/README.md)，开发样本边界见 [fixtures README](../fixtures/README.md)。上述结果在产品验收清单中的状态见 [MVP 验收清单](../docs/mvp-acceptance.md)。产品阶段计划仍由本地 `memory-bank/next.md` 控制，`memory-bank/` 按项目约定保持 Git 忽略。
