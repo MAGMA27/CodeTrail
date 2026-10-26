@@ -34,7 +34,7 @@ Status: proposed
 实现与本提案一致，但本记录保持 proposed：层词汇尚未由所有者确认，下面的自动测试也不能代替真实网页流程。
 
 - 实现：`ImpactLayer` 进入 `RunImpactResponse`；`impact_layers.py` 从已保存报告映射和 `get_static_impact` 的返回路径派生四层；影响面板分开显示 unmapped、请求失败重试和截断。
-- 自动测试覆盖最短路径归层、深度 1 的空间接层、环边不新增层、动态引用留在未知层、截断只分类已返回节点、unmapped 四层为空，以及契约拒绝错层。命令和结果写在本变更的 PR 说明中；未跑过的命令不记为通过。
+- 2026-10-26 在本分支上跑过的自动检查：`pnpm --dir apps/web test` 94 通过；`pnpm web:typecheck`、`pnpm web:build`、`pnpm docs:check` 通过；`pnpm contracts:check` 30 通过；`uv run --directory apps/api python -m compileall -q app` 通过。仓库没有单独的 lint 脚本。`uv run --directory apps/api pytest -q` 为 280 通过、4 失败。这 4 个失败在 `origin/main` `3dd21bb` 上用同一锁定 TypeScript 5.9.3 解析器复现：大小写敏感文件系统上把导入路径改成大写后返回 400；Linux 的 `ctypes` 没有 `get_last_error`；仓库自索引关系边达到 `max_edges`；本地导入旅程的结果步骤带有源码 evidence。它们不记为本分层实现的回归，也没有为了变绿而放宽路径、Windows 进程探测或关系预算。
 - 真实网页上的 unmapped、请求失败重试和截断尚未按用户流程点过，记为尚未验证。完整仓库影响范围、GitHub 公网导入和真实供应商语义质量不在本决策的验收范围内。
 
 ## 后果

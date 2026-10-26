@@ -52,7 +52,7 @@
 | 21 | 从报告或证据入口打开同一快照的源码和 hash；project/index/path/line/hash/evidence 不一致时显示错误，不回退到当前 latest | [MVP 操作说明](mvp-operation.md)；[UI 规范](design/workspace-ui-spec.md) | 已验证 | 600 秒验收点击报告证据后核对了路径、行范围和内容 SHA 前缀。影响链的 caller 源码 hash 前缀与固定 index 的完整 hash 一致。pluggy 刷新后重新打开的证据仍绑定旧 index 和原 content hash。UI 清单勾选了证据面板上下文。 |
 | 22 | 候选报告可以打开该 Run 固定快照上的有界静态影响，并保留 unresolved。静态可达不等于已确认影响，测试引用不等于测试覆盖 | [MVP 操作说明](mvp-operation.md)；[AGENTS.md](../AGENTS.md)；[影响链验收](../evals/results/p4-e2b-codex-host-20261001/impact-chain-acceptance.md) | 部分验证 | 影响链把用户要求的候选、调用链、源码、切换、刷新和截图记为已验证，并写明空的 callers 不是“没有业务影响”。同一记录没有执行 unmapped、请求失败/重试和截断这三类 UI。会话决策仍写影响面板部分边界待验收。UI 清单已把这三类从已勾选验收中拆出，并标为未验收。影响面板现在会显示这三种状态，`apps/web/lib/impact-layers.test.ts` 覆盖其状态机；本清单没有在真实网页上点过它们。 |
 | 23 | 终态之后，工作台能够持久化并展示形状正确的结论、证据和影响或证据不足说明 | [指导验收](../evals/results/p4-e2b-codex-host-20261007/guided-acceptance.md) | 已验证 | 三例 synthetic 在打开 gold 之后补验。记录写明这不是盲跑、不计分，也不改变该轮首轮 0/3。 |
-| 24 | Issue 影响分层和完整影响范围 | [工作区决策](decisions/2026-09-11-project-workspace.md)；[Issue 影响分层](decisions/2026-10-26-issue-impact-layering.md) | 部分验证 | 仓库原先没有层定义。新决策提案四层：报告锚点、直接静态可达、间接静态可达、未知边界。实现已进入契约、`get_run_impact` 和影响面板；最短路径归层由 fixture 测试约束。决策保持 proposed，因为层词汇待所有者确认。完整影响范围仍不在深度 2 和 40 节点预算之内。真实网页上的 unmapped、请求失败重试和截断仍未验收。 |
+| 24 | Issue 影响分层和完整影响范围 | [工作区决策](decisions/2026-09-11-project-workspace.md)；[Issue 影响分层](decisions/2026-10-26-issue-impact-layering.md) | 部分验证 | 仓库原先没有层定义。新决策提案四层：报告锚点、直接静态可达、间接静态可达、未知边界。实现已进入契约、`get_run_impact` 和影响面板；最短路径归层由 fixture 测试约束。决策保持 proposed，因为层词汇待所有者确认。完整影响范围仍不在深度 2 和 40 节点预算之内。真实网页上的 unmapped、请求失败重试和截断仍未验收。2026-10-26 的自动检查记录在该决策的验收段：分层相关前端测试、契约、typecheck、build 和 docs:check 通过；完整 pytest 的 4 个失败在当时的 `origin/main` 上同样出现，不把它们写成这四层的验收通过。 |
 
 ## 持久化与恢复
 
