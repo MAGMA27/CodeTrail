@@ -15,7 +15,7 @@
 | # | 准则 | 来源 | 状态 | 证据 |
 | --- | --- | --- | --- | --- |
 | 1 | 启动后检查 `GET /api/health`，工作台能发现名为「CodeTrail 自用验收」的项目及其 ready 索引 | [MVP 操作说明](mvp-operation.md) | 部分验证 | [共享运行决策](decisions/2026-09-14-shared-runtime-codex-demo.md) 记录当时以共享目录发现该项目，最新索引为 `relations-v2` / `python-entry-v4`，API 重启后浏览器看到 `API ONLINE`。2026-10-07 操作说明只记录自用大索引 `max_modules=40` 返回 40/96，没有重写 health 和项目发现的通过结论。推断：旧规则版本的通过不能覆盖当前索引身份。 |
-| 2 | 本地项目创建、索引隔离、源码证据隔离、失败不覆盖 latest、应用重开后恢复 | [工作区决策](decisions/2026-09-11-project-workspace.md) 验收段 | 已验证 | 该段写明用两个服务端配置的临时仓库验证了 W1。决策整体仍是 proposed，因为 GitHub 导入和影响分层未完成；本项只覆盖这段 W1。 |
+| 2 | 本地项目创建、索引隔离、源码证据隔离、失败不覆盖 latest、应用重开后恢复 | [工作区决策](decisions/2026-09-11-project-workspace.md) 验收段 | 已验证 | 该段写明用两个服务端配置的临时仓库验证了 W1。决策整体仍是 proposed，因为 GitHub 公网导入仍受阻，影响分层提案尚未由所有者确认，完整影响范围也未验收；本项只覆盖这段 W1。 |
 | 3 | 冷构建、跨进程热复用、单文件失效、无变化复用、禁用缓存等价、目标重命名/删除/恢复后重绑定，以及旧 Session/Run/evidence 仍绑定原 index；HTTP、stdio MCP 和工作台读取同一隔离数据 | [索引缓存联合验收](decisions/2026-09-16-project-index-cache-acceptance.md) | 已验证 | 决策状态为 implemented。样本是提交 `85149eb` 的 Python 快照。后果写明这不是完整增量索引。 |
 | 4 | 完整且安全的 manifest 兼容时，显式更新以 `historical_reused` 复用历史不可变 index，保留原 revision，不原地改写 | 同上 | 已验证 | 同决策的「版本恢复修复复核」：隔离 HTTP（8017）、stdio MCP 和 3017 工作台。 |
 | 5 | 源码变化后显式更新得到新的 ready index；旧 Session 与 Run 留在原 index；新建 Session 绑定刷新后的 index | [MVP 操作说明](mvp-operation.md)；[项目与会话决策](decisions/2026-09-11-project-session-workspace.md) | 部分验证 | [pluggy 旅程](../evals/results/real-repository-pluggy-issue-733-20261007/README.md) 的「来源变化与显式更新」为 PASS（仅索引范围）：新 index 再检查为 consistent，旧 Session 和 Run 仍绑定原 snapshot。缓存验收也记录旧 Session 不被 latest 替换。指定记录没有写出刷新之后新建的 Session 显示新 revision/hash。会话决策把“新 Session 固定最新可用 index”写成已实施，并说明不能据此推定全部产品验收完成。 |
@@ -50,9 +50,9 @@
 | # | 准则 | 来源 | 状态 | 证据 |
 | --- | --- | --- | --- | --- |
 | 21 | 从报告或证据入口打开同一快照的源码和 hash；project/index/path/line/hash/evidence 不一致时显示错误，不回退到当前 latest | [MVP 操作说明](mvp-operation.md)；[UI 规范](design/workspace-ui-spec.md) | 已验证 | 600 秒验收点击报告证据后核对了路径、行范围和内容 SHA 前缀。影响链的 caller 源码 hash 前缀与固定 index 的完整 hash 一致。pluggy 刷新后重新打开的证据仍绑定旧 index 和原 content hash。UI 清单勾选了证据面板上下文。 |
-| 22 | 候选报告可以打开该 Run 固定快照上的有界静态影响，并保留 unresolved。静态可达不等于已确认影响，测试引用不等于测试覆盖 | [MVP 操作说明](mvp-operation.md)；[AGENTS.md](../AGENTS.md)；[影响链验收](../evals/results/p4-e2b-codex-host-20261001/impact-chain-acceptance.md) | 部分验证 | 影响链把用户要求的候选、调用链、源码、切换、刷新和截图记为已验证，并写明空的 callers 不是“没有业务影响”。同一记录没有执行 unmapped、请求失败/重试和截断这三类 UI。会话决策仍写影响面板部分边界待验收。UI 清单却勾选了失败、取消和无唯一映射空态。对照结论：这三份文档不一致，不把勾选升成这些边界已全部验证。[工作台说明](../apps/web/workbench.md) 写明影响链的既有边界状态仍有效。 |
+| 22 | 候选报告可以打开该 Run 固定快照上的有界静态影响，并保留 unresolved。静态可达不等于已确认影响，测试引用不等于测试覆盖 | [MVP 操作说明](mvp-operation.md)；[AGENTS.md](../AGENTS.md)；[影响链验收](../evals/results/p4-e2b-codex-host-20261001/impact-chain-acceptance.md) | 部分验证 | 影响链把用户要求的候选、调用链、源码、切换、刷新和截图记为已验证，并写明空的 callers 不是“没有业务影响”。同一记录没有执行 unmapped、请求失败/重试和截断这三类 UI。会话决策仍写影响面板部分边界待验收。UI 清单已把这三类从已勾选验收中拆出，并标为未验收。影响面板现在会显示这三种状态，`apps/web/lib/impact-layers.test.ts` 覆盖其状态机；本清单没有在真实网页上点过它们。 |
 | 23 | 终态之后，工作台能够持久化并展示形状正确的结论、证据和影响或证据不足说明 | [指导验收](../evals/results/p4-e2b-codex-host-20261007/guided-acceptance.md) | 已验证 | 三例 synthetic 在打开 gold 之后补验。记录写明这不是盲跑、不计分，也不改变该轮首轮 0/3。 |
-| 24 | Issue 影响分层和完整影响范围 | [工作区决策](decisions/2026-09-11-project-workspace.md) | 尚未验证 | 验收段写明仍待后续验收，因此该决策保持 proposed。 |
+| 24 | Issue 影响分层和完整影响范围 | [工作区决策](decisions/2026-09-11-project-workspace.md)；[Issue 影响分层](decisions/2026-10-26-issue-impact-layering.md) | 部分验证 | 仓库原先没有层定义。新决策提案四层：报告锚点、直接静态可达、间接静态可达、未知边界。实现已进入契约、`get_run_impact` 和影响面板；最短路径归层由 fixture 测试约束。决策保持 proposed，因为层词汇待所有者确认。完整影响范围仍不在深度 2 和 40 节点预算之内。真实网页上的 unmapped、请求失败重试和截断仍未验收。2026-10-26 的自动检查记录在该决策的验收段：分层相关前端测试、契约、typecheck、build 和 docs:check 通过；完整 pytest 的 4 个失败在当时的 `origin/main` 上同样出现，不把它们写成这四层的验收通过。 |
 
 ## 持久化与恢复
 
@@ -71,7 +71,7 @@
 
 ## 界面范围
 
-[UI 规范](design/workspace-ui-spec.md) 写明产品面向 PC，当前交付条件是 PC 上的 MVP 阅读闭环。窄屏、移动端和平板专用适配不是交付条件；已有窄屏截图只保留为历史证据。截图只证明布局和视觉状态，不能替代导入、索引、Session 持久化、归属拒绝、证据 hash 和 Run 生命周期的流程证据。规范清单中的 13 项都已勾选。下表按该勾选记录状态；和影响链或会话决策冲突的项保持部分验证。本文件没有重做这些浏览器流程。
+[UI 规范](design/workspace-ui-spec.md) 写明产品面向 PC，当前交付条件是 PC 上的 MVP 阅读闭环。窄屏、移动端和平板专用适配不是交付条件；已有窄屏截图只保留为历史证据。截图只证明布局和视觉状态，不能替代导入、索引、Session 持久化、归属拒绝、证据 hash 和 Run 生命周期的流程证据。规范清单原有 13 项曾全部勾选；影响边界项已改写，并新增一条未勾选的 unmapped、请求失败/重试和截断状态。下表按当前清单记录状态。本文件没有重做这些浏览器流程。
 
 | # | 准则 | 来源 | 状态 | 证据 |
 | --- | --- | --- | --- | --- |
@@ -87,14 +87,14 @@
 | 39 | 证据面板显示 `project_id` / `index_id` / `generation_id`；图筛选位于图工具栏；合成证据不发起无效关系请求 | 清单第 9 项 | 已验证 | 规范清单已勾选。源码 hash 的流程证据见第 21 项。 |
 | 40 | 生产 Run 面板显示连接与终态；受限 SSE 断流后续接保持事件 sequence 连续且不重复；取消、Run 切换和刷新不启动重复 Run | 清单第 10 项 | 已验证 | 规范清单已勾选 sequence 续接。不重复 Run 另见第 17 项。 |
 | 41 | 视觉使用中性背景、单一强调色、明确焦点和错误状态；无旧网格、装饰渐变、假终端和假精确产品宣传 | 清单第 11 项 | 已验证 | 规范清单已勾选。这是视觉证据。 |
-| 42 | 原型截图与生产页面分开标记；影响面板区分报告候选、静态 calls 可达和 unresolved；Run SSE 不伪装成隐藏推理或模型质量 | 清单第 12 项 | 部分验证 | 规范清单已勾选上述区分。模型质量见第 29 项，仍为尚未验证。影响边界是否都走过见第 22 项。 |
-| 43 | 报告 candidate 或 finding 可进入固定 Run/index 的影响结果；方向和深度可控；影响节点能打开同一 snapshot 的源码并与图联动；失败、取消和无唯一映射有空态；旧 Run 不回退到后来的 latest index | 清单第 13 项 | 部分验证 | 规范清单已勾选。影响链写明 unmapped、请求失败/重试和截断 UI 在该次记录中没有执行。会话决策仍写部分边界待验收。已走过的候选、调用链、源码、切换和刷新见第 22 项。 |
+| 42 | 原型截图与生产页面分开标记；影响面板区分报告候选、静态 calls 可达和 unresolved；Run SSE 不伪装成隐藏推理或模型质量 | 清单第 12 项 | 部分验证 | 规范清单已勾选上述区分，并写明该勾选不是四层提案或未复验边界的浏览器验收。模型质量见第 29 项，仍为尚未验证。影响边界是否都走过见第 22 项。 |
+| 43 | 报告 candidate 或 finding 可进入固定 Run/index 的影响结果；方向和深度可控；影响节点能打开同一 snapshot 的源码并与图联动；失败、取消和无唯一映射有空态；旧 Run 不回退到后来的 latest index | 清单第 13 项及新增未勾选项 | 部分验证 | 规范清单保留 2026-10-01 已走过的候选、方向/深度、源码和图联动勾选。unmapped、请求失败/重试和截断改为未勾选。影响面板已实现这三种状态，状态机测试见 `apps/web/lib/impact-layers.test.ts`；真实网页流程仍未验收。已走过的部分见第 22 项。 |
 
 ## 仍开放的缺口
 
 下面只列上述记录已经写明、尚未关闭的项。
 
-- 影响分层与部分影响界面边界仍未关闭。工作区决策因此保持 proposed。影响链未执行 unmapped、请求失败/重试和截断 UI。会话决策写明部分边界仍待验收。UI 清单的勾选与这两份记录冲突，见第 22 项和第 43 项。
+- 影响分层提案已实现为四层读法，但层词汇仍待所有者确认，完整影响范围仍开放，工作区决策因此保持 proposed。unmapped、请求失败/重试和截断已有界面和状态机测试，真实网页流程仍未验收，见第 22、24、43 项。
 - real Run 的网页「理解代码」验收尚未完成，见第 20 项。
 - pluggy Issue #733 旅程整体为 partial，见第 19 项。静态定位不是盲测。
 - GitHub 产品导入在该次旅程中被 HTTP 429 挡住，见第 6 项。记录把它标成外部阻断，没有归因为代码缺陷。

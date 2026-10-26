@@ -225,6 +225,7 @@ type SymbolNodeData = {
   symbol: SymbolRecord;
   selected: boolean;
   callChain?: boolean;
+  impactLayer?: "report_anchor" | "static_direct" | "static_indirect";
   onSelect: (symbolId: string) => void;
   onExpand: ((symbolId: string) => void) | null;
 };
@@ -275,6 +276,7 @@ function SymbolFlowNodeView({ data, selected }: NodeProps<SymbolFlowNode>) {
       className={`flow-symbol-card${selected || data.selected ? " is-selected" : ""}`}
       data-kind={data.symbol.kind}
       data-call-chain={data.callChain ? "true" : undefined}
+      data-impact-layer={data.impactLayer}
       onClick={(event) => {
         if (data.callChain) event.stopPropagation();
         data.onSelect(data.symbol.symbol_id);
@@ -4337,6 +4339,15 @@ export default function Workbench() {
       });
     }
     const rowsByDepth = new Map<number, number>();
+    const layerBySymbol = new Map<string, "report_anchor" | "static_direct" | "static_indirect">();
+    for (const layer of runImpact.layers) {
+      if (layer.kind === "unknown") {
+        continue;
+      }
+      for (const symbolId of layer.symbol_ids) {
+        layerBySymbol.set(symbolId, layer.kind);
+      }
+    }
     const nodes: SymbolFlowNode[] = runImpact.nodes.map((symbol) => {
       const depth = depthById.get(symbol.symbol_id) ?? 1;
       const row = rowsByDepth.get(depth) ?? 0;
@@ -4348,6 +4359,7 @@ export default function Workbench() {
         data: {
           symbol,
           selected: symbol.symbol_id === runImpact.root_symbol_id,
+          impactLayer: layerBySymbol.get(symbol.symbol_id),
           onSelect: (symbolId) => {
             const next = runImpact.nodes.find((candidate) => candidate.symbol_id === symbolId);
             if (next) {
@@ -5037,6 +5049,12 @@ export default function Workbench() {
         impactDepth: runImpactDepth,
         onImpactDirectionChange: changeRunImpactDirection,
         onImpactDepthChange: changeRunImpactDepth,
+        impactCanRetry: runImpactStatus === "error" && runImpactSelection !== null,
+        onRetryImpact: () => {
+          if (runImpactSelection) {
+            void loadRunImpact(runImpactSelection, runImpactDirection, runImpactDepth);
+          }
+        },
         onImpactNodeClick: (nodeId) => {
           const symbol = runImpact?.nodes.find((candidate) => candidate.symbol_id === nodeId);
           if (symbol) {

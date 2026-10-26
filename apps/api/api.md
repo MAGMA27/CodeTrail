@@ -2,7 +2,7 @@
 
 ## 状态
 
-已实现 Project/Index/Session、可恢复回收站、来源导入、O1 `python-entry-v6+http-shape-v2+architecture-v1` 概览（入口、显式职责/HTTP/源码结构组、聚合模块关系及同快照 HTTP 客户端/路由方法路径形状关联）、O2/O3 内置 HTTP 功能生成与 P2-R1/P2-R2 fixture/real Run；本地 MCP 提供共用历史/功能图读取和可选 Codex external Run，以及由宿主 Agent 识别后提交的功能结果。索引支持本地 `.py`/`.ts`/`.tsx` 源码 freshness 与显式更新，Python 文件缓存和 TypeScript 有界冷 AST 解析隔离。Run 已覆盖冻结输入、受限工具执行、单 Agent 有界模型循环、公开事件、持久化 SSE 回放/续接、Issue/代码理解报告、取消和重启中断；P3-I1 已增加从保存报告候选/发现读取固定快照的有界静态影响查询。HTTP method/path association 仅表达静态形状一致，不声称运行时网络目标；真实供应商语义质量仍未验证。
+已实现 Project/Index/Session、可恢复回收站、来源导入、O1 `python-entry-v6+http-shape-v2+architecture-v1` 概览（入口、显式职责/HTTP/源码结构组、聚合模块关系及同快照 HTTP 客户端/路由方法路径形状关联）、O2/O3 内置 HTTP 功能生成与 P2-R1/P2-R2 fixture/real Run；本地 MCP 提供共用历史/功能图读取和可选 Codex external Run，以及由宿主 Agent 识别后提交的功能结果。索引支持本地 `.py`/`.ts`/`.tsx` 源码 freshness 与显式更新，Python 文件缓存和 TypeScript 有界冷 AST 解析隔离。Run 已覆盖冻结输入、受限工具执行、单 Agent 有界模型循环、公开事件、持久化 SSE 回放/续接、Issue/代码理解报告、取消和重启中断；P3-I1 已增加从保存报告候选/发现读取固定快照的有界静态影响查询，并按提案把结果分成报告锚点、直接/间接静态可达和未知边界。HTTP method/path association 仅表达静态形状一致，不声称运行时网络目标；真实供应商语义质量仍未验证。
 
 ## 职责与范围
 

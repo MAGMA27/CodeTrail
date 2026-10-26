@@ -14577,6 +14577,64 @@
       "title": "GraphSnapshot",
       "type": "object"
     },
+    "ImpactLayer": {
+      "additionalProperties": false,
+      "description": "One read-only slice of a bounded Issue impact query.\n\nMembership comes from the saved report symbol, a shortest static ``calls``\npath, or an unresolved reference. None of these slices is confirmed impact.",
+      "properties": {
+        "determination": {
+          "enum": [
+            "saved_report_symbol",
+            "static_calls",
+            "unresolved_reference"
+          ],
+          "title": "Determination",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "report_anchor",
+            "static_direct",
+            "static_indirect",
+            "unknown"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "summary": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Summary",
+          "type": "string"
+        },
+        "symbol_ids": {
+          "items": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 40,
+          "title": "Symbol Ids",
+          "type": "array"
+        },
+        "unresolved_ids": {
+          "items": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 40,
+          "title": "Unresolved Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "determination",
+        "summary"
+      ],
+      "title": "ImpactLayer",
+      "type": "object"
+    },
     "ImpactPath": {
       "$defs": {
         "CodeEdge": {
@@ -29254,6 +29312,64 @@
           "title": "CodeEdge",
           "type": "object"
         },
+        "ImpactLayer": {
+          "additionalProperties": false,
+          "description": "One read-only slice of a bounded Issue impact query.\n\nMembership comes from the saved report symbol, a shortest static ``calls``\npath, or an unresolved reference. None of these slices is confirmed impact.",
+          "properties": {
+            "determination": {
+              "enum": [
+                "saved_report_symbol",
+                "static_calls",
+                "unresolved_reference"
+              ],
+              "title": "Determination",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "report_anchor",
+                "static_direct",
+                "static_indirect",
+                "unknown"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "summary": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Summary",
+              "type": "string"
+            },
+            "symbol_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 40,
+              "title": "Symbol Ids",
+              "type": "array"
+            },
+            "unresolved_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 40,
+              "title": "Unresolved Ids",
+              "type": "array"
+            }
+          },
+          "required": [
+            "kind",
+            "determination",
+            "summary"
+          ],
+          "title": "ImpactLayer",
+          "type": "object"
+        },
         "ImpactPath": {
           "additionalProperties": false,
           "description": "One explainable static calls path from an impact root.",
@@ -29445,6 +29561,15 @@
               "default": null,
               "title": "Index Unresolved Truncation Reason"
             },
+            "layers": {
+              "items": {
+                "$ref": "#/$defs/ImpactLayer"
+              },
+              "maxItems": 4,
+              "minItems": 4,
+              "title": "Layers",
+              "type": "array"
+            },
             "mapping_status": {
               "enum": [
                 "mapped",
@@ -29577,6 +29702,7 @@
             "mapping_status",
             "direction",
             "max_depth",
+            "layers",
             "scope_note"
           ],
           "title": "RunImpactResponse",
@@ -42069,6 +42195,64 @@
           "title": "CodeEdge",
           "type": "object"
         },
+        "ImpactLayer": {
+          "additionalProperties": false,
+          "description": "One read-only slice of a bounded Issue impact query.\n\nMembership comes from the saved report symbol, a shortest static ``calls``\npath, or an unresolved reference. None of these slices is confirmed impact.",
+          "properties": {
+            "determination": {
+              "enum": [
+                "saved_report_symbol",
+                "static_calls",
+                "unresolved_reference"
+              ],
+              "title": "Determination",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "report_anchor",
+                "static_direct",
+                "static_indirect",
+                "unknown"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "summary": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Summary",
+              "type": "string"
+            },
+            "symbol_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 40,
+              "title": "Symbol Ids",
+              "type": "array"
+            },
+            "unresolved_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 40,
+              "title": "Unresolved Ids",
+              "type": "array"
+            }
+          },
+          "required": [
+            "kind",
+            "determination",
+            "summary"
+          ],
+          "title": "ImpactLayer",
+          "type": "object"
+        },
         "ImpactPath": {
           "additionalProperties": false,
           "description": "One explainable static calls path from an impact root.",
@@ -42380,6 +42564,15 @@
           "default": null,
           "title": "Index Unresolved Truncation Reason"
         },
+        "layers": {
+          "items": {
+            "$ref": "#/$defs/ImpactLayer"
+          },
+          "maxItems": 4,
+          "minItems": 4,
+          "title": "Layers",
+          "type": "array"
+        },
         "mapping_status": {
           "enum": [
             "mapped",
@@ -42512,6 +42705,7 @@
         "mapping_status",
         "direction",
         "max_depth",
+        "layers",
         "scope_note"
       ],
       "title": "RunImpactResponse",

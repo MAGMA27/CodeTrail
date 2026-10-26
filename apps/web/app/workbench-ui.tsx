@@ -67,6 +67,7 @@ import type {
   UnresolvedReference,
 } from "../lib/api";
 import { SCHEMA_VERSION } from "../lib/api";
+import { IMPACT_LAYER_LABELS, describeImpactPanel, impactPanelStateAttribute } from "../lib/impact-layers";
 import { canShowKnowledgeInspector, resolveGraphReturnPanel, type GraphPanelMode } from "../lib/workbench-navigation";
 import {
   clampSidebarWidth,
@@ -361,6 +362,8 @@ type GraphUi = {
   impactDepth: number;
   onImpactDirectionChange: (direction: ImpactDirection) => void;
   onImpactDepthChange: (depth: number) => void;
+  impactCanRetry: boolean;
+  onRetryImpact: Action;
   onImpactNodeClick: (nodeId: string) => void;
   featureModel: { nodes: Node[]; edges: Edge[] };
   featureStatus: UiAsyncStatus;
@@ -2769,6 +2772,12 @@ function GraphPanel({ graph }: { graph: GraphUi }) {
   const hasEntryCallChain = graph.httpChain !== null || graph.entryCallChain !== null;
   const isFeature = !hasEntryCallChain && graph.panelMode === "feature_graph";
   const isImpact = !hasEntryCallChain && graph.panelMode === "impact";
+  const impactPanel = describeImpactPanel({
+    status: graph.impactStatus,
+    impact: graph.impact,
+    canRetry: graph.impactCanRetry,
+  });
+  const impactState = impactPanelStateAttribute(impactPanel);
   const featureGraph = graph.featureGraph;
   const entryRootSymbol = graph.entryCallChain?.root ?? graph.httpChain?.handler ?? null;
   const focusSymbol = graph.entryTrace?.focusSymbol ?? entryRootSymbol;
@@ -2989,17 +2998,22 @@ function GraphPanel({ graph }: { graph: GraphUi }) {
         <GraphCanvas model={graph.featureModel} nodeTypes={graph.featureNodeTypes} onInit={graph.onFeatureInit} onNodeClick={graph.onFeatureNodeClick} emptyTitle="选择一个已保存功能版本。" />
         {featureGraph && (featureGraph.limitations.length > 0 || featureGraph.unavailable_target_ids.length > 0) ? <div className="ct-graph-limitations"><strong>图边界</strong>{featureGraph.limitations.map((item) => <span key={item}>{item}</span>)}{featureGraph.unavailable_target_ids.length > 0 ? <span>未映射目标 {featureGraph.unavailable_target_ids.length} 个</span> : null}</div> : null}
       </> : <>
+        <div className="ct-impact-panel" data-impact-state={impactState}>
         <div className="ct-graph-toolbar"><label>方向<select value={graph.impactDirection} onChange={(event) => graph.onImpactDirectionChange(event.target.value as ImpactDirection)}><option value="callers">调用方</option><option value="callees">被调用方</option></select></label><label>深度<select value={graph.impactDepth} onChange={(event) => graph.onImpactDepthChange(Number(event.target.value))}><option value={1}>1 层</option><option value={2}>2 层</option></select></label><button type="button" className="ct-link-button" onClick={() => graph.flowInstance?.fitView({ padding: 0.18, duration: 240 })} disabled={graph.impactModel.nodes.length === 0}>聚焦</button></div>
-        <div className="ct-panel-status"><span data-state={graph.impactStatus}>{graph.impactStatus === "loading" ? "影响范围载入中" : graph.impactStatus === "error" ? "影响范围请求失败" : graph.impact?.mapping_status === "unmapped" ? "没有可映射的唯一符号" : graph.impactStatus === "success" ? `${graph.impact?.reachable_node_count ?? 0} 个可达节点 · ${graph.impact?.paths.length ?? 0} 条路径` : graph.impactStatus === "empty" ? "当前方向没有静态 calls 可达节点" : "从 Run 报告选择一个候选或发现"}</span>{graph.impact?.truncated ? <small>已截断 · {graph.impact.truncation_reason}</small> : null}</div>
+        <div className="ct-panel-status"><span data-state={graph.impactStatus}>{impactPanel.headline}</span></div>
         {graph.impact?.index_truncated ? <p className="ct-graph-coverage-warning" role="status">影响查询使用的固定索引扫描未完成 · {graph.impact.index_truncation_reason}；空邻接不能证明没有关系。</p> : null}
         {graph.impact?.index_unresolved_truncated === true ? <p className="ct-graph-coverage-warning" role="status">影响查询使用的 unresolved 详情已截断 · {graph.impact.index_unresolved_truncation_reason}；未返回的 unresolved 不能被当作不存在。</p> : null}
         {graph.impact && graph.impact.index_unresolved_truncated === null ? <p className="ct-graph-coverage-warning" role="status">影响查询使用的旧索引未记录 unresolved 覆盖状态。</p> : null}
-        {graph.impactError ? <p className="ct-inline-error" role="alert">{graph.impactError}</p> : null}
-        <div className="ct-graph-legend"><span><i className="is-impact-root" />候选根</span><span><i className="is-calls" />静态 calls</span><span><i className="is-unknown" />未知边界</span></div>
-        {graph.impactStatus === "loading" ? <LoadingNote>正在从 Run 固定快照计算有界路径…</LoadingNote> : graph.impact?.mapping_status === "unmapped" ? <EmptyState title="报告没有可遍历的唯一符号" detail="保留报告源码证据；不会根据同名符号猜测影响范围。" /> : <GraphCanvas model={graph.impactModel} nodeTypes={graph.codeNodeTypes} onInit={graph.onCodeInit} onNodeClick={graph.onImpactNodeClick} emptyTitle="当前方向没有静态 calls 可达节点。" />}
-        {graph.impact && graph.impact.paths.length > 0 ? <div className="ct-impact-paths"><div className="ct-section-heading"><div><p className="ct-overline">STATIC PATHS</p><h3>可解释路径</h3></div><span className="ct-count-label">{graph.impact.paths.length}</span></div>{graph.impact.paths.slice(0, 12).map((path) => { const names = new Map(graph.impact?.nodes.map((node) => [node.symbol_id, node.qualified_name])); return <div className="ct-impact-path" key={path.path_id}><code>{path.symbol_ids.map((symbolId) => names.get(symbolId) ?? symbolId).join(graph.impact?.direction === "callers" ? " ← " : " → ")}</code><small>{path.edges.map((edge) => `${edge.source_location.path}:L${edge.source_location.start_line}`).join(" · ")}</small></div>; })}</div> : null}
-        {graph.impact && graph.impact.unresolved.length > 0 ? <div className="ct-impact-unknown"><strong>未知边界 · {graph.impact.unresolved.length}</strong><small>动态调用或无法解析的引用不会绘制为确定影响边。</small>{graph.impact.unresolved.map((item) => <span key={item.unresolved_id}><code>{item.expression}</code> · {item.reason}</span>)}</div> : null}
-        {graph.impact ? <p className="ct-graph-scope-note">{graph.impact.scope_note}</p> : null}
+        {impactPanel.mode === "error" ? <div className="ct-impact-failure" role="alert"><p className="ct-inline-error">{graph.impactError ?? "影响范围请求失败"}</p>{impactPanel.showRetry ? <button type="button" className="ct-link-button" onClick={graph.onRetryImpact}>重试影响查询</button> : null}</div> : null}
+        {impactPanel.showUnmapped ? <EmptyState title="报告没有可遍历的唯一符号" detail="保留报告源码证据；不会根据同名符号猜测影响范围。" /> : null}
+        {graph.impact && (impactPanel.mode === "unmapped" || impactPanel.mode === "result") ? <ol className="ct-impact-layers" aria-label="影响分层">{graph.impact.layers.map((layer) => <li key={layer.kind} data-layer={layer.kind}><strong>{IMPACT_LAYER_LABELS[layer.kind]}</strong><span>{layer.kind === "unknown" ? layer.unresolved_ids.length : layer.symbol_ids.length}</span><small>{layer.summary}</small></li>)}</ol> : null}
+        {impactPanel.showTruncation ? <p className="ct-graph-coverage-warning" role="status">{impactPanel.truncationMessage}</p> : null}
+        <div className="ct-graph-legend" aria-label="影响分层图例"><span><i className="is-impact-root" />报告锚点</span><span><i className="is-impact-direct" />直接静态可达</span><span><i className="is-impact-indirect" />间接静态可达</span><span><i className="is-unknown" />未知边界</span><small>calls 边只表示静态可达</small></div>
+        {impactPanel.mode === "loading" ? <LoadingNote>正在从 Run 固定快照计算有界路径…</LoadingNote> : impactPanel.showGraph ? <GraphCanvas model={graph.impactModel} nodeTypes={graph.codeNodeTypes} onInit={graph.onCodeInit} onNodeClick={graph.onImpactNodeClick} emptyTitle={impactPanel.emptyStatic ? "当前方向没有静态 calls 可达节点。" : "当前没有可显示的影响节点。"} /> : null}
+        {impactPanel.mode === "result" && graph.impact && graph.impact.paths.length > 0 ? <div className="ct-impact-paths"><div className="ct-section-heading"><div><p className="ct-overline">STATIC PATHS</p><h3>可解释路径</h3></div><span className="ct-count-label">{graph.impact.paths.length}</span></div>{graph.impact.paths.slice(0, 12).map((path) => { const names = new Map(graph.impact?.nodes.map((node) => [node.symbol_id, node.qualified_name])); return <div className="ct-impact-path" key={path.path_id}><code>{path.symbol_ids.map((symbolId) => names.get(symbolId) ?? symbolId).join(graph.impact?.direction === "callers" ? " ← " : " → ")}</code><small>{path.edges.map((edge) => `${edge.source_location.path}:L${edge.source_location.start_line}`).join(" · ")}</small></div>; })}</div> : null}
+        {impactPanel.mode === "result" && graph.impact && graph.impact.unresolved.length > 0 ? <div className="ct-impact-unknown"><strong>未知边界 · {graph.impact.unresolved.length}</strong><small>动态调用或无法解析的引用不会绘制为确定影响边。</small>{graph.impact.unresolved.map((item) => <span key={item.unresolved_id}><code>{item.expression}</code> · {item.reason}</span>)}</div> : null}
+        {graph.impact && impactPanel.mode !== "error" ? <p className="ct-graph-scope-note">{graph.impact.scope_note}</p> : null}
+        </div>
       </>}
     </aside>
   );

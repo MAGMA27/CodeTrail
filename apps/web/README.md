@@ -2,7 +2,7 @@
 
 ## 职责与边界
 
-`apps/web` 提供项目/索引切换、索引新鲜度检查与显式更新、概览、Session/消息、保存功能历史、可继续追踪的操作旅程、同快照功能图、源码证据，以及 Session 内显式 AI 分析 Run 的启动、状态、事件、工具结果、Issue/代码理解报告、候选位置与有界静态影响、SSE 订阅和取消；项目架构画布并列展示 Python/TypeScript imports/calls 与独立的 HTTP 方法/路径形状关联及双端证据。HTTP 关联列表可打开客户端锚点→方法/路径形状→FastAPI handler，再从 handler 查看最多 2 层、40 节点的同快照 calls 查询与 unresolved 边界。入口链路可从当前选中符号按一跳追踪调用方或被调用方，默认 calls 并可筛选 imports；模块静态导入视图只查询模块符号的一跳导入边，按名称导入文件内 class/function 的引用不会出现在模块反向结果中，可对具体定义查询 imports，空结果不代表整个文件无人导入。Codex external Run 会被自动发现并接入同一展示链。它只通过公开 HTTP API 访问服务端数据，不直接访问 SQLite、GitHub、宿主路径或模型。
+`apps/web` 提供项目/索引切换、索引新鲜度检查与显式更新、概览、Session/消息、保存功能历史、可继续追踪的操作旅程、同快照功能图、源码证据，以及 Session 内显式 AI 分析 Run 的启动、状态、事件、工具结果、Issue/代码理解报告、候选位置与有界静态影响分层、SSE 订阅和取消；项目架构画布并列展示 Python/TypeScript imports/calls 与独立的 HTTP 方法/路径形状关联及双端证据。HTTP 关联列表可打开客户端锚点→方法/路径形状→FastAPI handler，再从 handler 查看最多 2 层、40 节点的同快照 calls 查询与 unresolved 边界。入口链路可从当前选中符号按一跳追踪调用方或被调用方，默认 calls 并可筛选 imports；模块静态导入视图只查询模块符号的一跳导入边，按名称导入文件内 class/function 的引用不会出现在模块反向结果中，可对具体定义查询 imports，空结果不代表整个文件无人导入。Codex external Run 会被自动发现并接入同一展示链。它只通过公开 HTTP API 访问服务端数据，不直接访问 SQLite、GitHub、宿主路径或模型。
 
 ## 入口与目录导航
 

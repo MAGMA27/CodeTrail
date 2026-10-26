@@ -560,6 +560,29 @@ EdgeKind: TypeAlias = Literal["contains", "imports", "calls"]
 
 ImpactDirection: TypeAlias = Literal["callers", "callees"]
 ImpactMappingStatus: TypeAlias = Literal["mapped", "unmapped"]
+ImpactLayerKind: TypeAlias = Literal[
+    "report_anchor",
+    "static_direct",
+    "static_indirect",
+    "unknown",
+]
+ImpactLayerDetermination: TypeAlias = Literal[
+    "saved_report_symbol",
+    "static_calls",
+    "unresolved_reference",
+]
+_IMPACT_LAYER_KINDS: tuple[ImpactLayerKind, ...] = (
+    "report_anchor",
+    "static_direct",
+    "static_indirect",
+    "unknown",
+)
+_IMPACT_LAYER_DETERMINATION: dict[ImpactLayerKind, ImpactLayerDetermination] = {
+    "report_anchor": "saved_report_symbol",
+    "static_direct": "static_calls",
+    "static_indirect": "static_calls",
+    "unknown": "unresolved_reference",
+}
 
 
 class CodeEdge(ContractModel):
@@ -1395,6 +1418,36 @@ class NeighborsIndexResponse(VersionedModel):
         return self
 
 
+class ImpactLayer(ContractModel):
+    """One read-only slice of a bounded Issue impact query.
+
+    Membership comes from the saved report symbol, a shortest static ``calls``
+    path, or an unresolved reference. None of these slices is confirmed impact.
+    """
+
+    kind: ImpactLayerKind
+    determination: ImpactLayerDetermination
+    symbol_ids: list[Identifier] = Field(default_factory=list, max_length=40)
+    unresolved_ids: list[Identifier] = Field(default_factory=list, max_length=40)
+    summary: str = Field(min_length=1, max_length=500)
+
+    @model_validator(mode="after")
+    def validate_layer_shape(self) -> ImpactLayer:
+        if self.determination != _IMPACT_LAYER_DETERMINATION[self.kind]:
+            raise ValueError("impact layer determination does not match its kind")
+        if self.kind == "unknown" and self.symbol_ids:
+            raise ValueError("unknown impact layer cannot contain symbols")
+        if self.kind != "unknown" and self.unresolved_ids:
+            raise ValueError("symbol impact layers cannot contain unresolved ids")
+        if self.kind == "report_anchor" and len(self.symbol_ids) > 1:
+            raise ValueError("report anchor contains at most one symbol")
+        if len(set(self.symbol_ids)) != len(self.symbol_ids):
+            raise ValueError("impact layer symbol ids must be unique")
+        if len(set(self.unresolved_ids)) != len(self.unresolved_ids):
+            raise ValueError("impact layer unresolved ids must be unique")
+        return self
+
+
 class ImpactPath(ContractModel):
     """One explainable static calls path from an impact root."""
 
@@ -1439,6 +1492,7 @@ class RunImpactResponse(VersionedModel):
     edges: list[CodeEdge] = Field(default_factory=list, max_length=80)
     paths: list[ImpactPath] = Field(default_factory=list, max_length=40)
     unresolved: list[UnresolvedReference] = Field(default_factory=list, max_length=40)
+    layers: list[ImpactLayer] = Field(min_length=4, max_length=4)
     reachable_node_count: NonNegativeInt = 0
     returned_node_count: NonNegativeInt = 0
     scope_note: str = Field(min_length=1, max_length=1_000)
@@ -1525,6 +1579,38 @@ class RunImpactResponse(VersionedModel):
             raise ValueError("truncated impact responses must explain the truncation")
         if not self.truncated and self.truncation_reason:
             raise ValueError("non-truncated impact responses cannot have a truncation reason")
+        if tuple(layer.kind for layer in self.layers) != _IMPACT_LAYER_KINDS:
+            raise ValueError(
+                "impact layers must be report_anchor, static_direct, static_indirect, and unknown"
+            )
+        anchor, direct, indirect, unknown = self.layers
+        if self.mapping_status == "unmapped":
+            if any(layer.symbol_ids or layer.unresolved_ids for layer in self.layers):
+                raise ValueError("unmapped impact layers must be empty")
+            return self
+        if anchor.symbol_ids != [self.root_symbol_id]:
+            raise ValueError("report anchor must be the impact root")
+        if self.root_symbol_id in direct.symbol_ids or self.root_symbol_id in indirect.symbol_ids:
+            raise ValueError("impact root stays in the report anchor layer")
+        if set(direct.symbol_ids) & set(indirect.symbol_ids):
+            raise ValueError("a symbol cannot sit in both static impact layers")
+        covered = set(anchor.symbol_ids) | set(direct.symbol_ids) | set(indirect.symbol_ids)
+        if covered != node_ids:
+            raise ValueError("impact layers must cover every returned node exactly once")
+        shortest: dict[str, int] = {}
+        for path in self.paths:
+            for index, symbol_id in enumerate(path.symbol_ids):
+                current = shortest.get(symbol_id)
+                if current is None or index < current:
+                    shortest[symbol_id] = index
+        if any(shortest.get(symbol_id) != 1 for symbol_id in direct.symbol_ids):
+            raise ValueError("static_direct symbols must have shortest calls depth 1")
+        if any(shortest.get(symbol_id) != 2 for symbol_id in indirect.symbol_ids):
+            raise ValueError("static_indirect symbols must have shortest calls depth 2")
+        if self.max_depth == 1 and indirect.symbol_ids:
+            raise ValueError("depth 1 impact cannot include an indirect layer")
+        if unknown.unresolved_ids != [item.unresolved_id for item in self.unresolved]:
+            raise ValueError("unknown layer must list returned unresolved ids in order")
         return self
 
 

@@ -403,6 +403,7 @@ def test_run_impact_is_report_scoped_bounded_and_empty_without_a_candidate(tmp_p
     assert all(edge["kind"] == "calls" for edge in callers["edges"])
     assert all(path["symbol_ids"][0] == candidate_symbol_id for path in callers["paths"])
     assert "静态可达不等同于已确认影响" in callers["scope_note"]
+    assert_impact_layers(callers)
 
     source_root = application.state.workspace_service.registry.root_for("timeout-demo")
     config_path = source_root / "timeout_demo" / "config.py"
@@ -427,6 +428,7 @@ def test_run_impact_is_report_scoped_bounded_and_empty_without_a_candidate(tmp_p
     )
     assert status == 200, old_report_impact
     assert old_report_impact["index_id"] == index_id
+    assert_impact_layers(old_report_impact)
 
     status, finding_impact = request(
         application,
@@ -441,6 +443,8 @@ def test_run_impact_is_report_scoped_bounded_and_empty_without_a_candidate(tmp_p
     assert finding_impact["max_depth"] == 1
     assert finding_impact["root_symbol_id"] == finding_symbol_id
     assert all(path["depth"] == 1 for path in finding_impact["paths"])
+    assert_impact_layers(finding_impact)
+    assert finding_impact["layers"][2]["symbol_ids"] == []
 
     status, invalid_scope = request(
         application,
@@ -479,6 +483,46 @@ def test_run_impact_is_report_scoped_bounded_and_empty_without_a_candidate(tmp_p
     assert unmapped["nodes"] == []
     assert unmapped["paths"] == []
     assert unmapped["reachable_node_count"] == 0
+    assert_impact_layers(unmapped)
+
+
+def assert_impact_layers(payload: dict) -> None:
+    layers = payload["layers"]
+    assert [layer["kind"] for layer in layers] == [
+        "report_anchor",
+        "static_direct",
+        "static_indirect",
+        "unknown",
+    ]
+    anchor, direct, indirect, unknown = layers
+    assert anchor["determination"] == "saved_report_symbol"
+    assert direct["determination"] == "static_calls"
+    assert indirect["determination"] == "static_calls"
+    assert unknown["determination"] == "unresolved_reference"
+    if payload["mapping_status"] == "unmapped":
+        assert all(not layer["symbol_ids"] and not layer["unresolved_ids"] for layer in layers)
+        return
+    assert anchor["symbol_ids"] == [payload["root_symbol_id"]]
+    assert "不是已确认影响" in anchor["summary"]
+    assert "不等于已确认影响" in direct["summary"]
+    assert "不等于已确认影响" in indirect["summary"]
+    assert "保持未知" in unknown["summary"]
+    shortest: dict[str, int] = {}
+    for path in payload["paths"]:
+        for index, symbol_id in enumerate(path["symbol_ids"]):
+            shortest[symbol_id] = min(index, shortest.get(symbol_id, index))
+    assert set(direct["symbol_ids"]) == {
+        symbol_id for symbol_id, depth in shortest.items() if depth == 1
+    }
+    assert set(indirect["symbol_ids"]) == {
+        symbol_id for symbol_id, depth in shortest.items() if depth == 2
+    }
+    if payload["max_depth"] == 1:
+        assert indirect["symbol_ids"] == []
+    assert unknown["unresolved_ids"] == [item["unresolved_id"] for item in payload["unresolved"]]
+    assert set(anchor["symbol_ids"]) | set(direct["symbol_ids"]) | set(indirect["symbol_ids"]) == {
+        node["symbol_id"] for node in payload["nodes"]
+    }
 
 
 def test_run_idempotency_active_conflict_and_cancellation_are_persisted(tmp_path: Path) -> None:

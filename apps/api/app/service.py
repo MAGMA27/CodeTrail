@@ -153,6 +153,7 @@ from .feature_generation import (
     new_generation_id,
     resolve_model,
 )
+from .impact_layers import build_impact_layers
 from .issue_analysis import (
     ISSUE_EXECUTION_VERSION,
     ISSUE_PROMPT_VERSION,
@@ -2705,6 +2706,14 @@ class WorkspaceService:
                         mapping_status="unmapped",
                         direction=direction,
                         max_depth=depth,
+                        layers=build_impact_layers(
+                            mapping_status="unmapped",
+                            root_symbol_id=None,
+                            nodes=(),
+                            paths=(),
+                            unresolved=(),
+                            max_depth=depth,
+                        ),
                         scope_note=(
                             "当前报告没有一个可用于影响遍历的唯一候选符号；只保留报告中的源码证据。"
                         ),
@@ -2714,6 +2723,7 @@ class WorkspaceService:
                         index_unresolved_truncation_reason=coverage.index_unresolved_truncation_reason,
                     )
 
+                assert root_symbol_id is not None
                 result = store.get_static_impact(
                     record.run.index_id,
                     root_symbol_id,
@@ -2737,6 +2747,14 @@ class WorkspaceService:
                     edges=list(result.edges),
                     paths=list(result.paths),
                     unresolved=list(result.unresolved),
+                    layers=build_impact_layers(
+                        mapping_status="mapped",
+                        root_symbol_id=result.root.symbol_id,
+                        nodes=result.nodes,
+                        paths=result.paths,
+                        unresolved=result.unresolved,
+                        max_depth=depth,
+                    ),
                     reachable_node_count=result.reachable_node_count,
                     returned_node_count=len(result.nodes),
                     scope_note=scope_note,
