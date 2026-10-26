@@ -1,12 +1,12 @@
 # 决策：Issue 影响分层
 
-Status: proposed
+Status: implemented
 
 ## 问题
 
 [工作区决策](2026-09-11-project-workspace.md) 把「Issue 影响分层和完整范围」留在验收之外，但仓库文档没有定义层的名称、成员规则或和其他事实的边界。[Run 影响查询](2026-09-13-run-impact.md) 已经能从一份已保存报告读取有界静态 `calls`，工作台图例也区分候选根、静态可达和 unresolved。这些结果仍是一份平坦的节点、路径和未知引用，调用方必须自己猜测最短路径深度，请求失败还会和「当前方向没有静态 calls」画在一起。
 
-本记录只补上这次读取的分层语义。它不把静态可达升级为已确认影响，也不把深度 2 的有界结果称作完整影响范围。层的词汇是保守提案，需要所有者确认后才能把本记录标为 implemented。
+本记录只补上这次读取的分层语义。它不把静态可达升级为已确认影响，也不把深度 2 的有界结果称作完整影响范围。层的词汇是保守提案；所有者已确认四层名称 `report_anchor`、`static_direct`、`static_indirect`、`unknown`，本记录因此标为 implemented。
 
 ## 决定
 
@@ -31,7 +31,7 @@ Status: proposed
 
 ## 验收与证据
 
-实现与本提案一致，但本记录保持 proposed：层词汇尚未由所有者确认，下面的自动测试也不能代替真实网页流程。
+实现与本决定一致。2026-10-26 所有者确认四层名称原样采用；本记录因此从 proposed 改为 implemented。自动测试仍不能代替真实网页流程。
 
 - 实现：`ImpactLayer` 进入 `RunImpactResponse`；`impact_layers.py` 从已保存报告映射和 `get_static_impact` 的返回路径派生四层；影响面板分开显示 unmapped、请求失败重试和截断。
 - 2026-10-26 在本分支上跑过的自动检查：`pnpm --dir apps/web test` 94 通过；`pnpm web:typecheck`、`pnpm web:build`、`pnpm docs:check` 通过；`pnpm contracts:check` 30 通过；`uv run --directory apps/api python -m compileall -q app` 通过。仓库没有单独的 lint 脚本。`uv run --directory apps/api pytest -q` 为 280 通过、4 失败。这 4 个失败在 `origin/main` `3dd21bb` 上用同一锁定 TypeScript 5.9.3 解析器复现：大小写敏感文件系统上把导入路径改成大写后返回 400；Linux 的 `ctypes` 没有 `get_last_error`；仓库自索引关系边达到 `max_edges`；本地导入旅程的结果步骤带有源码 evidence。它们不记为本分层实现的回归，也没有为了变绿而放宽路径、Windows 进程探测或关系预算。
@@ -39,4 +39,4 @@ Status: proposed
 
 ## 后果
 
-[工作区决策](2026-09-11-project-workspace.md) 在层词汇确认、真实网页边界验收和其余既有缺口关闭前继续保持 proposed。影响读取的调用方必须消费 `layers`，不能再从平坦节点推断层。截断后的层是已返回子集。Issue 分析提示仍不负责分层，避免把模型假设写进静态事实。
+[工作区决策](2026-09-11-project-workspace.md) 在真实网页边界验收和其余既有缺口关闭前继续保持 proposed；层词汇已确认，不再阻塞本记录。影响读取的调用方必须消费 `layers`，不能再从平坦节点推断层。截断后的层是已返回子集。Issue 分析提示仍不负责分层，避免把模型假设写进静态事实。
