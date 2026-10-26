@@ -309,6 +309,35 @@ const files = input.files.map(({ path: filePath, text }) => {
   };
   const functionInfoForBinding = (binding) => binding.functionInfo ??
     functionInfos.find((candidate) => candidate.declaration === binding.declaration);
+  // Cache write scans per root/name set. Call extraction can ask about the same
+  // binding thousands of times in one function body; rescanning is O(n²).
+  const writeCache = new WeakMap();
+  function hasWrites(root, names) {
+    let byKey = writeCache.get(root);
+    if (!byKey) {
+      byKey = new Map();
+      writeCache.set(root, byKey);
+    }
+    const key = [...names].sort().join("\0");
+    if (byKey.has(key)) return byKey.get(key);
+    let found = false;
+    const assignedName = (node) => {
+      if (ts.isIdentifier(node)) return names.has(node.text);
+      if (ts.isPropertyAccessExpression(node)) return ts.isIdentifier(node.expression) && names.has(node.expression.text);
+      if (ts.isElementAccessExpression(node)) return ts.isIdentifier(node.expression) && names.has(node.expression.text);
+      return false;
+    };
+    const inspect = (node) => {
+      if (found) return;
+      if (ts.isBinaryExpression(node) && node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && node.operatorToken.kind <= ts.SyntaxKind.LastAssignment && assignedName(node.left)) found = true;
+      if ((ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) &&
+        [ts.SyntaxKind.PlusPlusToken, ts.SyntaxKind.MinusMinusToken].includes(node.operator) && assignedName(node.operand)) found = true;
+      if (!found) ts.forEachChild(node, inspect);
+    };
+    inspect(root);
+    byKey.set(key, found);
+    return found;
+  }
   for (const info of functionInfos) {
     if (callBudgetTruncated) break;
     const body = info.function_node.body;
@@ -316,6 +345,10 @@ const files = input.files.map(({ path: filePath, text }) => {
     const inspect = (node, isRoot = false) => {
       if (callBudgetTruncated || !isRoot && isCallableNode(node)) return;
       if (ts.isCallExpression(node)) {
+        if (callCount >= maxCalls) {
+          callBudgetTruncated = true;
+          return;
+        }
         const callRange = range(node);
         const expression = node.expression.getText(source).slice(0, 500);
         let targetQualifiedName = null;
@@ -373,10 +406,7 @@ const files = input.files.map(({ path: filePath, text }) => {
         } else {
           reason = "dynamic_call_target";
         }
-        if (++callCount > maxCalls) {
-          callBudgetTruncated = true;
-          return;
-        }
+        callCount += 1;
         calls.push({
           caller_qualified_name: info.qualified_name,
           caller_start_line: info.start_line,
@@ -388,6 +418,10 @@ const files = input.files.map(({ path: filePath, text }) => {
           reason,
           ...callRange,
         });
+        if (callCount >= maxCalls) {
+          callBudgetTruncated = true;
+          return;
+        }
       }
       ts.forEachChild(node, (child) => inspect(child));
     };
@@ -691,24 +725,6 @@ const files = input.files.map(({ path: filePath, text }) => {
     };
     inspect(fn.body, true);
   };
-
-  function hasWrites(root, names) {
-    let found = false;
-    const assignedName = (node) => {
-      if (ts.isIdentifier(node)) return names.has(node.text);
-      if (ts.isPropertyAccessExpression(node)) return ts.isIdentifier(node.expression) && names.has(node.expression.text);
-      if (ts.isElementAccessExpression(node)) return ts.isIdentifier(node.expression) && names.has(node.expression.text);
-      return false;
-    };
-    const inspect = (node) => {
-      if (ts.isBinaryExpression(node) && node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && node.operatorToken.kind <= ts.SyntaxKind.LastAssignment && assignedName(node.left)) found = true;
-      if ((ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node)) &&
-        [ts.SyntaxKind.PlusPlusToken, ts.SyntaxKind.MinusMinusToken].includes(node.operator) && assignedName(node.operand)) found = true;
-      ts.forEachChild(node, inspect);
-    };
-    inspect(root);
-    return found;
-  }
 
   for (const statement of topLevel) {
     if (ts.isImportDeclaration(statement) && ts.isStringLiteral(statement.moduleSpecifier)) {

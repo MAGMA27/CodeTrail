@@ -504,7 +504,7 @@ SOURCE_CAPTURE_RULES_VERSION = "source-v4"
 DEFINITION_EXTRACTION_RULES_VERSION = "python-definitions-v1"
 TYPESCRIPT_COMPILER_VERSION = "5.9.3"
 TYPESCRIPT_FACT_RULES_VERSION = "typescript-facts-v5"
-_TYPESCRIPT_PARSER_TIMEOUT_SECONDS = 15
+_TYPESCRIPT_PARSER_TIMEOUT_SECONDS = 30
 _TYPESCRIPT_PARSER_MAX_INPUT_BYTES = 20 * 1024 * 1024
 _TYPESCRIPT_PARSER_MAX_OUTPUT_BYTES = 8 * 1024 * 1024
 PYTHON_AST_VERSION = (
@@ -1047,7 +1047,7 @@ def _extract_typescript_facts(
             env=environment,
         )
     except subprocess.TimeoutExpired:
-        return {}, [SnapshotIssue("__snapshot__", "parser_error", "TypeScript parser exceeded its 15 second budget")]
+        return {}, [SnapshotIssue("__snapshot__", "parser_error", "TypeScript parser exceeded its 30 second budget")]
     except OSError:
         return {}, [SnapshotIssue("__snapshot__", "parser_unavailable", "TypeScript parser process could not be started")]
     if result.returncode != 0 or len(result.stdout.encode("utf-8")) > _TYPESCRIPT_PARSER_MAX_OUTPUT_BYTES:
