@@ -671,7 +671,15 @@ def test_code_trail_workspace_service_reader_stays_unresolved_after_new_bypass()
             dirty=True,
         )
     )
-    result = extract_relations(definitions, max_seconds=30)
+    # Self-index of this growing repo exceeds the production defaults (6k edges /
+    # 5k unresolved); raise only this probe's budget so truncation does not hide
+    # the WorkspaceService.read_source unresolved + contextual-call facts under test.
+    result = extract_relations(
+        definitions,
+        max_seconds=60,
+        max_edges=20_000,
+        max_unresolved=20_000,
+    )
     names = {symbol.symbol_id: symbol.qualified_name for symbol in result.symbols}
     calls = {
         (names[edge.source_id], names[edge.target_id])
@@ -712,7 +720,14 @@ def test_code_trail_workspace_service_reader_stays_unresolved_after_new_bypass()
     assert handler_contexts[0].activation_source.qualified_name == (
         "apps.api.app.main.create_app.read_project_source"
     )
-    assert handler_contexts[0].receiver_constructor_location.start_line == 166
+    main_lines = (ROOT / "apps" / "api" / "app" / "main.py").read_text(encoding="utf-8").splitlines()
+    expected_constructor_line = next(
+        line_number
+        for line_number, line in enumerate(main_lines, start=1)
+        if line.strip().startswith("workspace_service = WorkspaceService(")
+    )
+    assert handler_contexts[0].receiver_constructor_location.path == "apps/api/app/main.py"
+    assert handler_contexts[0].receiver_constructor_location.start_line == expected_constructor_line
     service_lines = (ROOT / "apps" / "api" / "app" / "service.py").read_text(
         encoding="utf-8"
     ).splitlines()

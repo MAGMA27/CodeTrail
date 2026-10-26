@@ -57,7 +57,7 @@ AGENTS.md 仅记录该目录额外的开发规则、所需阅读和检查命令�
 | 模型与事件行为 | 确定性 fixture 和实际组装路径；真实模型评测另记环境与结果 |
 | 独立评测数据与基线 | pnpm evals:validate、pnpm evals:test、pnpm evals:baseline |
 
-根目录运行后端测试：uv run --directory apps/api pytest tests/test_api.py -q。按修改面替换测试文件。pnpm doc-sync 聚合共享文档检查与契约测试，测试不调用网络或真实模型；首次依赖安装可能需要网络。首次准备环境使用 uv sync --project apps/api --locked。
+根目录运行后端测试：uv run --directory apps/api pytest tests/test_api.py -q。按修改面替换测试文件。pnpm doc-sync 聚合共享文档检查与契约测试，测试不调用网络或真实模型；首次依赖安装可能需要网络。首次准备环境使用 uv sync --project apps/api --locked。仓库 lockfile 固定公共 PyPI；在中国大陆若下载较慢，可仅在本机设置 `UV_DEFAULT_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple` 后再 sync，不要把镜像写进仓库。
 
 docs:check 同时扫描根目录以及 apps/api、apps/web、contracts、fixtures、evals 的顶层 Markdown，并验证本仓库约定的内联文件链接、栏目、状态、源码归属及 skill 元数据，不验证外部 URL、Markdown 锚点、自然语言语义或运行时正确性。docs:check:local 另检查存在的 memory-bank 内联文件链接，不将其作为干净克隆的依赖。
 

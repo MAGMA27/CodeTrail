@@ -6,6 +6,7 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
+import os
 import shutil
 import sqlite3
 from threading import Event
@@ -769,11 +770,15 @@ def test_local_import_is_bounded_persistent_idempotent_and_retryable(tmp_path: P
     assert (data_root / "registry.sqlite3").is_file()
     assert (data_root / "projects" / project_id / ".codetrail" / "index.sqlite3").is_file()
 
+    # Idempotent re-import must resolve path identity after normalize. Case folding
+    # is only path-equivalent on Windows; on case-sensitive filesystems use a
+    # trailing-separator form that resolve() maps to the same directory.
+    alternate_path = str(source).upper() if os.name == "nt" else f"{source}{os.sep}"
     status, repeated = request(
         application,
         "POST",
         "/api/imports/local",
-        {**payload, "path": str(source).upper()},
+        {**payload, "path": alternate_path},
     )
     assert status == 200
     assert repeated["project"]["project_id"] == project_id

@@ -591,7 +591,8 @@ def _journey_steps(
             )
         )
     else:
-        result_evidence = callback_evidence or evidence_action
+        # Unconfirmed result steps must not reuse trigger/callback excerpts as if they
+        # evidenced the UI update; callers continue from earlier step symbols instead.
         if has_http_shape:
             steps.append(
                 JourneyStep(
@@ -601,7 +602,7 @@ def _journey_steps(
                     relation_kind="result_display",
                     certainty="unconfirmed",
                     explanation="当前索引没有足够的静态关系证明请求结果如何更新界面；请从返回的符号继续追踪。",
-                    evidence=[result_evidence] if result_evidence else [],
+                    evidence=[],
                 )
             )
         else:
@@ -613,7 +614,7 @@ def _journey_steps(
                     relation_kind="unresolved",
                     certainty="unconfirmed",
                     explanation="当前源码未能唯一证明此动作产生的状态或显示结果；没有关联到 HTTP 路由，不补造服务端步骤。",
-                    evidence=[result_evidence] if result_evidence else [],
+                    evidence=[],
                 )
             )
             markers.append("此动作没有唯一 HTTP method/path 关联；未补造服务端步骤。")

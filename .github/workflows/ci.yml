@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+
+      # TypeScript indexing and journey tests need apps/web's locked typescript package.
+      - run: pnpm install --frozen-lockfile
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - run: uv sync --project apps/api --locked
+
+      - name: API pytest
+        run: uv run --directory apps/api pytest -q
+        env:
+          CODETRAIL_TYPESCRIPT_COMPILER: ${{ github.workspace }}/apps/web/node_modules/typescript/lib/typescript.js
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Web test
+        run: pnpm --dir apps/web test
+
+      - name: Web typecheck
+        run: pnpm web:typecheck
+
+      - name: Web build
+        run: pnpm web:build

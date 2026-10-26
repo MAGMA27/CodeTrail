@@ -55,7 +55,8 @@ def test_windows_process_liveness_distinguishes_exit_from_unknown_open_failure(m
     assert service_module._windows_process_liveness(456, kernel32=exited) == "exited"
 
     inaccessible = _FakeKernel32(handle=None, wait_result=0)
-    monkeypatch.setattr(service_module.ctypes, "get_last_error", lambda: 5)
+    # ctypes.get_last_error exists only on Windows; create it for cross-platform unit tests.
+    monkeypatch.setattr(service_module.ctypes, "get_last_error", lambda: 5, raising=False)
     assert service_module._windows_process_liveness(456, kernel32=inaccessible) == "unknown"
 
     missing = _FakeKernel32(handle=None, wait_result=0)
@@ -63,6 +64,7 @@ def test_windows_process_liveness_distinguishes_exit_from_unknown_open_failure(m
         service_module.ctypes,
         "get_last_error",
         lambda: service_module._WINDOWS_ERROR_INVALID_PARAMETER,
+        raising=False,
     )
     assert service_module._windows_process_liveness(456, kernel32=missing) == "exited"
 
