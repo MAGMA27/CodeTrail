@@ -108,7 +108,7 @@ def test_overview_identifies_main_rules_paths_and_stays_on_snapshot(tmp_path: Pa
     )
     assert status == 200
     assert overview["entry_status"] == "identified"
-    assert overview["rules_version"] == "python-entry-v6+http-shape-v2+architecture-v1"
+    assert overview["rules_version"] == "python-entry-v7+http-shape-v2+architecture-v1"
     assert {entry["kind"] for entry in overview["entries"]} == {
         "python_main_module",
         "python_main_guard",
@@ -686,7 +686,7 @@ def test_overview_invalidates_skipped_bindings_without_cross_scope_pollution(tmp
         ("GET", "/outer"),
         ("GET", "/before-star"),
     }
-    assert overview["rules_version"] == "python-entry-v6+http-shape-v2+architecture-v1"
+    assert overview["rules_version"] == "python-entry-v7+http-shape-v2+architecture-v1"
     assert overview["http_association_coverage"]["analysis_status"] == "complete"
 
 
@@ -1077,3 +1077,97 @@ def test_overview_keeps_cycles_bounded_without_inventing_edges(tmp_path: Path) -
     assert status == 200
     assert any("循环调用" in note for note in overview["notes"])
     assert len(overview["paths"]) <= 40
+
+
+def test_overview_marks_pluggy_hookimpls_as_entries_without_trusting_shadowed_markers(
+    tmp_path: Path,
+) -> None:
+    repository = tmp_path / "pluggy-demo"
+    package = repository / "demo"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "hooks.py").write_text(
+        "import pluggy\n"
+        "hookspec = pluggy.HookspecMarker('demo')\n"
+        "hookimpl = pluggy.HookimplMarker('demo')\n"
+        "@hookspec\n"
+        "def demo_greet(name):\n"
+        "    return None\n",
+        encoding="utf-8",
+    )
+    (package / "markers.py").write_text(
+        "from .hooks import hookimpl\n",
+        encoding="utf-8",
+    )
+    (package / "plugin.py").write_text(
+        "from demo.markers import hookimpl\n"
+        "from demo import hooks\n"
+        "@hookimpl\n"
+        "def demo_greet(name):\n"
+        "    return name\n"
+        "class Plugin:\n"
+        "    @hooks.hookimpl(tryfirst=True)\n"
+        "    def demo_other(self):\n"
+        "        return None\n",
+        encoding="utf-8",
+    )
+    (package / "pytest_plugin.py").write_text(
+        "import pytest\n"
+        "@pytest.hookimpl(wrapper=True)\n"
+        "def pytest_runtest_call(item):\n"
+        "    return (yield)\n",
+        encoding="utf-8",
+    )
+    (package / "by_name.py").write_text(
+        "def demo_greet(name):\n"
+        "    return name\n",
+        encoding="utf-8",
+    )
+    (package / "spoof.py").write_text(
+        "from demo.hooks import hookimpl\n"
+        "hookimpl = lambda function: function\n"
+        "@hookimpl\n"
+        "def rebound_is_not_a_hook():\n"
+        "    return None\n"
+        "from fake import HookimplMarker\n"
+        "fake = HookimplMarker('demo')\n"
+        "@fake\n"
+        "def fake_marker_is_not_a_hook():\n"
+        "    return None\n",
+        encoding="utf-8",
+    )
+    (package / "host.py").write_text(
+        "import pluggy\n"
+        "def run(pm):\n"
+        "    return pm.hook.demo_greet(name='x')\n",
+        encoding="utf-8",
+    )
+
+    application = create_app({"pluggy-demo": repository})
+    project_id, index_id = _create_index(application, "Pluggy demo", "pluggy-demo")
+    status, overview = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/indexes/{index_id}/overview",
+    )
+
+    assert status == 200
+    hook_entries = sorted(
+        (entry["path"], entry["rule_id"], entry["start_line"])
+        for entry in overview["entries"]
+        if entry["kind"] == "pluggy_hookimpl"
+    )
+    assert hook_entries == [
+        ("demo/by_name.py", "python.pluggy.hookspec_name", 1),
+        ("demo/plugin.py", "python.pluggy.hookimpl_marker", 3),
+        ("demo/plugin.py", "python.pluggy.hookimpl_marker", 7),
+        ("demo/pytest_plugin.py", "python.pluggy.hookimpl_marker", 2),
+    ]
+    assert all(
+        entry["evidence"] is not None and entry["symbol_id"]
+        for entry in overview["entries"]
+        if entry["kind"] == "pluggy_hookimpl"
+    )
+    assert not any(entry["path"] == "demo/spoof.py" for entry in overview["entries"])
+    assert not any(entry["path"] == "demo/hooks.py" for entry in overview["entries"])
+    assert overview["rules_version"].startswith("python-entry-v7+")
