@@ -3244,6 +3244,7 @@ export async function requestJson<T>(
   }
 }
 
+/** Keep above the API's 20-second GitHub acquisition budget, leaving time for indexing and cleanup. */
 export const IMPORT_REQUEST_TIMEOUT_MS = 60_000;
 export const IMPORT_STATUS_REQUEST_TIMEOUT_MS = 10_000;
 

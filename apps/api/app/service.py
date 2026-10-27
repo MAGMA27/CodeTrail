@@ -134,7 +134,15 @@ from .indexing import (
     is_source_code_path,
     scan_source_manifest,
 )
-from .github import GitHubArchive, GitHubClient, GitHubError, GitHubRepository, GitHubResolution, parse_github_repository_url
+from .github import (
+    GitHubArchive,
+    GitHubClient,
+    GitHubError,
+    GitHubRepository,
+    GitHubRequestBudget,
+    GitHubResolution,
+    parse_github_repository_url,
+)
 from .relations import (
     INDEX_BUILD_IDENTITY_VERSION,
     RELATION_FACT_EXTRACTION_RULES_VERSION,
@@ -943,6 +951,9 @@ class IndexService:
         self,
         project_id: str,
         baseline: IndexSnapshot,
+        *,
+        github_budget: GitHubRequestBudget | None = None,
+        raise_github_errors: bool = False,
     ) -> _FreshnessEvaluation:
         """Compare one local source manifest with a persisted index without parsing it."""
 
@@ -958,6 +969,8 @@ class IndexService:
                 checked_at=checked_at,
                 current_rules_version=current_rules_version,
                 current_configuration_hash=current_configuration_hash,
+                github_budget=github_budget,
+                raise_github_errors=raise_github_errors,
             )
 
         try:
@@ -1094,6 +1107,8 @@ class IndexService:
         checked_at: datetime,
         current_rules_version: str,
         current_configuration_hash: str,
+        github_budget: GitHubRequestBudget | None = None,
+        raise_github_errors: bool = False,
     ) -> _FreshnessEvaluation:
         """Resolve the tracked GitHub ref without downloading or changing an index."""
 
@@ -1130,8 +1145,10 @@ class IndexService:
             )
 
         try:
-            resolution = self.github_client.resolve(source_url, requested_ref)
+            resolution = self.github_client.resolve(source_url, requested_ref, budget=github_budget)
         except GitHubError as exc:
+            if raise_github_errors:
+                raise
             reason: FreshnessReasonCode = (
                 "budget_exceeded" if exc.code == "budget_exceeded" else "source_unavailable"
             )
@@ -3184,6 +3201,7 @@ class WorkspaceService:
         """Explicitly check and update a tracked GitHub ref through the safe importer."""
 
         self._require_github_import(via_mcp=via_mcp)
+        github_budget = self.github_client.new_budget()
         with self._index_mutation_lock:
             project = self._require_project_index(project_id, index_id)
             try:
@@ -3206,7 +3224,15 @@ class WorkspaceService:
             spec = self.registry.spec_for(project.repository_id)
             if spec.source_kind != "github":
                 raise ServiceError("conflict", 409, "the selected project is not a GitHub source")
-            evaluation = self.index_service.check_source_freshness_with_manifest(project_id, baseline)
+            try:
+                evaluation = self.index_service.check_source_freshness_with_manifest(
+                    project_id,
+                    baseline,
+                    github_budget=github_budget,
+                    raise_github_errors=True,
+                )
+            except GitHubError as exc:
+                raise ServiceError(exc.code, exc.status_code, exc.message) from exc
             freshness = evaluation.freshness
             if freshness.remote_status == "unknown":
                 if "budget_exceeded" in freshness.reasons:
@@ -3240,6 +3266,7 @@ class WorkspaceService:
                 ),
                 via_mcp=via_mcp,
                 expected_latest_index_id=index_id,
+                github_budget=github_budget,
             )
             if imported.attempt.status != "ready" or imported.index is None:
                 error_code = imported.attempt.error_code or "conflict"
@@ -4159,8 +4186,9 @@ class WorkspaceService:
     ) -> GitHubImportResponse:
         """Resolve, fetch, safely unpack, index, and clean one GitHub commit."""
 
+        github_budget = self.github_client.new_budget()
         with self._index_mutation_lock:
-            return self._import_github_locked(request, via_mcp=via_mcp)
+            return self._import_github_locked(request, via_mcp=via_mcp, github_budget=github_budget)
 
     def _import_github_locked(
         self,
@@ -4168,6 +4196,7 @@ class WorkspaceService:
         *,
         via_mcp: bool = False,
         expected_latest_index_id: str | None = None,
+        github_budget: GitHubRequestBudget | None = None,
     ) -> GitHubImportResponse:
 
         self._require_github_import(via_mcp=via_mcp)
@@ -4186,7 +4215,8 @@ class WorkspaceService:
                 raise ServiceError("conflict", 409, "idempotency key conflicts with a different import request")
             return self._github_import_response(existing_by_key)
 
-        resolution = self._resolve_github(repository, request)
+        github_budget = github_budget or self.github_client.new_budget()
+        resolution = self._resolve_github(repository, request, budget=github_budget)
         normalized_path = resolution.repository.identity
         spec = self.registry.repository_for_source(normalized_path)
         if spec is None:
@@ -4307,6 +4337,7 @@ class WorkspaceService:
                 attempt.attempt_id,
                 expected_latest_index_id=expected_latest,
                 project_update_id=operation.operation_id,
+                github_budget=github_budget,
             )
         except ServiceError as exc:
             self._reconcile_project_update_failure(
@@ -4353,6 +4384,7 @@ class WorkspaceService:
         via_mcp: bool = False,
     ) -> GitHubImportResponse:
         self._require_github_import(via_mcp=via_mcp)
+        github_budget = self.github_client.new_budget()
         with self._index_mutation_lock:
             attempt = self.registry.management_store.load_attempt(attempt_id)
             if attempt.source_kind != "github":
@@ -4392,6 +4424,7 @@ class WorkspaceService:
                     attempt_id,
                     expected_latest_index_id=project.latest_index_id,
                     project_update_id=operation.operation_id,
+                    github_budget=github_budget,
                 )
             except ServiceError as exc:
                 self._reconcile_project_update_failure(
@@ -4594,9 +4627,11 @@ class WorkspaceService:
         self,
         repository: GitHubRepository,
         request: GitHubImportRequest,
+        *,
+        budget: GitHubRequestBudget,
     ) -> GitHubResolution:
         try:
-            return self.github_client.resolve(repository.canonical_url, request.ref)
+            return self.github_client.resolve(repository.canonical_url, request.ref, budget=budget)
         except GitHubError as exc:
             raise ServiceError(exc.code, exc.status_code, exc.message) from exc
         except Exception as exc:
@@ -4631,6 +4666,7 @@ class WorkspaceService:
         *,
         expected_latest_index_id: str | None,
         project_update_id: str,
+        github_budget: GitHubRequestBudget,
     ) -> GitHubImportResponse:
         attempt = self.registry.management_store.load_attempt(attempt_id)
         if attempt.source_kind != "github" or not attempt.source_url or not attempt.resolved_commit:
@@ -4666,7 +4702,7 @@ class WorkspaceService:
                 resolved_commit=attempt.resolved_commit,
                 resolved_ref=attempt.resolved_ref or attempt.requested_ref,
             )
-            self.github_client.download_and_extract(resolution, source_root)
+            self.github_client.download_and_extract(resolution, source_root, budget=github_budget)
             self.registry.bind_runtime_source(attempt.repository_id, source_root)
             self.registry.management_store.update_attempt(
                 attempt_id,

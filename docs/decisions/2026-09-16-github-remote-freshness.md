@@ -8,9 +8,9 @@ GitHub 来源的临时归档在导入成功后会被清理，不能把已清理�
 
 ## 决定
 
-1. `GitHubClient.resolve` 是检查和导入共用的 ref→commit 入口。它复用现有 GitHub URL、HTTPS 主机、重定向、凭据、超时和总预算限制；metadata-only freshness 只调用 `resolve`，不调用归档下载、不访问临时目录。
+1. `GitHubClient.resolve` 是检查和导入共用的 ref→commit 入口。独立 freshness 请求使用自己的 20 秒预算；一次显式 GitHub refresh 从前置 metadata 检查开始，共用一份 20 秒单调时钟预算直到实际解析、archive 下载和解包完成。限流等待和每个 socket timeout 都受剩余预算约束；metadata-only freshness 只调用 `resolve`，不调用归档下载、不访问临时目录。
 2. `IndexFreshness` 增加 `remote_status` 与远端 URL、请求 ref、解析 ref、commit 字段。`consistent`/`changed` 表示远端身份已确认，`unknown` 表示元数据缺失、远端不可用或预算失败；远端 commit 与基准 index 一致不代表当前规则/配置一致，二者分别计算。旧默认分支记录缺少有效解析 ref 时不猜测，保持 unknown。
-3. GitHub 项目使用独立的 `POST /api/projects/{project_id}/indexes/{index_id}/github-refresh`。它只允许项目当前 ready latest，先做一次 metadata 检查，再通过现有受限导入流程实际解析、下载一个固定 commit 的官方归档并建立或复用 immutable index。MCP 的 `refresh_github_source` 复用同一 WorkspaceService，只有 GitHub 导入和 MCP GitHub 导入开关同时开启时注册；本地 `refresh_index` 开关不隐式开放远端下载。
+3. GitHub 项目使用独立的 `POST /api/projects/{project_id}/indexes/{index_id}/github-refresh`。它只允许项目当前 ready latest，先做一次 metadata 检查，再通过受限导入流程实际解析、下载一个固定 commit 的官方归档并建立或复用 immutable index；metadata 检查、后续解析、下载和解包共用上述 20 秒预算。MCP 的 `refresh_github_source` 复用同一 WorkspaceService，只有 GitHub 导入和 MCP GitHub 导入开关同时开启时注册；本地 `refresh_index` 开关不隐式开放远端下载。
 4. 显式更新以实际导入 attempt 的 commit/ref 为最终事实，以防 ref 在检查与下载之间移动。相同 commit 且 schema/rules/config/content metadata 兼容时复用当前或同项目历史 index；规则/配置过期或历史 index 不兼容时重新构建。失败、未知远端或基准冲突不替换旧 latest，也不改写旧 Session/Run/evidence；历史来源 metadata 保持原样。
 5. 更新的 latest CAS、来源 identity 和 attempt 收尾遵循独立的持久化项目更新意图；expected latest 贯穿复核、构建和 `finish_project_index`。latest 提交后若管理库事务尚未完成，服务重启按候选快照和阶段补提交或终止，不回滚其他请求的 latest。跨数据库一致性取舍与恢复状态见 [GitHub 更新的跨进程提交一致性](2026-09-16-github-update-commit-consistency.md)。
 
@@ -23,7 +23,7 @@ GitHub 来源的临时归档在导入成功后会被清理，不能把已清理�
 
 ## 验收与证据
 
-- 离线 GitHub client 覆盖默认分支、显式 ref、固定 SHA、限流和超时；freshness 的 changed/consistent/unknown 与本地规则/配置状态分别可见，检查不增加下载次数或 index。
+- 离线 GitHub client 覆盖默认分支、显式 ref、固定 SHA、限流和超时；refresh 服务测试断言前置 metadata resolve、导入 resolve 和下载复用同一个 budget。Freshness 的 changed/consistent/unknown 与本地规则/配置状态分别可见，独立检查不增加下载次数或 index。
 - HTTP 显式更新覆盖同一 commit 复用、远端移动新建、历史 commit 复用、失败保留 latest/source identity，以及项目归属/latest 冲突。
 - MCP 发现只在 GitHub 开关开启时增加 `refresh_github_source`，其结果契约与 HTTP 共用 `IndexRefreshResponse`；前端显示 URL、请求/解析 ref、远端 commit、基线 index commit，并在 unknown 时禁止更新。
 - 通过后端全量 pytest、compileall、前端测试/typecheck/build、Schema 导出与 contracts/docs 检查；真实供应商语义质量仍不在本步验收范围。

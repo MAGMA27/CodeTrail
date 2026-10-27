@@ -137,7 +137,14 @@ class ProcessGitHubClient:
         self._release_timeout = release_timeout
         self._download_calls = 0
 
-    def resolve(self, url: str, requested_ref: str | None):
+    def new_budget(self):
+        from app.github import GitHubRequestBudget
+
+        # This deterministic process harness tests lifecycle interleavings, not
+        # remote acquisition timing; controlled release gates have their own budget.
+        return GitHubRequestBudget(float("inf"))
+
+    def resolve(self, url: str, requested_ref: str | None, *, budget=None):
         from app.github import GitHubResolution, parse_github_repository_url
 
         repository = parse_github_repository_url(url)
@@ -147,7 +154,7 @@ class ProcessGitHubClient:
             raise RuntimeError("deterministic GitHub client ran out of commits") from exc
         return GitHubResolution(repository, requested_ref, commit, requested_ref or "main")
 
-    def download_and_extract(self, resolution, destination: Path):
+    def download_and_extract(self, resolution, destination: Path, *, budget=None):
         from app.github import GitHubArchive
 
         self._download_calls += 1
