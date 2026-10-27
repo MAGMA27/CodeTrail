@@ -154,9 +154,11 @@ class ProcessGitHubClient:
             raise RuntimeError("deterministic GitHub client ran out of commits") from exc
         return GitHubResolution(repository, requested_ref, commit, requested_ref or "main")
 
-    def download_and_extract(self, resolution, destination: Path, *, budget=None):
+    def download_and_extract(self, resolution, destination: Path, *, budget=None, control=None):
         from app.github import GitHubArchive
 
+        if control is not None:
+            control.check()
         self._download_calls += 1
         destination.mkdir(parents=True, exist_ok=False)
         payload = (
@@ -175,6 +177,8 @@ class ProcessGitHubClient:
                 timeout=self._release_timeout,
                 stage="github.download.release",
             )
+        if control is not None:
+            control.check()
         return GitHubArchive(
             resolution,
             hashlib.sha256(payload).hexdigest(),
@@ -1127,6 +1131,7 @@ def _try_public_github() -> dict[str, Any]:
             f"{base_url}/api/imports/github",
             "POST",
             {"name": "Public GitHub Probe", "url": "https://github.com/pallets/itsdangerous"},
+            timeout=20 * 60,
         )
         result: dict[str, Any] = {"status": status, "response": imported}
         if status == 200:

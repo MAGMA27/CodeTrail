@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+import subprocess
+import sys
+import threading
+import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
 import pytest
 
 import app.indexing as indexing
-from app.indexing import build_source_snapshot, extract_definitions
+from app.indexing import IndexingAborted, IndexingControl, SnapshotFile, build_source_snapshot, extract_definitions
 from app.main import create_app
 from app.relations import extract_relations
 
@@ -20,16 +24,20 @@ async def _request(application, method: str, target: str, payload: dict | None =
     body = b"" if payload is None else json.dumps(payload).encode("utf-8")
     messages: list[dict] = []
     received = False
+    response_complete = asyncio.Event()
 
     async def receive() -> dict:
         nonlocal received
         if received:
+            await response_complete.wait()
             return {"type": "http.disconnect"}
         received = True
         return {"type": "http.request", "body": body, "more_body": False}
 
     async def send(message: dict) -> None:
         messages.append(message)
+        if message["type"] == "http.response.body" and not message.get("more_body", False):
+            response_complete.set()
 
     headers = [(b"host", b"testserver")]
     if payload is not None:
@@ -186,6 +194,44 @@ def test_typescript_syntax_or_missing_locked_parser_fails_index_explicitly(tmp_p
     unavailable = extract_definitions(snapshot)
     assert unavailable.snapshot.index.status == "failed"
     assert any(issue.kind == "parser_unavailable" for issue in unavailable.issues)
+
+
+def test_cancel_during_slow_typescript_parse_kills_parser_process(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    pid_file = tmp_path / "parser.pid"
+    script = "import pathlib,sys,time; sys.stdin.read(); pathlib.Path(sys.argv[1]).write_text(str(__import__('os').getpid())); time.sleep(60)"
+    original_popen = subprocess.Popen
+    children: list[subprocess.Popen] = []
+
+    def slow_parser(*_args, **kwargs):
+        child = original_popen([sys.executable, "-c", script, str(pid_file)], **kwargs)
+        children.append(child)
+        return child
+
+    monkeypatch.setattr(indexing, "_TYPESCRIPT_PARSER_TIMEOUT_SECONDS", 10)
+    monkeypatch.setattr(indexing.subprocess, "Popen", slow_parser)
+    control = IndexingControl()
+    failures: list[BaseException] = []
+    source = SnapshotFile("slow.ts", 1, "hash", "export const slow = true;\n")
+
+    def parse() -> None:
+        try:
+            indexing._extract_typescript_facts((source,), control=control)
+        except BaseException as exc:
+            failures.append(exc)
+
+    worker = threading.Thread(target=parse)
+    worker.start()
+    deadline = time.monotonic() + 5
+    while not pid_file.exists() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert pid_file.exists(), "slow parser did not start"
+    control.cancel()
+    worker.join(timeout=5)
+
+    assert not worker.is_alive()
+    assert len(failures) == 1 and isinstance(failures[0], IndexingAborted)
+    assert failures[0].code == "index_cancelled"
+    assert len(children) == 1 and children[0].poll() is not None
 
 
 def test_unresolved_capacity_does_not_hide_later_typescript_import_edges(tmp_path: Path) -> None:

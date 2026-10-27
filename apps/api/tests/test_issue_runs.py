@@ -27,16 +27,20 @@ async def _request(application, method: str, target: str, payload: dict | None =
     body = b"" if payload is None else json.dumps(payload).encode("utf-8")
     messages: list[dict] = []
     received = False
+    response_complete = asyncio.Event()
 
     async def receive() -> dict:
         nonlocal received
         if received:
+            await response_complete.wait()
             return {"type": "http.disconnect"}
         received = True
         return {"type": "http.request", "body": body, "more_body": False}
 
     async def send(message: dict) -> None:
         messages.append(message)
+        if message["type"] == "http.response.body" and not message.get("more_body", False):
+            response_complete.set()
 
     scope = {
         "type": "http",

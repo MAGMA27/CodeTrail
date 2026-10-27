@@ -67,6 +67,7 @@ from .contracts import (
     TrashListResponse,
 )
 from .github import GitHubClient
+from .indexing import IndexingControl
 from .config import ModelProviderConfig
 from .feature_generation import FeatureModelAdapter
 from .issue_analysis import IssueModelAdapter
@@ -102,6 +103,32 @@ _API_ERROR_RESPONSES = {
     403: {"model": ApiErrorResponse},
     500: {"model": ApiErrorResponse},
     503: {"model": ApiErrorResponse},
+}
+
+
+async def _run_with_disconnect(request: Request, operation: Callable[..., object], *args: object) -> object:
+    """Run blocking indexing work while propagating HTTP disconnects to its worker."""
+
+    control = IndexingControl()
+    task = asyncio.create_task(run_in_threadpool(operation, *args, control=control))
+    try:
+        while not task.done():
+            if await request.is_disconnected():
+                control.cancel()
+                break
+            await asyncio.sleep(0.1)
+        return await task
+    finally:
+        if not task.done():
+            control.cancel()
+
+_GITHUB_REFRESH_ERROR_RESPONSES = {
+    **_API_ERROR_RESPONSES,
+    504: {"model": ApiErrorResponse},
+}
+_INDEX_BUILD_ERROR_RESPONSES = {
+    **_API_ERROR_RESPONSES,
+    504: {"model": ApiErrorResponse},
 }
 
 
@@ -232,7 +259,7 @@ def create_app(
     )
     async def import_local(http_request: Request, payload: LocalImportRequest) -> LocalImportResponse:
         _require_local_write(http_request)
-        return await run_in_threadpool(workspace_service.import_local, payload)
+        return await _run_with_disconnect(http_request, workspace_service.import_local, payload)
 
     @application.post(
         "/api/imports/github",
@@ -241,7 +268,7 @@ def create_app(
     )
     async def import_github(http_request: Request, payload: GitHubImportRequest) -> GitHubImportResponse:
         _require_local_write(http_request)
-        return await run_in_threadpool(workspace_service.import_github, payload)
+        return await _run_with_disconnect(http_request, workspace_service.import_github, payload)
 
     @application.get(
         "/api/imports/{attempt_id}",
@@ -258,7 +285,7 @@ def create_app(
     )
     async def retry_import(http_request: Request, attempt_id: str) -> LocalImportResponse:
         _require_local_write(http_request)
-        return await run_in_threadpool(workspace_service.retry_import, attempt_id)
+        return await _run_with_disconnect(http_request, workspace_service.retry_import, attempt_id)
 
     @application.post(
         "/api/imports/{attempt_id}/retry-github",
@@ -267,7 +294,7 @@ def create_app(
     )
     async def retry_github_import(http_request: Request, attempt_id: str) -> GitHubImportResponse:
         _require_local_write(http_request)
-        return await run_in_threadpool(workspace_service.retry_github_import, attempt_id)
+        return await _run_with_disconnect(http_request, workspace_service.retry_github_import, attempt_id)
 
     @application.post(
         "/api/imports/{attempt_id}/cleanup",
@@ -660,13 +687,14 @@ def create_app(
     @application.post(
         "/api/projects/{project_id}/indexes",
         response_model=IndexResponse,
-        responses=_API_ERROR_RESPONSES,
+        responses=_INDEX_BUILD_ERROR_RESPONSES,
     )
     async def create_project_index(
+        http_request: Request,
         project_id: str,
         request: CreateProjectIndexRequest,
     ) -> IndexResponse:
-        return await run_in_threadpool(workspace_service.create_project_index, project_id, request)
+        return await _run_with_disconnect(http_request, workspace_service.create_project_index, project_id, request)
 
     @application.post(
         "/api/projects/{project_id}/indexes/{index_id}/freshness",
@@ -679,7 +707,7 @@ def create_app(
     @application.post(
         "/api/projects/{project_id}/indexes/{index_id}/refresh",
         response_model=IndexRefreshResponse,
-        responses=_API_ERROR_RESPONSES,
+        responses=_INDEX_BUILD_ERROR_RESPONSES,
     )
     async def refresh_project_index(
         http_request: Request,
@@ -688,7 +716,8 @@ def create_app(
         request: RefreshProjectIndexRequest,
     ) -> IndexRefreshResponse:
         _require_local_write(http_request)
-        return await run_in_threadpool(
+        return await _run_with_disconnect(
+            http_request,
             workspace_service.refresh_project_index,
             project_id,
             index_id,
@@ -698,7 +727,7 @@ def create_app(
     @application.post(
         "/api/projects/{project_id}/indexes/{index_id}/github-refresh",
         response_model=IndexRefreshResponse,
-        responses=_API_ERROR_RESPONSES,
+        responses=_GITHUB_REFRESH_ERROR_RESPONSES,
     )
     async def refresh_github_source(
         http_request: Request,
@@ -706,7 +735,8 @@ def create_app(
         index_id: str,
     ) -> IndexRefreshResponse:
         _require_local_write(http_request)
-        return await run_in_threadpool(
+        return await _run_with_disconnect(
+            http_request,
             workspace_service.refresh_github_source,
             project_id,
             index_id,

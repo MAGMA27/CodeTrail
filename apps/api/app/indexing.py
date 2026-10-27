@@ -5,11 +5,13 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
@@ -82,6 +84,47 @@ _BLOCKING_ISSUES = {
 
 class SnapshotBoundaryError(ValueError):
     """Raised when a snapshot request leaves its configured repository root."""
+
+
+class IndexingAborted(RuntimeError):
+    """Indexing stopped at its deadline or after its HTTP client disconnected."""
+
+    def __init__(self, code: str) -> None:
+        self.code = code
+        super().__init__(code)
+
+
+@dataclass
+class IndexingControl:
+    """Thread-safe cancellation signal with a per-build monotonic deadline."""
+
+    cancelled: threading.Event = field(default_factory=threading.Event)
+    deadline: float | None = None
+
+    def start(self, timeout_seconds: float) -> None:
+        self.deadline = time.monotonic() + timeout_seconds
+
+    def cancel(self) -> None:
+        self.cancelled.set()
+
+    def check(self) -> None:
+        if self.cancelled.is_set():
+            raise IndexingAborted("index_cancelled")
+        if self.deadline is not None and time.monotonic() >= self.deadline:
+            raise IndexingAborted("index_timeout")
+
+
+def index_timeout_from_environment() -> float:
+    """Read the positive finite server indexing timeout, defaulting to 240s."""
+
+    raw_value = os.getenv("CODETRAIL_INDEX_TIMEOUT")
+    if raw_value is None:
+        return 240.0
+    try:
+        value = float(raw_value)
+    except (TypeError, ValueError):
+        return 240.0
+    return value if math.isfinite(value) and value > 0 else 240.0
 
 
 @dataclass(frozen=True)
@@ -454,6 +497,7 @@ def build_source_snapshot(
     max_seconds: float = 2.0,
     rules_version: str | None = None,
     configuration_hash: str | None = None,
+    control: IndexingControl | None = None,
 ) -> SourceSnapshot:
     """Read a bounded Python/TypeScript source tree into a reproducible snapshot.
 
@@ -476,6 +520,7 @@ def build_source_snapshot(
         max_files=max_files,
         max_total_bytes=max_total_bytes,
         max_seconds=max_seconds,
+        control=control,
     )
     snapshot_files = list(scan.files)
     issues = list(scan.issues)
@@ -557,6 +602,7 @@ def scan_source_manifest(
     max_files: int = 2_000,
     max_total_bytes: int = 20 * 1024 * 1024,
     max_seconds: float = 2.0,
+    control: IndexingControl | None = None,
 ) -> SourceManifestScan:
     """Read a bounded, hash-only manifest using the snapshot source rules.
 
@@ -588,6 +634,8 @@ def scan_source_manifest(
         scan_truncation_reason = reason
 
     def check_time() -> bool:
+        if control is not None:
+            control.check()
         if time.monotonic() > deadline:
             truncate("max_seconds")
             return False
@@ -808,6 +856,7 @@ def extract_definitions(
     snapshot: SourceSnapshot,
     *,
     cached: Mapping[str, DefinitionCacheEntry] | None = None,
+    control: IndexingControl | None = None,
 ) -> DefinitionIndex:
     """Extract definitions, reusing only validated entries for unchanged files."""
 
@@ -831,6 +880,8 @@ def extract_definitions(
     typescript_http_requests: list[tuple[str, TypeScriptHttpRequestDescription]] = []
     typescript_parse_file_count = 0
     for source_file in snapshot.files:
+        if control is not None:
+            control.check()
         if source_file.path.lower().endswith((".ts", ".tsx")):
             continue
         if not source_file.path.lower().endswith(".py"):
@@ -860,7 +911,9 @@ def extract_definitions(
             issues.append(entry.issue)
 
     if typescript_files:
-        facts, typescript_issues = _extract_typescript_facts(typescript_files)
+        if control is not None:
+            control.check()
+        facts, typescript_issues = _extract_typescript_facts(typescript_files, control=control)
         issues.extend(typescript_issues)
         if not any(issue.kind in {"parser_unavailable", "parser_error"} for issue in typescript_issues):
             typescript_parse_file_count = len(typescript_files)
@@ -1003,6 +1056,8 @@ def extract_definitions(
 
 def _extract_typescript_facts(
     source_files: tuple[SnapshotFile, ...],
+    *,
+    control: IndexingControl | None = None,
 ) -> tuple[dict[str, dict[str, object]], list[SnapshotIssue]]:
     """Parse captured TS/TSX text with the repository's locked TypeScript compiler."""
 
@@ -1034,20 +1089,48 @@ def _extract_typescript_facts(
             environment[key] = value
     environment["NODE_OPTIONS"] = "--max-old-space-size=128"
     try:
-        result = subprocess.run(
+        process = subprocess.Popen(
             [node, str(parser)],
-            input=payload,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=_TYPESCRIPT_PARSER_TIMEOUT_SECONDS,
-            check=False,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             cwd=parser.parent,
             env=environment,
         )
-    except subprocess.TimeoutExpired:
-        return {}, [SnapshotIssue("__snapshot__", "parser_error", "TypeScript parser exceeded its 30 second budget")]
+        deadline = time.monotonic() + _TYPESCRIPT_PARSER_TIMEOUT_SECONDS
+        completed = threading.Event()
+        result: list[subprocess.CompletedProcess[bytes]] = []
+
+        def communicate() -> None:
+            try:
+                stdout, stderr = process.communicate(input=payload.encode("utf-8"))
+                result.append(subprocess.CompletedProcess(process.args, process.returncode, stdout, stderr))
+            finally:
+                completed.set()
+
+        communicator = threading.Thread(target=communicate, daemon=True)
+        communicator.start()
+        while True:
+            if control is not None:
+                control.check()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                process.kill()
+                communicator.join()
+                return {}, [SnapshotIssue("__snapshot__", "parser_error", "TypeScript parser exceeded its 30 second budget")]
+            if completed.wait(min(0.05, remaining)):
+                break
+        completed_result = result[0]
+        completed_result.stdout = completed_result.stdout.decode("utf-8", "replace")
+        completed_result.stderr = completed_result.stderr.decode("utf-8", "replace")
+        result = completed_result
+    except IndexingAborted:
+        process.kill()
+        if "communicator" in locals():
+            communicator.join()
+        else:
+            process.communicate()
+        raise
     except OSError:
         return {}, [SnapshotIssue("__snapshot__", "parser_unavailable", "TypeScript parser process could not be started")]
     if result.returncode != 0 or len(result.stdout.encode("utf-8")) > _TYPESCRIPT_PARSER_MAX_OUTPUT_BYTES:

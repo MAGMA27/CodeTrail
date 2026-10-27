@@ -3244,9 +3244,33 @@ export async function requestJson<T>(
   }
 }
 
-/** Keep above the API's 20-second GitHub acquisition budget, leaving time for indexing and cleanup. */
+/** Local import endpoints remain short-running; GitHub operations can download and index a repository. */
 export const IMPORT_REQUEST_TIMEOUT_MS = 60_000;
 export const IMPORT_STATUS_REQUEST_TIMEOUT_MS = 10_000;
+
+export const DEFAULT_GITHUB_REQUEST_TIMEOUT_MS = 10 * 60_000;
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
+export function parseGitHubRequestTimeoutMs(value?: string): number {
+  if (!value?.trim()) {
+    return DEFAULT_GITHUB_REQUEST_TIMEOUT_MS;
+  }
+  const timeoutMs = Number(value);
+  return Number.isSafeInteger(timeoutMs) &&
+    timeoutMs > 0 &&
+    timeoutMs <= MAX_TIMER_DELAY_MS
+    ? timeoutMs
+    : DEFAULT_GITHUB_REQUEST_TIMEOUT_MS;
+}
+
+/**
+ * Browser timeout for GitHub import, retry, and refresh requests. The 10 minute default
+ * covers up to 320 seconds of acquisition and leaves 4 minutes 40 seconds for indexing and cleanup.
+ * Any positive safe integer up to the platform timer limit can override it.
+ */
+export const GITHUB_REQUEST_TIMEOUT_MS = parseGitHubRequestTimeoutMs(
+  process.env.NEXT_PUBLIC_GITHUB_REQUEST_TIMEOUT_MS,
+);
 
 export function importLocalPath(
   name: string,
@@ -3288,7 +3312,7 @@ export function importGitHubRepository(
     {
       method: "POST",
       signal,
-      timeoutMs: IMPORT_REQUEST_TIMEOUT_MS,
+      timeoutMs: GITHUB_REQUEST_TIMEOUT_MS,
       body: JSON.stringify({
         schema_version: SCHEMA_VERSION,
         name,
@@ -3329,7 +3353,7 @@ export function retryGitHubImport(
   return requestJson(
     `/api/imports/${encodeURIComponent(attemptId)}/retry-github`,
     isGitHubImportResponse,
-    { method: "POST", signal, timeoutMs: IMPORT_REQUEST_TIMEOUT_MS },
+    { method: "POST", signal, timeoutMs: GITHUB_REQUEST_TIMEOUT_MS },
   );
 }
 
@@ -3747,7 +3771,7 @@ export function refreshGitHubSource(
   return requestJson(
     `/api/projects/${encodeURIComponent(projectId)}/indexes/${encodeURIComponent(indexId)}/github-refresh`,
     isIndexRefreshResponse,
-    { method: "POST", signal },
+    { method: "POST", signal, timeoutMs: GITHUB_REQUEST_TIMEOUT_MS },
   );
 }
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import json
+import math
 import os
 import re
 import tarfile
@@ -18,6 +19,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
+from .indexing import IndexingControl
 
 _GITHUB_API_HOST = "api.github.com"
 _GITHUB_REDIRECT_HOSTS = frozenset({"api.github.com", "codeload.github.com", "github.com"})
@@ -26,12 +28,12 @@ _DEFAULT_MAX_ARCHIVE_BYTES = 50 * 1024 * 1024
 _DEFAULT_MAX_FILE_COUNT = 10_000
 _DEFAULT_MAX_UNPACKED_BYTES = 200 * 1024 * 1024
 _DEFAULT_TIMEOUT_SECONDS = 20.0
-# Keep remote acquisition well below the web import request's 60-second timeout;
-# the remaining 40 seconds are available for local indexing, persistence, and cleanup.
-_DEFAULT_IMPORT_TOTAL_SECONDS = 20.0
+_DEFAULT_DOWNLOAD_IDLE_TIMEOUT_SECONDS = 30.0
+_DEFAULT_DOWNLOAD_TIMEOUT_SECONDS = 300.0
 _MAX_JSON_BYTES = 2 * 1024 * 1024
 _DEFAULT_MAX_RATE_LIMIT_RETRIES = 3
 _DEFAULT_MAX_RETRY_WAIT_SECONDS = 20.0
+_DEFAULT_RATE_LIMIT_WAIT_BUDGET_SECONDS = 20.0
 _TOKEN_ENVIRONMENT_VARIABLES = ("CODETRAIL_GITHUB_TOKEN", "GITHUB_TOKEN")
 _CHUNK_SIZE = 64 * 1024
 
@@ -81,10 +83,9 @@ class _ResponseData:
 
 @dataclass
 class GitHubRequestBudget:
-    """One monotonic deadline shared by all GitHub calls in an operation."""
+    """Cumulative rate-limit sleep allowance shared by one GitHub operation."""
 
-    deadline: float
-    last_rate_limit: tuple[Mapping[str, str], float] | None = None
+    remaining_wait_seconds: float
 
 
 class _NoRedirectHandler(HTTPRedirectHandler):
@@ -107,23 +108,52 @@ class GitHubClient:
         token: str | None = None,
         opener: object | None = None,
         timeout_seconds: float = _DEFAULT_TIMEOUT_SECONDS,
+        download_idle_timeout_seconds: float | None = None,
+        download_timeout_seconds: float | None = None,
         max_archive_bytes: int = _DEFAULT_MAX_ARCHIVE_BYTES,
         max_file_count: int = _DEFAULT_MAX_FILE_COUNT,
         max_unpacked_bytes: int = _DEFAULT_MAX_UNPACKED_BYTES,
         max_redirects: int = 2,
-        max_total_seconds: float = _DEFAULT_IMPORT_TOTAL_SECONDS,
+        max_rate_limit_wait_seconds: float = _DEFAULT_RATE_LIMIT_WAIT_BUDGET_SECONDS,
         max_rate_limit_retries: int = _DEFAULT_MAX_RATE_LIMIT_RETRIES,
         max_retry_wait_seconds: float = _DEFAULT_MAX_RETRY_WAIT_SECONDS,
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.time,
         monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
-        if timeout_seconds <= 0 or max_total_seconds <= 0 or max_archive_bytes <= 0 or max_file_count <= 0 or max_unpacked_bytes <= 0:
+        download_idle_timeout_seconds = (
+            _timeout_from_environment("CODETRAIL_GITHUB_DOWNLOAD_IDLE_TIMEOUT", _DEFAULT_DOWNLOAD_IDLE_TIMEOUT_SECONDS)
+            if download_idle_timeout_seconds is None
+            else download_idle_timeout_seconds
+        )
+        download_timeout_seconds = (
+            _timeout_from_environment("CODETRAIL_GITHUB_DOWNLOAD_TIMEOUT", _DEFAULT_DOWNLOAD_TIMEOUT_SECONDS)
+            if download_timeout_seconds is None
+            else download_timeout_seconds
+        )
+        if (
+            not all(
+                math.isfinite(value) and value > 0
+                for value in (
+                    timeout_seconds,
+                    download_idle_timeout_seconds,
+                    download_timeout_seconds,
+                    max_rate_limit_wait_seconds,
+                )
+            )
+            or max_archive_bytes <= 0
+            or max_file_count <= 0
+            or max_unpacked_bytes <= 0
+        ):
             raise ValueError("GitHub acquisition budgets must be positive")
         if max_redirects < 0 or max_rate_limit_retries < 0 or max_retry_wait_seconds < 0:
             raise ValueError("GitHub redirect and retry budgets must not be negative")
+        if max_rate_limit_retries > _DEFAULT_MAX_RATE_LIMIT_RETRIES:
+            raise ValueError("GitHub rate-limit retries cannot exceed three")
         self.timeout_seconds = timeout_seconds
-        self.max_total_seconds = max_total_seconds
+        self.max_rate_limit_wait_seconds = max_rate_limit_wait_seconds
+        self.download_idle_timeout_seconds = download_idle_timeout_seconds
+        self.download_timeout_seconds = download_timeout_seconds
         self.max_archive_bytes = max_archive_bytes
         self.max_file_count = max_file_count
         self.max_unpacked_bytes = max_unpacked_bytes
@@ -143,9 +173,9 @@ class GitHubClient:
         return self._token is not None
 
     def new_budget(self) -> GitHubRequestBudget:
-        """Start one bounded GitHub acquisition budget for an import operation."""
+        """Start one cumulative rate-limit wait budget for an import operation."""
 
-        return GitHubRequestBudget(self._monotonic() + self.max_total_seconds)
+        return GitHubRequestBudget(self.max_rate_limit_wait_seconds)
 
     def resolve(
         self,
@@ -186,21 +216,26 @@ class GitHubClient:
         destination: Path,
         *,
         budget: GitHubRequestBudget | None = None,
+        control: IndexingControl | None = None,
     ) -> GitHubArchive:
         operation_budget = budget or self.new_budget()
-        deadline = operation_budget.deadline
         destination = destination.resolve(strict=False)
         destination.mkdir(parents=True, exist_ok=False)
         archive_path = destination.parent / f"{destination.name}.tar.gz"
         try:
-            archive_hash = self._download_archive(resolution, archive_path, budget=operation_budget)
+            if control is not None:
+                control.check()
+            archive_hash = self._download_archive(
+                resolution, archive_path, budget=operation_budget, control=control
+            )
+            if control is not None:
+                control.check()
             file_count, unpacked_bytes = extract_github_archive(
                 archive_path,
                 destination,
                 max_file_count=self.max_file_count,
                 max_unpacked_bytes=self.max_unpacked_bytes,
-                deadline=deadline,
-                monotonic=self._monotonic,
+                control=control,
             )
             return GitHubArchive(
                 resolution=resolution,
@@ -208,9 +243,6 @@ class GitHubClient:
                 extracted_file_count=file_count,
                 extracted_bytes=unpacked_bytes,
             )
-        except GitHubError as exc:
-            self._raise_rate_limit_after_budget(operation_budget, exc)
-            raise
         finally:
             _unlink_owned_file(archive_path)
 
@@ -225,20 +257,15 @@ class GitHubClient:
         return headers
 
     def _request_json(self, url: str, *, budget: GitHubRequestBudget) -> dict[str, object]:
-        deadline = budget.deadline
         response = self._open(url, allowed_hosts={_GITHUB_API_HOST}, budget=budget)
         try:
             body = self._read_response(
                 response,
                 max_bytes=_MAX_JSON_BYTES,
-                deadline=deadline,
                 timeout_seconds=self.timeout_seconds,
             )
             if response.status != 200:
                 raise _http_error(response.status, response.headers, authenticated=self.authenticated)
-        except GitHubError as exc:
-            self._raise_rate_limit_after_budget(budget, exc)
-            raise
         finally:
             _close_response(response)
         try:
@@ -255,14 +282,25 @@ class GitHubClient:
         archive_path: Path,
         *,
         budget: GitHubRequestBudget,
+        control: IndexingControl | None = None,
     ) -> str:
-        deadline = budget.deadline
+        deadline = self._monotonic() + self.download_timeout_seconds
+        timeout_error = GitHubError("download_timeout", 504, "GitHub archive download timed out")
         url = (
             f"https://{_GITHUB_API_HOST}/repos/{quote(resolution.repository.owner)}/"
             f"{quote(resolution.repository.name)}/tarball/{resolution.resolved_commit}"
         )
         for redirect_count in range(self.max_redirects + 1):
-            response = self._open(url, allowed_hosts=_GITHUB_REDIRECT_HOSTS, budget=budget)
+            if control is not None:
+                control.check()
+            response = self._open(
+                url,
+                allowed_hosts=_GITHUB_REDIRECT_HOSTS,
+                budget=budget,
+                timeout_seconds=self.download_idle_timeout_seconds,
+                deadline=deadline,
+                timeout_error=timeout_error,
+            )
             if response.status in {301, 302, 303, 307, 308}:
                 try:
                     location = _header(response.headers, "location")
@@ -284,23 +322,13 @@ class GitHubClient:
                     response,
                     archive_path,
                     deadline=deadline,
-                    timeout_seconds=self.timeout_seconds,
+                    timeout_seconds=self.download_idle_timeout_seconds,
+                    timeout_error=timeout_error,
+                    control=control,
                 )
-            except GitHubError as exc:
-                self._raise_rate_limit_after_budget(budget, exc)
-                raise
             finally:
                 _close_response(response)
         raise GitHubError("budget_exceeded", 429, "GitHub archive redirect limit was exceeded")
-
-    def _raise_rate_limit_after_budget(
-        self,
-        budget: GitHubRequestBudget,
-        error: GitHubError,
-    ) -> None:
-        if self._monotonic() >= budget.deadline and budget.last_rate_limit is not None:
-            headers, wait = budget.last_rate_limit
-            raise _rate_limit_error(headers, wait, authenticated=self.authenticated) from error
 
     def _open(
         self,
@@ -308,52 +336,42 @@ class GitHubClient:
         *,
         allowed_hosts: set[str] | frozenset[str],
         budget: GitHubRequestBudget,
+        timeout_seconds: float | None = None,
+        deadline: float | None = None,
+        timeout_error: GitHubError | None = None,
     ) -> _ResponseData:
         """Open one request, waiting out GitHub rate limits within bounded retries.
 
         Waits honor ``Retry-After`` first, then ``X-RateLimit-Reset`` when the
         quota is exhausted, and otherwise back off exponentially. A wait longer
-        than ``max_retry_wait_seconds`` or the remaining total deadline is not
-        attempted; the caller receives a clear rate-limit error instead.
+        than the per-wait limit, the remaining cumulative wait allowance, or
+        the remaining download time is not attempted.
         """
 
-        deadline = budget.deadline
-        last_rate_limit = budget.last_rate_limit
         for attempt in range(self.max_rate_limit_retries + 1):
-            try:
-                response = self._open_once(url, allowed_hosts=allowed_hosts, deadline=deadline)
-            except GitHubError as exc:
-                if deadline is not None and last_rate_limit is not None and deadline - self._monotonic() <= 0:
-                    headers, wait = last_rate_limit
-                    raise _rate_limit_error(headers, wait, authenticated=self.authenticated) from exc
-                raise
-            if deadline is not None and deadline - self._monotonic() <= 0:
-                retry_context = (
-                    (response.headers, _rate_limit_wait_seconds(response.headers, attempt, now=self._clock()))
-                    if _is_rate_limited(response.status, response.headers)
-                    else last_rate_limit
-                )
-                if retry_context is not None:
-                    budget.last_rate_limit = retry_context
-                _close_response(response)
-                if retry_context is not None:
-                    headers, wait = retry_context
-                    raise _rate_limit_error(headers, wait, authenticated=self.authenticated)
-                raise GitHubError("budget_exceeded", 429, "GitHub total request time exceeded the configured limit")
+            response = self._open_once(
+                url,
+                allowed_hosts=allowed_hosts,
+                timeout_seconds=timeout_seconds or self.timeout_seconds,
+                deadline=deadline,
+                timeout_error=timeout_error,
+            )
             if not _is_rate_limited(response.status, response.headers):
                 return response
             _close_response(response)
             wait = _rate_limit_wait_seconds(response.headers, attempt, now=self._clock())
-            remaining = None if deadline is None else deadline - self._monotonic()
+            remaining_download = None if deadline is None else deadline - self._monotonic()
             if (
                 attempt >= self.max_rate_limit_retries
                 or wait > self.max_retry_wait_seconds
-                or (remaining is not None and wait >= remaining)
+                or wait > budget.remaining_wait_seconds
+                or (remaining_download is not None and wait >= remaining_download)
             ):
                 raise _rate_limit_error(response.headers, wait, authenticated=self.authenticated)
-            last_rate_limit = (response.headers, wait)
-            budget.last_rate_limit = last_rate_limit
+            before_sleep = self._monotonic()
             self._sleep(wait)
+            elapsed_sleep = max(wait, self._monotonic() - before_sleep)
+            budget.remaining_wait_seconds = max(0.0, budget.remaining_wait_seconds - elapsed_sleep)
         raise AssertionError("unreachable")  # pragma: no cover
 
     def _open_once(
@@ -361,21 +379,25 @@ class GitHubClient:
         url: str,
         *,
         allowed_hosts: set[str] | frozenset[str],
+        timeout_seconds: float,
         deadline: float | None = None,
+        timeout_error: GitHubError | None = None,
     ) -> _ResponseData:
         safe_url = _validate_remote_url(url, allowed_hosts)
         request = Request(safe_url, headers=self._headers(), method="GET")
-        timeout = self.timeout_seconds
+        timeout = timeout_seconds
         if deadline is not None:
             remaining = deadline - self._monotonic()
             if remaining <= 0:
-                raise GitHubError("budget_exceeded", 429, "GitHub total request time exceeded the configured limit")
+                raise timeout_error or GitHubError("download_timeout", 504, "GitHub archive download timed out")
             timeout = min(timeout, remaining)
         try:
             response = self._opener.open(request, timeout=timeout)  # type: ignore[attr-defined]
         except HTTPError as exc:
             return _ResponseData(exc.code, _headers_from_http(exc.headers), exc)
         except (TimeoutError, URLError, OSError) as exc:
+            if timeout_error is not None and _is_timeout_exception(exc):
+                raise timeout_error from exc
             raise GitHubError("internal_error", 503, "GitHub request failed or timed out") from exc
         return _ResponseData(
             status=int(getattr(response, "status", getattr(response, "code", 0))),
@@ -431,6 +453,8 @@ class GitHubClient:
         *,
         deadline: float | None = None,
         timeout_seconds: float,
+        timeout_error: GitHubError,
+        control: IndexingControl | None = None,
     ) -> str:
         stream = response.stream
         digest = hashlib.sha256()
@@ -438,14 +462,21 @@ class GitHubClient:
         try:
             with archive_path.open("xb") as handle:
                 while True:
-                    _check_deadline(deadline, monotonic=self._monotonic)
+                    if control is not None:
+                        control.check()
                     _cap_stream_timeout(
                         stream,
                         deadline,
                         timeout_seconds=timeout_seconds,
                         monotonic=self._monotonic,
+                        timeout_error=timeout_error,
                     )
-                    chunk = stream.read(_CHUNK_SIZE)  # type: ignore[attr-defined]
+                    read_chunk = getattr(stream, "read1", None)
+                    if not callable(read_chunk):
+                        read_chunk = getattr(stream, "read")
+                    chunk = read_chunk(_CHUNK_SIZE)
+                    if deadline is not None and self._monotonic() >= deadline:
+                        raise timeout_error
                     if not chunk:
                         break
                     total += len(chunk)
@@ -456,8 +487,8 @@ class GitHubClient:
         except GitHubError:
             raise
         except (TimeoutError, URLError, OSError) as exc:
-            if deadline is not None and self._monotonic() >= deadline:
-                raise GitHubError("budget_exceeded", 429, "GitHub total request time exceeded the configured limit") from exc
+            if _is_timeout_exception(exc):
+                raise timeout_error from exc
             raise GitHubError("internal_error", 500, "GitHub archive could not be stored") from exc
         if total == 0:
             raise GitHubError("internal_error", 503, "GitHub returned an empty archive")
@@ -514,6 +545,7 @@ def extract_github_archive(
     max_unpacked_bytes: int = _DEFAULT_MAX_UNPACKED_BYTES,
     deadline: float | None = None,
     monotonic: Callable[[], float] = time.monotonic,
+    control: IndexingControl | None = None,
 ) -> tuple[int, int]:
     """Extract a GitHub tar archive without links, traversal, or special files."""
 
@@ -523,6 +555,8 @@ def extract_github_archive(
     destination.mkdir(parents=True, exist_ok=True)
     try:
         _check_deadline(deadline, monotonic=monotonic)
+        if control is not None:
+            control.check()
         with tarfile.open(archive_path, mode="r:*") as archive:
             members = archive.getmembers()
             _check_deadline(deadline, monotonic=monotonic)
@@ -536,6 +570,8 @@ def extract_github_archive(
             unpacked_bytes = 0
             for member, normalized in zip(members, normalized_members):
                 _check_deadline(deadline, monotonic=monotonic)
+                if control is not None:
+                    control.check()
                 relative = _strip_archive_prefix(normalized, prefix)
                 if not relative:
                     continue
@@ -561,6 +597,8 @@ def extract_github_archive(
                 with extracted, target.open("xb") as handle:
                     while True:
                         _check_deadline(deadline, monotonic=monotonic)
+                        if control is not None:
+                            control.check()
                         chunk = extracted.read(_CHUNK_SIZE)
                         if not chunk:
                             break
@@ -690,20 +728,40 @@ def _cap_stream_timeout(
     *,
     timeout_seconds: float,
     monotonic: Callable[[], float],
+    timeout_error: GitHubError | None = None,
 ) -> None:
-    """Reduce urllib's socket timeout before each blocking response read."""
+    """Apply an idle timeout, capped by a total download deadline when present."""
 
-    if deadline is None:
-        return
-    remaining = deadline - monotonic()
-    if remaining <= 0:
-        raise GitHubError("budget_exceeded", 429, "GitHub total request time exceeded the configured limit")
+    timeout = timeout_seconds
+    if deadline is not None:
+        remaining = deadline - monotonic()
+        if remaining <= 0:
+            raise timeout_error or GitHubError("budget_exceeded", 429, "GitHub total request time exceeded the configured limit")
+        timeout = min(timeout, remaining)
     buffered = getattr(stream, "fp", None)
     raw = getattr(buffered, "raw", None)
     sock = getattr(raw, "_sock", None)
     settimeout = getattr(sock, "settimeout", None)
     if callable(settimeout):
-        settimeout(min(timeout_seconds, remaining))
+        settimeout(timeout)
+
+
+def _timeout_from_environment(name: str, default: float) -> float:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    try:
+        value = float(raw_value)
+    except (TypeError, ValueError):
+        return default
+    return value if math.isfinite(value) and value > 0 else default
+
+
+def _is_timeout_exception(error: BaseException) -> bool:
+    if isinstance(error, TimeoutError):
+        return True
+    reason = getattr(error, "reason", None)
+    return isinstance(reason, TimeoutError)
 
 
 def _headers_from_http(headers: object) -> dict[str, str]:
