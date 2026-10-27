@@ -126,6 +126,7 @@ import {
 } from "../lib/run-event-stream";
 import {
   finishImportSubmissionKey,
+  githubImportErrorMessage,
   isImportStatusTerminal,
   nextImportSubmissionKey,
   waitForImportStatus,
@@ -2785,7 +2786,7 @@ export default function Workbench() {
         ? response.cleanup_status === "failed"
           ? response.cleanup_error ?? "索引已完成，但临时目录清理失败。"
           : null
-      : response.attempt.error_message ?? "GitHub 导入未完成。",
+      : githubImportErrorMessage(response.attempt.error_message ?? "GitHub 导入未完成。"),
     );
     if (response.attempt.status === "ready") {
       applyImportedProject(
@@ -2916,7 +2917,7 @@ export default function Workbench() {
         return false;
       }
       setGithubImportStatus(null);
-      setGithubImportError(importRequestErrorMessage(error));
+      setGithubImportError(githubImportErrorMessage(importRequestErrorMessage(error)));
       return false;
     } finally {
       importActionInFlight.current = false;
@@ -3068,7 +3069,7 @@ export default function Workbench() {
           return false;
         }
         setGithubImportStatus(isUncertainImportRequestError(error) ? null : "failed");
-        setGithubImportError(importRequestErrorMessage(error));
+        setGithubImportError(githubImportErrorMessage(importRequestErrorMessage(error)));
         return false;
       } finally {
         importActionInFlight.current = false;
@@ -3103,7 +3104,7 @@ export default function Workbench() {
         return false;
       }
       setGithubImportStatus(isUncertainImportRequestError(error) ? null : "failed");
-      setGithubImportError(importRequestErrorMessage(error));
+      setGithubImportError(githubImportErrorMessage(importRequestErrorMessage(error)));
       return false;
     } finally {
       importActionInFlight.current = false;
