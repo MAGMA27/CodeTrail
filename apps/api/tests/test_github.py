@@ -68,10 +68,12 @@ class _FakeOpener:
     def __init__(self, responses: dict[str, list[_FakeResponse]]) -> None:
         self.responses = responses
         self.calls: list[str] = []
+        self.requests: list[object] = []
 
     def open(self, request, timeout: float) -> _FakeResponse:
         url = request.full_url
         self.calls.append(url)
+        self.requests.append(request)
         values = self.responses.get(url)
         if not values:
             raise AssertionError(f"unexpected GitHub request: {url}")
@@ -82,7 +84,7 @@ def test_github_rate_limit_redirect_and_timeout_fail_with_bounded_errors(tmp_pat
     api_commit = "https://api.github.com/repos/owner/repo/commits/main"
     rate_limited = _FakeOpener({api_commit: [_FakeResponse(429, headers={"Retry-After": "3"})]})
     with pytest.raises(GitHubError) as rate_error:
-        GitHubClient(opener=rate_limited).resolve("https://github.com/owner/repo", "main")
+        GitHubClient(opener=rate_limited, max_rate_limit_retries=0).resolve("https://github.com/owner/repo", "main")
     assert rate_error.value.code == "budget_exceeded"
     assert "3" in rate_error.value.message
 
@@ -100,6 +102,111 @@ def test_github_rate_limit_redirect_and_timeout_fail_with_bounded_errors(tmp_pat
     with pytest.raises(GitHubError) as timeout_error:
         GitHubClient(opener=_TimeoutOpener()).resolve("https://github.com/owner/repo", "main")
     assert timeout_error.value.status_code == 503
+
+
+_COMMIT_URL = "https://api.github.com/repos/owner/repo/commits/main"
+_COMMIT_BODY = json.dumps({"sha": "b" * 40}).encode("utf-8")
+
+
+def _rate_limited_client(responses: list[_FakeResponse], **kwargs) -> tuple[GitHubClient, _FakeOpener, list[float]]:
+    opener = _FakeOpener({_COMMIT_URL: responses})
+    sleeps: list[float] = []
+    kwargs.setdefault("token", "")
+    client = GitHubClient(opener=opener, sleep=sleeps.append, clock=lambda: 1_000_000.0, **kwargs)
+    return client, opener, sleeps
+
+
+def test_github_retries_after_429_using_retry_after() -> None:
+    client, opener, sleeps = _rate_limited_client(
+        [_FakeResponse(429, headers={"Retry-After": "2"}), _FakeResponse(200, _COMMIT_BODY)]
+    )
+    resolution = client.resolve("https://github.com/owner/repo", "main")
+    assert resolution.resolved_commit == "b" * 40
+    assert sleeps == [2.0]
+    assert len(opener.calls) == 2
+
+
+def test_github_waits_for_primary_limit_reset_and_backs_off_exponentially() -> None:
+    client, _opener, sleeps = _rate_limited_client(
+        [
+            _FakeResponse(403, headers={"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "1000005"}),
+            _FakeResponse(429),
+            _FakeResponse(429),
+            _FakeResponse(200, _COMMIT_BODY),
+        ]
+    )
+    client.resolve("https://github.com/owner/repo", "main")
+    assert sleeps == [6.0, 2.0, 4.0]
+
+
+def test_github_rate_limit_gives_up_with_clear_error_after_bounded_retries() -> None:
+    client, opener, sleeps = _rate_limited_client(
+        [_FakeResponse(429, headers={"Retry-After": "1"}) for _ in range(4)]
+    )
+    with pytest.raises(GitHubError) as error:
+        client.resolve("https://github.com/owner/repo", "main")
+    assert error.value.code == "budget_exceeded"
+    assert error.value.status_code == 429
+    assert "rate limit" in error.value.message
+    assert "CODETRAIL_GITHUB_TOKEN" in error.value.message
+    assert sleeps == [1.0, 1.0, 1.0]
+    assert len(opener.calls) == 4
+
+
+def test_github_rate_limit_does_not_wait_past_the_retry_budget() -> None:
+    client, opener, sleeps = _rate_limited_client(
+        [_FakeResponse(403, headers={"X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "1003600"})]
+    )
+    with pytest.raises(GitHubError) as error:
+        client.resolve("https://github.com/owner/repo", "main")
+    assert error.value.code == "budget_exceeded"
+    assert "resets at" in error.value.message
+    assert sleeps == []
+    assert len(opener.calls) == 1
+
+
+def test_github_plain_403_and_401_are_access_errors_without_retry() -> None:
+    client, opener, sleeps = _rate_limited_client([_FakeResponse(403)])
+    with pytest.raises(GitHubError) as denied:
+        client.resolve("https://github.com/owner/repo", "main")
+    assert denied.value.code == "forbidden"
+    assert sleeps == [] and len(opener.calls) == 1
+
+    client, _opener, _sleeps = _rate_limited_client([_FakeResponse(401)], token="secret-token-value")
+    with pytest.raises(GitHubError) as unauthorized:
+        client.resolve("https://github.com/owner/repo", "main")
+    assert unauthorized.value.code == "forbidden"
+    assert "token" in unauthorized.value.message
+    assert "secret-token-value" not in unauthorized.value.message
+
+
+def test_github_token_from_environment_is_sent_as_bearer_header_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("CODETRAIL_GITHUB_TOKEN", raising=False)
+    monkeypatch.setenv("GITHUB_TOKEN", "fallback-token")
+    opener = _FakeOpener({_COMMIT_URL: [_FakeResponse(429, headers={"Retry-After": "1"}), _FakeResponse(200, _COMMIT_BODY)]})
+    client = GitHubClient(opener=opener, sleep=lambda _seconds: None)
+    client.resolve("https://github.com/owner/repo", "main")
+    assert client.authenticated
+    assert [request.get_header("Authorization") for request in opener.requests] == ["Bearer fallback-token"] * 2
+    assert all("fallback-token" not in url for url in opener.calls)
+
+    monkeypatch.setenv("CODETRAIL_GITHUB_TOKEN", "primary-token")
+    opener = _FakeOpener({_COMMIT_URL: [_FakeResponse(429) for _ in range(2)]})
+    with pytest.raises(GitHubError) as error:
+        GitHubClient(opener=opener, sleep=lambda _seconds: None, max_rate_limit_retries=1).resolve(
+            "https://github.com/owner/repo", "main"
+        )
+    assert opener.requests[0].get_header("Authorization") == "Bearer primary-token"
+    assert "primary-token" not in error.value.message
+    assert "configured GitHub token is also rate limited" in error.value.message
+
+    monkeypatch.setenv("CODETRAIL_GITHUB_TOKEN", "")
+    monkeypatch.setenv("GITHUB_TOKEN", "  ")
+    opener = _FakeOpener({_COMMIT_URL: [_FakeResponse(200, _COMMIT_BODY)]})
+    client = GitHubClient(opener=opener)
+    client.resolve("https://github.com/owner/repo", "main")
+    assert not client.authenticated
+    assert opener.requests[0].get_header("Authorization") is None
 
 
 def test_github_url_normalization_and_rejection() -> None:

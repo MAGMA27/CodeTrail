@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   finishImportSubmissionKey,
+  githubImportErrorMessage,
   isImportStatusTerminal,
   nextImportSubmissionKey,
   waitForImportStatus,
@@ -117,4 +118,12 @@ test("bounds a status request that never settles and keeps its last attempt stat
 
   assert.equal(reads, 1);
   assert.equal(result.attempt.status, "indexing");
+});
+
+test("explains GitHub rate limit errors and keeps other import errors unchanged", () => {
+  const limited = githubImportErrorMessage("GitHub API rate limit reached; the import was not completed. Retry after about 30 seconds.");
+  assert.match(limited, /^GitHub API 限流/);
+  assert.match(limited, /CODETRAIL_GITHUB_TOKEN/);
+  assert.match(limited, /Retry after about 30 seconds/);
+  assert.equal(githubImportErrorMessage("GitHub repository or ref was not found"), "GitHub repository or ref was not found");
 });

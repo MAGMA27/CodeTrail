@@ -40,6 +40,8 @@
 
 公开 GitHub 的 HTTP 导入默认开启；设置 github_import_enabled=false 或 CODETRAIL_GITHUB_IMPORT_ENABLED=0 可关闭。MCP GitHub 写入能力仍由独立开关控制。
 
+GitHub 未认证 API 按出口 IP 共享较低限额，较大仓库或多次导入容易遇到 429/403 限流。可在启动 API 的环境中设置 `CODETRAIL_GITHUB_TOKEN`（未设置时回退读取 `GITHUB_TOKEN`）提高限额；只读公开仓库的细粒度 token 无需额外仓库权限即可。token 只作为 `Authorization` 请求头发往 GitHub，不写日志、不持久化、不出现在错误或 HTTP/MCP 响应中。遇到限流时客户端优先遵守 `Retry-After`，额度耗尽时按 `X-RateLimit-Reset` 等待，否则指数退避；最多重试 3 次、单次等待不超过 20 秒且不超过导入总时限。仍被限流时导入以 `budget_exceeded`（HTTP 429）失败，消息说明重置时间与 token 配置方式，Web 导入面板显示中文提示。
+
 安装入口使用 `uv tool install ./apps/api`，得到独立 `codetrail` 命令。`codetrail init` 初始化用户设置，`codetrail api` 与 `codetrail mcp` 共用该设置；`install --print-config`、`install`、`status` 和 `uninstall` 管理 Codex 注册。完整配置和覆盖规则见 [mcp.md](mcp.md)。源码启动脚本调用同一 CLI；Web 仍从源码运行。
 
 从仓库根目录启动当前 API 与 Codex external 联合验收环境；脚本使用仓库根目录下的 `.codetrail-runtime`，从该服务数据目录读取已注册 managed source，不需要手工设置临时环境变量。完整步骤见 [MVP 操作说明](../../docs/mvp-operation.md)：

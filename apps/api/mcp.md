@@ -55,7 +55,7 @@ API (`codetrail api`) 与 MCP (`codetrail mcp`) 都读取 `~/.config/codetrail/s
 
 首次 `codetrail init` 默认允许当前目录。要导入其他项目，编辑 `~/.config/codetrail/settings.json` 的 `allowed_import_roots`，例如 `["D:/Dev"]`，保存后重启 API。既有 settings 不会被 init 参数覆盖；`--allow-root` 和 `--typescript-compiler` 仅用于首次创建设置。
 
-GitHub HTTP 导入默认开启，可通过 settings 的 `github_import_enabled=false` 或环境变量 `CODETRAIL_GITHUB_IMPORT_ENABLED=0` 关闭。可选的服务端 `CODETRAIL_GITHUB_TOKEN` 用于降低未认证请求限流影响；MCP GitHub 写能力仍独立开启。
+GitHub HTTP 导入默认开启，可通过 settings 的 `github_import_enabled=false` 或环境变量 `CODETRAIL_GITHUB_IMPORT_ENABLED=0` 关闭。可选的服务端 `CODETRAIL_GITHUB_TOKEN`（回退 `GITHUB_TOKEN`）用于降低未认证请求限流影响，限流重试与错误见 [API README](README.md)；MCP GitHub 写能力仍独立开启。
 
 - 找不到 codetrail：执行 `uv tool update-shell` 并重新打开终端。
 - 本地导入被拒绝：核对允许根目录、绝对路径和符号链接边界；修改 settings 后重启 API。

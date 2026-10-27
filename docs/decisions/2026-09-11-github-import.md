@@ -8,7 +8,7 @@ W2 只支持服务端允许根目录内的本地来源。工作台需要接收�
 
 ## 决定
 
-GitHub 导入只接受 `https://github.com/{owner}/{repo}`，可选 branch/tag/commit。服务端先调用官方 GitHub API 将 ref 解析为固定 commit，再只请求该 commit 的官方 tar archive；API、`github.com` 和 `codeload.github.com` 之外的 HTTPS 主机、凭据、端口、子路径、查询参数和片段均拒绝。可选 `CODETRAIL_GITHUB_TOKEN` 只在服务端使用，不进入 HTTP/MCP 或浏览器响应。
+GitHub 导入只接受 `https://github.com/{owner}/{repo}`，可选 branch/tag/commit。服务端先调用官方 GitHub API 将 ref 解析为固定 commit，再只请求该 commit 的官方 tar archive；API、`github.com` 和 `codeload.github.com` 之外的 HTTPS 主机、凭据、端口、子路径、查询参数和片段均拒绝。可选 `CODETRAIL_GITHUB_TOKEN`（未设置时回退 `GITHUB_TOKEN`）只在服务端使用，不进入 HTTP/MCP 或浏览器响应。限流（429，或带 `Retry-After`/`X-RateLimit-Remaining: 0` 的 403）在导入总时限内有界重试：遵守 `Retry-After` 或 reset 时间，否则指数退避；超过单次等待上限时直接返回说明重置时间与 token 配置的 `budget_exceeded`，普通 401/403 归为 `forbidden`。
 
 远端身份使用规范化的 `github://owner/repo` 与 canonical URL 持久化，commit、请求 ref、快照 content hash 和清理状态写入管理 SQLite；每次 attempt 的临时目录位于服务管理目录的 `github-imports/{attempt_id}`，由 owner marker 保护，成功后删除。解包拒绝绝对路径、父目录、符号链接、硬链接和特殊文件，并限制 archive 大小、文件数量、解包总字节、重定向次数、单请求超时和操作总时间。来源目录不被写入，远端临时目录不作为项目长期来源。
 

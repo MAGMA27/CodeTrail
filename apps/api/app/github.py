@@ -11,8 +11,10 @@ import shutil
 import tarfile
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path, PurePosixPath
-from typing import Mapping
+from typing import Callable, Mapping
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -26,6 +28,9 @@ _DEFAULT_MAX_FILE_COUNT = 10_000
 _DEFAULT_MAX_UNPACKED_BYTES = 200 * 1024 * 1024
 _DEFAULT_TIMEOUT_SECONDS = 20.0
 _MAX_JSON_BYTES = 2 * 1024 * 1024
+_DEFAULT_MAX_RATE_LIMIT_RETRIES = 3
+_DEFAULT_MAX_RETRY_WAIT_SECONDS = 20.0
+_TOKEN_ENVIRONMENT_VARIABLES = ("CODETRAIL_GITHUB_TOKEN", "GITHUB_TOKEN")
 _CHUNK_SIZE = 64 * 1024
 
 
@@ -97,19 +102,33 @@ class GitHubClient:
         max_unpacked_bytes: int = _DEFAULT_MAX_UNPACKED_BYTES,
         max_redirects: int = 2,
         max_total_seconds: float = 60.0,
+        max_rate_limit_retries: int = _DEFAULT_MAX_RATE_LIMIT_RETRIES,
+        max_retry_wait_seconds: float = _DEFAULT_MAX_RETRY_WAIT_SECONDS,
+        sleep: Callable[[float], None] = time.sleep,
+        clock: Callable[[], float] = time.time,
     ) -> None:
         if timeout_seconds <= 0 or max_total_seconds <= 0 or max_archive_bytes <= 0 or max_file_count <= 0 or max_unpacked_bytes <= 0:
             raise ValueError("GitHub acquisition budgets must be positive")
-        if max_redirects < 0:
-            raise ValueError("GitHub redirect budget must not be negative")
+        if max_redirects < 0 or max_rate_limit_retries < 0 or max_retry_wait_seconds < 0:
+            raise ValueError("GitHub redirect and retry budgets must not be negative")
         self.timeout_seconds = timeout_seconds
         self.max_total_seconds = max_total_seconds
         self.max_archive_bytes = max_archive_bytes
         self.max_file_count = max_file_count
         self.max_unpacked_bytes = max_unpacked_bytes
         self.max_redirects = max_redirects
-        self._token = token if token is not None else os.getenv("CODETRAIL_GITHUB_TOKEN")
+        self.max_rate_limit_retries = max_rate_limit_retries
+        self.max_retry_wait_seconds = max_retry_wait_seconds
+        self._sleep = sleep
+        self._clock = clock
+        # The token is only ever sent as an Authorization header; it is never
+        # logged, persisted, or included in error messages.
+        self._token = (token if token is not None else _token_from_environment()) or None
         self._opener = opener or build_opener(_NoRedirectHandler())
+
+    @property
+    def authenticated(self) -> bool:
+        return self._token is not None
 
     def resolve(self, url: str, requested_ref: str | None) -> GitHubResolution:
         repository = parse_github_repository_url(url)
@@ -179,7 +198,7 @@ class GitHubClient:
         try:
             body = self._read_response(response, max_bytes=_MAX_JSON_BYTES, deadline=deadline)
             if response.status != 200:
-                raise _http_error(response.status, response.headers)
+                raise _http_error(response.status, response.headers, authenticated=self.authenticated)
         finally:
             _close_response(response)
         try:
@@ -210,7 +229,7 @@ class GitHubClient:
                     _close_response(response)
             if response.status != 200:
                 try:
-                    raise _http_error(response.status, response.headers)
+                    raise _http_error(response.status, response.headers, authenticated=self.authenticated)
                 finally:
                     _close_response(response)
             try:
@@ -220,6 +239,37 @@ class GitHubClient:
         raise GitHubError("budget_exceeded", 429, "GitHub archive redirect limit was exceeded")
 
     def _open(
+        self,
+        url: str,
+        *,
+        allowed_hosts: set[str] | frozenset[str],
+        deadline: float | None = None,
+    ) -> _ResponseData:
+        """Open one request, waiting out GitHub rate limits within bounded retries.
+
+        Waits honor ``Retry-After`` first, then ``X-RateLimit-Reset`` when the
+        quota is exhausted, and otherwise back off exponentially. A wait longer
+        than ``max_retry_wait_seconds`` or the remaining total deadline is not
+        attempted; the caller receives a clear rate-limit error instead.
+        """
+
+        for attempt in range(self.max_rate_limit_retries + 1):
+            response = self._open_once(url, allowed_hosts=allowed_hosts, deadline=deadline)
+            if not _is_rate_limited(response.status, response.headers):
+                return response
+            _close_response(response)
+            wait = _rate_limit_wait_seconds(response.headers, attempt, now=self._clock())
+            remaining = None if deadline is None else deadline - time.monotonic()
+            if (
+                attempt >= self.max_rate_limit_retries
+                or wait > self.max_retry_wait_seconds
+                or (remaining is not None and wait >= remaining)
+            ):
+                raise _rate_limit_error(response.headers, wait, authenticated=self.authenticated)
+            self._sleep(wait)
+        raise AssertionError("unreachable")  # pragma: no cover
+
+    def _open_once(
         self,
         url: str,
         *,
@@ -434,13 +484,75 @@ def _validate_remote_url(value: str, allowed_hosts: set[str] | frozenset[str]) -
     return value
 
 
-def _http_error(status: int, headers: Mapping[str, str]) -> GitHubError:
+def _token_from_environment() -> str | None:
+    for name in _TOKEN_ENVIRONMENT_VARIABLES:
+        value = os.getenv(name, "").strip()
+        if value:
+            return value
+    return None
+
+
+def _is_rate_limited(status: int, headers: Mapping[str, str]) -> bool:
+    """429 always; 403 only when GitHub marks it as a primary or secondary rate limit."""
+
+    if status == 429:
+        return True
+    if status != 403:
+        return False
+    return _header(headers, "retry-after") is not None or _header(headers, "x-ratelimit-remaining") == "0"
+
+
+def _rate_limit_wait_seconds(headers: Mapping[str, str], attempt: int, *, now: float) -> float:
+    retry_after = _header(headers, "retry-after")
+    if retry_after is not None:
+        value = retry_after.strip()
+        if value.isdigit():
+            return float(int(value))
+        try:
+            retry_at = parsedate_to_datetime(value)
+        except (TypeError, ValueError, IndexError):
+            retry_at = None
+        if retry_at is not None:
+            if retry_at.tzinfo is None:
+                retry_at = retry_at.replace(tzinfo=timezone.utc)
+            return max(0.0, retry_at.timestamp() - now)
+    reset = _header(headers, "x-ratelimit-reset")
+    if _header(headers, "x-ratelimit-remaining") == "0" and reset is not None and reset.strip().isdigit():
+        return max(0.0, int(reset.strip()) - now) + 1.0
+    return float(2**attempt)
+
+
+def _rate_limit_error(headers: Mapping[str, str], wait_seconds: float, *, authenticated: bool) -> GitHubError:
+    parts = ["GitHub API rate limit reached; the import was not completed."]
+    reset = _header(headers, "x-ratelimit-reset")
+    if _header(headers, "x-ratelimit-remaining") == "0" and reset is not None and reset.strip().isdigit():
+        reset_at = datetime.fromtimestamp(int(reset.strip()), tz=timezone.utc)
+        parts.append(f"The limit resets at {reset_at.strftime('%Y-%m-%d %H:%M:%S')} UTC.")
+    parts.append(f"Retry after about {max(1, int(-(-wait_seconds // 1)))} seconds.")
+    if authenticated:
+        parts.append("The configured GitHub token is also rate limited.")
+    else:
+        parts.append(
+            "Unauthenticated requests share a low per-IP limit; set CODETRAIL_GITHUB_TOKEN "
+            "(or GITHUB_TOKEN) on the API server to raise it."
+        )
+    return GitHubError("budget_exceeded", 429, " ".join(parts))
+
+
+def _http_error(status: int, headers: Mapping[str, str], *, authenticated: bool = False) -> GitHubError:
     if status == 404:
         return GitHubError("not_found", 404, "GitHub repository or ref was not found, or is not public")
-    if status in {401, 403, 429}:
-        retry_after = _header(headers, "retry-after")
-        suffix = f" Retry after {retry_after} seconds." if retry_after else ""
-        return GitHubError("budget_exceeded", 429, f"GitHub rate limit or access policy blocked the import.{suffix}")
+    if _is_rate_limited(status, headers):
+        return _rate_limit_error(headers, _rate_limit_wait_seconds(headers, 0, now=time.time()), authenticated=authenticated)
+    if status == 401:
+        message = (
+            "GitHub rejected the configured token; check CODETRAIL_GITHUB_TOKEN or GITHUB_TOKEN on the API server"
+            if authenticated
+            else "GitHub requires authentication for this request"
+        )
+        return GitHubError("forbidden", 403, message)
+    if status == 403:
+        return GitHubError("forbidden", 403, "GitHub denied access to this repository or ref")
     if 500 <= status <= 599:
         return GitHubError("internal_error", 503, "GitHub is temporarily unavailable")
     return GitHubError("internal_error", 503, "GitHub returned an unexpected response")
