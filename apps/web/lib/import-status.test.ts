@@ -140,3 +140,10 @@ test("explains failed GitHub download attempts without showing the rate-limit hi
   assert.match(message, /The archive download exceeded its time limit/);
   assert.doesNotMatch(message, /限流/);
 });
+
+test("explains GitHub index timeouts with the server setting", () => {
+  const message = githubImportErrorMessage("Indexing timed out; raise CODETRAIL_INDEX_TIMEOUT", "index_timeout");
+  assert.match(message, /^仓库索引构建超时/);
+  assert.match(message, /CODETRAIL_INDEX_TIMEOUT/);
+  assert.match(message, /Indexing timed out/);
+});

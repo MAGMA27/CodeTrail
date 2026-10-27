@@ -8,12 +8,15 @@ from pathlib import Path
 import pytest
 
 from app.indexing import (
+    IndexingAborted,
+    IndexingControl,
     SnapshotBoundaryError,
     SUBSYSTEM_MANIFEST_MAX_BYTES,
     SUBSYSTEM_MANIFEST_PATH,
     SubsystemManifestError,
     build_source_snapshot,
     extract_definitions,
+    index_timeout_from_environment,
     parse_subsystem_manifest,
     scan_source_manifest,
 )
@@ -22,6 +25,28 @@ from app.indexing import (
 ROOT = Path(__file__).resolve().parents[3]
 FIXTURE_ROOT = ROOT / "fixtures" / "repos" / "timeout-demo"
 MANIFEST_PATH = ROOT / "fixtures" / "scenarios" / "source-manifest.json"
+
+
+def test_indexing_control_cancels_source_scan(tmp_path: Path) -> None:
+    control = IndexingControl()
+    control.cancel()
+
+    with pytest.raises(IndexingAborted) as error:
+        build_source_snapshot(tmp_path, repository_id="cancelled", control=control)
+
+    assert error.value.code == "index_cancelled"
+
+
+def test_index_timeout_environment_uses_positive_finite_seconds(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("CODETRAIL_INDEX_TIMEOUT", raising=False)
+    assert index_timeout_from_environment() == 240.0
+
+    monkeypatch.setenv("CODETRAIL_INDEX_TIMEOUT", "12.5")
+    assert index_timeout_from_environment() == 12.5
+
+    for invalid in ("0", "-1", "inf", "nan", "bad"):
+        monkeypatch.setenv("CODETRAIL_INDEX_TIMEOUT", invalid)
+        assert index_timeout_from_environment() == 240.0
 
 
 def test_timeout_demo_snapshot_is_reproducible_and_contract_aligned() -> None:

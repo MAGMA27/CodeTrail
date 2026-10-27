@@ -3372,7 +3372,7 @@ export default function Workbench() {
         return;
       }
       setIndexFreshnessError(
-        error instanceof ApiRequestError && error.code === "download_timeout"
+        error instanceof ApiRequestError && ["download_timeout", "index_timeout"].includes(error.code)
           ? githubImportErrorMessage(error.message, error.code)
           : errorMessage(error),
       );

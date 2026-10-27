@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import os
@@ -324,6 +325,75 @@ def test_github_download_timeout_openapi_response_is_scoped_to_refresh(tmp_path:
     ]["post"]["responses"]
 
 
+def test_index_timeout_returns_failed_attempt_and_cleans_github_temp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+
+    monkeypatch.setenv("CODETRAIL_INDEX_TIMEOUT", "0.000001")
+    archive_url = "https://api.github.com/repos/owner/repo/tarball/" + "b" * 40
+    opener = _FakeOpener(
+        {
+            _COMMIT_URL: [_FakeResponse(200, _COMMIT_BODY)],
+            archive_url: [_FakeResponse(200, _archive_bytes(("repo-root/module.py", b"VALUE = 1\n", "file")))],
+        }
+    )
+    data_root = tmp_path / "service-data"
+    application = create_app(
+        {},
+        data_root=data_root,
+        github_import_enabled=True,
+        github_client=GitHubClient(token="", opener=opener),
+    )
+
+    status, response = asyncio.run(
+        _request(
+            application,
+            "POST",
+            "/api/imports/github",
+            {"name": "Slow index", "url": "https://github.com/owner/repo", "ref": "main"},
+        )
+    )
+
+    attempt = response["attempt"]
+    assert status == 200
+    assert attempt["status"] == "failed"
+    assert attempt["error_code"] == "index_timeout"
+    assert "CODETRAIL_INDEX_TIMEOUT" in attempt["error_message"]
+    assert attempt["index_id"] is None
+    assert response["project"]["latest_index_id"] is None
+    assert application.state.workspace_service.list_project_indexes(
+        response["project"]["project_id"]
+    ).indexes == []
+    assert list((data_root / "github-imports").glob("*")) == []
+    assert application.state.registry.management_store.list_project_updates() == ()
+
+
+def test_github_refresh_index_timeout_returns_504(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _FakeGitHubClient(["a" * 40, "b" * 40, "b" * 40])
+    application = create_app(
+        {},
+        data_root=tmp_path / "service-data",
+        github_import_enabled=True,
+        github_client=client,  # type: ignore[arg-type]
+    )
+    initial = application.state.workspace_service.import_github(
+        GitHubImportRequest(name="Remote", url="https://github.com/owner/repo", ref="main")
+    )
+    assert initial.index is not None
+    monkeypatch.setenv("CODETRAIL_INDEX_TIMEOUT", "0.000001")
+
+    status, error = asyncio.run(
+        _request(
+            application,
+            "POST",
+            f"/api/projects/{initial.project.project_id}/indexes/{initial.index.index.index_id}/github-refresh",
+        )
+    )
+
+    assert status == 504
+    assert error["code"] == "index_timeout"
+    assert "CODETRAIL_INDEX_TIMEOUT" in error["message"]
+
+
 def test_github_request_timeout_does_not_use_the_rate_limit_wait_budget() -> None:
     monotonic_now = [100.0]
     def sleep(seconds: float) -> None:
@@ -520,6 +590,17 @@ def test_mcp_preserves_retryable_github_download_timeout() -> None:
 
     assert result.code == "download_timeout"
     assert result.retryable is True
+
+    indexing_result = _mcp_error(
+        ServiceError("index_timeout", 504, "raise CODETRAIL_INDEX_TIMEOUT")
+    )
+    assert indexing_result.code == "index_timeout"
+    assert indexing_result.retryable is True
+    cancelled_result = _mcp_error(
+        ServiceError("index_cancelled", 499, "Indexing was cancelled")
+    )
+    assert cancelled_result.code == "index_cancelled"
+    assert cancelled_result.retryable is True
 
 
 def test_github_import_succeeds_after_one_rate_limited_resolve_and_download(tmp_path: Path) -> None:
@@ -762,6 +843,7 @@ class _FakeGitHubClient:
         destination: Path,
         *,
         budget: GitHubRequestBudget | None = None,
+        control=None,
     ) -> GitHubArchive:
         budget = budget or self.new_budget()
         self.download_budgets.append(budget)
@@ -809,16 +891,20 @@ async def _request(application, method: str, target: str, payload: dict | None =
     body = b"" if payload is None else json.dumps(payload).encode("utf-8")
     messages: list[dict] = []
     received = False
+    response_complete = asyncio.Event()
 
     async def receive() -> dict:
         nonlocal received
         if received:
+            await response_complete.wait()
             return {"type": "http.disconnect"}
         received = True
         return {"type": "http.request", "body": body, "more_body": False}
 
     async def send(message: dict) -> None:
         messages.append(message)
+        if message["type"] == "http.response.body" and not message.get("more_body", False):
+            response_complete.set()
 
     scope = {
         "type": "http",
@@ -993,6 +1079,7 @@ def test_github_refresh_failure_keeps_latest_and_source_identity(tmp_path: Path)
         destination: Path,
         *,
         budget: GitHubRequestBudget | None = None,
+        control=None,
     ) -> GitHubArchive:
         client.downloads += 1
         raise GitHubError("download_timeout", 504, "GitHub archive download timed out")

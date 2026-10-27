@@ -14,6 +14,7 @@ from typing import Literal
 from .contracts import CodeEdge, ContextualCall, SourceLocation, Symbol, UnresolvedReference
 from .indexing import (
     DefinitionIndex,
+    IndexingControl,
     SnapshotIssue,
     SourceSnapshot,
     SnapshotFile,
@@ -396,6 +397,7 @@ def extract_relations(
     max_edges: int = 6_000,
     max_unresolved: int = 5_000,
     max_seconds: float = 5.0,
+    control: IndexingControl | None = None,
 ) -> RelationIndex:
     """Resolve file syntax facts against the current immutable definition set."""
 
@@ -426,6 +428,8 @@ def extract_relations(
     facts_by_path: dict[str, RelationFileFacts] = {}
 
     for source_file in snapshot.files:
+        if control is not None:
+            control.check()
         if budget.truncated:
             break
         if not source_file.path.lower().endswith(".py"):

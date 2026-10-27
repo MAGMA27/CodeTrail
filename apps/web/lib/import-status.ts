@@ -11,6 +11,9 @@ export function githubImportErrorMessage(message: string, errorCode?: string): s
   if (errorCode === "download_timeout") {
     return `GitHub 仓库归档下载超时，操作未完成。可能是网络较慢或仓库较大；可重试，或在 API 服务端调高 CODETRAIL_GITHUB_DOWNLOAD_TIMEOUT 后重启服务。（${message}）`;
   }
+  if (errorCode === "index_timeout") {
+    return `仓库索引构建超时，操作未完成。可重试，或在 API 服务端调高 CODETRAIL_INDEX_TIMEOUT 后重启服务。（${message}）`;
+  }
   return /rate limit/i.test(message)
     ? `GitHub API 限流，导入未完成。可稍后重试，或在 API 服务端设置 CODETRAIL_GITHUB_TOKEN 提高限额。（${message}）`
     : message;

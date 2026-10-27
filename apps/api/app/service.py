@@ -120,6 +120,8 @@ from .contracts import (
 )
 from .config import ModelConfigError, ModelProviderConfig, load_model_config, save_model_config as persist_model_config
 from .indexing import (
+    IndexingAborted,
+    IndexingControl,
     DEFINITION_EXTRACTION_RULES_VERSION,
     PYTHON_AST_VERSION,
     IndexBuildStats,
@@ -130,6 +132,7 @@ from .indexing import (
     build_source_snapshot,
     current_source_rules_version,
     extract_definitions,
+    index_timeout_from_environment,
     index_configuration_hash,
     is_source_code_path,
     scan_source_manifest,
@@ -799,6 +802,7 @@ class IndexService:
         on_build_stats: Callable[[IndexBuildStats], None] | None = None,
         identity_version: str | None = None,
         cache_scope_id: str | None = None,
+        control: IndexingControl | None = None,
     ) -> IndexResponse:
         root = self.registry.root_for(request.repository_id)
         with self.registry.store_for_repository(request.repository_id) as store:
@@ -808,6 +812,8 @@ class IndexService:
         # The rebuild identity is only a namespace for legacy immutable rows;
         # it must not make an otherwise current source configuration stale.
         build_configuration_hash = self.configuration_hash
+        control = control or IndexingControl()
+        control.start(index_timeout_from_environment())
         if not self._index_slots.acquire(blocking=False):
             raise ServiceError("budget_exceeded", 429, "index capacity is currently busy")
         try:
@@ -824,7 +830,9 @@ class IndexService:
                     max_seconds=self.freshness_max_seconds,
                     rules_version=self.rules_version,
                     configuration_hash=build_configuration_hash,
+                    control=control,
                 )
+                control.check()
                 if not any(is_source_code_path(source_file.path) for source_file in snapshot.files):
                     raise ServiceError(
                         "invalid_input",
@@ -859,11 +867,14 @@ class IndexService:
                         "derived cache read failed; continuing with cold extraction: %s",
                         exc,
                     )
-                definitions = extract_definitions(snapshot, cached=cached_definitions)
-                relation = extract_relations(definitions, cached=cached_relation_facts)
+                definitions = extract_definitions(snapshot, cached=cached_definitions, control=control)
+                control.check()
+                relation = extract_relations(definitions, cached=cached_relation_facts, control=control)
+                control.check()
                 if on_snapshot_ready is not None:
                     on_snapshot_ready(snapshot.index.index_id)
                 with self.registry.store_for_repository(request.repository_id) as store:
+                    control.check()
                     store.write_index(relation)
                     persisted = store.load_index(snapshot.index.index_id)
                     cache_entries_written = 0
@@ -933,6 +944,14 @@ class IndexService:
                 raise ServiceError("conflict", 409, "index content conflicts with an existing index") from exc
             except StorageError as exc:
                 raise ServiceError("internal_error", 500, "local index storage failed") from exc
+            except IndexingAborted as exc:
+                if exc.code == "index_timeout":
+                    raise ServiceError(
+                        "index_timeout",
+                        504,
+                        "Indexing timed out; raise CODETRAIL_INDEX_TIMEOUT on the server and restart the API to allow more time",
+                    ) from exc
+                raise ServiceError("index_cancelled", 499, "Indexing was cancelled because the client disconnected") from exc
             return _index_response(persisted)
         finally:
             self._index_slots.release()
@@ -3065,6 +3084,7 @@ class WorkspaceService:
         request: CreateProjectIndexRequest,
         *,
         on_build_stats: Callable[[IndexBuildStats], None] | None = None,
+        control: IndexingControl | None = None,
     ) -> IndexResponse:
         with self._index_mutation_lock:
             project = self._find_project(project_id)
@@ -3076,6 +3096,7 @@ class WorkspaceService:
                     expected_latest_index_id=project.latest_index_id,
                     project_update_id=operation.operation_id,
                     on_build_stats=on_build_stats,
+                    control=control,
                 )
                 self.registry.management_store.commit_project_update(
                     operation.operation_id,
@@ -3113,6 +3134,7 @@ class WorkspaceService:
         identity_version: str | None = None,
         project_update_id: str | None = None,
         on_build_stats: Callable[[IndexBuildStats], None] | None = None,
+        control: IndexingControl | None = None,
     ) -> IndexResponse:
         project = self._find_project(project_id)
         spec = self.registry.spec_for(project.repository_id)
@@ -3155,6 +3177,7 @@ class WorkspaceService:
                 on_build_stats=on_build_stats,
                 identity_version=identity_version,
                 cache_scope_id=project.project_id,
+                control=control,
             )
             with self.registry.store_for_repository(project.repository_id) as store:
                 store.finish_project_index(
@@ -3197,6 +3220,7 @@ class WorkspaceService:
         index_id: str,
         *,
         via_mcp: bool = False,
+        control: IndexingControl | None = None,
     ) -> IndexRefreshResponse:
         """Explicitly check and update a tracked GitHub ref through the safe importer."""
 
@@ -3267,14 +3291,16 @@ class WorkspaceService:
                 via_mcp=via_mcp,
                 expected_latest_index_id=index_id,
                 github_budget=github_budget,
+                control=control,
             )
             if imported.attempt.status != "ready" or imported.index is None:
                 error_code = imported.attempt.error_code or "conflict"
-                if error_code not in {"budget_exceeded", "download_timeout", "forbidden", "not_found", "conflict", "internal_error"}:
+                if error_code not in {"budget_exceeded", "download_timeout", "index_timeout", "forbidden", "not_found", "conflict", "internal_error"}:
                     error_code = "conflict"
                 status_code = {
                     "budget_exceeded": 429,
                     "download_timeout": 504,
+                    "index_timeout": 504,
                     "forbidden": 403,
                     "not_found": 404,
                     "internal_error": 503,
@@ -3321,6 +3347,8 @@ class WorkspaceService:
         project_id: str,
         index_id: str,
         request: RefreshProjectIndexRequest,
+        *,
+        control: IndexingControl | None = None,
     ) -> IndexRefreshResponse:
         """Recheck and explicitly reuse or rebuild the project's current index."""
 
@@ -3422,6 +3450,7 @@ class WorkspaceService:
                         else None
                     ),
                     project_update_id=operation.operation_id,
+                    control=control,
                 )
                 self.registry.management_store.commit_project_update(
                     operation.operation_id,
@@ -4135,6 +4164,7 @@ class WorkspaceService:
         request: LocalImportRequest,
         *,
         via_mcp: bool = False,
+        control: IndexingControl | None = None,
     ) -> LocalImportResponse:
         """Register, index, and persist one server-local source directory."""
 
@@ -4168,6 +4198,7 @@ class WorkspaceService:
                 source_path,
                 normalized_path,
                 request,
+                control=control,
             )
 
         project = self._load_project_from_spec(spec)
@@ -4177,6 +4208,7 @@ class WorkspaceService:
             source_path,
             normalized_path,
             request,
+            control=control,
         )
 
     def import_github(
@@ -4184,12 +4216,13 @@ class WorkspaceService:
         request: GitHubImportRequest,
         *,
         via_mcp: bool = False,
+        control: IndexingControl | None = None,
     ) -> GitHubImportResponse:
         """Resolve, fetch, safely unpack, index, and clean one GitHub commit."""
 
         github_budget = self.github_client.new_budget()
         with self._index_mutation_lock:
-            return self._import_github_locked(request, via_mcp=via_mcp, github_budget=github_budget)
+            return self._import_github_locked(request, via_mcp=via_mcp, github_budget=github_budget, control=control)
 
     def _import_github_locked(
         self,
@@ -4198,9 +4231,15 @@ class WorkspaceService:
         via_mcp: bool = False,
         expected_latest_index_id: str | None = None,
         github_budget: GitHubRequestBudget | None = None,
+        control: IndexingControl | None = None,
     ) -> GitHubImportResponse:
 
         self._require_github_import(via_mcp=via_mcp)
+        if control is not None:
+            try:
+                control.check()
+            except IndexingAborted as exc:
+                raise ServiceError("index_cancelled", 499, "GitHub import was cancelled because the client disconnected") from exc
         try:
             repository = parse_github_repository_url(request.url)
         except GitHubError as exc:
@@ -4339,6 +4378,7 @@ class WorkspaceService:
                 expected_latest_index_id=expected_latest,
                 project_update_id=operation.operation_id,
                 github_budget=github_budget,
+                control=control,
             )
         except ServiceError as exc:
             self._reconcile_project_update_failure(
@@ -4383,6 +4423,7 @@ class WorkspaceService:
         attempt_id: str,
         *,
         via_mcp: bool = False,
+        control: IndexingControl | None = None,
     ) -> GitHubImportResponse:
         self._require_github_import(via_mcp=via_mcp)
         github_budget = self.github_client.new_budget()
@@ -4426,6 +4467,7 @@ class WorkspaceService:
                     expected_latest_index_id=project.latest_index_id,
                     project_update_id=operation.operation_id,
                     github_budget=github_budget,
+                    control=control,
                 )
             except ServiceError as exc:
                 self._reconcile_project_update_failure(
@@ -4487,7 +4529,13 @@ class WorkspaceService:
         )
         return self._github_import_response(updated)
 
-    def retry_import(self, attempt_id: str, *, via_mcp: bool = False) -> LocalImportResponse:
+    def retry_import(
+        self,
+        attempt_id: str,
+        *,
+        via_mcp: bool = False,
+        control: IndexingControl | None = None,
+    ) -> LocalImportResponse:
         if via_mcp and not self.registry.mcp_local_import_enabled:
             raise ServiceError("forbidden", 403, "local MCP import is disabled")
         attempt = self.registry.management_store.load_attempt(attempt_id)
@@ -4503,7 +4551,7 @@ class WorkspaceService:
                 error_code=None,
                 error_message=None,
             )
-        return self._run_import_attempt(attempt_id)
+        return self._run_import_attempt(attempt_id, control=control)
 
     def _run_import_for_project(
         self,
@@ -4512,6 +4560,8 @@ class WorkspaceService:
         source_path: Path,
         normalized_path: str,
         request: LocalImportRequest,
+        *,
+        control: IndexingControl | None = None,
     ) -> LocalImportResponse:
         self._find_project(project.project_id)
         existing = (
@@ -4562,9 +4612,9 @@ class WorkspaceService:
             if not _same_import_request(existing, project, normalized_path, request):
                 raise ServiceError("conflict", 409, "idempotency key conflicts with a different import request")
             return self._local_import_response(existing)
-        return self._run_import_attempt(attempt.attempt_id)
+        return self._run_import_attempt(attempt.attempt_id, control=control)
 
-    def _run_import_attempt(self, attempt_id: str) -> LocalImportResponse:
+    def _run_import_attempt(self, attempt_id: str, *, control: IndexingControl | None = None) -> LocalImportResponse:
         attempt = self.registry.management_store.load_attempt(attempt_id)
         try:
             self.registry.management_store.update_attempt(
@@ -4583,6 +4633,7 @@ class WorkspaceService:
             self.create_project_index(
                 attempt.project_id,
                 CreateProjectIndexRequest(revision=attempt.revision, dirty=attempt.dirty),
+                control=control,
             )
             project = self._find_project(attempt.project_id)
             index_id = project.latest_index_id
@@ -4668,6 +4719,7 @@ class WorkspaceService:
         expected_latest_index_id: str | None,
         project_update_id: str,
         github_budget: GitHubRequestBudget,
+        control: IndexingControl | None = None,
     ) -> GitHubImportResponse:
         attempt = self.registry.management_store.load_attempt(attempt_id)
         if attempt.source_kind != "github" or not attempt.source_url or not attempt.resolved_commit:
@@ -4703,7 +4755,14 @@ class WorkspaceService:
                 resolved_commit=attempt.resolved_commit,
                 resolved_ref=attempt.resolved_ref or attempt.requested_ref,
             )
-            self.github_client.download_and_extract(resolution, source_root, budget=github_budget)
+            if control is None:
+                self.github_client.download_and_extract(
+                    resolution, source_root, budget=github_budget
+                )
+            else:
+                self.github_client.download_and_extract(
+                    resolution, source_root, budget=github_budget, control=control
+                )
             self.registry.bind_runtime_source(attempt.repository_id, source_root)
             self.registry.management_store.update_attempt(
                 attempt_id,
@@ -4715,6 +4774,7 @@ class WorkspaceService:
                 CreateProjectIndexRequest(revision=attempt.resolved_commit, dirty=False),
                 expected_latest_index_id=expected_latest_index_id,
                 project_update_id=project_update_id,
+                control=control,
             )
             content_hash = index_response.index.snapshot_hash
             self.registry.management_store.update_project_update(
@@ -4732,6 +4792,13 @@ class WorkspaceService:
         except GitHubError as exc:
             error_code = exc.code
             error_message = exc.message
+        except IndexingAborted as exc:
+            error_code = exc.code
+            error_message = (
+                "GitHub import timed out during indexing"
+                if exc.code == "index_timeout"
+                else "GitHub import was cancelled because the client disconnected"
+            )
         except ServiceError as exc:
             error_code = exc.code
             error_message = exc.message

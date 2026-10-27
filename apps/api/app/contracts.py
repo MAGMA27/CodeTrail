@@ -2758,6 +2758,8 @@ ApiErrorCode: TypeAlias = Literal[
     "conflict",
     "budget_exceeded",
     "download_timeout",
+    "index_timeout",
+    "index_cancelled",
     "internal_error",
     "forbidden",
 ]
@@ -2809,6 +2811,8 @@ McpErrorCode: TypeAlias = Literal[
     "conflict",
     "budget_exceeded",
     "download_timeout",
+    "index_timeout",
+    "index_cancelled",
     "internal_error",
     "forbidden",
 ]

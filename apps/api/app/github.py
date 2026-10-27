@@ -19,6 +19,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
+from .indexing import IndexingControl
 
 _GITHUB_API_HOST = "api.github.com"
 _GITHUB_REDIRECT_HOSTS = frozenset({"api.github.com", "codeload.github.com", "github.com"})
@@ -215,18 +216,26 @@ class GitHubClient:
         destination: Path,
         *,
         budget: GitHubRequestBudget | None = None,
+        control: IndexingControl | None = None,
     ) -> GitHubArchive:
         operation_budget = budget or self.new_budget()
         destination = destination.resolve(strict=False)
         destination.mkdir(parents=True, exist_ok=False)
         archive_path = destination.parent / f"{destination.name}.tar.gz"
         try:
-            archive_hash = self._download_archive(resolution, archive_path, budget=operation_budget)
+            if control is not None:
+                control.check()
+            archive_hash = self._download_archive(
+                resolution, archive_path, budget=operation_budget, control=control
+            )
+            if control is not None:
+                control.check()
             file_count, unpacked_bytes = extract_github_archive(
                 archive_path,
                 destination,
                 max_file_count=self.max_file_count,
                 max_unpacked_bytes=self.max_unpacked_bytes,
+                control=control,
             )
             return GitHubArchive(
                 resolution=resolution,
@@ -273,6 +282,7 @@ class GitHubClient:
         archive_path: Path,
         *,
         budget: GitHubRequestBudget,
+        control: IndexingControl | None = None,
     ) -> str:
         deadline = self._monotonic() + self.download_timeout_seconds
         timeout_error = GitHubError("download_timeout", 504, "GitHub archive download timed out")
@@ -281,6 +291,8 @@ class GitHubClient:
             f"{quote(resolution.repository.name)}/tarball/{resolution.resolved_commit}"
         )
         for redirect_count in range(self.max_redirects + 1):
+            if control is not None:
+                control.check()
             response = self._open(
                 url,
                 allowed_hosts=_GITHUB_REDIRECT_HOSTS,
@@ -312,6 +324,7 @@ class GitHubClient:
                     deadline=deadline,
                     timeout_seconds=self.download_idle_timeout_seconds,
                     timeout_error=timeout_error,
+                    control=control,
                 )
             finally:
                 _close_response(response)
@@ -441,6 +454,7 @@ class GitHubClient:
         deadline: float | None = None,
         timeout_seconds: float,
         timeout_error: GitHubError,
+        control: IndexingControl | None = None,
     ) -> str:
         stream = response.stream
         digest = hashlib.sha256()
@@ -448,6 +462,8 @@ class GitHubClient:
         try:
             with archive_path.open("xb") as handle:
                 while True:
+                    if control is not None:
+                        control.check()
                     _cap_stream_timeout(
                         stream,
                         deadline,
@@ -529,6 +545,7 @@ def extract_github_archive(
     max_unpacked_bytes: int = _DEFAULT_MAX_UNPACKED_BYTES,
     deadline: float | None = None,
     monotonic: Callable[[], float] = time.monotonic,
+    control: IndexingControl | None = None,
 ) -> tuple[int, int]:
     """Extract a GitHub tar archive without links, traversal, or special files."""
 
@@ -538,6 +555,8 @@ def extract_github_archive(
     destination.mkdir(parents=True, exist_ok=True)
     try:
         _check_deadline(deadline, monotonic=monotonic)
+        if control is not None:
+            control.check()
         with tarfile.open(archive_path, mode="r:*") as archive:
             members = archive.getmembers()
             _check_deadline(deadline, monotonic=monotonic)
@@ -551,6 +570,8 @@ def extract_github_archive(
             unpacked_bytes = 0
             for member, normalized in zip(members, normalized_members):
                 _check_deadline(deadline, monotonic=monotonic)
+                if control is not None:
+                    control.check()
                 relative = _strip_archive_prefix(normalized, prefix)
                 if not relative:
                     continue
@@ -576,6 +597,8 @@ def extract_github_archive(
                 with extracted, target.open("xb") as handle:
                     while True:
                         _check_deadline(deadline, monotonic=monotonic)
+                        if control is not None:
+                            control.check()
                         chunk = extracted.read(_CHUNK_SIZE)
                         if not chunk:
                             break
