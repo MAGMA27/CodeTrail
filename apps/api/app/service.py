@@ -4755,14 +4755,9 @@ class WorkspaceService:
                 resolved_commit=attempt.resolved_commit,
                 resolved_ref=attempt.resolved_ref or attempt.requested_ref,
             )
-            if control is None:
-                self.github_client.download_and_extract(
-                    resolution, source_root, budget=github_budget
-                )
-            else:
-                self.github_client.download_and_extract(
-                    resolution, source_root, budget=github_budget, control=control
-                )
+            self.github_client.download_and_extract(
+                resolution, source_root, budget=github_budget, control=control
+            )
             self.registry.bind_runtime_source(attempt.repository_id, source_root)
             self.registry.management_store.update_attempt(
                 attempt_id,
