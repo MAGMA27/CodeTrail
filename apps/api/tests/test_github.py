@@ -83,6 +83,28 @@ class _FakeResponse:
         return None
 
 
+class _TricklingResponse(_FakeResponse):
+    def __init__(
+        self,
+        body: bytes,
+        monotonic_now: list[float],
+        *,
+        piece_size: int,
+    ) -> None:
+        super().__init__(200, body)
+        self.monotonic_now = monotonic_now
+        self.piece_size = piece_size
+        self.read1_calls = 0
+
+    def read1(self, size: int = -1) -> bytes:
+        self.monotonic_now[0] += 1.0
+        self.read1_calls += 1
+        return super().read(min(size, self.piece_size))
+
+    def read(self, _size: int = -1) -> bytes:
+        raise AssertionError("read1 should be preferred for a progressing response")
+
+
 class _FakeOpener:
     def __init__(self, responses: dict[str, list[_FakeResponse]]) -> None:
         self.responses = responses
@@ -137,7 +159,7 @@ def _rate_limited_client(responses: list[_FakeResponse], **kwargs) -> tuple[GitH
     return client, opener, sleeps
 
 
-def test_github_import_shares_one_deadline_across_resolve_and_download(tmp_path: Path) -> None:
+def test_github_import_shares_only_the_rate_limit_wait_budget(tmp_path: Path) -> None:
     api_archive = "https://api.github.com/repos/owner/repo/tarball/" + "b" * 40
     monotonic_now = [100.0]
     sleeps: list[float] = []
@@ -158,7 +180,7 @@ def test_github_import_shares_one_deadline_across_resolve_and_download(tmp_path:
     client = GitHubClient(
         token="",
         opener=opener,
-        max_total_seconds=20.0,
+        max_rate_limit_wait_seconds=20.0,
         sleep=sleep,
         clock=lambda: 1_000_000.0,
         monotonic=lambda: monotonic_now[0],
@@ -170,10 +192,10 @@ def test_github_import_shares_one_deadline_across_resolve_and_download(tmp_path:
         client.download_and_extract(resolution, tmp_path / "shared-budget", budget=budget)
 
     assert monotonic_now[0] - 100.0 == 15.0
-    assert monotonic_now[0] < budget.deadline
+    assert budget.remaining_wait_seconds == 5.0
     assert sleeps == [15.0]
     assert opener.calls == [_COMMIT_URL, _COMMIT_URL, api_archive]
-    assert opener.timeouts == [20.0, 5.0, 5.0]
+    assert opener.timeouts == [20.0, 20.0, 30.0]
     assert error.value.code == "budget_exceeded"
     assert error.value.status_code == 429
     assert "rate limit" in error.value.message
@@ -200,7 +222,7 @@ def test_github_import_http_returns_rate_limit_hint_before_client_timeout(tmp_pa
     client = GitHubClient(
         token="",
         opener=opener,
-        max_total_seconds=20.0,
+        max_rate_limit_wait_seconds=20.0,
         sleep=sleep,
         clock=lambda: 1_000_000.0,
         monotonic=lambda: monotonic_now[0],
@@ -228,10 +250,82 @@ def test_github_import_http_returns_rate_limit_hint_before_client_timeout(tmp_pa
     assert "CODETRAIL_GITHUB_TOKEN" in error["message"]
 
 
-def test_github_budget_expiry_during_response_read_keeps_rate_limit_hint() -> None:
-    monotonic_now = [100.0]
-    budget_deadline = monotonic_now[0] + 20.0
+def test_github_download_timeout_returns_failed_attempt_and_retry_works(tmp_path: Path) -> None:
+    import asyncio
 
+    archive_url = "https://api.github.com/repos/owner/repo/tarball/" + "b" * 40
+
+    class _IdleTimeoutResponse(_FakeResponse):
+        def __init__(self) -> None:
+            super().__init__(200)
+            self._body = None
+
+        def read(self, _size: int = -1) -> bytes:
+            raise TimeoutError("archive download stalled")
+
+    idle_response = _IdleTimeoutResponse()
+    opener = _FakeOpener(
+        {
+            _COMMIT_URL: [_FakeResponse(200, _COMMIT_BODY)],
+            archive_url: [idle_response],
+        }
+    )
+    application = create_app(
+        {},
+        data_root=tmp_path / "service-data",
+        github_import_enabled=True,
+        github_client=GitHubClient(
+            token="",
+            opener=opener,
+            download_idle_timeout_seconds=5.0,
+            download_timeout_seconds=30.0,
+        ),
+    )
+
+    status, error = asyncio.run(
+        _request(
+            application,
+            "POST",
+            "/api/imports/github",
+            {"name": "Slow archive", "url": "https://github.com/owner/repo", "ref": "main"},
+        )
+    )
+
+    assert status == 200
+    assert error["attempt"]["status"] == "failed"
+    assert error["attempt"]["error_code"] == "download_timeout"
+    assert error["attempt"]["error_message"] == "GitHub archive download timed out"
+    attempt_id = error["attempt"]["attempt_id"]
+    assert opener.timeouts == [20.0, 5.0]
+    assert idle_response.socket_timeouts == [5.0]
+    assert application.state.registry.management_store.list_project_updates() == ()
+
+    opener.responses[archive_url] = [
+        _FakeResponse(200, _archive_bytes(("repo-root/module.py", b"VALUE = 1\n", "file")))
+    ]
+    status, retried = asyncio.run(
+        _request(application, "POST", f"/api/imports/{attempt_id}/retry-github")
+    )
+
+    assert status == 200
+    assert retried["attempt"]["attempt_id"] == attempt_id
+    assert retried["attempt"]["status"] == "ready"
+    assert retried["attempt"]["error_code"] is None
+
+
+def test_github_download_timeout_openapi_response_is_scoped_to_refresh(tmp_path: Path) -> None:
+    application = create_app({}, data_root=tmp_path / "service-data")
+    paths = application.openapi()["paths"]
+
+    assert "504" not in paths["/api/imports/github"]["post"]["responses"]
+    assert "504" not in paths["/api/imports/{attempt_id}/retry-github"]["post"]["responses"]
+    assert "504" in paths[
+        "/api/projects/{project_id}/indexes/{index_id}/github-refresh"
+    ]["post"]["responses"]
+
+
+def test_github_request_timeout_does_not_use_the_rate_limit_wait_budget() -> None:
+    monotonic_now = [100.0]
     def sleep(seconds: float) -> None:
         monotonic_now[0] += seconds
 
@@ -241,8 +335,8 @@ def test_github_budget_expiry_during_response_read_keeps_rate_limit_hint() -> No
             self._body = None
 
         def read(self, _size: int = -1) -> bytes:
-            monotonic_now[0] = budget_deadline
-            raise TimeoutError("response body stalled until the shared deadline")
+            monotonic_now[0] += 50.0
+            raise TimeoutError("response body exceeded the per-request timeout")
 
     slow_response = _DeadlineResponse()
     opener = _FakeOpener(
@@ -257,7 +351,7 @@ def test_github_budget_expiry_during_response_read_keeps_rate_limit_hint() -> No
         token="",
         opener=opener,
         timeout_seconds=10.0,
-        max_total_seconds=20.0,
+        max_rate_limit_wait_seconds=20.0,
         sleep=sleep,
         clock=lambda: 1_000_000.0,
         monotonic=lambda: monotonic_now[0],
@@ -267,14 +361,165 @@ def test_github_budget_expiry_during_response_read_keeps_rate_limit_hint() -> No
     with pytest.raises(GitHubError) as error:
         client.resolve("https://github.com/owner/repo", "main", budget=budget)
 
-    assert monotonic_now[0] == budget.deadline
-    assert opener.timeouts == [10.0, 1.0]
-    assert slow_response.socket_timeouts == [1.0]
-    assert error.value.code == "budget_exceeded"
-    assert error.value.status_code == 429
-    assert "rate limit" in error.value.message
-    assert "resets at" in error.value.message
-    assert "CODETRAIL_GITHUB_TOKEN" in error.value.message
+    assert monotonic_now[0] == 169.0
+    assert opener.timeouts == [10.0, 10.0]
+    assert slow_response.socket_timeouts == [10.0]
+    assert error.value.code == "internal_error"
+    assert error.value.status_code == 503
+    assert budget.remaining_wait_seconds == 1.0
+
+
+def test_slow_github_requests_do_not_consume_rate_limit_wait_budget() -> None:
+    monotonic_now = [100.0]
+
+    api_repo_url = "https://api.github.com/repos/owner/repo"
+
+    class _SlowOpener(_FakeOpener):
+        def open(self, request, timeout: float) -> _FakeResponse:
+            monotonic_now[0] += 18.0
+            return super().open(request, timeout)
+
+    opener = _SlowOpener(
+        {
+            api_repo_url: [_FakeResponse(200, json.dumps({"default_branch": "main"}).encode())],
+            _COMMIT_URL: [_FakeResponse(200, _COMMIT_BODY)],
+        }
+    )
+    client = GitHubClient(opener=opener, token="", monotonic=lambda: monotonic_now[0])
+    budget = client.new_budget()
+
+    resolution = client.resolve("https://github.com/owner/repo", None, budget=budget)
+
+    assert resolution.resolved_commit == "b" * 40
+    assert monotonic_now[0] == 136.0
+    assert budget.remaining_wait_seconds == 20.0
+    assert opener.timeouts == [20.0, 20.0]
+
+
+def test_github_archive_total_timeout_is_distinct_from_rate_limit_budget(tmp_path: Path) -> None:
+    archive_url = "https://api.github.com/repos/owner/repo/tarball/" + "b" * 40
+    monotonic_now = [100.0]
+
+    class _LateEofResponse(_FakeResponse):
+        def __init__(self) -> None:
+            super().__init__(200)
+            self._body = None
+
+        def read(self, _size: int = -1) -> bytes:
+            monotonic_now[0] = 105.0
+            return b""
+
+    response = _LateEofResponse()
+    opener = _FakeOpener({archive_url: [response]})
+    client = GitHubClient(
+        opener=opener,
+        token="",
+        download_idle_timeout_seconds=30.0,
+        download_timeout_seconds=5.0,
+        monotonic=lambda: monotonic_now[0],
+    )
+    resolution = GitHubResolution(parse_github_repository_url("https://github.com/owner/repo"), "main", "b" * 40)
+
+    with pytest.raises(GitHubError) as error:
+        client.download_and_extract(resolution, tmp_path / "total-timeout")
+
+    assert error.value.code == "download_timeout"
+    assert error.value.status_code == 504
+    assert opener.timeouts == [5.0]
+    assert response.socket_timeouts == [5.0]
+    assert client.new_budget().remaining_wait_seconds == 20.0
+
+
+def test_github_archive_total_timeout_is_enforced_while_body_trickles(tmp_path: Path) -> None:
+    archive_url = "https://api.github.com/repos/owner/repo/tarball/" + "b" * 40
+    monotonic_now = [100.0]
+    response = _TricklingResponse(b"x" * 3_000, monotonic_now, piece_size=120)
+    opener = _FakeOpener({archive_url: [response]})
+    client = GitHubClient(
+        opener=opener,
+        token="",
+        download_idle_timeout_seconds=30.0,
+        download_timeout_seconds=5.0,
+        monotonic=lambda: monotonic_now[0],
+    )
+    resolution = GitHubResolution(parse_github_repository_url("https://github.com/owner/repo"), "main", "b" * 40)
+
+    with pytest.raises(GitHubError) as error:
+        client.download_and_extract(resolution, tmp_path / "trickling-timeout")
+
+    assert error.value.code == "download_timeout"
+    assert error.value.status_code == 504
+    assert monotonic_now[0] - 100.0 == 5.0
+    assert response.read1_calls == 5
+    assert opener.timeouts == [5.0]
+    assert response.socket_timeouts == [5.0, 4.0, 3.0, 2.0, 1.0]
+
+
+def test_github_archive_slow_progress_longer_than_api_timeout_succeeds(tmp_path: Path) -> None:
+    import random
+    import string
+
+    archive_url = "https://api.github.com/repos/owner/repo/tarball/" + "b" * 40
+    random_source = random.Random(42)
+    payload = "".join(
+        f"VALUE_{index} = '{''.join(random_source.choices(string.ascii_letters, k=60))}'\n"
+        for index in range(500)
+    ).encode("ascii")
+    archive_bytes = _archive_bytes(("repo-root/module.py", payload, "file"))
+    monotonic_now = [100.0]
+    response = _TricklingResponse(
+        archive_bytes,
+        monotonic_now,
+        piece_size=(len(archive_bytes) + 25) // 26,
+    )
+    opener = _FakeOpener({archive_url: [response]})
+    client = GitHubClient(
+        opener=opener,
+        token="",
+        download_idle_timeout_seconds=30.0,
+        download_timeout_seconds=40.0,
+        monotonic=lambda: monotonic_now[0],
+    )
+    resolution = GitHubResolution(parse_github_repository_url("https://github.com/owner/repo"), "main", "b" * 40)
+
+    result = client.download_and_extract(resolution, tmp_path / "slow-progress")
+
+    elapsed = monotonic_now[0] - 100.0
+    assert result.extracted_file_count == 1
+    assert elapsed > 20.0
+    assert elapsed < 40.0
+    assert 21 <= response.read1_calls <= 27
+    assert elapsed == float(response.read1_calls)
+    assert opener.timeouts == [30.0]
+
+
+def test_github_download_timeout_environment_values_fall_back_when_invalid(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("CODETRAIL_GITHUB_DOWNLOAD_IDLE_TIMEOUT", raising=False)
+    monkeypatch.delenv("CODETRAIL_GITHUB_DOWNLOAD_TIMEOUT", raising=False)
+    defaults = GitHubClient(token="")
+    assert defaults.download_idle_timeout_seconds == 30.0
+    assert defaults.download_timeout_seconds == 300.0
+
+    monkeypatch.setenv("CODETRAIL_GITHUB_DOWNLOAD_IDLE_TIMEOUT", "8.5")
+    monkeypatch.setenv("CODETRAIL_GITHUB_DOWNLOAD_TIMEOUT", "600")
+    configured = GitHubClient(token="")
+    assert configured.download_idle_timeout_seconds == 8.5
+    assert configured.download_timeout_seconds == 600.0
+
+    monkeypatch.setenv("CODETRAIL_GITHUB_DOWNLOAD_IDLE_TIMEOUT", "invalid")
+    monkeypatch.setenv("CODETRAIL_GITHUB_DOWNLOAD_TIMEOUT", "inf")
+    invalid = GitHubClient(token="")
+    assert invalid.download_idle_timeout_seconds == 30.0
+    assert invalid.download_timeout_seconds == 300.0
+
+
+def test_mcp_preserves_retryable_github_download_timeout() -> None:
+    from app.mcp_server import _mcp_error
+
+    result = _mcp_error(ServiceError("download_timeout", 504, "GitHub archive download timed out"))
+
+    assert result.code == "download_timeout"
+    assert result.retryable is True
 
 
 def test_github_import_succeeds_after_one_rate_limited_resolve_and_download(tmp_path: Path) -> None:
@@ -300,7 +545,7 @@ def test_github_import_succeeds_after_one_rate_limited_resolve_and_download(tmp_
         token="",
         opener=opener,
         timeout_seconds=10.0,
-        max_total_seconds=20.0,
+        max_rate_limit_wait_seconds=20.0,
         sleep=sleep,
         clock=lambda: 1_000_000.0,
         monotonic=lambda: monotonic_now[0],
@@ -315,10 +560,10 @@ def test_github_import_succeeds_after_one_rate_limited_resolve_and_download(tmp_
     assert (tmp_path / "success-after-retry" / "main.py").is_file()
     assert sleeps == [19.0]
     assert monotonic_now[0] - 100.0 == 19.0
-    assert monotonic_now[0] < budget.deadline
-    assert opener.timeouts == [10.0, 1.0, 1.0, 1.0]
+    assert budget.remaining_wait_seconds == 1.0
+    assert opener.timeouts == [10.0, 10.0, 30.0, 30.0]
     assert archive_response.socket_timeouts
-    assert all(timeout == 1.0 for timeout in archive_response.socket_timeouts)
+    assert all(timeout == 30.0 for timeout in archive_response.socket_timeouts)
 
 
 def test_github_retries_after_429_using_retry_after() -> None:
@@ -743,17 +988,22 @@ def test_github_refresh_failure_keeps_latest_and_source_identity(tmp_path: Path)
     baseline_index_id = imported["index"]["index"]["index_id"]
     repository_id = imported["attempt"]["repository_id"]
 
-    def fail_download(resolution: GitHubResolution, destination: Path) -> GitHubArchive:
+    def fail_download(
+        resolution: GitHubResolution,
+        destination: Path,
+        *,
+        budget: GitHubRequestBudget | None = None,
+    ) -> GitHubArchive:
         client.downloads += 1
-        raise GitHubError("internal_error", 503, "archive unavailable")
+        raise GitHubError("download_timeout", 504, "GitHub archive download timed out")
 
     client.download_and_extract = fail_download  # type: ignore[method-assign]
 
     status, failed = asyncio.run(
         _request(app, "POST", f"/api/projects/{project_id}/indexes/{baseline_index_id}/github-refresh")
     )
-    assert status == 503
-    assert failed["code"] == "internal_error"
+    assert status == 504
+    assert failed["code"] == "download_timeout"
     assert app.state.registry.management_store.load_source(repository_id).resolved_commit == first
     status, indexes = asyncio.run(_request(app, "GET", f"/api/projects/{project_id}/indexes"))
     assert status == 200

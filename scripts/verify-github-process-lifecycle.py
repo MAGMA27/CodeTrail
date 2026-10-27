@@ -1127,6 +1127,7 @@ def _try_public_github() -> dict[str, Any]:
             f"{base_url}/api/imports/github",
             "POST",
             {"name": "Public GitHub Probe", "url": "https://github.com/pallets/itsdangerous"},
+            timeout=20 * 60,
         )
         result: dict[str, Any] = {"status": status, "response": imported}
         if status == 200:

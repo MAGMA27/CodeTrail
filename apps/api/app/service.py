@@ -3270,10 +3270,11 @@ class WorkspaceService:
             )
             if imported.attempt.status != "ready" or imported.index is None:
                 error_code = imported.attempt.error_code or "conflict"
-                if error_code not in {"budget_exceeded", "forbidden", "not_found", "conflict", "internal_error"}:
+                if error_code not in {"budget_exceeded", "download_timeout", "forbidden", "not_found", "conflict", "internal_error"}:
                     error_code = "conflict"
                 status_code = {
                     "budget_exceeded": 429,
+                    "download_timeout": 504,
                     "forbidden": 403,
                     "not_found": 404,
                     "internal_error": 503,

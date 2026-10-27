@@ -40,7 +40,7 @@
 
 公开 GitHub 的 HTTP 导入默认开启；设置 github_import_enabled=false 或 CODETRAIL_GITHUB_IMPORT_ENABLED=0 可关闭。MCP GitHub 写入能力仍由独立开关控制。
 
-GitHub 未认证 API 按出口 IP 共享较低限额，较大仓库或多次导入容易遇到 429/403 限流。可在启动 API 的环境中设置 `CODETRAIL_GITHUB_TOKEN`（未设置时回退读取 `GITHUB_TOKEN`）提高限额；只读公开仓库的细粒度 token 无需额外仓库权限即可。token 只作为 `Authorization` 请求头发往 GitHub，不写日志、不持久化、不出现在错误或 HTTP/MCP 响应中。遇到限流时客户端优先遵守 `Retry-After`，额度耗尽时按 `X-RateLimit-Reset` 等待，否则指数退避；每个请求最多重试 3 次、单次等待不超过 20 秒。一次导入共用 20 秒单调时钟预算，覆盖 ref 解析、archive 下载/解包及所有请求重试；显式 GitHub 刷新还把前置 metadata 检查计入同一预算。每次请求的 socket timeout 不超过剩余预算，等待超出剩余预算时立即返回 `budget_exceeded`（HTTP 429），消息包含 reset/token 提示。该预算比 Web 导入请求的 60 秒 timeout 少 40 秒，为索引构建及本地收尾留出时间；MCP 导入、重试和刷新复用相同服务端预算。
+GitHub 未认证 API 按出口 IP 共享较低限额，较大仓库或多次导入容易遇到 429/403 限流。可在启动 API 的环境中设置 `CODETRAIL_GITHUB_TOKEN`（未设置时回退读取 `GITHUB_TOKEN`）提高限额；只读公开仓库的细粒度 token 无需额外仓库权限即可。token 只作为 `Authorization` 请求头发往 GitHub，不写日志、不持久化、不出现在错误或 HTTP/MCP 响应中。遇到限流时客户端优先遵守 `Retry-After`，额度耗尽时按 `X-RateLimit-Reset` 等待，否则指数退避；每个请求最多重试 3 次。一次导入、重试或刷新共用 20 秒累计限流等待预算；只有 429/限流型 403 的重试休眠扣减此预算，正常 GitHub 请求、下载、解包和索引耗时不计入。等待放不进剩余预算时立即返回带 reset/token 提示的 `budget_exceeded`（HTTP 429）。GitHub metadata/API 请求各有 20 秒请求超时；归档下载另设 30 秒无数据空闲超时和 300 秒总下载超时，可用 `CODETRAIL_GITHUB_DOWNLOAD_IDLE_TIMEOUT` 与 `CODETRAIL_GITHUB_DOWNLOAD_TIMEOUT`（秒）配置，无效值回退默认值。导入或重试的归档下载超时时，接口仍返回 `GitHubImportResponse`，其中 attempt 状态为 `failed`、`error_code` 为 `download_timeout`，并保留 attempt ID 供重试；显式 `github-refresh` 则返回 HTTP 504 和 `download_timeout`。MCP 导入、重试和刷新复用相同下载与限流边界，并通过 MCP 错误映射保留 `download_timeout`。
 
 安装入口使用 `uv tool install ./apps/api`，得到独立 `codetrail` 命令。`codetrail init` 初始化用户设置，`codetrail api` 与 `codetrail mcp` 共用该设置；`install --print-config`、`install`、`status` 和 `uninstall` 管理 Codex 注册。完整配置和覆盖规则见 [mcp.md](mcp.md)。源码启动脚本调用同一 CLI；Web 仍从源码运行。
 

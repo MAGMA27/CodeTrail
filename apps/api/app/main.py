@@ -104,6 +104,11 @@ _API_ERROR_RESPONSES = {
     503: {"model": ApiErrorResponse},
 }
 
+_GITHUB_REFRESH_ERROR_RESPONSES = {
+    **_API_ERROR_RESPONSES,
+    504: {"model": ApiErrorResponse},
+}
+
 
 def _allowed_origins() -> list[str]:
     configured_origins = os.getenv(
@@ -698,7 +703,7 @@ def create_app(
     @application.post(
         "/api/projects/{project_id}/indexes/{index_id}/github-refresh",
         response_model=IndexRefreshResponse,
-        responses=_API_ERROR_RESPONSES,
+        responses=_GITHUB_REFRESH_ERROR_RESPONSES,
     )
     async def refresh_github_source(
         http_request: Request,

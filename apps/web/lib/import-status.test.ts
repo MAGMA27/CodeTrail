@@ -127,3 +127,16 @@ test("explains GitHub rate limit errors and keeps other import errors unchanged"
   assert.match(limited, /Retry after about 30 seconds/);
   assert.equal(githubImportErrorMessage("GitHub repository or ref was not found"), "GitHub repository or ref was not found");
 });
+
+test("explains failed GitHub download attempts without showing the rate-limit hint", () => {
+  const failedAttempt = {
+    status: "failed",
+    error_code: "download_timeout",
+    error_message: "The archive download exceeded its time limit.",
+  };
+  const message = githubImportErrorMessage(failedAttempt.error_message, failedAttempt.error_code);
+  assert.match(message, /^GitHub 仓库归档下载超时/);
+  assert.match(message, /可重试/);
+  assert.match(message, /The archive download exceeded its time limit/);
+  assert.doesNotMatch(message, /限流/);
+});

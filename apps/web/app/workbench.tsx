@@ -2786,7 +2786,10 @@ export default function Workbench() {
         ? response.cleanup_status === "failed"
           ? response.cleanup_error ?? "索引已完成，但临时目录清理失败。"
           : null
-      : githubImportErrorMessage(response.attempt.error_message ?? "GitHub 导入未完成。"),
+      : githubImportErrorMessage(
+          response.attempt.error_message ?? "GitHub 导入未完成。",
+          response.attempt.error_code ?? undefined,
+        ),
     );
     if (response.attempt.status === "ready") {
       applyImportedProject(
@@ -2917,7 +2920,10 @@ export default function Workbench() {
         return false;
       }
       setGithubImportStatus(null);
-      setGithubImportError(githubImportErrorMessage(importRequestErrorMessage(error)));
+      setGithubImportError(githubImportErrorMessage(
+        importRequestErrorMessage(error),
+        error instanceof ApiRequestError ? error.code : undefined,
+      ));
       return false;
     } finally {
       importActionInFlight.current = false;
@@ -3069,7 +3075,10 @@ export default function Workbench() {
           return false;
         }
         setGithubImportStatus(isUncertainImportRequestError(error) ? null : "failed");
-        setGithubImportError(githubImportErrorMessage(importRequestErrorMessage(error)));
+        setGithubImportError(githubImportErrorMessage(
+          importRequestErrorMessage(error),
+          error instanceof ApiRequestError ? error.code : undefined,
+        ));
         return false;
       } finally {
         importActionInFlight.current = false;
@@ -3104,7 +3113,10 @@ export default function Workbench() {
         return false;
       }
       setGithubImportStatus(isUncertainImportRequestError(error) ? null : "failed");
-      setGithubImportError(githubImportErrorMessage(importRequestErrorMessage(error)));
+      setGithubImportError(githubImportErrorMessage(
+        importRequestErrorMessage(error),
+        error instanceof ApiRequestError ? error.code : undefined,
+      ));
       return false;
     } finally {
       importActionInFlight.current = false;
@@ -3359,7 +3371,11 @@ export default function Workbench() {
       if (isAbortError(error) || !isLatestRequest(requestId, indexRequestId.current)) {
         return;
       }
-      setIndexFreshnessError(errorMessage(error));
+      setIndexFreshnessError(
+        error instanceof ApiRequestError && error.code === "download_timeout"
+          ? githubImportErrorMessage(error.message, error.code)
+          : errorMessage(error),
+      );
     } finally {
       if (isLatestRequest(requestId, indexRequestId.current)) {
         setIndexFreshnessStatus("idle");

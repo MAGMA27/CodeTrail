@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  DEFAULT_GITHUB_REQUEST_TIMEOUT_MS,
+  GITHUB_REQUEST_TIMEOUT_MS,
   RequestTimeoutError,
   isFeatureGenerationListResponse,
   isFeatureGenerationResponse,
@@ -23,6 +25,10 @@ import {
   createProjectSessionRun,
   getProjectNeighbors,
   openProjectIndex,
+  importGitHubRepository,
+  refreshGitHubSource,
+  retryGitHubImport,
+  parseGitHubRequestTimeoutMs,
   requestJson,
   SCHEMA_VERSION,
 } from "./api.ts";
@@ -1415,6 +1421,52 @@ test("requestJson preserves a timeout when response headers arrive before the bo
       (error: unknown) => error instanceof RequestTimeoutError,
     );
   } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("GitHub import, retry, and refresh requests share the extended timeout", async () => {
+  assert.ok(GITHUB_REQUEST_TIMEOUT_MS > 320_000);
+  assert.equal(DEFAULT_GITHUB_REQUEST_TIMEOUT_MS, 600_000);
+  assert.equal(parseGitHubRequestTimeoutMs(undefined), DEFAULT_GITHUB_REQUEST_TIMEOUT_MS);
+  assert.equal(parseGitHubRequestTimeoutMs(String(DEFAULT_GITHUB_REQUEST_TIMEOUT_MS + 60_000)), DEFAULT_GITHUB_REQUEST_TIMEOUT_MS + 60_000);
+  assert.equal(parseGitHubRequestTimeoutMs("320000"), 320_000);
+  assert.equal(parseGitHubRequestTimeoutMs("1"), 1);
+  assert.equal(parseGitHubRequestTimeoutMs("2147483647"), 2_147_483_647);
+  assert.equal(parseGitHubRequestTimeoutMs("2147483648"), DEFAULT_GITHUB_REQUEST_TIMEOUT_MS);
+  assert.equal(parseGitHubRequestTimeoutMs("0"), DEFAULT_GITHUB_REQUEST_TIMEOUT_MS);
+  assert.equal(parseGitHubRequestTimeoutMs("-1"), DEFAULT_GITHUB_REQUEST_TIMEOUT_MS);
+  assert.equal(parseGitHubRequestTimeoutMs("Infinity"), DEFAULT_GITHUB_REQUEST_TIMEOUT_MS);
+  assert.equal(parseGitHubRequestTimeoutMs("1.5"), DEFAULT_GITHUB_REQUEST_TIMEOUT_MS);
+  assert.equal(parseGitHubRequestTimeoutMs("invalid"), DEFAULT_GITHUB_REQUEST_TIMEOUT_MS);
+
+  const originalFetch = globalThis.fetch;
+  const originalSetTimeout = globalThis.setTimeout;
+  const timeoutDelays: number[] = [];
+  type TimeoutCallback = Parameters<typeof globalThis.setTimeout>[0];
+  globalThis.setTimeout = ((callback: TimeoutCallback, timeout?: number) => {
+    timeoutDelays.push(Number(timeout));
+    return originalSetTimeout(callback, 0);
+  }) as typeof globalThis.setTimeout;
+  globalThis.fetch = ((_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+    const signal = init?.signal;
+    signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+  })) as typeof fetch;
+
+  try {
+    const results = await Promise.allSettled([
+      importGitHubRepository("project", "https://github.com/org/repo"),
+      retryGitHubImport("attempt"),
+      refreshGitHubSource("project", "index"),
+    ]);
+    assert.deepEqual(results.map((result) => result.status), ["rejected", "rejected", "rejected"]);
+    assert.deepEqual(timeoutDelays, [
+      GITHUB_REQUEST_TIMEOUT_MS,
+      GITHUB_REQUEST_TIMEOUT_MS,
+      GITHUB_REQUEST_TIMEOUT_MS,
+    ]);
+  } finally {
+    globalThis.setTimeout = originalSetTimeout;
     globalThis.fetch = originalFetch;
   }
 });

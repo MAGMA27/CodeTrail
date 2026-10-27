@@ -96,7 +96,7 @@ logger = logging.getLogger(__name__)
 _WORKBENCH_URL_ENV = "CODETRAIL_WORKBENCH_URL"
 _DEFAULT_WORKBENCH_URL = "http://localhost:3000"
 _MAX_DISCOVERY_ITEMS = 100
-_RETRYABLE_CODES = {"budget_exceeded", "internal_error"}
+_RETRYABLE_CODES = {"budget_exceeded", "download_timeout", "internal_error"}
 _NeighborEdgeKind = Literal["imports", "calls"]
 _ImpactDirection = Literal["callers", "callees"]
 _ProjectId = Annotated[Identifier, Field(description="Stable CodeTrail project ID.")]
@@ -1550,7 +1550,7 @@ def _project_indexes_response(result: ProjectIndexListResponse, limit: int) -> M
 
 
 def _mcp_error(exc: ServiceError) -> McpError:
-    code = exc.code if exc.code in {"not_found", "invalid_input", "conflict", "budget_exceeded", "internal_error", "forbidden"} else "internal_error"
+    code = exc.code if exc.code in {"not_found", "invalid_input", "conflict", "budget_exceeded", "download_timeout", "internal_error", "forbidden"} else "internal_error"
     message = exc.message if code == exc.code else "local MCP query failed"
     return McpError(code=code, message=message, retryable=code in _RETRYABLE_CODES)
 

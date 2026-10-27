@@ -6,8 +6,11 @@ export const IMPORT_STATUS_TOTAL_TIMEOUT_MS = 35_000;
 
 export type ImportSubmissionKey = { signature: string; key: string };
 
-/** Prefix a readable explanation when the API reports a GitHub rate limit; other messages pass through. */
-export function githubImportErrorMessage(message: string): string {
+/** Explain GitHub failures while preserving the API message for troubleshooting. */
+export function githubImportErrorMessage(message: string, errorCode?: string): string {
+  if (errorCode === "download_timeout") {
+    return `GitHub 仓库归档下载超时，操作未完成。可能是网络较慢或仓库较大；可重试，或在 API 服务端调高 CODETRAIL_GITHUB_DOWNLOAD_TIMEOUT 后重启服务。（${message}）`;
+  }
   return /rate limit/i.test(message)
     ? `GitHub API 限流，导入未完成。可稍后重试，或在 API 服务端设置 CODETRAIL_GITHUB_TOKEN 提高限额。（${message}）`
     : message;

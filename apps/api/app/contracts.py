@@ -2757,6 +2757,7 @@ ApiErrorCode: TypeAlias = Literal[
     "invalid_input",
     "conflict",
     "budget_exceeded",
+    "download_timeout",
     "internal_error",
     "forbidden",
 ]
@@ -2807,6 +2808,7 @@ McpErrorCode: TypeAlias = Literal[
     "invalid_input",
     "conflict",
     "budget_exceeded",
+    "download_timeout",
     "internal_error",
     "forbidden",
 ]
