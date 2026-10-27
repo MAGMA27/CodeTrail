@@ -27,7 +27,7 @@ RelationKind = Literal["imports", "calls"]
 BindingKind = Literal["module", "symbol"]
 RelationScopeKind = Literal["module", "class", "function"]
 # The semantic version changes when the graph/unresolved meaning changes.
-RELATION_SEMANTICS_VERSION = "relations-v9"
+RELATION_SEMANTICS_VERSION = "relations-v10"
 # This version only governs the persisted, index-independent facts payload.
 RELATION_FACT_EXTRACTION_RULES_VERSION = "python-relation-facts-v4"
 _RELATION_FACTS_FORMAT_VERSION = "relation-facts-v4"
@@ -1999,6 +1999,29 @@ class _RelationFactResolver:
         )
 
     def _resolve_call_target_parts(
+        self,
+        target_kind: Literal["name", "attribute", "dynamic"],
+        target_name: str | None,
+        target_parts: tuple[str, ...],
+    ) -> tuple[Symbol | None, str, list[str]]:
+        target, reason, candidates = self._resolve_call_target_parts_statically(
+            target_kind,
+            target_name,
+            target_parts,
+        )
+        if (
+            target is None
+            and target_kind == "attribute"
+            and len(target_parts) >= 3
+            and target_parts[-2] == "hook"
+        ):
+            # pluggy dispatches ``pm.hook.<name>(...)`` to every registered
+            # implementation at runtime. Keep it unresolved and expose
+            # same-name definitions only as possible targets.
+            return None, "pluggy_hook_dispatch", self._candidate_ids(target_parts[-1])
+        return target, reason, candidates
+
+    def _resolve_call_target_parts_statically(
         self,
         target_kind: Literal["name", "attribute", "dynamic"],
         target_name: str | None,

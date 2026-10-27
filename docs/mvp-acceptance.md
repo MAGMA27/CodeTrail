@@ -31,7 +31,7 @@
 | 10 | 规则入口覆盖无入口、静态路径、预算、项目隔离、HTTP/MCP 对照、证据引用和工作台联动 | [工作区决策](decisions/2026-09-11-project-workspace.md) 对 O1 的验收句 | 已验证 | 该句写明已用固定快照验证。没有另附结果文件。父决策仍为 proposed。 |
 | 11 | 保存功能版本的稳定分页和精确读取、同一快照上的 semantic/static 功能图、项目/index/generation 隔离，以及 HTTP/MCP 和工作台版本与图流程 | 同决策对 O3 的验收句 | 已验证 | 该句写明已验证。没有另附结果文件。 |
 | 12 | fixture/real 功能生成的适配、真实工具上下文、引用校验、预算/缓存/失败语义、HTTP 或可选 MCP，以及工作台证据钻取 | 同决策对 O2 的验收句 | 已验证 | 该句写明已验证。该段没有把真实供应商语义质量算作通过。 |
-| 13 | 架构视图识别插件入口和 `pyproject` 脚本 | [pluggy 旅程](../evals/results/real-repository-pluggy-issue-733-20261007/README.md) 的架构项 | 尚未验证 | 该项为 NEEDS_FIX，并写明规则说明尚不识别插件入口和 `pyproject` 脚本。源码钻取本身见第 8 项。 |
+| 13 | 架构视图识别插件入口和 `pyproject` 脚本 | [pluggy 旅程](../evals/results/real-repository-pluggy-issue-733-20261007/README.md) 的架构项 | 尚未验证 | 该项为 NEEDS_FIX，并写明规则说明尚不识别插件入口和 `pyproject` 脚本。当前入口规则已加入 pluggy hookimpl（marker 装饰或与快照内 hookspec 同名），`pm.hook` 分发保留为 unresolved；`pyproject` 脚本与 entry-points 元数据仍未识别，尚未重新验收。源码钻取本身见第 8 项。 |
 
 ## Session 与 Run
 

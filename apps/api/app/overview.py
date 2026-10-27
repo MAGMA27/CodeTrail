@@ -8,7 +8,7 @@ import re
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, Mapping
 
 from .contracts import (
     CodeEdge,
@@ -39,7 +39,7 @@ from .indexing import (
 from .relations import RelationIndex, relation_coverage_limitations
 
 
-RULES_VERSION = "python-entry-v6+http-shape-v2+architecture-v1"
+RULES_VERSION = "python-entry-v7+http-shape-v2+architecture-v1"
 DEFAULT_MAX_DEPTH = 4
 DEFAULT_MAX_PATHS = 40
 DEFAULT_MAX_MODULES = 100
@@ -319,17 +319,17 @@ def build_project_overview(
     if not candidates and not _deadline_reached(deadline):
         notes = [
             "未识别入口；这不表示项目没有入口。",
-            "当前规则覆盖 __main__.py、顶层 __name__ == __main__ 条件，以及可静态确认的 FastAPI 路由。",
+            "当前规则覆盖 __main__.py、顶层 __name__ == __main__ 条件、可静态确认的 FastAPI 路由，以及 pluggy hookimpl 标记或与快照内 hookspec 同名的插件钩子。",
         ]
     else:
         notes = [
-            "当前规则覆盖 __main__.py、顶层 __name__ == __main__ 条件，以及可静态确认的 FastAPI 路由。",
+            "当前规则覆盖 __main__.py、顶层 __name__ == __main__ 条件、可静态确认的 FastAPI 路由，以及 pluggy hookimpl 标记或与快照内 hookspec 同名的插件钩子。",
             (
                 "FastAPI 入口显示声明路径；未解析 APIRouter、挂载前缀或动态注册，因此不能视为最终 URL。"
                 if has_fastapi_routes
                 else "FastAPI 入口仅接受已知 FastAPI 实例、字面量路径和静态方法；未识别路由不表示项目没有入口。"
             ),
-            "插件运行时注册入口和 pyproject 脚本元数据尚未纳入入口规则。",
+            "pluggy 钩子由运行时 pm.hook 分发，入口只表示可能被插件管理器调用；pyproject/setup.cfg/setup.py entry-points 元数据和运行时 register 尚未纳入入口规则。",
         ]
     if cycle_skipped:
         notes.append("循环调用只保留首次有界路径，未继续展开循环。")
@@ -1579,6 +1579,18 @@ def _find_entry_candidates(
             function_symbols_by_location[(symbol.path, symbol.start_line, symbol.end_line)].append(symbol)
     for symbols in function_symbols_by_location.values():
         symbols.sort(key=lambda symbol: (symbol.qualified_name, symbol.symbol_id))
+    trees: dict[str, ast.Module] = {}
+    for source_file in sorted(relation.snapshot.files, key=lambda item: item.path):
+        if _deadline_reached(deadline):
+            break
+        if not source_file.path.lower().endswith(".py") or source_file.path not in symbols_by_path:
+            continue
+        try:
+            trees[source_file.path] = ast.parse(source_file.text, filename=source_file.path, type_comments=True)
+        except SyntaxError:
+            continue
+    hookimpl_markers = _hookimpl_marker_exports(trees, symbols_by_path, deadline)
+    hookspec_names, hookspec_symbol_ids = _hookspec_names(trees, symbols_by_path, function_symbols_by_location, deadline)
     for source_file in sorted(relation.snapshot.files, key=lambda item: item.path):
         if _deadline_reached(deadline):
             break
@@ -1601,9 +1613,8 @@ def _find_entry_candidates(
                     guard=False,
                 )
             )
-        try:
-            tree = ast.parse(source_file.text, filename=source_file.path, type_comments=True)
-        except SyntaxError:
+        tree = trees.get(source_file.path)
+        if tree is None:
             continue
         candidates.extend(
             _find_fastapi_route_candidates(
@@ -1611,6 +1622,17 @@ def _find_entry_candidates(
                 tree,
                 function_symbols_by_location,
                 deadline,
+            )
+        )
+        candidates.extend(
+            _find_pluggy_hookimpl_candidates(
+                source_file.path,
+                module,
+                tree,
+                function_symbols_by_location,
+                hookimpl_markers,
+                hookspec_names,
+                hookspec_symbol_ids,
             )
         )
         for node in tree.body:
@@ -1669,6 +1691,225 @@ def _find_fastapi_route_candidates(
     scanner = _FastApiRouteScanner(path, function_symbols_by_location, deadline)
     scanner.scan(tree.body)
     return scanner.candidates
+
+
+_PLUGGY_MODULES = frozenset({"pluggy", "pluggy._hooks"})
+_PYTEST_HOOKIMPL_ATTRIBUTES = frozenset({"hookimpl"})
+_MAX_HOOKIMPL_MARKER_PASSES = 4
+
+
+class _HookimplBindings:
+    """Module-level names that are known to hold a pluggy ``HookimplMarker`` instance."""
+
+    def __init__(self) -> None:
+        self.marker_classes: set[str] = set()
+        self.pluggy_modules: set[str] = set()
+        self.instances: set[str] = set()
+        self.namespaces: dict[str, frozenset[str]] = {}
+
+    def clear(self, name: str) -> None:
+        self.marker_classes.discard(name)
+        self.pluggy_modules.discard(name)
+        self.instances.discard(name)
+        self.namespaces.pop(name, None)
+
+    def clear_all(self) -> None:
+        self.marker_classes.clear()
+        self.pluggy_modules.clear()
+        self.instances.clear()
+        self.namespaces.clear()
+
+    def clear_writes(self, statement: ast.stmt) -> None:
+        writes = _BindingWriteCollector()
+        writes.visit(statement)
+        if writes.invalidate_all:
+            self.clear_all()
+        for name in writes.names:
+            self.clear(name)
+
+    def is_marker(self, decorator: ast.expr) -> bool:
+        expression = decorator.func if isinstance(decorator, ast.Call) else decorator
+        if isinstance(expression, ast.Name):
+            return expression.id in self.instances
+        if isinstance(expression, ast.Attribute) and isinstance(expression.value, ast.Name):
+            return expression.attr in self.namespaces.get(expression.value.id, frozenset())
+        return False
+
+
+def _scan_hookimpl_module(
+    path: str,
+    module: Symbol,
+    tree: ast.Module,
+    exported: Mapping[str, frozenset[str]],
+) -> tuple[_HookimplBindings, list[tuple[ast.FunctionDef | ast.AsyncFunctionDef, ast.expr]]]:
+    """Track module-level hookimpl markers in statement order and collect decorated functions.
+
+    Recognized markers are ``pluggy.HookimplMarker(...)`` instances bound in this
+    module or imported from a snapshot module that binds one, and ``pytest.hookimpl``.
+    Any later rebinding of a name drops it, so shadowed markers are not trusted.
+    """
+
+    bindings = _HookimplBindings()
+    decorated: list[tuple[ast.FunctionDef | ast.AsyncFunctionDef, ast.expr]] = []
+
+    def record(function: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+        marker = next((item for item in function.decorator_list if bindings.is_marker(item)), None)
+        if marker is not None:
+            decorated.append((function, marker))
+
+    for statement in tree.body:
+        if isinstance(statement, ast.ImportFrom):
+            resolved = _resolved_python_import_module(module, path, statement.level, statement.module)
+            for alias in statement.names:
+                if alias.name == "*":
+                    bindings.clear_all()
+                    continue
+                local_name = alias.asname or alias.name
+                bindings.clear(local_name)
+                if resolved is None:
+                    continue
+                if resolved in _PLUGGY_MODULES and alias.name == "HookimplMarker":
+                    bindings.marker_classes.add(local_name)
+                elif resolved == "pytest" and alias.name in _PYTEST_HOOKIMPL_ATTRIBUTES:
+                    bindings.instances.add(local_name)
+                elif alias.name in exported.get(resolved, frozenset()):
+                    bindings.instances.add(local_name)
+                elif f"{resolved}.{alias.name}" in exported:
+                    bindings.namespaces[local_name] = exported[f"{resolved}.{alias.name}"]
+        elif isinstance(statement, ast.Import):
+            for alias in statement.names:
+                local_name = alias.asname or alias.name.split(".", 1)[0]
+                bindings.clear(local_name)
+                if alias.name in _PLUGGY_MODULES and (alias.asname or alias.name == "pluggy"):
+                    bindings.pluggy_modules.add(local_name)
+                elif alias.name == "pytest":
+                    bindings.namespaces[local_name] = _PYTEST_HOOKIMPL_ATTRIBUTES
+                elif alias.asname and alias.name in exported:
+                    bindings.namespaces[local_name] = exported[alias.name]
+        elif isinstance(statement, (ast.Assign, ast.AnnAssign)):
+            targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
+            value = statement.value
+            is_marker = False
+            if len(targets) == 1 and isinstance(targets[0], ast.Name) and value is not None:
+                if isinstance(value, ast.Name):
+                    is_marker = value.id in bindings.instances
+                elif isinstance(value, ast.Call):
+                    func = value.func
+                    is_marker = (
+                        isinstance(func, ast.Name) and func.id in bindings.marker_classes
+                    ) or (
+                        isinstance(func, ast.Attribute)
+                        and func.attr == "HookimplMarker"
+                        and isinstance(func.value, ast.Name)
+                        and func.value.id in bindings.pluggy_modules
+                    )
+            bindings.clear_writes(statement)
+            if is_marker:
+                bindings.instances.add(targets[0].id)  # type: ignore[union-attr]
+        elif isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            record(statement)
+            bindings.clear_writes(statement)
+        elif isinstance(statement, ast.ClassDef):
+            for item in statement.body:
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    record(item)
+            bindings.clear_writes(statement)
+        else:
+            bindings.clear_writes(statement)
+    return bindings, decorated
+
+
+def _hookimpl_marker_exports(
+    trees: Mapping[str, ast.Module],
+    modules_by_path: Mapping[str, Symbol],
+    deadline: float,
+) -> dict[str, frozenset[str]]:
+    """Map snapshot module names to the module-level hookimpl marker names they export."""
+
+    exported: dict[str, frozenset[str]] = {}
+    for _ in range(_MAX_HOOKIMPL_MARKER_PASSES):
+        changed = False
+        for path, tree in trees.items():
+            if _deadline_reached(deadline):
+                return exported
+            module = modules_by_path[path]
+            bindings, _decorated = _scan_hookimpl_module(path, module, tree, exported)
+            names = frozenset(bindings.instances)
+            if names and exported.get(module.qualified_name) != names:
+                exported[module.qualified_name] = names
+                changed = True
+        if not changed:
+            break
+    return exported
+
+
+def _hookspec_names(
+    trees: Mapping[str, ast.Module],
+    modules_by_path: Mapping[str, Symbol],
+    function_symbols_by_location: dict[tuple[str, int, int], list[Symbol]],
+    deadline: float,
+) -> tuple[frozenset[str], frozenset[str]]:
+    names: set[str] = set()
+    symbol_ids: set[str] = set()
+    for path, tree in trees.items():
+        for spec in _find_hookspec_classifications(
+            path, modules_by_path[path], tree, function_symbols_by_location, deadline
+        ):
+            if spec.symbol_id is not None:
+                symbol_ids.add(spec.symbol_id)
+                names.add(spec.symbol_name.rsplit(".", 1)[-1])
+    return frozenset(names), frozenset(symbol_ids)
+
+
+def _find_pluggy_hookimpl_candidates(
+    path: str,
+    module: Symbol,
+    tree: ast.Module,
+    function_symbols_by_location: dict[tuple[str, int, int], list[Symbol]],
+    exported_markers: Mapping[str, frozenset[str]],
+    hookspec_names: frozenset[str],
+    hookspec_symbol_ids: frozenset[str],
+) -> list[_EntryCandidate]:
+    """Pluggy hook implementations are called by ``pm.hook.<name>(...)`` at runtime, not statically."""
+
+    _bindings, decorated = _scan_hookimpl_module(path, module, tree, exported_markers)
+    decorated_nodes = {id(function) for function, _marker in decorated}
+    functions: list[tuple[ast.FunctionDef | ast.AsyncFunctionDef, str, int]] = [
+        (function, "python.pluggy.hookimpl_marker", min(item.lineno for item in function.decorator_list))
+        for function, _marker in decorated
+    ]
+    if hookspec_names:
+        for statement in tree.body:
+            members = statement.body if isinstance(statement, ast.ClassDef) else [statement]
+            for item in members:
+                if (
+                    isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+                    and id(item) not in decorated_nodes
+                    and item.name in hookspec_names
+                ):
+                    start_line = min([item.lineno, *(decorator.lineno for decorator in item.decorator_list)])
+                    functions.append((item, "python.pluggy.hookspec_name", start_line))
+    candidates: list[_EntryCandidate] = []
+    for function, rule_id, start_line in functions:
+        end_line = getattr(function, "end_lineno", None) or function.lineno
+        symbols = function_symbols_by_location.get((path, function.lineno, end_line), [])
+        if len(symbols) != 1 or symbols[0].symbol_id in hookspec_symbol_ids:
+            continue
+        symbol = symbols[0]
+        suffix = "@hookimpl" if rule_id == "python.pluggy.hookimpl_marker" else "名称匹配 hookspec"
+        candidates.append(
+            _EntryCandidate(
+                path=path,
+                start_line=start_line,
+                end_line=end_line,
+                kind="pluggy_hookimpl",
+                rule_id=rule_id,
+                label=f"pluggy hook {symbol.qualified_name} ({suffix})"[:500],
+                symbol_id=symbol.symbol_id,
+                guard=False,
+            )
+        )
+    return candidates
 
 
 class _LocalBindingCollector(ast.NodeVisitor):

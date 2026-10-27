@@ -629,7 +629,7 @@ export type OverviewEntryPoint = {
   entry_point_id: string;
   index_id: string;
   path: string;
-  kind: "python_main_module" | "python_main_guard" | "fastapi_route";
+  kind: "python_main_module" | "python_main_guard" | "fastapi_route" | "pluggy_hookimpl";
   rule_id: string;
   label: string;
   symbol_id: string | null;
@@ -2347,7 +2347,7 @@ function isOverviewEntryPoint(value: unknown): value is OverviewEntryPoint {
     isString(value.entry_point_id) &&
     isString(value.index_id) &&
     isString(value.path) &&
-    ["python_main_module", "python_main_guard", "fastapi_route"].includes(kind) &&
+    ["python_main_module", "python_main_guard", "fastapi_route", "pluggy_hookimpl"].includes(kind) &&
     isString(value.rule_id) &&
     isString(value.label) &&
     (value.symbol_id === null || isString(value.symbol_id)) &&

@@ -1614,7 +1614,7 @@ class RunImpactResponse(VersionedModel):
         return self
 
 
-OverviewEntryKind: TypeAlias = Literal["python_main_module", "python_main_guard", "fastapi_route"]
+OverviewEntryKind: TypeAlias = Literal["python_main_module", "python_main_guard", "fastapi_route", "pluggy_hookimpl"]
 OverviewHttpMethod: TypeAlias = Literal[
     "GET",
     "POST",

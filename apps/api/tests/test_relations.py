@@ -1079,3 +1079,39 @@ def test_old_snapshot_is_unchanged_when_worktree_changes(tmp_path: Path) -> None
     assert first.edges
     assert [edge.model_dump() for edge in first.edges] == [edge.model_dump() for edge in second.edges]
     assert [item.model_dump() for item in first.unresolved] == [item.model_dump() for item in second.unresolved]
+
+
+def test_pluggy_hook_dispatch_stays_unresolved_with_same_name_candidates(tmp_path: Path) -> None:
+    package = tmp_path / "demo"
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "plugin.py").write_text(
+        "def demo_greet(name):\n"
+        "    return name\n",
+        encoding="utf-8",
+    )
+    (package / "host.py").write_text(
+        "class Host:\n"
+        "    def run(self, pm):\n"
+        "        first = pm.hook.demo_greet(name='x')\n"
+        "        return self.pm.hook.demo_greet(name='y'), first\n",
+        encoding="utf-8",
+    )
+    result = extract_relations(
+        extract_definitions(
+            build_source_snapshot(tmp_path, repository_id="pluggy", revision="r1", dirty=False)
+        )
+    )
+    names = {symbol.symbol_id: symbol.qualified_name for symbol in result.symbols}
+
+    dispatches = [item for item in result.unresolved if ".hook.demo_greet(" in item.expression]
+    assert len(dispatches) == 2
+    assert {item.reason for item in dispatches} == {"pluggy_hook_dispatch"}
+    assert all(
+        [names[target] for target in item.possible_target_ids] == ["demo.plugin.demo_greet"]
+        for item in dispatches
+    )
+    assert not any(
+        edge.kind == "calls" and names[edge.target_id] == "demo.plugin.demo_greet"
+        for edge in result.edges
+    )

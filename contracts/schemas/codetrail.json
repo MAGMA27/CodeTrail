@@ -25344,7 +25344,8 @@
               "enum": [
                 "python_main_module",
                 "python_main_guard",
-                "fastapi_route"
+                "fastapi_route",
+                "pluggy_hookimpl"
               ],
               "title": "Kind",
               "type": "string"
@@ -35387,7 +35388,8 @@
           "enum": [
             "python_main_module",
             "python_main_guard",
-            "fastapi_route"
+            "fastapi_route",
+            "pluggy_hookimpl"
           ],
           "title": "Kind",
           "type": "string"
@@ -37184,7 +37186,8 @@
               "enum": [
                 "python_main_module",
                 "python_main_guard",
-                "fastapi_route"
+                "fastapi_route",
+                "pluggy_hookimpl"
               ],
               "title": "Kind",
               "type": "string"

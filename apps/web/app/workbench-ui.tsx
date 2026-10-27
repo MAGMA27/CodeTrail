@@ -1317,7 +1317,7 @@ function overviewEntryStart(overview: ProjectOverview, entry: OverviewEntryPoint
 }
 
 function overviewEntryKindLabel(entry: OverviewEntryPoint): string {
-  return entry.kind === "fastapi_route" ? "HTTP 入口" : entry.kind === "python_main_module" ? "Python 启动文件" : "Python 启动块";
+  return entry.kind === "fastapi_route" ? "HTTP 入口" : entry.kind === "python_main_module" ? "Python 启动文件" : entry.kind === "pluggy_hookimpl" ? "pluggy 插件钩子" : "Python 启动块";
 }
 
 const classificationLabels = {

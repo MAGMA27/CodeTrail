@@ -284,11 +284,14 @@ test("architecture containers label entry owners, not every reachable module", (
   const reachableModule = moduleRecord("reachable-helper", "src/helper.py", true);
   reachableModule.entry_point_ids = ["route-entry", "main-entry", "guard-entry", "missing-entry"];
   const unmappedEntry = { ...entryPoint("unmapped-entry", "python_main_guard"), path: "src/unmapped.py", symbol_id: "absent-module" };
-  const role = { ...directory("role-main", "main", [module.module_id, reachableModule.module_id]), group_kind: "responsibility" as const, group_key: "main", label: "Main", entry_point_ids: ["route-entry", "main-entry", "unmapped-entry", "missing-entry"] };
+  const hookEntry = { ...entryPoint("hook-entry", "pluggy_hookimpl"), symbol_id: "main-hook-function" };
+  module.entry_point_ids.push("hook-entry");
+  const role = { ...directory("role-main", "main", [module.module_id, reachableModule.module_id]), group_kind: "responsibility" as const, group_key: "main", label: "Main", entry_point_ids: ["route-entry", "main-entry", "hook-entry", "unmapped-entry", "missing-entry"] };
   const value = overview([module, reachableModule], [role], [], [], [
     entryPoint("route-entry", "fastapi_route"),
     entryPoint("main-entry", "python_main_module"),
     entryPoint("guard-entry", "python_main_guard"),
+    hookEntry,
     unmappedEntry,
   ]);
 
@@ -297,10 +300,11 @@ test("architecture containers label entry owners, not every reachable module", (
     fastapi_route: 1,
     python_main_module: 1,
     python_main_guard: 1,
+    pluggy_hookimpl: 1,
     unmapped: 1,
     unreturned: 1,
   });
-  assert.equal(architectureEntrySummary(folded.directories[0].entryPointCounts), "HTTP入口 1 · Python启动文件 1 · __main__启动块 1 · 入口模块未映射 1 · 入口明细未返回 1");
+  assert.equal(architectureEntrySummary(folded.directories[0].entryPointCounts), "HTTP入口 1 · Python启动文件 1 · __main__启动块 1 · pluggy插件钩子 1 · 入口模块未映射 1 · 入口明细未返回 1");
 
   const expanded = buildArchitectureGraph(value, { expandedGroupIds: [role.group_id] });
   const mainView = expanded.directories[0].visibleModules.find(({ module: item }) => item.module_id === module.module_id)!;
@@ -309,10 +313,11 @@ test("architecture containers label entry owners, not every reachable module", (
     fastapi_route: 1,
     python_main_module: 1,
     python_main_guard: 1,
+    pluggy_hookimpl: 1,
     unmapped: 0,
     unreturned: 0,
   });
-  assert.deepEqual(helperView.entryPointCounts, { fastapi_route: 0, python_main_module: 0, python_main_guard: 0, unmapped: 0, unreturned: 0 });
+  assert.deepEqual(helperView.entryPointCounts, { fastapi_route: 0, python_main_module: 0, python_main_guard: 0, pluggy_hookimpl: 0, unmapped: 0, unreturned: 0 });
   assert.equal(mainView.position.y, 95);
   assert.equal(helperView.position.y, 95);
 });
