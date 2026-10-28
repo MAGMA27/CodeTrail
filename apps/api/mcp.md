@@ -1,5 +1,9 @@
 # 本地 MCP 配置
 
+## 后台任务工具
+
+GitHub 导入、GitHub 重试、远端刷新和项目索引刷新提交持久 job，并返回 `job_id` 与当前状态。轮询使用 `get_job_status`，显式取消使用 `cancel_job(job_id, project_id?)`；未绑定 Project 的初始导入可不传 project_id，已绑定任务必须传入归属项目。工具注册仍受现有 GitHub/索引写入 opt-in 开关约束。HTTP 与 MCP 复用同一个 WorkspaceService 和 SQLite job 状态。MCP 客户端断开不会取消已提交 job。
+
 `get_neighbors` 与 `run_get_neighbors` 独立返回构造上下文 `contextual_calls`：绑定实际返回的激活 calls 边，条件目标不增加普通 nodes/static_edges。记录可能带逃逸后改写未知标记，不能视为确定调用或已确认影响；查询与静态边共用时间、最多 200 条关系及输出预算。旧快照返回空列表，精确语义见 [索引说明](indexing.md) 与 [条件调用决策](../../docs/decisions/2026-10-07-python-contextual-instance-calls.md)。
 
 `python -m app.mcp_server` 启动 MCP SDK `2.2.0` 的本地 stdio 服务；stdout 只承载协议帧，日志写 stderr。服务复用 WorkspaceService，不直接访问 SQLite，不创建索引，不执行仓库代码。
@@ -55,7 +59,7 @@ API (`codetrail api`) 与 MCP (`codetrail mcp`) 都读取 `~/.config/codetrail/s
 
 首次 `codetrail init` 默认允许当前目录。要导入其他项目，编辑 `~/.config/codetrail/settings.json` 的 `allowed_import_roots`，例如 `["D:/Dev"]`，保存后重启 API。既有 settings 不会被 init 参数覆盖；`--allow-root` 和 `--typescript-compiler` 仅用于首次创建设置。
 
-GitHub HTTP 导入默认开启，可通过 settings 的 `github_import_enabled=false` 或环境变量 `CODETRAIL_GITHUB_IMPORT_ENABLED=0` 关闭。可选的服务端 `CODETRAIL_GITHUB_TOKEN`（回退 `GITHUB_TOKEN`）用于降低未认证请求限流影响。MCP 的 GitHub 导入、固定 commit 重试和显式刷新复用同一 20 秒累计限流等待预算；GitHub API 单请求超时为 20 秒，归档下载单独使用 30 秒空闲与 300 秒总超时，索引默认最多 240 秒（可用 `CODETRAIL_INDEX_TIMEOUT` 正数秒调整，非法值回退默认）。导入与重试的下载或索引超时会作为带 `download_timeout` 或 `index_timeout` 的失败 attempt 返回；显式刷新保留对应的 HTTP 504 错误映射。索引超时会建议调高服务端 `CODETRAIL_INDEX_TIMEOUT`。相关环境变量与错误见 [API README](README.md)；MCP GitHub 写能力仍独立开启。
+GitHub HTTP 导入默认开启，可通过 settings 的 `github_import_enabled=false` 或环境变量 `CODETRAIL_GITHUB_IMPORT_ENABLED=0` 关闭。可选的服务端 `CODETRAIL_GITHUB_TOKEN`（回退 `GITHUB_TOKEN`）用于降低未认证请求限流影响。MCP 的 GitHub 导入、固定 commit 重试和显式刷新复用同一 20 秒累计限流等待预算；GitHub API 单请求超时为 20 秒，归档下载单独使用 30 秒空闲与 300 秒总超时，索引默认最多 240 秒（可用 `CODETRAIL_INDEX_TIMEOUT` 正数秒调整，非法值回退默认）。GitHub 写工具现在提交 job 并轮询状态；下载超时可在总重试预算内重试，索引超时将 job 终结为 `timed_out`，原 attempt 可通过 `get_import_status` 读取。相关环境变量与错误见 [API README](README.md)；MCP GitHub 写能力仍独立开启。
 
 - 找不到 codetrail：执行 `uv tool update-shell` 并重新打开终端。
 - 本地导入被拒绝：核对允许根目录、绝对路径和符号链接边界；修改 settings 后重启 API。

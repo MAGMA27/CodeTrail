@@ -1,11 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import type { JobStatusResponse } from "./api.ts";
 
 import {
+  clearTrackedJob,
   finishImportSubmissionKey,
   githubImportErrorMessage,
+  importStatusFromJob,
   isImportStatusTerminal,
+  jobErrorMessage,
+  jobStatusLabel,
+  loadTrackedJobs,
   nextImportSubmissionKey,
+  resolveGitHubImportJobResult,
+  trackJob,
+  waitForJob,
   waitForImportStatus,
 } from "./import-status.ts";
 
@@ -100,6 +109,89 @@ test("aborts the poll wait without reading another status", async () => {
 
   await assert.rejects(pendingPoll, { name: "AbortError" });
   assert.equal(reads, 0);
+});
+
+function makeJob(status: "queued" | "running" | "succeeded" | "failed", phase = "queued"): JobStatusResponse {
+  return {
+    schema_version: "0.1.0" as const, job_id: "job-1", project_id: null, kind: "github_import" as const,
+    status, phase, progress: {}, attempts: [], result: null, error_code: null, summary: null,
+    created_at: "now", updated_at: "now", deadline_at: "later", execution_deadline_at: null, merged_into: null,
+  };
+}
+
+test("job status labels and error codes are localized", () => {
+  assert.equal(jobStatusLabel("running", "indexing"), "索引中");
+  assert.equal(jobStatusLabel("retry_wait", "retry_wait"), "等待重试");
+  assert.match(jobErrorMessage("worker_lost", null), /工作进程中断/);
+  assert.match(jobErrorMessage("rate_limited", null), /限流/);
+  assert.equal(importStatusFromJob(makeJob("running", "downloading")), "acquiring");
+  assert.equal(importStatusFromJob(makeJob("running", "indexing")), "indexing");
+});
+
+test("re-fetches GitHub import status when the succeeded job result is truncated", async () => {
+  const job = makeJob("succeeded", "succeeded");
+  job.project_id = "project-1";
+  job.result = { truncated: true, project_id: "project-1", attempt_id: "attempt-1" };
+  let fetchedAttempt = "";
+  const response = await resolveGitHubImportJobResult(job, async (attemptId) => {
+    fetchedAttempt = attemptId;
+    return {
+      schema_version: "0.1.0",
+      source_path: "/data/project-1",
+      project: {
+        schema_version: "0.1.0", project_id: "project-1", name: "repo", repository_id: "repo-1",
+        created_at: "now", available_index_ids: ["index-1"], latest_index_id: "index-1", building_index_id: null,
+      },
+      attempt: {
+        schema_version: "0.1.0", attempt_id: "attempt-1", project_id: "project-1", repository_id: "repo-1",
+        source_path: "/data/project-1", status: "ready", phase: "ready", index_id: "index-1",
+        error_code: null, error_message: null, source_kind: "github", source_url: "https://github.com/org/repo",
+        requested_ref: "main", resolved_ref: "main", resolved_commit: "abc123", content_hash: "hash",
+        cleanup_status: "succeeded", cleanup_error: null, created_at: "now", updated_at: "now",
+      },
+      latest_index: null,
+    };
+  });
+  assert.equal(fetchedAttempt, "attempt-1");
+  assert.equal(response?.attempt.status, "ready");
+  assert.equal(response?.project.project_id, "project-1");
+  assert.equal(response?.source_url, "https://github.com/org/repo");
+});
+
+test("polls job through terminal state with persisted tracking and clears it", async () => {
+  const values = new Map<string, string>();
+  const storage = { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); } };
+  let reads = 0;
+  const result = await waitForJob(
+    makeJob("queued"),
+    async () => ++reads === 1 ? makeJob("running", "indexing") : makeJob("succeeded", "succeeded"),
+    new AbortController().signal,
+    () => undefined,
+    { initialDelayMs: 0, maxDelayMs: 0, storage },
+  );
+  assert.equal(result.status, "succeeded");
+  assert.deepEqual(loadTrackedJobs(storage), []);
+  trackJob(makeJob("running", "indexing"), storage);
+  assert.equal(loadTrackedJobs(storage)[0]?.jobId, "job-1");
+  clearTrackedJob("job-1", storage);
+  assert.deepEqual(loadTrackedJobs(storage), []);
+});
+
+test("job polling keeps trying after a transient status request error", async () => {
+  let reads = 0;
+  const job = await waitForJob(
+    makeJob("queued"),
+    async () => {
+      reads += 1;
+      if (reads === 1) throw new Error("temporary network failure");
+      return makeJob("succeeded", "succeeded");
+    },
+    new AbortController().signal,
+    () => undefined,
+    { initialDelayMs: 0, maxDelayMs: 0, storage: { getItem: () => "[]", setItem: () => undefined } },
+  );
+  assert.equal(job.status, "succeeded");
+  assert.equal(reads, 2);
 });
 
 test("bounds a status request that never settles and keeps its last attempt status", async () => {

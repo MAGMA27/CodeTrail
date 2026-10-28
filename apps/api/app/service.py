@@ -194,6 +194,7 @@ from .run_execution import (
     RunExecutorStartupError,
     RunReservation,
 )
+from .jobs import JobConflict, JobControl, JobFailure, JobResponse, JobService
 
 
 class ServiceError(RuntimeError):
@@ -741,6 +742,15 @@ def _process_liveness(pid: int) -> _ProcessLiveness:
     return "alive"
 
 
+def _current_pid_namespace() -> str | None:
+    """Return the Linux PID namespace identity used to scope persisted PIDs."""
+
+    try:
+        return os.readlink("/proc/self/ns/pid")
+    except OSError:
+        return None
+
+
 @dataclass(frozen=True)
 class _FreshnessEvaluation:
     """Freshness result plus the safe manifest captured for one update attempt."""
@@ -951,7 +961,7 @@ class IndexService:
                         504,
                         "Indexing timed out; raise CODETRAIL_INDEX_TIMEOUT on the server and restart the API to allow more time",
                     ) from exc
-                raise ServiceError("index_cancelled", 499, "Indexing was cancelled because the client disconnected") from exc
+                raise ServiceError("index_cancelled", 499, "Indexing was cancelled at a cooperative checkpoint") from exc
             return _index_response(persisted)
         finally:
             self._index_slots.release()
@@ -1507,6 +1517,7 @@ class WorkspaceService:
         self.feature_adapter_factory = feature_adapter_factory
         self.run_model_adapter_factory = run_model_adapter_factory
         self._index_mutation_lock = threading.RLock()
+        self._project_update_heartbeats: dict[str, threading.Event] = {}
         self._active_feature_projects: set[str] = set()
         self._active_feature_lock = threading.Lock()
         self._overview_cache: OrderedDict[
@@ -1520,6 +1531,91 @@ class WorkspaceService:
             max_concurrent_runs=_configured_run_capacity(run_max_concurrent_runs),
             model_adapter_factory=run_model_adapter_factory,
         )
+        self.jobs = JobService(str(self.registry.management_store.database_path), self._execute_job)
+        self.jobs.recover_expired()
+
+    def submit_job(self, kind: str, project_id: str | None, payload: dict[str, object], *, idempotency_key: str | None = None) -> JobResponse:
+        if project_id is not None:
+            self._find_project(project_id)
+        if idempotency_key is not None:
+            idempotency_key = idempotency_key.strip()
+            if not idempotency_key or len(idempotency_key) > 200:
+                raise ServiceError("invalid_input", 400, "Idempotency-Key must contain 1 to 200 characters")
+        dedupe_key = None
+        if kind == "github_import":
+            try:
+                identity = parse_github_repository_url(str(payload.get("url", ""))).identity
+            except GitHubError as exc:
+                raise ServiceError(exc.code, exc.status_code, exc.message) from exc
+            ref = str(payload.get("ref") or "").strip()
+            normalized_ref = ref.lower() if len(ref) == 40 and all(
+                char in "0123456789abcdefABCDEF" for char in ref
+            ) else ref
+            dedupe_key = f"github-request:{identity}:{normalized_ref or '@default'}"
+        try:
+            return self.jobs.submit(kind, project_id, payload, idempotency_key=idempotency_key, dedupe_key=dedupe_key)
+        except JobConflict as exc:
+            raise ServiceError("conflict", 409, str(exc)) from exc
+
+    def get_job(self, job_id: str, *, project_id: str | None = None) -> JobResponse:
+        try:
+            job = self.jobs.store.get(job_id)
+        except KeyError as exc:
+            raise ServiceError("not_found", 404, "job was not found") from exc
+        if project_id is not None and job.project_id != project_id:
+            raise ServiceError("not_found", 404, "job was not found for this project")
+        if job.project_id is not None and project_id is None and job.kind != "github_import":
+            raise ServiceError("not_found", 404, "job was not found")
+        if job.project_id is not None:
+            self._find_project(job.project_id)
+        return job
+
+    def cancel_job(self, job_id: str, *, project_id: str | None = None) -> JobResponse:
+        try:
+            job = self.jobs.store.get(job_id)
+        except KeyError as exc:
+            raise ServiceError("not_found", 404, "job was not found") from exc
+        if job.project_id is not None and project_id is None:
+            raise ServiceError("not_found", 404, "project-owned job requires project scope")
+        if project_id is not None:
+            self._find_project(project_id)
+        if job.project_id is not None and job.project_id != project_id:
+            raise ServiceError("not_found", 404, "job was not found for this project")
+        return self.jobs.store.cancel(job_id)
+
+    def _execute_job(self, record: dict[str, object], control: JobControl) -> dict[str, object]:
+        payload = record["payload"]
+        assert isinstance(payload, dict)
+        kind = str(record["kind"])
+        control.check()
+        if kind == "github_import":
+            result = self.import_github(GitHubImportRequest.model_validate(payload), control=control)
+            self.jobs.store.bind_project(str(record["job_id"]), result.project.project_id)
+            return self._job_import_result(result)
+        if kind == "github_retry":
+            return self._job_import_result(self.retry_github_import(str(payload["attempt_id"]), control=control))
+        if kind == "github_cleanup":
+            result = self.retry_import_cleanup(str(payload["attempt_id"]))
+            summary = result.model_dump(mode="json")
+            if result.cleanup_status != "succeeded":
+                raise JobFailure("cleanup_failed", result.cleanup_error or "GitHub temporary directory cleanup failed", summary)
+            return summary
+        if kind == "github_refresh":
+            result = self.refresh_github_source(str(record["project_id"]), str(payload["index_id"]), control=control)
+            return result.model_dump(mode="json")
+        if kind == "project_index_refresh":
+            result = self.refresh_project_index(str(record["project_id"]), str(payload["index_id"]), RefreshProjectIndexRequest.model_validate(payload.get("request", {})), control=control)
+            return result.model_dump(mode="json")
+        raise ServiceError("invalid_input", 400, "unsupported job type")
+
+    @staticmethod
+    def _job_import_result(result: GitHubImportResponse) -> dict[str, object]:
+        if result.attempt.status == "cancelled":
+            raise JobFailure("index_cancelled", result.attempt.error_message or "job was cancelled", result.model_dump(mode="json"))
+        if result.attempt.status != "ready":
+            code = result.attempt.error_code or "internal_error"
+            raise JobFailure(code, result.attempt.error_message or "GitHub import failed", result.model_dump(mode="json"))
+        return result.model_dump(mode="json")
 
     def get_model_config_settings(self) -> ModelConfigSettingsResponse:
         config = self._current_model_config()
@@ -2881,6 +2977,8 @@ class WorkspaceService:
                     repository_id=project.repository_id,
                     expected_latest_index_id=expected_latest_index_id,
                     owner_pid=os.getpid(),
+                    owner_namespace=_current_pid_namespace(),
+                    owner_lease_seconds=_project_update_owner_timeout(),
                     source_url=source_url,
                     requested_ref=requested_ref,
                     resolved_ref=resolved_ref,
@@ -2906,14 +3004,58 @@ class WorkspaceService:
                     )
                     raise
         except StorageConflictError as exc:
+            stale = next(
+                (
+                    item
+                    for item in self.registry.management_store.list_project_updates()
+                    if item.project_id == project.project_id
+                    and self._project_update_owner_liveness(item) == "exited"
+                ),
+                None,
+            )
+            if stale is not None:
+                self._claim_and_recover_project_update(stale)
+                if not any(
+                    item.operation_id == stale.operation_id
+                    for item in self.registry.management_store.list_project_updates()
+                ):
+                    return self._begin_project_update(
+                        project,
+                        expected_latest_index_id,
+                        source_url=source_url,
+                        requested_ref=requested_ref,
+                        resolved_ref=resolved_ref,
+                        resolved_commit=resolved_commit,
+                    )
             raise ServiceError("conflict", 409, "project index update is already in progress") from exc
         except StorageError as exc:
             raise ServiceError("internal_error", 500, "project update coordination storage failed") from exc
         with _ACTIVE_PROJECT_UPDATE_OPERATIONS_LOCK:
             _ACTIVE_PROJECT_UPDATE_OPERATIONS.add(operation.operation_id)
+        stop = threading.Event()
+        self._project_update_heartbeats[operation.operation_id] = stop
+
+        def heartbeat() -> None:
+            interval = max(1.0, min(5.0, _project_update_owner_timeout() / 3))
+            while not stop.wait(interval):
+                try:
+                    self.registry.management_store.heartbeat_project_update_owner(operation.operation_id)
+                except StorageNotFoundError:
+                    return
+                except StorageError:
+                    logger.warning("could not heartbeat project update %s", operation.operation_id, exc_info=True)
+
+        threading.Thread(
+            target=heartbeat,
+            name=f"codetrail-project-update-heartbeat-{operation.operation_id}",
+            daemon=True,
+        ).start()
         return operation
 
     def _forget_project_update(self, operation_id: str) -> None:
+        stop = self._project_update_heartbeats.pop(operation_id, None)
+        if stop is not None:
+            stop.set()
         with _ACTIVE_PROJECT_UPDATE_OPERATIONS_LOCK:
             _ACTIVE_PROJECT_UPDATE_OPERATIONS.discard(operation_id)
 
@@ -3017,6 +3159,17 @@ class WorkspaceService:
             return
 
         try:
+            with self.registry.store_for_repository(operation.repository_id) as store:
+                store.clear_project_building(operation.project_id)
+        except StorageError:
+            logger.warning(
+                "could not clear interrupted project build marker %s",
+                operation.operation_id,
+                exc_info=True,
+            )
+            return
+
+        try:
             self.registry.management_store.abort_project_update(
                 operation.operation_id,
                 error_code="interrupted",
@@ -3026,6 +3179,31 @@ class WorkspaceService:
             logger.warning("could not abort interrupted project update %s", operation.operation_id, exc_info=True)
             return
         self._recover_github_cleanup(operation.attempt_id)
+
+    def _claim_and_recover_project_update(self, operation: ProjectUpdateRecord) -> bool:
+        try:
+            claimed = self.registry.management_store.claim_project_update_recovery(
+                operation.operation_id,
+                expected_updated_at=operation.updated_at,
+                owner_pid=os.getpid(),
+                owner_namespace=_current_pid_namespace(),
+                owner_lease_seconds=_project_update_owner_timeout(),
+            )
+        except StorageError:
+            logger.warning("could not claim interrupted project update %s", operation.operation_id, exc_info=True)
+            return False
+        if not claimed:
+            return False
+        with _ACTIVE_PROJECT_UPDATE_OPERATIONS_LOCK:
+            _ACTIVE_PROJECT_UPDATE_OPERATIONS.add(operation.operation_id)
+        try:
+            self._recover_project_update(
+                self.registry.management_store.load_project_update(operation.operation_id)
+            )
+        finally:
+            with _ACTIVE_PROJECT_UPDATE_OPERATIONS_LOCK:
+                _ACTIVE_PROJECT_UPDATE_OPERATIONS.discard(operation.operation_id)
+        return True
 
     def _recover_github_cleanup(self, attempt_id: str | None) -> None:
         if attempt_id is None:
@@ -3069,6 +3247,19 @@ class WorkspaceService:
     def _project_update_owner_liveness(operation: ProjectUpdateRecord) -> _ProcessLiveness:
         if operation.owner_pid is None:
             return "exited"
+        current_namespace = _current_pid_namespace()
+        if (
+            operation.owner_namespace is not None
+            and current_namespace is not None
+            and operation.owner_namespace != current_namespace
+        ):
+            age = datetime.now(timezone.utc) - operation.updated_at
+            return "exited" if age.total_seconds() >= _project_update_owner_timeout(operation.owner_lease_seconds) else "alive"
+        if operation.owner_namespace is None and current_namespace is None:
+            if os.name == "nt":
+                return _process_liveness(operation.owner_pid)
+            age = datetime.now(timezone.utc) - operation.updated_at
+            return "exited" if age.total_seconds() >= _project_update_owner_timeout(operation.owner_lease_seconds) else "alive"
         if operation.owner_pid == os.getpid():
             with _ACTIVE_PROJECT_UPDATE_OPERATIONS_LOCK:
                 return (
@@ -3167,6 +3358,8 @@ class WorkspaceService:
                 )
 
         try:
+            if control is not None and hasattr(control, "set_phase"):
+                control.set_phase("indexing")
             response = self.index_service.create_index(
                 CreateIndexRequest(
                     repository_id=project.repository_id,
@@ -3295,11 +3488,12 @@ class WorkspaceService:
             )
             if imported.attempt.status != "ready" or imported.index is None:
                 error_code = imported.attempt.error_code or "conflict"
-                if error_code not in {"budget_exceeded", "download_timeout", "index_timeout", "forbidden", "not_found", "conflict", "internal_error"}:
+                if error_code not in {"budget_exceeded", "connection_error", "download_timeout", "index_timeout", "forbidden", "not_found", "conflict", "internal_error"}:
                     error_code = "conflict"
                 status_code = {
                     "budget_exceeded": 429,
                     "download_timeout": 504,
+                    "connection_error": 503,
                     "index_timeout": 504,
                     "forbidden": 403,
                     "not_found": 404,
@@ -4239,7 +4433,7 @@ class WorkspaceService:
             try:
                 control.check()
             except IndexingAborted as exc:
-                raise ServiceError("index_cancelled", 499, "GitHub import was cancelled because the client disconnected") from exc
+                raise ServiceError("index_cancelled", 499, "GitHub import was cancelled before execution") from exc
         try:
             repository = parse_github_repository_url(request.url)
         except GitHubError as exc:
@@ -4257,6 +4451,10 @@ class WorkspaceService:
 
         github_budget = github_budget or self.github_client.new_budget()
         resolution = self._resolve_github(repository, request, budget=github_budget)
+        if control is not None and hasattr(control, "claim_build_key"):
+            control.claim_build_key(
+                f"github:{repository.identity}:{resolution.resolved_commit.lower()}"
+            )
         normalized_path = resolution.repository.identity
         spec = self.registry.repository_for_source(normalized_path)
         if spec is None:
@@ -4729,6 +4927,8 @@ class WorkspaceService:
         temp_created = False
         completed = attempt
         try:
+            if control is not None and hasattr(control, "set_phase"):
+                control.set_phase("downloading")
             self.registry.management_store.update_attempt(
                 attempt_id,
                 status="acquiring",
@@ -4758,6 +4958,8 @@ class WorkspaceService:
             self.github_client.download_and_extract(
                 resolution, source_root, budget=github_budget, control=control
             )
+            if control is not None and hasattr(control, "set_phase"):
+                control.set_phase("indexing")
             self.registry.bind_runtime_source(attempt.repository_id, source_root)
             self.registry.management_store.update_attempt(
                 attempt_id,
@@ -4792,7 +4994,7 @@ class WorkspaceService:
             error_message = (
                 "GitHub import timed out during indexing"
                 if exc.code == "index_timeout"
-                else "GitHub import was cancelled because the client disconnected"
+                else "GitHub import was cancelled at a cooperative checkpoint"
             )
         except ServiceError as exc:
             error_code = exc.code
@@ -5003,7 +5205,7 @@ class WorkspaceService:
         for operation in updates:
             owner_state = owner_states[operation.operation_id]
             if owner_state == "exited":
-                self._recover_project_update(operation)
+                self._claim_and_recover_project_update(operation)
             elif owner_state == "unknown":
                 logger.warning(
                     "leaving project update %s in place because owner PID %s could not be verified",
@@ -5156,6 +5358,15 @@ def _feature_generation_summary(generation: FeatureGeneration) -> FeatureGenerat
 
 def _env_flag(name: str, *, default: bool = False) -> bool:
     return os.getenv(name, "1" if default else "0").strip().casefold() in {"1", "true", "yes", "on"}
+
+
+def _project_update_owner_timeout(value: int | None = None) -> int:
+    if value is None:
+        try:
+            value = int(os.environ.get("CODETRAIL_JOB_LEASE_SECONDS", "60"))
+        except ValueError:
+            return 60
+    return max(5, min(value, 3600))
 
 
 def _configured_run_capacity(value: int | None) -> int:

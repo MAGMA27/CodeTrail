@@ -11,12 +11,12 @@ Status: proposed
 ### 当前架构（代码核实）
 
 - Web 工作台由 Next.js 提供，通过 HTTP 访问 FastAPI API；MCP server 是独立 stdio 适配入口，与 HTTP 复用应用服务。MCP 客户端、Web 和 API 不应被描述成同一个操作系统进程。
-- `apps/api/pyproject.toml` 的运行时依赖只有 `fastapi`、`mcp`、`pydantic`、`uvicorn[standard]`；`pytest` 位于开发依赖组。没有 Redis、PostgreSQL、任务队列或 ORM 运行依赖。
+- `apps/api/pyproject.toml` 已增加 arq 与 Redis 运行依赖；PostgreSQL 与 ORM 仍未引入。
 - SQLite 由 `apps/api/app/storage.py` 中的 `ManagementStore`、`IndexStore` 等直接管理，项目来源、导入 attempt、索引快照、Session、Run、证据和派生缓存等分布在管理库及项目索引库中。`apps/api/app` 下约有 148 行源码包含大小写不敏感的 `sqlite`/`sqlite3` 字样（按检索命中行计数，不代表 SQL 语句、表或调用点数量）；相关引用集中在 `storage.py` 与 `service.py`。静态仓库兼容路径还会使用来源目录下 `.codetrail/index.sqlite3`。
-- GitHub 导入、重试、刷新及索引构建在 HTTP 响应完成前同步执行。FastAPI 路由通过 `run_in_threadpool` 执行同步服务方法；断连监视不会把导入转成后台持久任务。GitHub 更新使用 `WorkspaceService` 实例内的 `threading.RLock`，索引并发由默认值为 1 的 `threading.BoundedSemaphore` 限制；进程内锁和缓存不跨实例。
+- GitHub 导入、失败重试/清理、远端刷新和索引重建通过 job 接口快速提交；SQLite 保存 job/attempt，未设置 Redis 时由 API 进程线程执行，设置 Redis 后由 arq worker 消费。PR 2 的跨实例锁与共享缓存尚未实现。
 - `CODETRAIL_INDEX_TIMEOUT` 控制索引阶段超时，默认 240 秒；超时错误为 `index_timeout`。HTTP 客户端断开后，服务在协作式检查点取消索引并记录 `index_cancelled`；GitHub 下载等阻塞阶段在下一个检查点才响应取消。
 - Web 的 GitHub 导入、重试和刷新请求默认最多等待 600000 毫秒，由 `NEXT_PUBLIC_GITHUB_REQUEST_TIMEOUT_MS` 覆盖。API GitHub metadata 请求各有 20 秒请求超时；单次导入的限流重试等待预算为 20 秒；归档下载默认空闲超时 30 秒、总超时 300 秒，后者由 `CODETRAIL_GITHUB_DOWNLOAD_TIMEOUT` 配置，前者由 `CODETRAIL_GITHUB_DOWNLOAD_IDLE_TIMEOUT` 配置。索引默认 240 秒；这些配置预算相加为 560 秒，Web 余 40 秒用于收尾。
-- 导入 attempt 可通过 HTTP 状态端点轮询；目前没有导入任务 SSE。已有持久化事件和 SSE 模式服务于 Run。PR #8 引入/调整的长 HTTP 等待与下载超时边界，仍属于同步请求生命周期。
+- job 状态通过 HTTP 轮询，不提供 job SSE；Run 仍使用独立的持久化事件与 SSE。Web 的提交/单次状态请求超时默认 30 秒，任务生命周期由 job 预算控制。
 
 ### 当前与目标架构
 
@@ -78,6 +78,8 @@ flowchart LR
 | [RQ](https://python-rq.org/docs/) | 基于 Redis 的简单 Python 队列，worker/failed registry 易理解 | 常见 worker 使用独立进程执行同步任务，接入 asyncio API 仍需同步/异步边界；若将来需要复杂异步 I/O 与任务拓展，优势较少。它仍可作为优先简单同步 worker 的替代候选 |
 
 选型须在 PR 1 实施时复核锁定版本、Python 3.10–3.13 支持、Windows/本地开发体验、Redis 持久化、活动任务恢复和取消语义，再决定新增的运行时依赖。Redis 队列不是任务业务状态数据库。
+
+PR 1 已实现 arq/Redis 队列、SQLite job/attempt 状态、轻量线程适配器、Web 轮询/显式取消/刷新恢复、commit 合并与 ready index 复用、租约恢复和有界重试，并提供 Compose 配置；决策状态仍为 `proposed`。离线验收通过：Web TypeScript 检查及受影响单测 102 项、`tests/test_jobs.py` 11 项、`tests/test_contracts.py` 30 项、恢复/重放与跨 PID namespace 活跃 owner 测试 56 项、`compileall -q app`、`docs:check`；PyYAML 解析 Compose 及服务/健康检查核对通过。2026-10-29 在本机 Redis 8.10.2、uvicorn API 与独立 arq worker、共享 SQLite 数据目录及 `CODETRAIL_JOB_LEASE_SECONDS=15` 下端到端验证：GitHub 导入 16–78ms 返回 `job_id`，MAGMA27/dsh-calendar 约 2.4 秒后 `succeeded` 且 index ready；无 Redis 轻量模式同仓库 21–24ms 返回、约 2.2 秒后 `succeeded`。重复请求复用同一 `job_id`；分支与对应 SHA 并发提交（worker 并发 2）只产生一次导入 attempt 和一次下载/索引，第二个 job 复用结果；该次无 `merged_into` 字段，合并路径由单测覆盖。排队任务可直接取消；运行中的 fastapi/fastapi 索引任务取消后约 0.22 秒进入 `cancelled`，项目索引库没有 index 快照。worker 在 downloading 和 indexing 阶段遭 SIGKILL 后，租约约 15–20 秒过期时任务标记 `worker_lost` 并重执行，第二次 attempt 成功且 index ready，旧 attempt 标记 `interrupted`。未验收项：环境无 Docker，未启动 Compose；未在浏览器手动操作；sqlalchemy/sqlalchemy 大仓库导入曾在索引阶段以 `internal_error` / `local index storage failed` 失败，此问题与队列无关，未在 PR 1 处理。
 
 ### PR 2：队列之外的 Redis 协调与缓存
 

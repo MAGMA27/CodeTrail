@@ -467,6 +467,8 @@ class ProjectUpdateRecord:
     repository_id: str
     expected_latest_index_id: str | None
     owner_pid: int | None
+    owner_namespace: str | None
+    owner_lease_seconds: int
     attempt_id: str | None
     candidate_index_id: str | None
     source_url: str | None
@@ -852,6 +854,8 @@ CREATE TABLE IF NOT EXISTS project_updates (
     repository_id TEXT NOT NULL,
     expected_latest_index_id TEXT,
     owner_pid INTEGER,
+    owner_namespace TEXT,
+    owner_lease_seconds INTEGER NOT NULL DEFAULT 60,
     attempt_id TEXT,
     candidate_index_id TEXT,
     source_url TEXT,
@@ -960,6 +964,10 @@ class ManagementStore:
                 "cleanup_status": "TEXT NOT NULL DEFAULT 'not_required'",
                 "cleanup_error": "TEXT",
                 "temporary_path": "TEXT",
+            },
+            "project_updates": {
+                "owner_namespace": "TEXT",
+                "owner_lease_seconds": "INTEGER NOT NULL DEFAULT 60",
             },
         }
         for table, columns in additions.items():
@@ -1173,6 +1181,8 @@ class ManagementStore:
         repository_id: str,
         expected_latest_index_id: str | None,
         owner_pid: int | None,
+        owner_namespace: str | None = None,
+        owner_lease_seconds: int = 60,
         source_url: str | None = None,
         requested_ref: str | None = None,
         resolved_ref: str | None = None,
@@ -1199,15 +1209,17 @@ class ManagementStore:
                     raise StorageConflictError("project index update is already in progress")
                 connection.execute(
                     "INSERT INTO project_updates "
-                    "(operation_id, project_id, repository_id, expected_latest_index_id, owner_pid, "
+                    "(operation_id, project_id, repository_id, expected_latest_index_id, owner_pid, owner_namespace, owner_lease_seconds, "
                     "source_url, requested_ref, resolved_ref, resolved_commit, phase, created_at, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'building', ?, ?)",
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'building', ?, ?)",
                     (
                         operation_id,
                         project_id,
                         repository_id,
                         expected_latest_index_id,
                         owner_pid,
+                        owner_namespace,
+                        owner_lease_seconds,
                         source_url,
                         requested_ref,
                         resolved_ref,
@@ -1436,6 +1448,51 @@ class ManagementStore:
         except sqlite3.Error as exc:
             raise StorageError(f"could not release project index update owner: {exc}") from exc
         return self.load_project_update(operation_id)
+
+    def heartbeat_project_update_owner(self, operation_id: str) -> None:
+        """Refresh a durable update's liveness timestamp while its owner is active."""
+
+        try:
+            with self._connect() as connection:
+                cursor = connection.execute(
+                    "UPDATE project_updates SET updated_at = ? WHERE operation_id = ?",
+                    (_datetime_text(datetime.now(timezone.utc)), operation_id),
+                )
+                if cursor.rowcount != 1:
+                    raise StorageNotFoundError(f"project update {operation_id!r} was not found")
+        except StorageNotFoundError:
+            raise
+        except sqlite3.Error as exc:
+            raise StorageError(f"could not heartbeat project update owner: {exc}") from exc
+
+    def claim_project_update_recovery(
+        self,
+        operation_id: str,
+        *,
+        expected_updated_at: datetime,
+        owner_pid: int,
+        owner_namespace: str | None,
+        owner_lease_seconds: int = 60,
+    ) -> bool:
+        """Atomically fence recovery against a concurrent owner heartbeat."""
+
+        try:
+            with self._connect() as connection:
+                cursor = connection.execute(
+                    "UPDATE project_updates SET owner_pid = ?, owner_namespace = ?, owner_lease_seconds = ?, updated_at = ? "
+                    "WHERE operation_id = ? AND updated_at = ?",
+                    (
+                        owner_pid,
+                        owner_namespace,
+                        owner_lease_seconds,
+                        _datetime_text(datetime.now(timezone.utc)),
+                        operation_id,
+                        _datetime_text(expected_updated_at),
+                    ),
+                )
+                return cursor.rowcount == 1
+        except sqlite3.Error as exc:
+            raise StorageError(f"could not claim interrupted project update: {exc}") from exc
 
     def update_source(
         self,
@@ -5947,6 +6004,8 @@ def _project_update_from_row(row: sqlite3.Row) -> ProjectUpdateRecord:
         repository_id=row["repository_id"],
         expected_latest_index_id=row["expected_latest_index_id"],
         owner_pid=None if row["owner_pid"] is None else int(row["owner_pid"]),
+        owner_namespace=row["owner_namespace"],
+        owner_lease_seconds=int(row["owner_lease_seconds"]),
         attempt_id=row["attempt_id"],
         candidate_index_id=row["candidate_index_id"],
         source_url=row["source_url"],

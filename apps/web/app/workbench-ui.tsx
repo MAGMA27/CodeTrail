@@ -523,6 +523,9 @@ function importStatusLabel(status: ImportStatus | null): string {
     failed: "导入失败",
     cancelled: "已取消",
     interrupted: "中断待重试",
+    retry_wait: "等待重试",
+    cancel_requested: "取消中",
+    timed_out: "已超时",
   }[status];
 }
 

@@ -1,0 +1,10 @@
+.git
+.next
+node_modules
+**/node_modules
+**/.venv
+.codetrail-runtime
+.codetrail
+memory-bank
+**/__pycache__
+**/.pytest_cache

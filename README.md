@@ -75,7 +75,7 @@ codetrail install
 
 ## 当前架构与演进规划
 
-当前 Web 工作台通过 HTTP 使用 FastAPI API，MCP server 作为独立 stdio 入口复用应用服务；导入和索引在 API 请求内同步执行，持久化使用 SQLite，锁和并发限制仅在单个进程实例内生效。目标架构尚未实现：[后端基础设施分阶段演进提案](docs/decisions/2026-10-28-backend-infrastructure-evolution.md)规划按三个独立 PR 顺序引入 Redis 任务队列与 worker、Redis 分布式协调，以及 PostgreSQL/Alembic 和可选 pgvector；状态均为 proposed。
+当前 Web 工作台通过 HTTP 使用 FastAPI API，MCP server 作为独立 stdio 入口复用应用服务。GitHub 导入/重试/清理重试、GitHub 刷新与索引重建以后台 job 提交；默认轻量模式使用 SQLite 和 API 进程内线程执行，不提供进程崩溃恢复保证。完整模式设置 `CODETRAIL_REDIS_URL` 并启动 `codetrail worker`，或使用仓库根目录 `docker compose up --build` 启动 Redis、API、worker 和 Web；任务事实仍保存在共享 SQLite 数据卷。Compose 当前不包含 PostgreSQL，PR 3 再引入 PostgreSQL/Alembic。Redis 分布式协调与缓存仍属 PR 2；[后端基础设施演进提案](docs/decisions/2026-10-28-backend-infrastructure-evolution.md)保持 proposed，实施细节与验证状态见 API/Web 就近文档。
 
 ## 配置与开发
 

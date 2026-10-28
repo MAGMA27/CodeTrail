@@ -1,5 +1,9 @@
 # 存储与查询
 
+## 后台任务
+
+`ManagementStore` 所在的 `registry.sqlite3` 管理库旁使用 `jobs` 表持久化 job payload、公开状态、attempt 历史、结果摘要、幂等键、合并关系和 worker 租约；`job_build_keys` 在 SQLite 写事务内声明活跃仓库/解析后 commit 构建键；Redis 不保存业务状态。attempt 列表最多 20 条，终态 result 最多 32 KB，summary 最多 2,000 字符。worker 可能至少一次执行，业务写入仍由现有 IndexStore/管理库事务完成，完整索引提交后才成为 ready。过期租约扫描会在重试预算内重新排队，耗尽时标记 `worker_lost`。无 Redis 的轻量线程模式由周期扫描器检查租约，心跳未过期的共享任务不会被误判为丢失。
+
 ## 状态
 
 已实现 SQLite/FTS5 快照、Project/Index 归属、来源导入、Session/消息、可恢复 Project/Session 回收站、搜索、源码证据、受限邻接、O2 内置与外部 Agent 功能结果，以及 P2-R1/P2-R2 Run/冻结输入/事件/工具结果/报告和模型用量持久化；P3-I1 增加从 Run 固定报告/快照派生的有界静态影响查询；external Codex Run 复用同一表记录真实工具调用、证据和结论，宿主功能提交使用 FeatureGeneration 表达来源并在事务中校验 Run 作用域；已支持索引规则/配置元数据、只读源码 manifest、latest 保护下的显式更新，以及项目隔离且共享容量的文件级定义描述/关系事实派生缓存。SSE 仅读取同一持久化事件事实，不增加存储日志，影响结果也不写回 Run。
@@ -32,7 +36,7 @@ Project 与 Session 以各自 SQLite 行上的 nullable `removed_at` 持久化�
 
 职责配置没有独立服务表或用户可编辑数据库状态：根 `codetrail-subsystems.json` 作为 64 KiB 有界 `snapshot_files` 成员与源码一起捕获，内容 hash 参与既有 snapshot identity；overview 和 provenance 从该 index 读取。源码文件/字节预算独立于这一个有界 metadata 读取，且 root 文件在源码预算截断前优先观察。规则升级到 `source-v4` 后 freshness 会使旧 index 显示规则变化；`relations-v13` 为新 index identity。旧不可变 index 和数据库行无需迁移：因其不含该文件，概览继续使用目录 fallback。
 
-索引更新还在 ManagementStore 的 `project_updates` 中保留跨数据库提交意图。该表以 `project_id` 唯一约束串行化项目更新，记录 expected latest、owner PID、attempt、候选 immutable index、GitHub source identity 和阶段；服务启动只处理 owner 明确已退出的记录。owner 探测为 `alive`、`exited`、`unknown` 三态：Windows 使用 `OpenProcess(SYNCHRONIZE)` 与 `WaitForSingleObject(..., 0)` 的只读句柄查询并始终关闭句柄，POSIX 才使用平台限定的无信号探测；权限不足、未知错误或查询失败保持 `unknown`，不会触发恢复。应用服务将 expected 贯穿源码检查、下载、构建、历史复用和 `finish_project_index` 的 CAS，候选快照可以先写入但不会绕过 latest 校验。latest CAS 成功后，管理库用一个 `BEGIN IMMEDIATE` 事务写入 source identity、attempt ready/index/hash 并删除意图；跨库中断时，当前 latest 若仍是候选 ready 快照则补提交，否则终止意图且不回滚其他 writer。恢复前的短暂 source/latest 差异由该意图解释，待恢复意图会阻止同项目继续更新。
+索引更新还在 ManagementStore 的 `project_updates` 中保留跨数据库提交意图。该表以 `project_id` 唯一约束串行化项目更新，记录 expected latest、owner PID/PID namespace/租约秒数、attempt、候选 immutable index、GitHub source identity 和阶段；owner 活跃期间心跳刷新意图时间。相同 PID namespace 内按 PID 探测进程；不同容器的 PID 不可直接比较，按记录中 owner 自己的 `CODETRAIL_JOB_LEASE_SECONDS` 心跳过期判断，过期意图须通过原更新时间的 SQLite 条件更新原子认领后才可恢复。owner 探测为 `alive`、`exited`、`unknown` 三态：Windows 使用 `OpenProcess(SYNCHRONIZE)` 与 `WaitForSingleObject(..., 0)` 的只读句柄查询并始终关闭句柄，POSIX 才使用平台限定的无信号探测；权限不足、未知错误或查询失败保持 `unknown`，不会触发恢复。应用服务将 expected 贯穿源码检查、下载、构建、历史复用和 `finish_project_index` 的 CAS，候选快照可以先写入但不会绕过 latest 校验。latest CAS 成功后，管理库用一个 `BEGIN IMMEDIATE` 事务写入 source identity、attempt ready/index/hash 并删除意图；跨库中断时，当前 latest 若仍是候选 ready 快照则补提交，否则终止意图并清理归档临时目录，且不回滚其他 writer。恢复前的短暂 source/latest 差异由该意图解释，待恢复意图会阻止同项目继续更新。
 
 FeatureGeneration 的关系表继续保存 generation ID、project/index、cache/idempotency、模式和结果 JSON；`source`、`source_scope`、宿主标签和零模型用量保存在版本化结果中，旧结果缺少 `source` 时默认读取为 `server`，不需要迁移。外部保存通过同一个 `BEGIN IMMEDIATE` 事务二次校验 generation 的 project/index 与活动 `understanding` Codex Run 的 project/session/index/status/deadline，防止提交与取消或终态竞争；Run 不进入终态，FeatureGeneration 成功提交后再由 external Agent 提交 Run 结论。外部 evidence 从 Run 工具结果恢复并在固定 snapshot 上复核，不持久化客户端自报内容为证据。
 
@@ -42,7 +46,7 @@ FeatureGeneration 的关系表继续保存 generation ID、project/index、cache
 
 ## 错误与限制
 
-项目更新的持久化准入冲突返回 conflict；下载/构建失败或 latest CAS 冲突不会改写旧 source identity/latest。管理库提交失败不会被当作成功，意图会释放 owner 并等待下一次服务启动按候选 ready latest 恢复或终止；清理状态单独保留，清理失败不撤销已经提交的 latest。两套 SQLite 没有跨库原子事务，因此恢复前可能存在可解释的短暂可见差异，但不会通过回滚覆盖其他请求。owner 无法确认时不会把 active attempt 标为 interrupted，意图继续作为项目级 conflict 保护状态。
+项目更新的持久化准入冲突返回 conflict；下载/构建失败或 latest CAS 冲突不会改写旧 source identity/latest。管理库提交失败不会被当作成功，意图会释放 owner 并等待后续恢复扫描按候选 ready latest 恢复或终止；job 重放遇到已过期意图也会先尝试原子认领并恢复。清理状态单独保留，清理失败不撤销已经提交的 latest。两套 SQLite 没有跨库原子事务，因此恢复前可能存在可解释的短暂可见差异，但不会通过回滚覆盖其他请求。owner 无法确认时不会把 active attempt 标为 interrupted，意图继续作为项目级 conflict 保护状态。
 
 Run 持久化限制工具调用、模型调用/修复、单次/总源码行、输入/输出字符、模型输入/输出字符、事件和时间预算；external Run 不走内部并发槽位，但仍受相同工具、源码、输出、事件和创建时间预算。定义描述和关系事实缓存默认每个 scope/repository 合计最多 5,000 条和 16 MiB，单行 UTF-8 字节数、格式版本、路径、行号和事实形状均复核；坏行按未命中，写入/清理失败不回滚已提交 index。新鲜度检查还受文件数、总字节和时间预算约束；扫描完整且仅有旧 metadata 与源码/规则/配置变化时允许显式重建，读取错误、来源不可用、路径/符号链接异常、TOCTOU 或预算原因仍返回未知且不覆盖 latest。变化路径列表另有 100 条展示上限，不能把路径列表截断误读为扫描不完整。关系扫描达到时间或静态边预算时才设置 `index_truncated`；unresolved 达到详情上限则只设置 `index_unresolved_truncated` 并继续扫描静态边。旧索引的 unresolved 列为 NULL，查询透传为未知；邻接查询自身的 `truncated`/`truncation_reason` 只表示本次节点、边、时间或输出边界。事件页最多 100 条、工具结果页最多 40 条、Run 历史最多 40 条，游标绑定 project/session/run。影响查询默认/最大深度为 2、节点最多 40、边最多 80、路径和 unresolved 最多 40，且有时间与输出字节边界；root 不计入 reachable_node_count，重复节点和多路径去重，循环不展开为重复符号路径。唯一约束冲突映射为 conflict，坏 scope 映射为 not_found，输入或预算违反映射为 invalid_input/budget_exceeded；执行器容量满在落库前映射为可重试的 budget_exceeded/429；终态后写工具结果、事件和模型用量会被拒绝或忽略。SSE 连接/单 Run 订阅、批次、事件字节、心跳和生命周期也有独立上限，游标未来或跨 Run 不进入流；来源目录只读，索引和服务数据目录由 registry 边界控制。
 
