@@ -1,5 +1,7 @@
 # 决策记录
 
+- [后端基础设施分阶段演进提案（proposed）](2026-10-28-backend-infrastructure-evolution.md)
+
 - [Issue 影响分层](2026-10-26-issue-impact-layering.md)
 
 - [Real Run 直接代码理解](2026-10-22-real-code-understanding-runs.md)
