@@ -73,6 +73,10 @@ codetrail install
 
 动态调用与无法解析的关系会保留为未知。静态可达不等于已确认影响，报告也不代替运行时复现。CodeGraph/Archify 是设计参考，当前并非完整复现。
 
+## 当前架构与演进规划
+
+当前 Web 工作台通过 HTTP 使用 FastAPI API，MCP server 作为独立 stdio 入口复用应用服务；导入和索引在 API 请求内同步执行，持久化使用 SQLite，锁和并发限制仅在单个进程实例内生效。目标架构尚未实现：[后端基础设施分阶段演进提案](docs/decisions/2026-10-28-backend-infrastructure-evolution.md)规划按三个独立 PR 顺序引入 Redis 任务队列与 worker、Redis 分布式协调，以及 PostgreSQL/Alembic 和可选 pgvector；状态均为 proposed。
+
 ## 配置与开发
 
 - [CLI、共享配置与 MCP](apps/api/mcp.md)：允许导入路径、编译器、GitHub token、模型配置和故障排查。
