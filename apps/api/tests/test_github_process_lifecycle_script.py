@@ -96,7 +96,11 @@ def test_missing_release_recycles_worker_and_retains_diagnostic_log(tmp_path: Pa
             timeout=3,
         )
         assert status == 200
-        assert body["attempt"]["status"] == "failed"
+        assert body["job_id"]
+        status, job = script._wait_for_job(base_url, body["job_id"], timeout=5)
+        assert status == 200
+        assert job["status"] == "failed"
+        assert job["result"]["attempt"]["status"] == "failed"
         assert gate.is_file()
         assert "stage=github.download.release" in script._read_log_tail(log_path)
     finally:

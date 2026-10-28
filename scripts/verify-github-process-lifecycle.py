@@ -337,6 +337,29 @@ def _http_json(
         return int(exc.code), json.loads(exc.read() or b"{}")
 
 
+def _wait_for_job(
+    base_url: str,
+    job_id: str,
+    *,
+    timeout: float = HTTP_REQUEST_TIMEOUT_SECONDS,
+    poll_interval: float = 0.05,
+) -> tuple[int, dict[str, Any]]:
+    """Poll an asynchronous API job until it reaches a terminal state."""
+    if timeout <= 0 or poll_interval <= 0:
+        raise ValueError("job wait timeout and poll interval must be positive")
+    deadline = time.monotonic() + timeout
+    latest: dict[str, Any] = {}
+    while time.monotonic() < deadline:
+        status, latest = _http_json(
+            f"{base_url}/api/jobs/{job_id}",
+            timeout=min(HTTP_REQUEST_TIMEOUT_SECONDS, max(0.01, deadline - time.monotonic())),
+        )
+        if status != 200 or latest.get("status") in {"succeeded", "failed", "cancelled", "timed_out"}:
+            return status, latest
+        time.sleep(min(poll_interval, max(0.0, deadline - time.monotonic())))
+    raise TimeoutError(f"job {job_id} did not reach a terminal state: {latest}")
+
+
 def _read_log_tail(path: Path, limit: int = 4_000) -> str:
     if not path.is_file():
         return ""
@@ -1133,8 +1156,13 @@ def _try_public_github() -> dict[str, Any]:
             {"name": "Public GitHub Probe", "url": "https://github.com/pallets/itsdangerous"},
             timeout=20 * 60,
         )
-        result: dict[str, Any] = {"status": status, "response": imported}
+        job_status = None
         if status == 200:
+            status, job = _wait_for_job(base_url, imported["job_id"], timeout=20 * 60)
+            job_status = job.get("status")
+            imported = job.get("result") or job
+        result: dict[str, Any] = {"status": status, "job_status": job_status, "response": imported}
+        if status == 200 and job_status == "succeeded":
             project_id = imported["project"]["project_id"]
             index_id = imported["index"]["index"]["index_id"]
             freshness_status, freshness = _http_json(
