@@ -4,7 +4,7 @@
 
 `apps/api` 提供本地 FastAPI 服务、静态仓库 allow-list、受限本地/GitHub 来源导入、Project/Index/Session 管理、索引新鲜度检查与显式更新、规则概览、功能生成，以及显式 fixture/real/external Run 的冻结、执行、事件、SSE、Issue/代码理解报告读取和报告候选的有界静态影响查询，以及同一结果上的四层读法。Real 与 external understanding Run 共用 explanation 报告和同快照证据规则；外部 `understanding` Run 还可接收宿主 Agent 识别的功能结果，服务端只校验和保存，不为该提交调用模型。源码索引覆盖 `.py`、`.ts`、`.tsx`；纯 Python 仓库可只用 `uv` 运行 API，仓库含 TypeScript 时，API 主机还必须可运行 Node.js，并使用 CodeTrail 工作区锁定的 `apps/web/node_modules/typescript` 5.9.3。工作区根目录运行 `codetrail init` 会自动发现它；安装 `codetrail` 包本身不包含 Web 或 TypeScript 编译器。解析器缺失或语法错误会显式令新索引失败。API 不执行被分析仓库代码、shell 或测试；real Run 和内置 HTTP 功能生成只通过有界模型适配器请求服务端配置的兼容供应商，external Run 只接收 Codex 通过本地 MCP 发起的白名单工具调用和结构化结论。
 
-GitHub 导入/重试/远端刷新与项目索引重建通过持久 job 提交，HTTP 立即返回 `job_id`；初始导入用 `GET /api/jobs/{job_id}` 轮询，可用 `POST /api/jobs/{job_id}/cancel` 显式取消；项目任务用 project-scoped job 状态和取消路由。任务摘要与 attempt 保存在现有 SQLite 管理库，Redis（配置后）只承载 arq 队列。无 Redis 时同一接口由进程内线程执行，运行期间的租约扫描可恢复遗留任务，但不保证 API 进程崩溃后恢复。API 与 arq worker 通过同一服务工厂构建仓库注册表、索引服务和工作区服务，因此使用一致的数据目录、导入开关、GitHub 凭据/下载预算与 TypeScript 编译器设置；worker 与 API 必须共享数据目录及来源挂载。
+GitHub 导入/重试/远端刷新与项目索引重建通过持久 job 提交，HTTP 立即返回 `job_id`；初始导入用 `GET /api/jobs/{job_id}` 轮询，可用 `POST /api/jobs/{job_id}/cancel` 显式取消；项目任务用 project-scoped job 状态和取消路由。任务摘要与 attempt 保存在现有 SQLite 管理库，Redis（配置后）只承载 arq 队列。恢复扫描只在当前 dispatch 已从 Redis 消失时重新投递 queued 或到期 retry_wait job，每个 job 至多保留一个待处理 dispatch。无 Redis 时同一接口由进程内线程执行；API 停止期间没有独立 worker，重启后恢复线程会重新调度 SQLite 中 queued 或租约过期的 job。API 与 arq worker 通过同一服务工厂构建仓库注册表、索引服务和工作区服务，因此使用一致的数据目录、导入开关、GitHub 凭据/下载预算与 TypeScript 编译器设置；worker 与 API 必须共享数据目录及来源挂载。
 
 本地目录导入仍同步完成：它只读取调用方已授权、API 本机可见的目录，不需要独立的远端获取/重试队列；保留现有调用语义也避免为本地路径引入额外任务生命周期。
 

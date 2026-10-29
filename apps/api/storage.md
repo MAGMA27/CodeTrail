@@ -2,7 +2,7 @@
 
 ## 后台任务
 
-`ManagementStore` 所在的 `registry.sqlite3` 管理库旁使用 `jobs` 表持久化 job payload、公开状态、attempt 历史、结果摘要、幂等键、合并关系和 worker 租约；`job_build_keys` 在 SQLite 写事务内声明活跃仓库/解析后 commit 构建键；Redis 不保存业务状态。attempt 列表最多 20 条，终态 result 最多 32 KB，summary 最多 2,000 字符。worker 可能至少一次执行，业务写入仍由现有 IndexStore/管理库事务完成，完整索引提交后才成为 ready。过期租约扫描会在重试预算内重新排队，耗尽时标记 `worker_lost`。无 Redis 的轻量线程模式由周期扫描器检查租约，心跳未过期的共享任务不会被误判为丢失。
+`ManagementStore` 所在的 `registry.sqlite3` 管理库旁使用 `jobs` 表持久化 job payload、公开状态、attempt 历史、结果摘要、幂等键、合并关系和 worker 租约；`job_build_keys` 在 SQLite 写事务内声明活跃仓库/解析后 commit 构建键；Redis 不保存业务状态。attempt 列表最多 20 条，终态 result 最多 32 KB，summary 最多 2,000 字符。worker 可能至少一次执行，业务写入仍由现有 IndexStore/管理库事务完成，完整索引提交后才成为 ready。过期租约扫描会在重试预算内重新排队，耗尽时标记 `worker_lost`；Redis 恢复扫描仅在 queued 或到期 retry_wait job 的当前 dispatch 不存在时重新投递，同一 job 至多一个待处理 dispatch。无 Redis 的轻量线程模式由周期扫描器检查租约并跳过已在线程池中排队或运行的 job，心跳未过期的共享任务不会被误判为丢失。
 
 ## 状态
 

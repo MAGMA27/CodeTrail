@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sqlite3
 import threading
+import time
 from pathlib import Path
 from urllib.parse import urlsplit
 from datetime import datetime, timedelta, timezone
@@ -234,6 +236,196 @@ def test_lease_recovery_requeues_or_marks_worker_lost(
     assert jobs.store.get(retryable.job_id).error_code == "worker_lost"
     assert jobs.store.get(failed.job_id).status == "failed"
     assert jobs.store.get(failed.job_id).error_code == "worker_lost"
+
+
+def test_redis_recovery_only_requeues_missing_dispatches(tmp_path: Path) -> None:
+    redis_url = os.getenv("CODETRAIL_TEST_REDIS_URL")
+    if not redis_url:
+        pytest.skip("CODETRAIL_TEST_REDIS_URL is not configured")
+    from redis import Redis
+
+    redis = Redis.from_url(redis_url)
+    try:
+        redis.ping()
+    except Exception as exc:
+        redis.close()
+        pytest.skip(f"test Redis is unavailable: {exc}")
+    try:
+        redis.flushdb()
+        jobs = JobService(
+            str(tmp_path / "registry.sqlite3"),
+            lambda record, control: {"ok": True},
+            redis_url=redis_url,
+            start_background=True,
+        )
+        try:
+            submitted = [jobs.submit("github_import", None, {"n": n}) for n in range(3)]
+            job_ids = {job.job_id for job in submitted}
+            for _ in range(4):
+                jobs.recover_expired()
+            queue = redis.zrange("arq:queue", 0, -1)
+            assert len(queue) == 3
+            assert {member.decode().rsplit(":", 1)[0] for member in queue} == job_ids
+
+            lost = submitted[0].job_id
+            raw = jobs.store.raw(lost)
+            dispatch_id = f"{lost}:{raw['enqueue_seq']}"
+            redis.zrem("arq:queue", dispatch_id)
+            redis.delete(f"arq:job:{dispatch_id}")
+            for _ in range(4):
+                jobs.recover_expired()
+            queue = redis.zrange("arq:queue", 0, -1)
+            assert len(queue) == 3
+            assert sum(member.decode().startswith(f"{lost}:") for member in queue) == 1
+            assert sum(
+                any(member.decode().startswith(f"{job.job_id}:") for member in queue)
+                for job in submitted[1:]
+            ) == 2
+
+            # Simulate an API crash after the durable SQLite insert but before
+            # the first Redis enqueue. Old rows are recovered; fresh ones get grace.
+            lost_first_dispatch = jobs.store.create(
+                "github_import",
+                None,
+                {"crashed_before_enqueue": True},
+                idempotency_key=None,
+                dedupe_key=None,
+                wait_seconds=jobs.config.queue_timeout,
+            )
+            fresh = jobs.store.create(
+                "github_import",
+                None,
+                {"fresh_before_enqueue": True},
+                idempotency_key=None,
+                dedupe_key=None,
+                wait_seconds=jobs.config.queue_timeout,
+            )
+            with jobs.store._connect() as db:
+                db.execute(
+                    "UPDATE jobs SET created_at=? WHERE job_id=?",
+                    ((datetime.now(timezone.utc) - timedelta(seconds=10)).isoformat(), lost_first_dispatch.job_id),
+                )
+            for _ in range(4):
+                jobs.recover_expired()
+            queue = redis.zrange("arq:queue", 0, -1)
+            assert sum(member.decode().startswith(f"{lost_first_dispatch.job_id}:") for member in queue) == 1
+            assert jobs.store.raw(lost_first_dispatch.job_id)["enqueue_seq"] == 1
+            assert not any(member.decode().startswith(f"{fresh.job_id}:") for member in queue)
+            assert jobs.store.raw(fresh.job_id)["enqueue_seq"] == 0
+
+            stale = jobs.store.create(
+                "github_import",
+                None,
+                {"stale_scan": True},
+                idempotency_key=None,
+                dedupe_key=None,
+                wait_seconds=jobs.config.queue_timeout,
+            )
+            jobs._enqueue(stale.job_id)
+            stale_dispatch = f"{stale.job_id}:1"
+            redis.zrem("arq:queue", stale_dispatch)
+            redis.delete(f"arq:job:{stale_dispatch}")
+            dispatch_lock = jobs._redis_dispatch_lock
+
+            class MutatingDispatchLock:
+                def __enter__(self):
+                    with jobs.store._connect() as db:
+                        db.execute(
+                            "UPDATE jobs SET status='retry_wait', retry_after_at=?, enqueue_seq=2 WHERE job_id=?",
+                            ((datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(), stale.job_id),
+                        )
+
+                def __exit__(self, *_args):
+                    return False
+
+            jobs._redis_dispatch_lock = MutatingDispatchLock()  # type: ignore[assignment]
+            try:
+                jobs.recover_expired()
+            finally:
+                jobs._redis_dispatch_lock = dispatch_lock
+            assert jobs.store.raw(stale.job_id)["enqueue_seq"] == 2
+            assert not any(
+                member.decode().startswith(f"{stale.job_id}:")
+                for member in redis.zrange("arq:queue", 0, -1)
+            )
+
+            retry = jobs.store.create(
+                "github_import",
+                None,
+                {"retry": True},
+                idempotency_key=None,
+                dedupe_key=None,
+                wait_seconds=jobs.config.queue_timeout,
+            )
+            jobs._enqueue(retry.job_id, defer_seconds=3600)
+            with jobs.store._connect() as db:
+                db.execute(
+                    "UPDATE jobs SET status='retry_wait', retry_after_at=? WHERE job_id=?",
+                    ("2000-01-01T00:00:00+00:00", retry.job_id),
+                )
+            before = len(redis.zrange("arq:queue", 0, -1))
+            for _ in range(4):
+                jobs.recover_expired()
+            queue = redis.zrange("arq:queue", 0, -1)
+            assert len(queue) == before
+            assert sum(member.decode().startswith(f"{retry.job_id}:") for member in queue) == 1
+        finally:
+            jobs.close()
+    finally:
+        redis.flushdb()
+        redis.close()
+
+
+def test_light_recovery_does_not_submit_duplicate_futures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("CODETRAIL_WORKER_CONCURRENCY", "1")
+    entered = threading.Event()
+    release = threading.Event()
+    completed = threading.Event()
+    calls: dict[str, int] = {}
+
+    def executor(record, control):
+        job_id = record["job_id"]
+        calls[job_id] = calls.get(job_id, 0) + 1
+        if record["payload"].get("blocker"):
+            entered.set()
+            assert release.wait(timeout=2)
+        else:
+            completed.set()
+        return {"ok": True}
+
+    jobs = JobService(
+        str(tmp_path / "registry.sqlite3"), executor, start_background=True
+    )
+    submitted_jobs: list[str] = []
+    pool_submit = jobs.pool.submit
+
+    def counting_submit(fn, *args, **kwargs):
+        submitted_jobs.append(str(args[0]))
+        return pool_submit(fn, *args, **kwargs)
+
+    jobs.pool.submit = counting_submit  # type: ignore[method-assign]
+    try:
+        blocker = jobs.submit("github_import", None, {"blocker": True})
+        assert entered.wait(timeout=1)
+        queued = jobs.submit("github_import", None, {"queued": True})
+        for _ in range(5):
+            jobs.recover_expired()
+        assert submitted_jobs.count(queued.job_id) == 1
+        assert jobs._scheduled_jobs == {blocker.job_id, queued.job_id}
+        release.set()
+        assert completed.wait(timeout=2)
+        deadline = time.monotonic() + 2
+        while jobs.store.get(queued.job_id).status != "succeeded" and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert jobs.store.get(blocker.job_id).status == "succeeded"
+        assert jobs.store.get(queued.job_id).status == "succeeded"
+        assert calls == {blocker.job_id: 1, queued.job_id: 1}
+        assert submitted_jobs.count(queued.job_id) == 1
+    finally:
+        release.set()
+        jobs.close()
 
 
 def test_recovery_loop_retries_after_exception_and_stops_on_close(

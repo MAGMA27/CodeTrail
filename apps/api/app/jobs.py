@@ -30,6 +30,7 @@ JobStatus = Literal[
 TERMINAL = {"succeeded", "failed", "cancelled", "timed_out"}
 MAX_SUMMARY = 2_000
 MAX_RESULT_BYTES = 32_000
+FIRST_ENQUEUE_GRACE_SECONDS = 2
 logger = logging.getLogger(__name__)
 
 
@@ -351,10 +352,13 @@ class JobStore:
 
     def next_enqueue_sequence(self, job_id: str) -> int:
         with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
             db.execute("UPDATE jobs SET enqueue_seq=enqueue_seq+1 WHERE job_id=?", (job_id,))
             row = db.execute("SELECT enqueue_seq FROM jobs WHERE job_id=?", (job_id,)).fetchone()
-        if row is None:
-            raise KeyError(job_id)
+            if row is None:
+                db.execute("ROLLBACK")
+                raise KeyError(job_id)
+            db.execute("COMMIT")
         return int(row["enqueue_seq"])
 
     def update_attempts(self, job_id: str, attempts: list[dict[str, Any]]) -> None:
@@ -574,6 +578,9 @@ class JobService:
         self.redis_url = redis_url or os.getenv("CODETRAIL_REDIS_URL")
         self.start_background = start_background
         self.pool = ThreadPoolExecutor(max_workers=self.config.worker_concurrency)
+        self._scheduled_jobs: set[str] = set()
+        self._scheduled_jobs_lock = threading.Lock()
+        self._redis_dispatch_lock = threading.Lock()
         self._recovery_stop = threading.Event()
         self._recovery_thread: threading.Thread | None = None
         if start_background and not self.redis_url:
@@ -605,8 +612,29 @@ class JobService:
             if self.redis_url:
                 self.submit_existing(job.job_id)
             else:
-                self.pool.submit(self.run, job.job_id, self.config.max_retries)
+                self._submit_light(job.job_id)
         return job
+
+    def _submit_light(self, job_id: str) -> bool:
+        """Schedule one in-process future per job until its run call finishes."""
+        with self._scheduled_jobs_lock:
+            if job_id in self._scheduled_jobs:
+                return False
+            self._scheduled_jobs.add(job_id)
+        try:
+            self.pool.submit(self._run_scheduled, job_id, self.config.max_retries)
+        except Exception:
+            with self._scheduled_jobs_lock:
+                self._scheduled_jobs.discard(job_id)
+            raise
+        return True
+
+    def _run_scheduled(self, job_id: str, max_retries: int) -> None:
+        try:
+            self.run(job_id, max_retries)
+        finally:
+            with self._scheduled_jobs_lock:
+                self._scheduled_jobs.discard(job_id)
 
     def run(self, job_id: str, max_retries: int | None = None) -> None:
         max_retries = self.config.max_retries if max_retries is None else max_retries
@@ -804,7 +832,7 @@ class JobService:
             ).fetchall()
             queued = db.execute(
                 """
-                SELECT job_id FROM jobs
+                SELECT job_id, enqueue_seq, created_at FROM jobs
                 WHERE merged_into IS NULL
                   AND (status='queued' OR (status='retry_wait' AND (retry_after_at IS NULL OR retry_after_at<=?)))
                 """,
@@ -813,13 +841,40 @@ class JobService:
         if self.start_background and self.redis_url:
             for row in queued:
                 try:
-                    self.submit_existing(row["job_id"])
+                    # Let the submitter finish the SQLite-create/enqueue window.
+                    if row["enqueue_seq"] == 0 and (
+                        self.store.clock() - datetime.fromisoformat(row["created_at"])
+                    ).total_seconds() < FIRST_ENQUEUE_GRACE_SECONDS:
+                        continue
+                    with self._redis_dispatch_lock:
+                        # The scan snapshot may be stale: a retry can have received a
+                        # newer dispatch while this row waited for the dispatch lock.
+                        with self.store._connect() as db:
+                            current = db.execute(
+                                """SELECT status, merged_into, retry_after_at, enqueue_seq
+                                   FROM jobs WHERE job_id=?""",
+                                (row["job_id"],),
+                            ).fetchone()
+                        if current is None or current["merged_into"] is not None:
+                            continue
+                        status = current["status"]
+                        retry_after_at = current["retry_after_at"]
+                        if status == "retry_wait":
+                            if retry_after_at is not None and self.store.clock() < datetime.fromisoformat(
+                                retry_after_at
+                            ):
+                                continue
+                        elif status != "queued":
+                            continue
+                        if self._current_dispatch_pending(row["job_id"], current["enqueue_seq"]):
+                            continue
+                        self._enqueue_unlocked(row["job_id"])
                 except Exception:
                     # Redis availability is retried on the next worker scan.
-                    pass
+                    logger.warning("Could not check queued job dispatch; it will be retried", exc_info=True)
         for row in queued:
             if self.start_background and not self.redis_url:
-                self.pool.submit(self.run, row["job_id"], self.config.max_retries)
+                self._submit_light(row["job_id"])
         for row in rows:
             if row["status"] == "cancel_requested":
                 self.store.transition(
@@ -851,7 +906,7 @@ class JobService:
                 if self.redis_url:
                     self.submit_existing(row["job_id"])
                 else:
-                    self.pool.submit(self.run, row["job_id"], max_retries)
+                    self._submit_light(row["job_id"])
             else:
                 self.store.transition(
                     row["job_id"],
@@ -864,9 +919,37 @@ class JobService:
         return len(rows)
 
     def submit_existing(self, job_id: str) -> None:
-        self._enqueue(job_id)
+        with self._redis_dispatch_lock:
+            self._enqueue_unlocked(job_id)
+
+    def _current_dispatch_pending(self, job_id: str, sequence: int) -> bool:
+        """Check only live arq job state; an old result must not block recovery."""
+        if sequence <= 0:
+            return False
+        from arq import create_pool
+        from arq.connections import RedisSettings
+        from arq.constants import default_queue_name, in_progress_key_prefix, job_key_prefix
+
+        dispatch_id = f"{job_id}:{sequence}"
+
+        async def check() -> bool:
+            pool = await create_pool(RedisSettings.from_dsn(self.redis_url))
+            try:
+                pending = await pool.exists(
+                    job_key_prefix + dispatch_id, in_progress_key_prefix + dispatch_id
+                )
+                queued = await pool.zscore(default_queue_name, dispatch_id)
+                return bool(pending or queued is not None)
+            finally:
+                await pool.aclose()
+
+        return bool(run_async_from_sync(check))
 
     def _enqueue(self, job_id: str, *, defer_seconds: int = 0) -> None:
+        with self._redis_dispatch_lock:
+            self._enqueue_unlocked(job_id, defer_seconds=defer_seconds)
+
+    def _enqueue_unlocked(self, job_id: str, *, defer_seconds: int = 0) -> None:
         from arq import create_pool
         from arq.connections import RedisSettings
 
@@ -877,21 +960,11 @@ class JobService:
                 options: dict[str, Any] = {"_job_id": f"{job_id}:{sequence}"}
                 if defer_seconds:
                     options["_defer_by"] = timedelta(seconds=defer_seconds)
-                queued = await pool.enqueue_job("run_job", job_id, **options)
-                if queued is None:
-                    raw = self.store.raw(job_id)
-                    if raw["status"] not in {
-                        "running",
-                        "succeeded",
-                        "failed",
-                        "cancelled",
-                        "timed_out",
-                    }:
-                        raise RuntimeError(
-                            f"arq declined job {job_id} dispatch {sequence}; job remains recoverable"
-                        )
+                # arq returns None when this dispatch ID already exists in Redis.
+                # Recovery will verify its live queue/in-progress state next scan.
+                await pool.enqueue_job("run_job", job_id, **options)
             finally:
-                await pool.close()
+                await pool.aclose()
 
         run_async_from_sync(enqueue)
 
