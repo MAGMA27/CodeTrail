@@ -79,7 +79,7 @@ flowchart LR
 
 选型须在 PR 1 实施时复核锁定版本、Python 3.10–3.13 支持、Windows/本地开发体验、Redis 持久化、活动任务恢复和取消语义，再决定新增的运行时依赖。Redis 队列不是任务业务状态数据库。
 
-PR 1 已实现 arq/Redis 队列、SQLite job/attempt 状态、轻量线程适配器、Web 轮询/显式取消/刷新恢复、commit 合并与 ready index 复用、租约恢复和有界重试，并提供 Compose 配置；决策状态仍为 `proposed`。离线验收通过：Web TypeScript 检查及受影响单测 102 项、`tests/test_jobs.py` 11 项、`tests/test_contracts.py` 30 项、恢复/重放与跨 PID namespace 活跃 owner 测试 56 项、`compileall -q app`、`docs:check`；PyYAML 解析 Compose 及服务/健康检查核对通过。2026-10-29 在本机 Redis 8.10.2、uvicorn API 与独立 arq worker、共享 SQLite 数据目录及 `CODETRAIL_JOB_LEASE_SECONDS=15` 下端到端验证：GitHub 导入 16–78ms 返回 `job_id`，MAGMA27/dsh-calendar 约 2.4 秒后 `succeeded` 且 index ready；无 Redis 轻量模式同仓库 21–24ms 返回、约 2.2 秒后 `succeeded`。重复请求复用同一 `job_id`；分支与对应 SHA 并发提交（worker 并发 2）只产生一次导入 attempt 和一次下载/索引，第二个 job 复用结果；该次无 `merged_into` 字段，合并路径由单测覆盖。排队任务可直接取消；运行中的 fastapi/fastapi 索引任务取消后约 0.22 秒进入 `cancelled`，项目索引库没有 index 快照。worker 在 downloading 和 indexing 阶段遭 SIGKILL 后，租约约 15–20 秒过期时任务标记 `worker_lost` 并重执行，第二次 attempt 成功且 index ready，旧 attempt 标记 `interrupted`。未验收项：环境无 Docker，未启动 Compose；未在浏览器手动操作；sqlalchemy/sqlalchemy 大仓库导入曾在索引阶段以 `internal_error` / `local index storage failed` 失败，此问题与队列无关，未在 PR 1 处理。
+PR 1 已实现 arq/Redis 队列、SQLite job/attempt 状态、轻量线程适配器、Web 轮询/显式取消/刷新恢复、commit 合并与 ready index 复用、租约恢复和有界重试，并提供 Compose 配置；决策状态仍为 `proposed`。离线验收通过：Web TypeScript 检查及受影响单测 102 项、`tests/test_jobs.py` 11 项、`tests/test_contracts.py` 30 项、恢复/重放与跨 PID namespace 活跃 owner 测试 56 项、`compileall -q app`、`docs:check`；PyYAML 解析 Compose 及服务/健康检查核对通过。2026-10-29 在 Docker 29.9.2、Compose v5.6.1、默认子网 `192.168.253.0/24` 下启动 Compose，Redis/API healthy，Web 返回 HTTP 200。GitHub 导入 MAGMA27/dsh-calendar 于 14–229ms 返回 `job_id`，worker 容器内约 2.4 秒后成功；运行中的 fastapi/fastapi 导入取消后 0.12–0.53 秒进入 `cancelled`。API 镜像用磁盘占用由 1.79GB 降至 558MB：以从 `node:24-bookworm-slim` 复制的 Node 替换 apt nodejs/npm 后，无缓存 API 构建约 9 秒，之前约 73 秒（基础镜像已预拉取）。此前在本机 Redis 8.10.2、uvicorn API 与独立 arq worker、共享 SQLite 数据目录及 `CODETRAIL_JOB_LEASE_SECONDS=15` 下的端到端验证仍有效：重复请求复用同一 `job_id`；分支与对应 SHA 并发提交（worker 并发 2）只产生一次导入 attempt 和一次下载/索引，第二个 job 复用结果；该次无 `merged_into` 字段，合并路径由单测覆盖。排队任务可直接取消；worker 在 downloading 和 indexing 阶段遭 SIGKILL 后，租约约 15–20 秒过期时任务标记 `worker_lost` 并重执行，第二次 attempt 成功且 index ready，旧 attempt 标记 `interrupted`。仍未验收：浏览器手动点击流程；sqlalchemy/sqlalchemy 大仓库导入曾在索引阶段以 `internal_error` / `local index storage failed` 失败，此问题与队列无关，未在 PR 1 处理。
 
 ### PR 2：队列之外的 Redis 协调与缓存
 
@@ -127,7 +127,7 @@ SQLite 到 PostgreSQL 的迁移建议按明确停写窗口执行：备份并盘�
 
 ## 验收与证据
 
-本文是架构提案，当前没有运行或验收目标基础设施，也没有依赖或代码变更。提案文档的格式、链接和索引检查由 `pnpm docs:check` 与 `pnpm docs:test` 验证；三个实施阶段的运行和语义验收须在对应 PR 中完成后，才能更新状态或记录验收结论。
+本文仍是架构提案；PR 1 已实现并有离线及 Compose 冒烟验收记录，PR 2/3 的运行与语义验收尚待对应阶段完成。提案文档的格式、链接和索引检查由 `pnpm docs:check` 与 `pnpm docs:test` 验证；决策状态保持 `proposed`。
 
 ## 后果
 

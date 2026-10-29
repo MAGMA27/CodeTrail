@@ -1,7 +1,9 @@
 FROM node:24-bookworm-slim AS build
 WORKDIR /workspace
 ARG NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
+ARG NEXT_PUBLIC_GITHUB_REQUEST_TIMEOUT_MS=30000
 ENV NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL}
+ENV NEXT_PUBLIC_GITHUB_REQUEST_TIMEOUT_MS=${NEXT_PUBLIC_GITHUB_REQUEST_TIMEOUT_MS}
 RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/web/package.json apps/web/package.json

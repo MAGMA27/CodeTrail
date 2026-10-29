@@ -21,7 +21,7 @@ services:
       CODETRAIL_GITHUB_TOKEN: ${CODETRAIL_GITHUB_TOKEN:-}
       CODETRAIL_GITHUB_IMPORT_ENABLED: ${CODETRAIL_GITHUB_IMPORT_ENABLED:-1}
       CODETRAIL_WEB_ORIGINS: ${CODETRAIL_WEB_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
-      CODETRAIL_TRUSTED_WRITE_NETWORKS: 172.30.0.0/24
+      CODETRAIL_TRUSTED_WRITE_NETWORKS: ${CODETRAIL_COMPOSE_SUBNET:-192.168.253.0/24}
     volumes:
       - codetrail-data:/data
     ports:
@@ -59,9 +59,9 @@ services:
       dockerfile: apps/web/Dockerfile
       args:
         NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000}
+        NEXT_PUBLIC_GITHUB_REQUEST_TIMEOUT_MS: ${NEXT_PUBLIC_GITHUB_REQUEST_TIMEOUT_MS:-30000}
     environment:
       NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000}
-      NEXT_PUBLIC_GITHUB_REQUEST_TIMEOUT_MS: ${NEXT_PUBLIC_GITHUB_REQUEST_TIMEOUT_MS:-30000}
     ports:
       - "127.0.0.1:3000:3000"
     depends_on:
@@ -76,4 +76,4 @@ networks:
   default:
     ipam:
       config:
-        - subnet: 172.30.0.0/24
+        - subnet: ${CODETRAIL_COMPOSE_SUBNET:-192.168.253.0/24}
