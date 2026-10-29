@@ -67,7 +67,7 @@ API 健康检查为 `GET /api/health`。前端或测试先创建 Project、建�
 
 ## 验证
 
-本目录的验证由 [api.md](api.md) 维护；精确字段与行为约束以源码声明为准。
+真实 Redis 恢复回归可在本地通过 `cd apps/api && CODETRAIL_TEST_REDIS_URL=redis://localhost:6379/15 uv run pytest -q -rs tests/test_jobs.py` 运行；必须使用专用的非 0 数据库，因为测试会清空该库。GitHub CI 的 API job 使用 Redis 7 service，并以数据库 15 运行该回归。其他验证由 [api.md](api.md) 维护；精确字段与行为约束以源码声明为准。
 
 ## 关联文档
 

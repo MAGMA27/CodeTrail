@@ -7,7 +7,7 @@ import sqlite3
 import threading
 import time
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -239,17 +239,47 @@ def test_lease_recovery_requeues_or_marks_worker_lost(
 
 
 def test_redis_recovery_only_requeues_missing_dispatches(tmp_path: Path) -> None:
+    require_redis = os.getenv("CODETRAIL_REQUIRE_REDIS_TEST") == "1"
+
+    def unavailable(reason: str) -> None:
+        if require_redis:
+            pytest.fail(reason)
+        pytest.skip(reason)
+
     redis_url = os.getenv("CODETRAIL_TEST_REDIS_URL")
     if not redis_url:
-        pytest.skip("CODETRAIL_TEST_REDIS_URL is not configured")
+        unavailable("CODETRAIL_TEST_REDIS_URL is not configured")
+
+    try:
+        parsed_url = urlsplit(redis_url)
+        db_path = parsed_url.path
+        if parsed_url.scheme not in {"redis", "rediss"} or not db_path.startswith("/"):
+            raise ValueError("URL must explicitly select a Redis database")
+        db_number = int(db_path[1:])
+        query_db = parse_qs(parsed_url.query).get("db")
+        if (
+            db_path != f"/{db_number}"
+            or db_number <= 0
+            or (query_db is not None and query_db != [str(db_number)])
+        ):
+            raise ValueError("URL must explicitly select a non-zero Redis database")
+    except (TypeError, ValueError) as exc:
+        unavailable(
+            f"CODETRAIL_TEST_REDIS_URL must select a dedicated non-zero Redis database; "
+            f"the test flushes it: {exc}"
+        )
+
     from redis import Redis
 
-    redis = Redis.from_url(redis_url)
+    try:
+        redis = Redis.from_url(redis_url)
+    except Exception as exc:
+        unavailable(f"CODETRAIL_TEST_REDIS_URL is invalid: {exc}")
     try:
         redis.ping()
     except Exception as exc:
         redis.close()
-        pytest.skip(f"test Redis is unavailable: {exc}")
+        unavailable(f"test Redis is unavailable: {exc}")
     try:
         redis.flushdb()
         jobs = JobService(
