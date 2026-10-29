@@ -57,6 +57,6 @@ Worker 时钟偏差不能简单表述为“小于 10 秒就一定是同一 tick�
 
 ## 核对位置
 
-- CodeTrail：[`jobs.py`](../../apps/api/app/jobs.py)、[`worker.py`](../../apps/api/app/worker.py)、[`cli.py`](../../apps/api/app/cli.py)、[`docker-compose.yml`](../../docker-compose.yml)、[`Dockerfile`](../../apps/api/Dockerfile)、[`storage.py`](../../apps/api/app/storage.py)。
+- CodeTrail：[`jobs.py`](../../apps/api/app/jobs.py)、[`worker.py`](../../apps/api/app/worker.py)、[`cli.py`](../../apps/api/app/cli.py)、`docker-compose.yml`、[`Dockerfile`](../../apps/api/Dockerfile)、[`storage.py`](../../apps/api/app/storage.py)。
 - 决策与分期：[`后端基础设施演进`](../decisions/2026-10-28-backend-infrastructure-evolution.md)。
 - 安装版本源码：`apps/api/.venv/lib/python3.13/site-packages/arq/{connections.py,worker.py,cron.py,constants.py}`。
