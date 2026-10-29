@@ -398,7 +398,7 @@ class GitHubClient:
         except (TimeoutError, URLError, OSError) as exc:
             if timeout_error is not None and _is_timeout_exception(exc):
                 raise timeout_error from exc
-            raise GitHubError("internal_error", 503, "GitHub request failed or timed out") from exc
+            raise GitHubError("connection_error", 503, "GitHub request failed or timed out") from exc
         return _ResponseData(
             status=int(getattr(response, "status", getattr(response, "code", 0))),
             headers=_headers_from_http(getattr(response, "headers", {})),
@@ -443,7 +443,7 @@ class GitHubClient:
         except (TimeoutError, URLError, OSError) as exc:
             if deadline is not None and self._monotonic() >= deadline:
                 raise GitHubError("budget_exceeded", 429, "GitHub total request time exceeded the configured limit") from exc
-            raise GitHubError("internal_error", 503, "GitHub response read failed or timed out") from exc
+            raise GitHubError("connection_error", 503, "GitHub response read failed or timed out") from exc
         return b"".join(chunks)
 
     def _stream_to_file(

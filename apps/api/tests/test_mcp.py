@@ -94,6 +94,18 @@ def request(application, method: str, target: str, payload: dict | None = None) 
     return asyncio.run(_request(application, method, target, payload))
 
 
+def request_job(application, target: str, payload: dict | None = None) -> tuple[int, dict]:
+    jobs = application.state.workspace_service.jobs
+    jobs.start_background = False
+    status, submitted = request(application, "POST", target, payload)
+    if status != 200 or "job_id" not in submitted:
+        return status, submitted
+    jobs.run(submitted["job_id"])
+    project_id = jobs.store.get(submitted["job_id"]).project_id
+    query = "" if project_id is None else f"?project_id={project_id}"
+    status, finished = request(application, "GET", f"/api/jobs/{submitted['job_id']}{query}")
+    return status, finished.get("result") or finished
+
 def copy_fixture(tmp_path: Path, *, name: str = "timeout-demo", default_timeout: int = 30) -> Path:
     destination = tmp_path / name
     shutil.copytree(
@@ -616,6 +628,7 @@ def test_mcp_local_import_is_opt_in_and_shares_http_state(tmp_path: Path) -> Non
     mcp_repository = copy_fixture(tmp_path, name="mcp-agent")
     data_root = tmp_path / "service-data"
     application = create_app({}, data_root=data_root, allowed_import_roots=(tmp_path,))
+    application.state.workspace_service.jobs.start_background = False
     status, http_import = request(
         application,
         "POST",
@@ -740,7 +753,17 @@ def test_mcp_local_import_is_opt_in_and_shares_http_state(tmp_path: Path) -> Non
                 "import_github_repository",
                 "retry_github_import",
                 "refresh_github_source",
+                "get_job_status",
+                "cancel_job",
             } | RUN_READ_TOOLS == github_tools
+            pending = application.state.workspace_service.submit_job(
+                "github_import",
+                None,
+                {"name": "Pending", "url": "https://github.com/owner/repo", "ref": "main"},
+            )
+            cancelled = await client.call_tool("cancel_job", {"job_id": pending.job_id})
+            assert cancelled.structured_content["ok"] is True
+            assert cancelled.structured_content["job"]["status"] == "cancelled"
         return mcp_project_id
 
     mcp_project_id = asyncio.run(exercise())
@@ -793,9 +816,8 @@ def test_mcp_index_refresh_is_separately_opt_in(tmp_path: Path) -> None:
     assert status == 200
     assert http_freshness["status"] == "unknown"
     assert http_freshness["reasons"] == ["source_changed", "missing_index_metadata"]
-    status, http_refreshed = request(
+    status, http_refreshed = request_job(
         application,
-        "POST",
         f"/api/projects/{project_id}/indexes/{index_id}/refresh",
         {"revision": "http-legacy-repair", "dirty": True},
     )
@@ -833,6 +855,18 @@ def test_mcp_index_refresh_is_separately_opt_in(tmp_path: Path) -> None:
         )
 
     async def exercise() -> None:
+        async def wait_job(client, submitted):
+            job_id = submitted.structured_content["job"]["job_id"]
+            for _ in range(100):
+                polled = await client.call_tool(
+                    "get_job_status", {"job_id": job_id, "project_id": project_id}
+                )
+                job = polled.structured_content["job"]
+                if job["status"] in {"succeeded", "failed", "cancelled", "timed_out"}:
+                    return polled
+                await asyncio.sleep(0.05)
+            raise AssertionError(f"job {job_id} did not reach a terminal state")
+
         async with Client(parameters(False), read_timeout_seconds=10) as client:
             names = {tool.name for tool in (await client.list_tools()).tools}
             assert "check_index_freshness" in names
@@ -851,7 +885,7 @@ def test_mcp_index_refresh_is_separately_opt_in(tmp_path: Path) -> None:
                 "source_changed",
                 "missing_index_metadata",
             ]
-            refreshed = await client.call_tool(
+            refresh_job = await client.call_tool(
                 "refresh_index",
                 {
                     "project_id": project_id,
@@ -860,9 +894,11 @@ def test_mcp_index_refresh_is_separately_opt_in(tmp_path: Path) -> None:
                     "dirty": True,
                 },
             )
-            assert refreshed.structured_content["ok"] is True
-            assert refreshed.structured_content["result"]["mode"] == "created"
-            mcp_index_id = refreshed.structured_content["result"]["index"]["index"]["index_id"]
+            assert refresh_job.structured_content["ok"] is True
+            refreshed = await wait_job(client, refresh_job)
+            refreshed_result = refreshed.structured_content["job"]["result"]
+            assert refreshed_result["mode"] == "created"
+            mcp_index_id = refreshed_result["index"]["index"]["index_id"]
             assert mcp_index_id != http_index_id
 
             repaired = await client.call_tool(
@@ -870,13 +906,15 @@ def test_mcp_index_refresh_is_separately_opt_in(tmp_path: Path) -> None:
                 {"project_id": project_id, "index_id": mcp_index_id},
             )
             assert repaired.structured_content["result"]["status"] == "consistent"
-            reused = await client.call_tool(
+            reuse_job = await client.call_tool(
                 "refresh_index",
                 {"project_id": project_id, "index_id": mcp_index_id},
             )
-            assert reused.structured_content["ok"] is True
-            assert reused.structured_content["result"]["mode"] == "reused"
-            assert reused.structured_content["result"]["index"]["index"]["index_id"] == mcp_index_id
+            assert reuse_job.structured_content["ok"] is True
+            reused = await wait_job(client, reuse_job)
+            reused_result = reused.structured_content["job"]["result"]
+            assert reused_result["mode"] == "reused"
+            assert reused_result["index"]["index"]["index_id"] == mcp_index_id
             return mcp_index_id
 
     mcp_index_id = asyncio.run(exercise())
@@ -890,7 +928,6 @@ def test_mcp_index_refresh_is_separately_opt_in(tmp_path: Path) -> None:
     status, current_project = request(application, "GET", f"/api/projects/{project_id}")
     assert status == 200
     assert current_project["latest_index_id"] == mcp_index_id
-
 
 def test_mcp_historical_refresh_reuses_snapshot_and_matches_http(tmp_path: Path) -> None:
     repository = copy_fixture(tmp_path, name="mcp-historical-refresh")
@@ -915,9 +952,8 @@ def test_mcp_historical_refresh_reuses_snapshot_and_matches_http(tmp_path: Path)
     source = repository / "timeout_demo" / "config.py"
     original = source.read_bytes()
     source.write_bytes(original.replace(b"DEFAULT_TIMEOUT = 30", b"DEFAULT_TIMEOUT = 99"))
-    status, changed_index = request(
+    status, changed_index = request_job(
         application,
-        "POST",
         f"/api/projects/{project_id}/indexes/{index_a_id}/refresh",
         {"revision": "mcp-historical-b", "dirty": True},
     )
@@ -926,9 +962,8 @@ def test_mcp_historical_refresh_reuses_snapshot_and_matches_http(tmp_path: Path)
     index_b_id = changed_index["index"]["index"]["index_id"]
 
     source.write_bytes(original)
-    status, restored = request(
+    status, restored = request_job(
         application,
-        "POST",
         f"/api/projects/{project_id}/indexes/{index_b_id}/refresh",
         {"revision": "mcp-historical-restored", "dirty": True},
     )
@@ -959,6 +994,18 @@ def test_mcp_historical_refresh_reuses_snapshot_and_matches_http(tmp_path: Path)
     )
 
     async def exercise() -> tuple[str, str]:
+        async def wait_job(submitted):
+            job_id = submitted.structured_content["job"]["job_id"]
+            for _ in range(100):
+                polled = await client.call_tool(
+                    "get_job_status", {"job_id": job_id, "project_id": project_id}
+                )
+                job = polled.structured_content["job"]
+                if job["status"] in {"succeeded", "failed", "cancelled", "timed_out"}:
+                    return polled.structured_content["job"]["result"]
+                await asyncio.sleep(0.05)
+            raise AssertionError(f"job {job_id} did not reach a terminal state")
+
         async with Client(parameters, read_timeout_seconds=10) as client:
             checked = await client.call_tool(
                 "check_index_freshness",
@@ -969,7 +1016,7 @@ def test_mcp_historical_refresh_reuses_snapshot_and_matches_http(tmp_path: Path)
             assert checked_payload["changed_paths"] == http_freshness["changed_paths"]
             assert checked_payload["reasons"] == http_freshness["reasons"]
 
-            refreshed = await client.call_tool(
+            refresh_job = await client.call_tool(
                 "refresh_index",
                 {
                     "project_id": project_id,
@@ -978,20 +1025,21 @@ def test_mcp_historical_refresh_reuses_snapshot_and_matches_http(tmp_path: Path)
                     "dirty": True,
                 },
             )
-            result = refreshed.structured_content["result"]
-            assert refreshed.structured_content["ok"] is True
+            result = await wait_job(refresh_job)
             assert result["mode"] == "historical_reused"
             assert result["index"]["index"]["index_id"] == index_b_id
 
-            repeated = await client.call_tool(
+            repeated_job = await client.call_tool(
                 "refresh_index",
                 {"project_id": project_id, "index_id": index_b_id},
             )
-            repeated_result = repeated.structured_content["result"]
-            assert repeated.structured_content["ok"] is True
+            repeated_result = await wait_job(repeated_job)
             assert repeated_result["mode"] == "reused"
             assert repeated_result["index"]["index"]["index_id"] == index_b_id
-            return result["index"]["index"]["index_id"], repeated_result["index"]["index"]["index_id"]
+            return (
+                result["index"]["index"]["index_id"],
+                repeated_result["index"]["index"]["index_id"],
+            )
 
     historical_id, repeated_id = asyncio.run(exercise())
     assert historical_id == index_b_id
@@ -999,7 +1047,6 @@ def test_mcp_historical_refresh_reuses_snapshot_and_matches_http(tmp_path: Path)
     status, current_project = request(application, "GET", f"/api/projects/{project_id}")
     assert status == 200
     assert current_project["latest_index_id"] == index_b_id
-
 
 def test_mcp_reads_server_feature_generations_without_registering_model_generation(tmp_path: Path) -> None:
     repository = copy_fixture(tmp_path)

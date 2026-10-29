@@ -17143,6 +17143,296 @@
       "title": "IssueModelToolCall",
       "type": "object"
     },
+    "JobAttempt": {
+      "additionalProperties": false,
+      "properties": {
+        "attempt": {
+          "exclusiveMinimum": 0,
+          "title": "Attempt",
+          "type": "integer"
+        },
+        "ended_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ended At"
+        },
+        "error_code": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error Code"
+        },
+        "phase": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Phase",
+          "type": "string"
+        },
+        "retry_count": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Retry Count",
+          "type": "integer"
+        },
+        "started_at": {
+          "format": "date-time",
+          "title": "Started At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "attempt",
+        "started_at",
+        "phase"
+      ],
+      "title": "JobAttempt",
+      "type": "object"
+    },
+    "JobStatusResponse": {
+      "$defs": {
+        "JobAttempt": {
+          "additionalProperties": false,
+          "properties": {
+            "attempt": {
+              "exclusiveMinimum": 0,
+              "title": "Attempt",
+              "type": "integer"
+            },
+            "ended_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Ended At"
+            },
+            "error_code": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Error Code"
+            },
+            "phase": {
+              "maxLength": 100,
+              "minLength": 1,
+              "title": "Phase",
+              "type": "string"
+            },
+            "retry_count": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Retry Count",
+              "type": "integer"
+            },
+            "started_at": {
+              "format": "date-time",
+              "title": "Started At",
+              "type": "string"
+            }
+          },
+          "required": [
+            "attempt",
+            "started_at",
+            "phase"
+          ],
+          "title": "JobAttempt",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Durable state for one asynchronous import or index job.",
+      "properties": {
+        "attempts": {
+          "items": {
+            "$ref": "#/$defs/JobAttempt"
+          },
+          "maxItems": 20,
+          "title": "Attempts",
+          "type": "array"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "deadline_at": {
+          "format": "date-time",
+          "title": "Deadline At",
+          "type": "string"
+        },
+        "error_code": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error Code"
+        },
+        "execution_deadline_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Execution Deadline At"
+        },
+        "job_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Job Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "github_import",
+            "github_retry",
+            "github_cleanup",
+            "github_refresh",
+            "project_index_refresh"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "merged_into": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Merged Into"
+        },
+        "phase": {
+          "maxLength": 100,
+          "minLength": 1,
+          "title": "Phase",
+          "type": "string"
+        },
+        "progress": {
+          "additionalProperties": true,
+          "title": "Progress",
+          "type": "object"
+        },
+        "project_id": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Project Id"
+        },
+        "result": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Result"
+        },
+        "schema_version": {
+          "const": "0.1.0",
+          "default": "0.1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "queued",
+            "running",
+            "retry_wait",
+            "succeeded",
+            "failed",
+            "cancel_requested",
+            "cancelled",
+            "timed_out"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "summary": {
+          "anyOf": [
+            {
+              "maxLength": 2000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Summary"
+        },
+        "updated_at": {
+          "format": "date-time",
+          "title": "Updated At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "job_id",
+        "kind",
+        "status",
+        "phase",
+        "created_at",
+        "updated_at",
+        "deadline_at"
+      ],
+      "title": "JobStatusResponse",
+      "type": "object"
+    },
     "JourneyCoverage": {
       "additionalProperties": false,
       "description": "Bounded UI action extraction and route-matching coverage.",

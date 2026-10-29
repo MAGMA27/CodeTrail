@@ -23,6 +23,8 @@ import {
   isSessionResponse,
   isTrashListResponse,
   createProjectSessionRun,
+  cancelJob,
+  getJob,
   getProjectNeighbors,
   openProjectIndex,
   importGitHubRepository,
@@ -1425,9 +1427,9 @@ test("requestJson preserves a timeout when response headers arrive before the bo
   }
 });
 
-test("GitHub import, retry, and refresh requests share the extended timeout", async () => {
-  assert.ok(GITHUB_REQUEST_TIMEOUT_MS > 320_000);
-  assert.equal(DEFAULT_GITHUB_REQUEST_TIMEOUT_MS, 600_000);
+test("GitHub job submissions use a short per-request timeout", async () => {
+  assert.equal(GITHUB_REQUEST_TIMEOUT_MS, 30_000);
+  assert.equal(DEFAULT_GITHUB_REQUEST_TIMEOUT_MS, 30_000);
   assert.equal(parseGitHubRequestTimeoutMs(undefined), DEFAULT_GITHUB_REQUEST_TIMEOUT_MS);
   assert.equal(parseGitHubRequestTimeoutMs(String(DEFAULT_GITHUB_REQUEST_TIMEOUT_MS + 60_000)), DEFAULT_GITHUB_REQUEST_TIMEOUT_MS + 60_000);
   assert.equal(parseGitHubRequestTimeoutMs("320000"), 320_000);
@@ -1467,6 +1469,31 @@ test("GitHub import, retry, and refresh requests share the extended timeout", as
     ]);
   } finally {
     globalThis.setTimeout = originalSetTimeout;
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("job polling and cancellation use project scoped routes when available", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls: Array<{ url: string; method: string }> = [];
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    calls.push({ url: String(input), method: init?.method ?? "GET" });
+    return Response.json({
+      schema_version: SCHEMA_VERSION, job_id: "job-1", project_id: "project-1", kind: "github_refresh",
+      status: "cancelled", phase: "cancelled", progress: {}, attempts: [], result: null,
+      error_code: null, summary: null, created_at: "now", updated_at: "now", deadline_at: "later",
+      execution_deadline_at: null, merged_into: null,
+    });
+  }) as typeof fetch;
+  try {
+    await getJob("job-1", "project-1");
+    await cancelJob("job-1", "project-1");
+    assert.deepEqual(calls.map((call) => call.url), [
+      "http://localhost:8000/api/projects/project-1/jobs/job-1",
+      "http://localhost:8000/api/projects/project-1/jobs/job-1/cancel",
+    ]);
+    assert.deepEqual(calls.map((call) => call.method), ["GET", "POST"]);
+  } finally {
     globalThis.fetch = originalFetch;
   }
 });

@@ -634,8 +634,20 @@ def test_typescript_source_change_refreshes_to_new_index_and_keeps_old_source(tm
         {"revision": "changed-ts", "dirty": True},
     )
     assert status == 200
-    new_index_id = refreshed["index"]["index"]["index_id"]
-    assert refreshed["mode"] == "created"
+    deadline = time.monotonic() + 10
+    while refreshed["status"] not in {"succeeded", "failed", "cancelled", "timed_out"}:
+        assert time.monotonic() < deadline, f"index refresh job did not finish: {refreshed}"
+        time.sleep(0.01)
+        status, refreshed = request(
+            application,
+            "GET",
+            f"/api/projects/{project_id}/jobs/{refreshed['job_id']}",
+        )
+        assert status == 200
+    assert refreshed["status"] == "succeeded"
+    refresh_result = refreshed["result"]
+    assert refresh_result["mode"] == "created"
+    new_index_id = refresh_result["index"]["index"]["index_id"]
     assert new_index_id != old_index_id
     with application.state.registry.store_for_repository("ts") as store:
         assert store.read_evidence(old_index_id, "client.ts", 1, 1).excerpt == "export const value = 'old';"

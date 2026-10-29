@@ -212,7 +212,8 @@ def test_model_config_settings_redact_secret_preserve_blank_and_remove_explicitl
     assert json.loads(config_path.read_text(encoding="utf-8"))["api_key"] == ""
 
 
-def test_model_config_write_requires_loopback_client(tmp_path: Path) -> None:
+def test_model_config_write_requires_loopback_client(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("CODETRAIL_TRUSTED_WRITE_NETWORKS", "")
     application = create_app({}, data_root=tmp_path / "data")
     payload = {
         "schema_version": "0.1.0",
@@ -248,6 +249,41 @@ def test_model_config_write_requires_loopback_client(tmp_path: Path) -> None:
     )
     assert status == 200
     assert response["has_api_key"] is True
+
+
+def test_model_config_write_allows_only_explicit_trusted_networks(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("CODETRAIL_TRUSTED_WRITE_NETWORKS", "172.30.0.0/24")
+    application = create_app({}, data_root=tmp_path / "data")
+    payload = {
+        "schema_version": "0.1.0",
+        "provider": "test-provider",
+        "base_url": "https://model.example.test/v1",
+        "model": "test-model",
+        "api_key": "",
+        "remove_api_key": False,
+    }
+
+    status, response = request(
+        application,
+        "POST",
+        "/api/model-config",
+        payload,
+        client_host="172.30.0.1",
+        origin="http://localhost:3000",
+    )
+    assert status == 200
+    assert response["has_api_key"] is False
+
+    status, response = request(
+        application,
+        "POST",
+        "/api/model-config",
+        payload,
+        client_host="172.31.0.1",
+        origin="http://localhost:3000",
+    )
+    assert status == 403
+    assert response["code"] == "forbidden"
 
 
 def test_model_config_concurrent_blank_save_keeps_new_key(tmp_path: Path) -> None:

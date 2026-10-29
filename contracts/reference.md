@@ -2,11 +2,13 @@
 
 ## 状态
 
-已实现 Pydantic 契约和可重复 Schema 导出；前端对 Project、Index、Index freshness/refresh、Session/消息、概览、功能、fixture/real/external Run、事件、工具结果、Issue/代码理解报告、Run 影响查询和错误响应执行运行时边界校验；MCP 使用同一领域契约包装结构化结果。external Run 的 `execution_source=codex`、`analysis_kind`、工具响应、结论响应和报告限制，以及外部 Agent 功能生成的来源、范围和零服务端模型用量约束已纳入契约。
+已实现 Pydantic 契约和可重复 Schema 导出；前端对 Project、Index、Index freshness/refresh、Job/attempt、Session/消息、概览、功能、fixture/real/external Run、事件、工具结果、Issue/代码理解报告、Run 影响查询和错误响应执行运行时边界校验；MCP 使用同一领域契约包装结构化结果。external Run 的 `execution_source=codex`、`analysis_kind`、工具响应、结论响应和报告限制，以及外部 Agent 功能生成的来源、范围和零服务端模型用量约束已纳入契约。
 
 ## 职责与范围
 
 [contracts.py](../apps/api/app/contracts.py) 定义 Project/Index、`IndexFreshness`/`IndexRefreshResponse`、Session、fixture/real/external Run、RunInput、预算、`IssueModelOutput`、公开事件、allowlisted ToolResult、Report、证据/图、MCP envelope 和请求/响应的字段与校验；freshness 契约区分 `consistent`、`changed`、`unknown`、扫描不完整和变化路径列表截断，refresh 契约区分复用与新建且绑定同一基准 index。概览入口的 `fastapi_route` 变体要求方法、声明路径、处理函数 symbol 与同快照范围，`OverviewGroup` 表示 HTTP 路径/源码目录静态组织，`OverviewModuleRelation` 表示同快照可映射的 imports/calls 聚合和代表 `CodeEdge`。旧 Python 入口仍可省略路由字段。[export_schema.py](../apps/api/app/export_schema.py) 生成 [codetrail.json](schemas/codetrail.json)；HTTP 路由和前端分别拥有传输与消费编排。
+
+后台任务使用 `JobStatusResponse` 表示 job 身份、归属、阶段、有限 attempt 历史、结果摘要、错误和 `merged_into`；`JobAttempt` 表示一次执行的时间、重试次数和阶段。任务状态不与 ImportAttempt 状态混用，具体轮询/取消路由与生命周期见 [API 说明](../apps/api/api.md)。
 
 GitHub freshness 契约在 `IndexFreshness` 中额外区分 `remote_status` 的 `not_applicable`、`not_checked`、`consistent`、`changed`、`unknown`，并携带远端来源 URL、请求/解析 ref 和解析 commit；远端身份检查与本地规则/配置观察并列存在。`McpIndexRefreshResponse` 与 HTTP `IndexRefreshResponse` 共用同一个 freshness/refresh 结构，GitHub 显式更新的 MCP 工具不会另定义一套结果形状。
 

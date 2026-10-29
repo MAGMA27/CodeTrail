@@ -75,7 +75,11 @@ codetrail install
 
 ## 当前架构与演进规划
 
-当前 Web 工作台通过 HTTP 使用 FastAPI API，MCP server 作为独立 stdio 入口复用应用服务；导入和索引在 API 请求内同步执行，持久化使用 SQLite，锁和并发限制仅在单个进程实例内生效。目标架构尚未实现：[后端基础设施分阶段演进提案](docs/decisions/2026-10-28-backend-infrastructure-evolution.md)规划按三个独立 PR 顺序引入 Redis 任务队列与 worker、Redis 分布式协调，以及 PostgreSQL/Alembic 和可选 pgvector；状态均为 proposed。
+当前 Web 工作台通过 HTTP 使用 FastAPI API，MCP server 作为独立 stdio 入口复用应用服务。GitHub 导入/重试/清理重试、GitHub 刷新与索引重建以后台 job 提交；默认轻量模式使用 SQLite 和 API 进程内线程执行，不提供进程崩溃恢复保证。完整模式设置 `CODETRAIL_REDIS_URL` 并启动 `codetrail worker`，或使用仓库根目录 `docker compose up --build` 启动 Redis、API、worker 和 Web；任务事实仍保存在共享 SQLite 数据卷。Compose 当前不包含 PostgreSQL，PR 3 再引入 PostgreSQL/Alembic。Redis 分布式协调与缓存仍属 PR 2；[后端基础设施演进提案](docs/decisions/2026-10-28-backend-infrastructure-evolution.md)保持 proposed，实施细节与验证状态见 API/Web 就近文档。
+
+### Docker Compose
+
+Compose 默认使用 `192.168.253.0/24` 作为私有网络，该不常见的高位 192.168 子网比常见家庭路由网段更少冲突；启动前仍应在宿主机运行 `ip route` 检查路由，并确保没有重叠。可在仓库根目录 `.env` 中设置 `CODETRAIL_COMPOSE_SUBNET` 覆盖它；同一值同时配置 Compose 网络和 API 本地写接口信任的客户端网段。`NEXT_PUBLIC_API_BASE_URL` 与 `NEXT_PUBLIC_GITHUB_REQUEST_TIMEOUT_MS` 在 Web 镜像构建时传入，后者默认 30000 毫秒，与源码默认值一致。
 
 ## 配置与开发
 

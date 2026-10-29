@@ -8,6 +8,7 @@ import json
 import os
 import tarfile
 import threading
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -26,6 +27,26 @@ from app.contracts import GitHubImportRequest
 from app.main import create_app
 from app.service import ServiceError
 from app.storage import StorageError
+
+
+@pytest.fixture(autouse=True)
+def _clear_task_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in (
+        "CODETRAIL_REDIS_URL",
+        "CODETRAIL_JOB_MAX_RETRIES",
+        "CODETRAIL_JOB_ATTEMPT_TIMEOUT",
+        "CODETRAIL_JOB_TOTAL_TIMEOUT",
+        "CODETRAIL_JOB_QUEUE_TIMEOUT",
+        "CODETRAIL_JOB_LEASE_SECONDS",
+        "CODETRAIL_WORKER_CONCURRENCY",
+        "CODETRAIL_DATA_DIR",
+        "CODETRAIL_INDEX_TIMEOUT",
+        "CODETRAIL_GITHUB_TOKEN",
+        "CODETRAIL_GITHUB_IMPORT_ENABLED",
+        "CODETRAIL_GITHUB_DOWNLOAD_IDLE_TIMEOUT",
+        "CODETRAIL_GITHUB_DOWNLOAD_TIMEOUT",
+    ):
+        monkeypatch.delenv(name, raising=False)
 
 
 def _archive_bytes(*members: tuple[str, bytes | None, str]) -> bytes:
@@ -215,7 +236,14 @@ def test_github_import_http_returns_rate_limit_hint_before_client_timeout(tmp_pa
     opener = _FakeOpener(
         {
             _COMMIT_URL: [
-                _FakeResponse(429, headers={"Retry-After": "15", "X-RateLimit-Remaining": "0", "X-RateLimit-Reset": "1000030"})
+                _FakeResponse(
+                    429,
+                    headers={
+                        "Retry-After": "15",
+                        "X-RateLimit-Remaining": "0",
+                        "X-RateLimit-Reset": "1000030",
+                    },
+                )
                 for _ in range(4)
             ]
         }
@@ -234,25 +262,26 @@ def test_github_import_http_returns_rate_limit_hint_before_client_timeout(tmp_pa
         github_import_enabled=True,
         github_client=client,
     )
-    status, error = asyncio.run(
-        _request(
-            application,
-            "POST",
-            "/api/imports/github",
-            {"name": "Rate limited", "url": "https://github.com/owner/repo", "ref": "main"},
-        )
+    status, error = _submit_and_wait_job(
+        application,
+        "/api/imports/github",
+        {"name": "Rate limited", "url": "https://github.com/owner/repo", "ref": "main"},
     )
 
-    assert status == 429
+    assert status == 200
     assert monotonic_now[0] - 100.0 == 15.0
-    assert error["code"] == "budget_exceeded"
-    assert "rate limit" in error["message"]
-    assert "resets at" in error["message"]
-    assert "CODETRAIL_GITHUB_TOKEN" in error["message"]
+    assert error["status"] == "failed"
+    assert error["error_code"] == "budget_exceeded"
+    assert "rate limit" in error["summary"]
+    assert "resets at" in error["summary"]
+    assert "CODETRAIL_GITHUB_TOKEN" in error["summary"]
 
-
-def test_github_download_timeout_returns_failed_attempt_and_retry_works(tmp_path: Path) -> None:
+def test_github_download_timeout_returns_failed_attempt_and_retry_works(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import asyncio
+
+    monkeypatch.setenv("CODETRAIL_JOB_MAX_RETRIES", "0")
 
     archive_url = "https://api.github.com/repos/owner/repo/tarball/" + "b" * 40
 
@@ -283,13 +312,10 @@ def test_github_download_timeout_returns_failed_attempt_and_retry_works(tmp_path
         ),
     )
 
-    status, error = asyncio.run(
-        _request(
-            application,
-            "POST",
-            "/api/imports/github",
-            {"name": "Slow archive", "url": "https://github.com/owner/repo", "ref": "main"},
-        )
+    status, error = _submit_and_wait_job(
+        application,
+        "/api/imports/github",
+        {"name": "Slow archive", "url": "https://github.com/owner/repo", "ref": "main"},
     )
 
     assert status == 200
@@ -304,15 +330,12 @@ def test_github_download_timeout_returns_failed_attempt_and_retry_works(tmp_path
     opener.responses[archive_url] = [
         _FakeResponse(200, _archive_bytes(("repo-root/module.py", b"VALUE = 1\n", "file")))
     ]
-    status, retried = asyncio.run(
-        _request(application, "POST", f"/api/imports/{attempt_id}/retry-github")
-    )
+    status, retried = _submit_and_wait_job(application, f"/api/imports/{attempt_id}/retry-github")
 
     assert status == 200
     assert retried["attempt"]["attempt_id"] == attempt_id
     assert retried["attempt"]["status"] == "ready"
     assert retried["attempt"]["error_code"] is None
-
 
 def test_github_download_timeout_openapi_response_is_scoped_to_refresh(tmp_path: Path) -> None:
     application = create_app({}, data_root=tmp_path / "service-data")
@@ -325,7 +348,9 @@ def test_github_download_timeout_openapi_response_is_scoped_to_refresh(tmp_path:
     ]["post"]["responses"]
 
 
-def test_index_timeout_returns_failed_attempt_and_cleans_github_temp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_index_timeout_returns_failed_attempt_and_cleans_github_temp(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import asyncio
 
     monkeypatch.setenv("CODETRAIL_INDEX_TIMEOUT", "0.000001")
@@ -333,7 +358,9 @@ def test_index_timeout_returns_failed_attempt_and_cleans_github_temp(tmp_path: P
     opener = _FakeOpener(
         {
             _COMMIT_URL: [_FakeResponse(200, _COMMIT_BODY)],
-            archive_url: [_FakeResponse(200, _archive_bytes(("repo-root/module.py", b"VALUE = 1\n", "file")))],
+            archive_url: [
+                _FakeResponse(200, _archive_bytes(("repo-root/module.py", b"VALUE = 1\n", "file")))
+            ],
         }
     )
     data_root = tmp_path / "service-data"
@@ -344,30 +371,31 @@ def test_index_timeout_returns_failed_attempt_and_cleans_github_temp(tmp_path: P
         github_client=GitHubClient(token="", opener=opener),
     )
 
-    status, response = asyncio.run(
-        _request(
-            application,
-            "POST",
-            "/api/imports/github",
-            {"name": "Slow index", "url": "https://github.com/owner/repo", "ref": "main"},
-        )
+    status, response = _submit_and_wait_job(
+        application,
+        "/api/imports/github",
+        {"name": "Slow index", "url": "https://github.com/owner/repo", "ref": "main"},
     )
 
     attempt = response["attempt"]
     assert status == 200
     assert attempt["status"] == "failed"
     assert attempt["error_code"] == "index_timeout"
-    assert "CODETRAIL_INDEX_TIMEOUT" in attempt["error_message"]
+    assert "timed out during indexing" in attempt["error_message"]
     assert attempt["index_id"] is None
     assert response["project"]["latest_index_id"] is None
-    assert application.state.workspace_service.list_project_indexes(
-        response["project"]["project_id"]
-    ).indexes == []
+    assert (
+        application.state.workspace_service.list_project_indexes(
+            response["project"]["project_id"]
+        ).indexes
+        == []
+    )
     assert list((data_root / "github-imports").glob("*")) == []
     assert application.state.registry.management_store.list_project_updates() == ()
 
-
-def test_github_refresh_index_timeout_returns_504(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_github_refresh_index_timeout_returns_504(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     client = _FakeGitHubClient(["a" * 40, "b" * 40, "b" * 40])
     application = create_app(
         {},
@@ -381,18 +409,15 @@ def test_github_refresh_index_timeout_returns_504(tmp_path: Path, monkeypatch: p
     assert initial.index is not None
     monkeypatch.setenv("CODETRAIL_INDEX_TIMEOUT", "0.000001")
 
-    status, error = asyncio.run(
-        _request(
-            application,
-            "POST",
-            f"/api/projects/{initial.project.project_id}/indexes/{initial.index.index.index_id}/github-refresh",
-        )
+    status, error = _submit_and_wait_job(
+        application,
+        f"/api/projects/{initial.project.project_id}/indexes/{initial.index.index.index_id}/github-refresh",
     )
 
-    assert status == 504
-    assert error["code"] == "index_timeout"
-    assert "CODETRAIL_INDEX_TIMEOUT" in error["message"]
-
+    assert status == 200
+    assert error["status"] == "timed_out"
+    assert error["error_code"] == "index_timeout"
+    assert "timed out during indexing" in error["summary"]
 
 def test_github_request_timeout_does_not_use_the_rate_limit_wait_budget() -> None:
     monotonic_now = [100.0]
@@ -434,7 +459,7 @@ def test_github_request_timeout_does_not_use_the_rate_limit_wait_budget() -> Non
     assert monotonic_now[0] == 169.0
     assert opener.timeouts == [10.0, 10.0]
     assert slow_response.socket_timeouts == [10.0]
-    assert error.value.code == "internal_error"
+    assert error.value.code == "connection_error"
     assert error.value.status_code == 503
     assert budget.remaining_wait_seconds == 1.0
 
@@ -926,6 +951,23 @@ async def _request(application, method: str, target: str, payload: dict | None =
     return response["status"], json.loads(response_body or b"{}")
 
 
+def _submit_and_wait_job(application, target: str, payload: dict | None = None) -> tuple[int, dict]:
+    """Exercise the public submit/poll contract with deterministic inline execution."""
+    import asyncio
+
+    jobs = application.state.workspace_service.jobs
+    jobs.start_background = False
+    status, submitted = asyncio.run(_request(application, "POST", target, payload))
+    if status != 200 or "job_id" not in submitted:
+        return status, submitted
+    jobs.run(submitted["job_id"], jobs.config.max_retries)
+    project_id = jobs.store.get(submitted["job_id"]).project_id
+    query = "" if project_id is None else f"?project_id={project_id}"
+    status, finished = asyncio.run(
+        _request(application, "GET", f"/api/jobs/{submitted['job_id']}{query}")
+    )
+    return status, finished.get("result") or finished
+
 def test_github_http_import_is_fixed_commit_idempotent_and_cleans_temp(tmp_path: Path) -> None:
     import asyncio
 
@@ -944,7 +986,7 @@ def test_github_http_import_is_fixed_commit_idempotent_and_cleans_temp(tmp_path:
         "ref": "main",
         "idempotency_key": "remote-one",
     }
-    status, imported = asyncio.run(_request(app, "POST", "/api/imports/github", payload))
+    status, imported = _submit_and_wait_job(app, "/api/imports/github", payload)
     assert status == 200
     assert imported["attempt"]["status"] == "ready"
     assert imported["attempt"]["resolved_commit"] == first
@@ -956,13 +998,13 @@ def test_github_http_import_is_fixed_commit_idempotent_and_cleans_temp(tmp_path:
     assert client.resolve_budgets[0] is client.download_budgets[0]
     assert list((tmp_path / "service-data" / "github-imports").iterdir()) == []
 
-    status, repeated = asyncio.run(_request(app, "POST", "/api/imports/github", payload))
+    status, repeated = _submit_and_wait_job(app, "/api/imports/github", payload)
     assert status == 200
     assert repeated["attempt"]["attempt_id"] == attempt_id
     assert client.downloads == 1
 
-    status, moved = asyncio.run(
-        _request(app, "POST", "/api/imports/github", {**payload, "idempotency_key": None})
+    status, moved = _submit_and_wait_job(
+        app, "/api/imports/github", {**payload, "idempotency_key": None}
     )
     assert status == 200
     assert moved["project"]["project_id"] == project_id
@@ -975,8 +1017,78 @@ def test_github_http_import_is_fixed_commit_idempotent_and_cleans_temp(tmp_path:
     assert status == 200
     assert len(indexes["indexes"]) == 2
 
+def test_different_refs_resolving_to_same_commit_share_one_build(tmp_path: Path) -> None:
+    commit = "d" * 40
+    downloading = threading.Event()
+    release = threading.Event()
 
-def test_github_freshness_is_metadata_only_and_explicit_refresh_updates_latest(tmp_path: Path) -> None:
+    class BlockingClient(_FakeGitHubClient):
+        def resolve(self, url, requested_ref, *, budget=None):
+            budget = budget or self.new_budget()
+            self.resolve_budgets.append(budget)
+            return GitHubResolution(
+                parse_github_repository_url(url), requested_ref, commit, requested_ref or "main"
+            )
+
+        def download_and_extract(self, resolution, destination, *, budget=None, control=None):
+            downloading.set()
+            assert release.wait(timeout=5)
+            return super().download_and_extract(
+                resolution, destination, budget=budget, control=control
+            )
+
+    data_root = tmp_path / "shared-data"
+    owner_client = BlockingClient([])
+    follower_client = BlockingClient([])
+    owner = create_app({}, data_root=data_root, github_import_enabled=True, github_client=owner_client)  # type: ignore[arg-type]
+    follower = create_app({}, data_root=data_root, github_import_enabled=True, github_client=follower_client)  # type: ignore[arg-type]
+    owner.state.workspace_service.jobs.start_background = False
+    follower.state.workspace_service.jobs.start_background = False
+
+    status, branch_job = asyncio.run(
+        _request(
+            owner,
+            "POST",
+            "/api/imports/github",
+            {"name": "Same commit", "url": "https://github.com/owner/repo", "ref": "main"},
+        )
+    )
+    assert status == 200
+    owner_thread = threading.Thread(
+        target=owner.state.workspace_service.jobs.run, args=(branch_job["job_id"],)
+    )
+    owner_thread.start()
+    assert downloading.wait(timeout=5)
+
+    status, sha_job = asyncio.run(
+        _request(
+            follower,
+            "POST",
+            "/api/imports/github",
+            {"name": "Same commit", "url": "https://github.com/owner/repo", "ref": commit},
+        )
+    )
+    assert status == 200
+    follower.state.workspace_service.jobs.run(sha_job["job_id"])
+    merged = follower.state.workspace_service.jobs.store.get(sha_job["job_id"])
+    assert merged.merged_into == branch_job["job_id"]
+    assert merged.phase == "merged_wait"
+
+    release.set()
+    owner_thread.join(timeout=10)
+    assert not owner_thread.is_alive()
+    completed = follower.state.workspace_service.jobs.store.get(sha_job["job_id"])
+    owner_result = owner.state.workspace_service.jobs.store.get(branch_job["job_id"]).result
+    assert completed.status == "succeeded"
+    assert completed.result == owner_result
+    assert owner_client.downloads == 1
+    assert follower_client.downloads == 0
+    project_id = owner_result["project"]["project_id"]
+    assert len(owner.state.workspace_service.list_project_indexes(project_id).indexes) == 1
+
+def test_github_freshness_is_metadata_only_and_explicit_refresh_updates_latest(
+    tmp_path: Path,
+) -> None:
     import asyncio
 
     first = "a" * 40
@@ -989,7 +1101,7 @@ def test_github_freshness_is_metadata_only_and_explicit_refresh_updates_latest(t
         github_client=client,  # type: ignore[arg-type]
     )
     payload = {"name": "Remote Python", "url": "https://github.com/owner/repo", "ref": "main"}
-    status, imported = asyncio.run(_request(app, "POST", "/api/imports/github", payload))
+    status, imported = _submit_and_wait_job(app, "/api/imports/github", payload)
     assert status == 200
     project_id = imported["project"]["project_id"]
     baseline_index_id = imported["index"]["index"]["index_id"]
@@ -1008,8 +1120,8 @@ def test_github_freshness_is_metadata_only_and_explicit_refresh_updates_latest(t
     assert "source_changed" in freshness["reasons"]
     assert client.downloads == 1
 
-    status, refreshed = asyncio.run(
-        _request(app, "POST", f"/api/projects/{project_id}/indexes/{baseline_index_id}/github-refresh")
+    status, refreshed = _submit_and_wait_job(
+        app, f"/api/projects/{project_id}/indexes/{baseline_index_id}/github-refresh"
     )
     assert status == 200
     assert refreshed["mode"] == "created"
@@ -1018,8 +1130,9 @@ def test_github_freshness_is_metadata_only_and_explicit_refresh_updates_latest(t
     assert client.downloads == 2
     assert client.resolve_budgets[2] is client.resolve_budgets[3] is client.download_budgets[1]
 
-
-def test_github_refresh_reuses_compatible_historical_commit_without_download(tmp_path: Path) -> None:
+def test_github_refresh_reuses_compatible_historical_commit_without_download(
+    tmp_path: Path,
+) -> None:
     import asyncio
 
     first = "a" * 40
@@ -1032,13 +1145,13 @@ def test_github_refresh_reuses_compatible_historical_commit_without_download(tmp
         github_client=client,  # type: ignore[arg-type]
     )
     payload = {"name": "Remote Python", "url": "https://github.com/owner/repo", "ref": "main"}
-    status, imported = asyncio.run(_request(app, "POST", "/api/imports/github", payload))
+    status, imported = _submit_and_wait_job(app, "/api/imports/github", payload)
     assert status == 200
     project_id = imported["project"]["project_id"]
     first_index_id = imported["index"]["index"]["index_id"]
 
-    status, moved = asyncio.run(
-        _request(app, "POST", f"/api/projects/{project_id}/indexes/{first_index_id}/github-refresh")
+    status, moved = _submit_and_wait_job(
+        app, f"/api/projects/{project_id}/indexes/{first_index_id}/github-refresh"
     )
     assert status == 200
     second_index_id = moved["index"]["index"]["index_id"]
@@ -1046,17 +1159,20 @@ def test_github_refresh_reuses_compatible_historical_commit_without_download(tmp
     assert second_index_id != first_index_id
     assert client.downloads == 2
 
-    status, restored = asyncio.run(
-        _request(app, "POST", f"/api/projects/{project_id}/indexes/{second_index_id}/github-refresh")
+    status, restored = _submit_and_wait_job(
+        app, f"/api/projects/{project_id}/indexes/{second_index_id}/github-refresh"
     )
     assert status == 200
     assert restored["mode"] == "historical_reused"
     assert restored["index"]["index"]["index_id"] == first_index_id
     assert client.downloads == 2
 
-
-def test_github_refresh_failure_keeps_latest_and_source_identity(tmp_path: Path) -> None:
+def test_github_refresh_failure_keeps_latest_and_source_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import asyncio
+
+    monkeypatch.setenv("CODETRAIL_JOB_MAX_RETRIES", "0")
 
     first = "a" * 40
     second = "b" * 40
@@ -1068,7 +1184,7 @@ def test_github_refresh_failure_keeps_latest_and_source_identity(tmp_path: Path)
         github_client=client,  # type: ignore[arg-type]
     )
     payload = {"name": "Remote Python", "url": "https://github.com/owner/repo", "ref": "main"}
-    status, imported = asyncio.run(_request(app, "POST", "/api/imports/github", payload))
+    status, imported = _submit_and_wait_job(app, "/api/imports/github", payload)
     assert status == 200
     project_id = imported["project"]["project_id"]
     baseline_index_id = imported["index"]["index"]["index_id"]
@@ -1086,16 +1202,16 @@ def test_github_refresh_failure_keeps_latest_and_source_identity(tmp_path: Path)
 
     client.download_and_extract = fail_download  # type: ignore[method-assign]
 
-    status, failed = asyncio.run(
-        _request(app, "POST", f"/api/projects/{project_id}/indexes/{baseline_index_id}/github-refresh")
+    status, failed = _submit_and_wait_job(
+        app, f"/api/projects/{project_id}/indexes/{baseline_index_id}/github-refresh"
     )
-    assert status == 504
-    assert failed["code"] == "download_timeout"
+    assert status == 200
+    assert failed["status"] == "failed"
+    assert failed["error_code"] == "download_timeout"
     assert app.state.registry.management_store.load_source(repository_id).resolved_commit == first
     status, indexes = asyncio.run(_request(app, "GET", f"/api/projects/{project_id}/indexes"))
     assert status == 200
     assert indexes["latest_index_id"] == baseline_index_id
-
 
 def test_github_freshness_unknown_remote_does_not_update(tmp_path: Path) -> None:
     import asyncio
@@ -1108,13 +1224,10 @@ def test_github_freshness_unknown_remote_does_not_update(tmp_path: Path) -> None
         github_import_enabled=True,
         github_client=client,  # type: ignore[arg-type]
     )
-    status, imported = asyncio.run(
-        _request(
-            app,
-            "POST",
-            "/api/imports/github",
-            {"name": "Remote Python", "url": "https://github.com/owner/repo"},
-        )
+    status, imported = _submit_and_wait_job(
+        app,
+        "/api/imports/github",
+        {"name": "Remote Python", "url": "https://github.com/owner/repo"},
     )
     assert status == 200
     project_id = imported["project"]["project_id"]
@@ -1129,16 +1242,16 @@ def test_github_freshness_unknown_remote_does_not_update(tmp_path: Path) -> None
     assert freshness["reasons"] == ["source_unavailable"]
     assert client.downloads == 1
 
-    status, failed = asyncio.run(
-        _request(app, "POST", f"/api/projects/{project_id}/indexes/{baseline_index_id}/github-refresh")
+    status, failed = _submit_and_wait_job(
+        app, f"/api/projects/{project_id}/indexes/{baseline_index_id}/github-refresh"
     )
-    assert status == 409
-    assert failed["code"] == "conflict"
+    assert status == 200
+    assert failed["status"] == "failed"
+    assert failed["error_code"] == "conflict"
     assert client.downloads == 1
     status, indexes = asyncio.run(_request(app, "GET", f"/api/projects/{project_id}/indexes"))
     assert status == 200
     assert indexes["latest_index_id"] == baseline_index_id
-
 
 def test_github_default_ref_without_persisted_resolution_stays_unknown(tmp_path: Path) -> None:
     import asyncio
@@ -1151,13 +1264,10 @@ def test_github_default_ref_without_persisted_resolution_stays_unknown(tmp_path:
         github_import_enabled=True,
         github_client=client,  # type: ignore[arg-type]
     )
-    status, imported = asyncio.run(
-        _request(
-            app,
-            "POST",
-            "/api/imports/github",
-            {"name": "Remote Python", "url": "https://github.com/owner/repo"},
-        )
+    status, imported = _submit_and_wait_job(
+        app,
+        "/api/imports/github",
+        {"name": "Remote Python", "url": "https://github.com/owner/repo"},
     )
     assert status == 200
     project_id = imported["project"]["project_id"]
@@ -1176,7 +1286,6 @@ def test_github_default_ref_without_persisted_resolution_stays_unknown(tmp_path:
     assert freshness["reasons"] == ["remote_metadata_missing"]
     assert client.downloads == 1
 
-
 def test_github_cleanup_failure_is_recorded_and_retryable(tmp_path: Path) -> None:
     import asyncio
 
@@ -1191,13 +1300,10 @@ def test_github_cleanup_failure_is_recorded_and_retryable(tmp_path: Path) -> Non
     original = service._cleanup_github_temp
     service._cleanup_github_temp = lambda _path, _attempt: "injected cleanup failure"
     try:
-        status, failed_cleanup = asyncio.run(
-            _request(
-                app,
-                "POST",
-                "/api/imports/github",
-                {"name": "Cleanup", "url": "https://github.com/owner/repo", "ref": "main"},
-            )
+        status, failed_cleanup = _submit_and_wait_job(
+            app,
+            "/api/imports/github",
+            {"name": "Cleanup", "url": "https://github.com/owner/repo", "ref": "main"},
         )
     finally:
         service._cleanup_github_temp = original
@@ -1205,12 +1311,11 @@ def test_github_cleanup_failure_is_recorded_and_retryable(tmp_path: Path) -> Non
     assert failed_cleanup["attempt"]["status"] == "ready"
     assert failed_cleanup["cleanup_status"] == "failed"
 
-    status, cleaned = asyncio.run(
-        _request(app, "POST", f"/api/imports/{failed_cleanup['attempt']['attempt_id']}/cleanup")
+    status, cleaned = _submit_and_wait_job(
+        app, f"/api/imports/{failed_cleanup['attempt']['attempt_id']}/cleanup"
     )
     assert status == 200
     assert cleaned["cleanup_status"] == "succeeded"
-
 
 def test_github_refresh_stale_new_commit_cannot_overwrite_independent_service_update(tmp_path: Path) -> None:
     first = "a" * 40
@@ -1370,7 +1475,130 @@ def test_github_project_update_recovers_source_commit_after_registry_failure(tmp
     assert recovered_attempt.index_id == operation.candidate_index_id
 
 
-def test_github_build_failure_aborts_update_without_changing_latest_or_source(tmp_path: Path) -> None:
+@pytest.mark.parametrize("crash_phase", ["downloading", "indexing", "committing"])
+def test_github_worker_crash_replay_recovers_update_without_duplicate_index(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, crash_phase: str
+) -> None:
+    monkeypatch.setenv("CODETRAIL_JOB_LEASE_SECONDS", "3")
+    first_commit = "a" * 40
+    replay_commit = "b" * 40
+    commits = [first_commit, replay_commit]
+    if crash_phase == "committing":
+        commits.append(replay_commit)
+    client = _FakeGitHubClient(commits)
+    data_root = tmp_path / "service-data"
+    app = create_app(
+        {},
+        data_root=data_root,
+        github_import_enabled=True,
+        github_client=client,  # type: ignore[arg-type]
+    )
+    workspace = app.state.workspace_service
+    initial = workspace.import_github(
+        GitHubImportRequest(name="Remote", url="https://github.com/owner/repo", ref="main")
+    )
+    project = workspace._find_project(initial.project.project_id)
+    management = app.state.registry.management_store
+    source_url = "https://github.com/owner/repo"
+
+    if crash_phase == "committing":
+        built = workspace.import_github(
+            GitHubImportRequest(name="Remote", url=source_url, ref="main")
+        )
+        assert built.index is not None
+        attempt = management.load_attempt(built.attempt.attempt_id)
+        candidate_index_id = built.index.index.index_id
+        content_hash = built.index.index.snapshot_hash
+    else:
+        attempt_id = f"import-crashed-{crash_phase}"
+        attempt = management.create_attempt(
+            attempt_id=attempt_id,
+            project_id=project.project_id,
+            repository_id=project.repository_id,
+            source_path=source_url,
+            normalized_source_path=parse_github_repository_url(source_url).identity,
+            name=project.name,
+            revision=replay_commit,
+            dirty=False,
+            idempotency_key=None,
+            created_at=datetime.now(timezone.utc),
+            source_kind="github",
+            source_url=source_url,
+            requested_ref="main",
+            resolved_ref="main",
+            resolved_commit=replay_commit,
+        )
+        phase = "acquiring" if crash_phase == "downloading" else "indexing"
+        management.update_attempt(attempt_id, status=phase, phase=phase)
+        temp_path = None
+        if crash_phase == "downloading":
+            temp_root = data_root / "github-imports" / attempt_id
+            workspace._prepare_github_temp(temp_root, attempt_id)
+            (temp_root / "partial.tar.gz").write_bytes(b"partial archive")
+            temp_path = str(temp_root)
+            management.update_attempt_metadata(attempt_id, temporary_path=temp_path)
+        attempt = management.load_attempt(attempt_id)
+        candidate_index_id = None
+        content_hash = None
+
+    operation_id = f"project-update-crashed-{crash_phase}"
+    operation = management.begin_project_update(
+        operation_id=operation_id,
+        project_id=project.project_id,
+        repository_id=project.repository_id,
+        expected_latest_index_id=initial.project.latest_index_id,
+        owner_pid=1,
+        owner_namespace="pid:[different-container]",
+        owner_lease_seconds=5,
+        source_url=source_url,
+        requested_ref="main",
+        resolved_ref="main",
+        resolved_commit=replay_commit,
+    )
+    management.update_project_update(
+        operation.operation_id,
+        attempt_id=attempt.attempt_id,
+        candidate_index_id=candidate_index_id,
+        content_hash=content_hash,
+        phase="latest_committed" if crash_phase == "committing" else "building",
+    )
+    if crash_phase == "indexing":
+        with app.state.registry.store_for_repository(project.repository_id) as store:
+            store.set_project_building(project.project_id, "index-interrupted-before-write")
+    with management._connect() as db:
+        db.execute(
+            "UPDATE project_updates SET updated_at = ? WHERE operation_id = ?",
+            ((datetime.now(timezone.utc) - timedelta(seconds=10)).isoformat(), operation_id),
+        )
+
+    replayed = workspace.import_github(
+        GitHubImportRequest(name="Remote", url=source_url, ref="main")
+    )
+    assert replayed.attempt.status == "ready"
+    assert replayed.index is not None
+    assert management.list_project_updates() == ()
+    assert workspace._find_project(project.project_id).building_index_id is None
+    assert all(
+        item.index_id != "index-interrupted-before-write"
+        for item in workspace.list_project_indexes(project.project_id).indexes
+    )
+    if crash_phase == "committing":
+        assert replayed.attempt.attempt_id == attempt.attempt_id
+        assert replayed.index.index.index_id == candidate_index_id
+        assert client.downloads == 2
+    else:
+        recovered_old = management.load_attempt(attempt.attempt_id)
+        assert recovered_old.status == "failed"
+        assert recovered_old.error_code == "interrupted"
+        if crash_phase == "downloading":
+            assert recovered_old.temporary_path is None
+            assert not Path(str(temp_path)).exists()
+        assert client.downloads == 2
+
+
+def test_github_build_failure_aborts_update_without_changing_latest_or_source(
+    tmp_path: Path,
+) -> None:
     import asyncio
 
     first = "a" * 40
@@ -1396,14 +1624,15 @@ def test_github_build_failure_aborts_update_without_changing_latest_or_source(tm
 
     service._create_project_index = fail_build  # type: ignore[method-assign]
     try:
-        status, failed = asyncio.run(
-            _request(app, "POST", f"/api/projects/{project_id}/indexes/{baseline_index_id}/github-refresh")
+        status, failed = _submit_and_wait_job(
+            app, f"/api/projects/{project_id}/indexes/{baseline_index_id}/github-refresh"
         )
     finally:
         service._create_project_index = original_create  # type: ignore[method-assign]
 
-    assert status == 503
-    assert failed["code"] == "internal_error"
+    assert status == 200
+    assert failed["status"] == "failed"
+    assert failed["error_code"] == "internal_error"
     assert app.state.workspace_service.get_project(project_id).latest_index_id == baseline_index_id
     assert app.state.registry.management_store.load_source(repository_id).resolved_commit == first
     assert app.state.registry.management_store.list_project_updates() == ()

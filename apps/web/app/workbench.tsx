@@ -29,6 +29,10 @@ import {
   getModelConfig,
   getHealth,
   getImportStatus,
+  getJob,
+  cancelJob,
+  isGitHubImportResponse,
+  isIndexRefreshResponse,
   getProjectNeighbors,
   getProjectOverview,
   getProjectJourneyCatalog,
@@ -84,6 +88,7 @@ import {
   type HealthResponse,
   type ImpactDirection,
   type ImportStatus,
+  type JobStatusResponse,
   type ImportAttemptResponse,
   type IndexFreshness,
   type IndexRefreshMode,
@@ -130,6 +135,14 @@ import {
   isImportStatusTerminal,
   nextImportSubmissionKey,
   waitForImportStatus,
+  waitForJob,
+  jobStatusLabel,
+  importStatusFromJob,
+  jobErrorMessage,
+  loadTrackedJobs,
+  trackJob,
+  clearTrackedJob,
+  resolveGitHubImportJobResult,
 } from "../lib/import-status";
 import {
   CALL_CHAIN_NODE_HEIGHT,
@@ -576,6 +589,7 @@ export default function Workbench() {
   const [indexFreshness, setIndexFreshness] = useState<IndexFreshness | null>(null);
   const [indexFreshnessStatus, setIndexFreshnessStatus] = useState<"idle" | "checking" | "refreshing">("idle");
   const [indexFreshnessError, setIndexFreshnessError] = useState<string | null>(null);
+  const [activeJob, setActiveJob] = useState<JobStatusResponse | null>(null);
   const [indexRefreshMode, setIndexRefreshMode] = useState<IndexRefreshMode | null>(null);
   const [searchQuery, setSearchQuery] = useState("load_settings");
   const [searchStatus, setSearchStatus] = useState<AsyncStatus>("idle");
@@ -2801,6 +2815,74 @@ export default function Workbench() {
     }
   }, [applyImportedProject]);
 
+  const settleJob = useCallback(async (initial: JobStatusResponse, signal: AbortSignal, onUpdate?: (job: JobStatusResponse) => void) => {
+    setActiveJob(initial);
+    const terminal = await waitForJob(
+      initial,
+      (job, requestSignal) => getJob(job.job_id, job.project_id ?? undefined, requestSignal),
+      signal,
+      (job) => { setActiveJob(job); onUpdate?.(job); },
+    );
+    window.setTimeout(() => setActiveJob((job) => job?.job_id === terminal.job_id ? null : job), 4_000);
+    return terminal;
+  }, []);
+
+  const cancelActiveJob = useCallback(async () => {
+    if (!activeJob) return;
+    try {
+      const updated = await cancelJob(activeJob.job_id, activeJob.project_id ?? undefined);
+      setActiveJob(updated);
+      trackJob(updated);
+    } catch (error) {
+      setIndexFreshnessError(errorMessage(error));
+    }
+  }, [activeJob]);
+
+  useEffect(() => {
+    let disposed = false;
+    const controller = new AbortController();
+    const resume = async () => {
+      for (const tracked of loadTrackedJobs()) {
+        let current: JobStatusResponse | null = null;
+        while (!disposed && !current) {
+          try {
+            current = await getJob(tracked.jobId, tracked.projectId ?? undefined, controller.signal);
+          } catch (error) {
+            if (disposed || controller.signal.aborted) return;
+            if (error instanceof ApiRequestError && error.status === 404) {
+              clearTrackedJob(tracked.jobId);
+              break;
+            }
+            await new Promise((resolve) => window.setTimeout(resolve, 3_000));
+          }
+        }
+        if (!current) continue;
+        try {
+          setActiveJob(current);
+          const terminal = await waitForJob(
+            current,
+            (job, signal) => getJob(job.job_id, job.project_id ?? undefined, signal),
+            controller.signal,
+            (job) => { if (!disposed) setActiveJob(job); },
+          );
+          if (terminal.status === "succeeded" && terminal.project_id) {
+            await loadProjects();
+            await loadSelectedProject(terminal.project_id);
+          }
+          if (!disposed) {
+            window.setTimeout(() => setActiveJob((job) => job?.job_id === terminal.job_id ? null : job), 4_000);
+          }
+        } catch (error) {
+          if (!disposed && error instanceof ApiRequestError && error.status === 404) {
+            clearTrackedJob(tracked.jobId);
+          }
+        }
+      }
+    };
+    void resume();
+    return () => { disposed = true; controller.abort(); };
+  }, [loadProjects, loadSelectedProject]);
+
   const settleLocalImportResponse = useCallback(async (
     initial: LocalImportResponse,
     signal: AbortSignal,
@@ -2834,36 +2916,36 @@ export default function Workbench() {
   }, [applyImportResponse]);
 
   const settleGitHubImportResponse = useCallback(async (
-    initial: GitHubImportResponse,
+    initial: JobStatusResponse,
     signal: AbortSignal,
     requestId: number,
     navigationId: number,
   ) => {
-    applyGitHubImportResponse(initial, navigationId);
-    const response = await waitForImportStatus(
-      initial,
-      async (statusSignal) => githubImportResponseFromStatus(
-        await getImportStatus(initial.attempt.attempt_id, statusSignal),
-        statusSignal,
-      ),
-      signal,
-    );
+    const job = await settleJob(initial, signal, (current) => {
+      setGithubImportStatus(importStatusFromJob(current));
+      if (current.merged_into) setGithubImportError(`此任务已合并到任务 ${current.merged_into}。`);
+    });
     if (!isLatestRequest(requestId, importRequestId.current)) {
       return false;
-    }
-    if (response !== initial) {
-      applyGitHubImportResponse(response, navigationId);
     }
     if (navigationId !== importNavigationId.current) {
       return false;
     }
-    if (!isImportStatusTerminal(response.attempt.status)) {
-      setGithubImportStatus(null);
-      setGithubImportError("GitHub 导入仍在处理中。点击“刷新状态”继续查看。");
+    if (job.status !== "succeeded") {
+      if (isGitHubImportResponse(job.result)) applyGitHubImportResponse(job.result, navigationId);
+      setGithubImportStatus(job.status === "cancelled" ? "cancelled" : job.status === "timed_out" ? "timed_out" : "failed");
+      setGithubImportError(jobErrorMessage(job.error_code, job.summary));
       return false;
     }
+    const response = await resolveGitHubImportJobResult(job, (attemptId) => getImportStatus(attemptId, signal));
+    if (!response) {
+      setGithubImportStatus("failed");
+      setGithubImportError(jobErrorMessage(job.error_code, job.summary));
+      return false;
+    }
+    applyGitHubImportResponse(response, navigationId);
     return response.attempt.status === "ready" && response.cleanup_status !== "failed";
-  }, [applyGitHubImportResponse]);
+  }, [applyGitHubImportResponse, settleJob]);
 
   const refreshLocalProjectImportStatus = useCallback(async () => {
     if (!importAttempt || isImportStatusTerminal(importAttempt.status) || importActionInFlight.current) {
@@ -2914,7 +2996,9 @@ export default function Workbench() {
         return false;
       }
       const response = await githubImportResponseFromStatus(status, controller.signal);
-      return await settleGitHubImportResponse(response, controller.signal, requestId, navigationId);
+      if (!isLatestRequest(requestId, importRequestId.current)) return false;
+      applyGitHubImportResponse(response, navigationId);
+      return response.attempt.status === "ready";
     } catch (error) {
       if (isAbortError(error) || !isLatestRequest(requestId, importRequestId.current)) {
         return false;
@@ -2928,7 +3012,7 @@ export default function Workbench() {
     } finally {
       importActionInFlight.current = false;
     }
-  }, [githubImportAttempt, settleGitHubImportResponse]);
+  }, [applyGitHubImportResponse, githubImportAttempt]);
 
   const importLocalProject = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
@@ -3136,11 +3220,20 @@ export default function Workbench() {
     setGithubImportStatus("queued");
     setGithubImportError(null);
     try {
-      const response = await retryImportCleanup(githubImportAttempt.attempt_id, controller.signal);
+      const submitted = await retryImportCleanup(githubImportAttempt.attempt_id, controller.signal);
       if (!isLatestRequest(requestId, importRequestId.current)) {
         return;
       }
-      applyGitHubImportResponse(response, navigationId);
+      const job = await settleJob(submitted, controller.signal);
+      const response = job.status === "succeeded"
+        ? await resolveGitHubImportJobResult(job, (attemptId) => getImportStatus(attemptId, controller.signal))
+        : null;
+      if (response) {
+        applyGitHubImportResponse(response, navigationId);
+      } else {
+        setGithubImportStatus(job.status === "cancelled" ? "cancelled" : "failed");
+        setGithubImportError(jobErrorMessage(job.error_code, job.summary));
+      }
     } catch (error) {
       if (isAbortError(error) || !isLatestRequest(requestId, importRequestId.current)) {
         return;
@@ -3150,7 +3243,7 @@ export default function Workbench() {
     } finally {
       importActionInFlight.current = false;
     }
-  }, [applyGitHubImportResponse, githubImportAttempt]);
+  }, [applyGitHubImportResponse, githubImportAttempt, settleJob]);
 
   const createNewIndex = useCallback(
     async () => {
@@ -3281,16 +3374,22 @@ export default function Workbench() {
     setIndexFreshnessStatus("refreshing");
     setIndexFreshnessError(null);
     try {
-      const result = await refreshProjectIndex(
+      const submitted = await refreshProjectIndex(
         selectedProjectId,
         indexResponse.index.index_id,
         "working-tree",
         false,
         controller.signal,
       );
+      const job = await settleJob(submitted, controller.signal);
       if (!isLatestRequest(requestId, indexRequestId.current)) {
         return;
       }
+      if (job.status !== "succeeded" || !isIndexRefreshResponse(job.result)) {
+        setIndexFreshnessError(jobErrorMessage(job.error_code, job.summary));
+        return;
+      }
+      const result = job.result;
       applyIndexResponse(result.index);
       setIndexFreshness(result.freshness);
       setIndexRefreshMode(result.mode);
@@ -3321,7 +3420,7 @@ export default function Workbench() {
         setIndexFreshnessStatus("idle");
       }
     }
-  }, [applyIndexResponse, indexResponse, selectedProjectId]);
+  }, [applyIndexResponse, indexResponse, selectedProjectId, settleJob]);
 
   const refreshCurrentGitHubSource = useCallback(async () => {
     if (!selectedProjectId || !indexResponse || !indexFreshness?.remote_source_url) {
@@ -3339,14 +3438,20 @@ export default function Workbench() {
     setIndexFreshnessStatus("refreshing");
     setIndexFreshnessError(null);
     try {
-      const result = await refreshGitHubSource(
+      const submitted = await refreshGitHubSource(
         selectedProjectId,
         indexResponse.index.index_id,
         controller.signal,
       );
+      const job = await settleJob(submitted, controller.signal);
       if (!isLatestRequest(requestId, indexRequestId.current)) {
         return;
       }
+      if (job.status !== "succeeded" || !isIndexRefreshResponse(job.result)) {
+        setIndexFreshnessError(jobErrorMessage(job.error_code, job.summary));
+        return;
+      }
+      const result = job.result;
       applyIndexResponse(result.index);
       setIndexFreshness(result.freshness);
       setIndexRefreshMode(result.mode);
@@ -3381,7 +3486,7 @@ export default function Workbench() {
         setIndexFreshnessStatus("idle");
       }
     }
-  }, [applyIndexResponse, indexFreshness, indexResponse, selectedProjectId]);
+  }, [applyIndexResponse, indexFreshness, indexResponse, selectedProjectId, settleJob]);
 
   const loadSource = useCallback(
     async (symbol: SymbolRecord, startLine = symbol.start_line) => {
@@ -4679,6 +4784,14 @@ export default function Workbench() {
   }, [loadTrash]);
 
   return (
+    <>
+    {activeJob ? <div className="ct-job-status" role="status" aria-live="polite">
+      <span>{jobStatusLabel(activeJob.status, activeJob.phase)}</span>
+      {activeJob.merged_into ? <span>已合并到任务 {activeJob.merged_into}</span> : null}
+      {activeJob.status === "failed" || activeJob.status === "timed_out" ? <span>{jobErrorMessage(activeJob.error_code, activeJob.summary)}</span> : null}
+      {!(["succeeded", "failed", "cancelled", "timed_out", "cancel_requested"].includes(activeJob.status))
+        ? <button type="button" onClick={() => void cancelActiveJob()}>取消任务</button> : null}
+    </div> : null}
     <WorkbenchUi
       connection={{
         state: connectionState,
@@ -5136,5 +5249,6 @@ export default function Workbench() {
       panelMode={panelMode}
       onPanelModeChange={setPanelMode}
     />
+    </>
   );
 }

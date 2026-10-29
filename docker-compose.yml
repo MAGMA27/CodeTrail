@@ -1,0 +1,79 @@
+services:
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: ["uv", "run", "--project", "apps/api", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      CODETRAIL_DATA_DIR: /data
+      CODETRAIL_REDIS_URL: redis://redis:6379/0
+      CODETRAIL_GITHUB_TOKEN: ${CODETRAIL_GITHUB_TOKEN:-}
+      CODETRAIL_GITHUB_IMPORT_ENABLED: ${CODETRAIL_GITHUB_IMPORT_ENABLED:-1}
+      CODETRAIL_WEB_ORIGINS: ${CODETRAIL_WEB_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+      CODETRAIL_TRUSTED_WRITE_NETWORKS: ${CODETRAIL_COMPOSE_SUBNET:-192.168.253.0/24}
+    volumes:
+      - codetrail-data:/data
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: ["uv", "run", "--project", "apps/api", "codetrail", "worker"]
+    environment:
+      CODETRAIL_DATA_DIR: /data
+      CODETRAIL_REDIS_URL: redis://redis:6379/0
+      CODETRAIL_GITHUB_TOKEN: ${CODETRAIL_GITHUB_TOKEN:-}
+      CODETRAIL_GITHUB_IMPORT_ENABLED: ${CODETRAIL_GITHUB_IMPORT_ENABLED:-1}
+    volumes:
+      - codetrail-data:/data
+    depends_on:
+      api:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000}
+        NEXT_PUBLIC_GITHUB_REQUEST_TIMEOUT_MS: ${NEXT_PUBLIC_GITHUB_REQUEST_TIMEOUT_MS:-30000}
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000}
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  redis-data:
+  codetrail-data:
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${CODETRAIL_COMPOSE_SUBNET:-192.168.253.0/24}

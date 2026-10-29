@@ -543,6 +543,37 @@ class ImportAttemptResponse(VersionedModel):
     latest_index: IndexResponse | None = None
 
 
+JobStatus: TypeAlias = Literal["queued", "running", "retry_wait", "succeeded", "failed", "cancel_requested", "cancelled", "timed_out"]
+
+
+class JobAttempt(ContractModel):
+    attempt: PositiveInt
+    started_at: datetime
+    ended_at: datetime | None = None
+    error_code: str | None = Field(default=None, max_length=200)
+    retry_count: NonNegativeInt = 0
+    phase: str = Field(min_length=1, max_length=100)
+
+
+class JobStatusResponse(VersionedModel):
+    """Durable state for one asynchronous import or index job."""
+    job_id: Identifier
+    project_id: Identifier | None = None
+    kind: Literal["github_import", "github_retry", "github_cleanup", "github_refresh", "project_index_refresh"]
+    status: JobStatus
+    phase: str = Field(min_length=1, max_length=100)
+    progress: dict[str, object] = Field(default_factory=dict)
+    attempts: list[JobAttempt] = Field(default_factory=list, max_length=20)
+    result: dict[str, object] | None = None
+    error_code: str | None = Field(default=None, max_length=200)
+    summary: str | None = Field(default=None, max_length=2_000)
+    created_at: datetime
+    updated_at: datetime
+    deadline_at: datetime
+    execution_deadline_at: datetime | None = None
+    merged_into: Identifier | None = None
+
+
 SymbolKind: TypeAlias = Literal["module", "file", "class", "function", "test"]
 
 
@@ -3379,6 +3410,16 @@ class McpImportStatusResponse(McpResultBase):
                 raise ValueError("successful import status requires source, project, and attempt")
         elif any(value is not None for value in (self.source_path, self.project, self.attempt, self.latest_index)):
             raise ValueError("failed import status cannot include import data")
+        return self
+
+
+class McpJobResponse(McpResultBase):
+    job: JobStatusResponse | None = None
+
+    @model_validator(mode="after")
+    def validate_job_result(self) -> McpJobResponse:
+        if self.ok != (self.job is not None):
+            raise ValueError("successful MCP job response must contain job status")
         return self
 
 

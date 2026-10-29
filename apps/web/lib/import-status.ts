@@ -1,8 +1,143 @@
-import type { ImportStatus } from "./api.ts";
+import { isGitHubImportResponse, type GitHubImportResponse, type ImportAttemptResponse, type ImportStatus, type JobStatus, type JobStatusResponse } from "./api.ts";
 
 export const IMPORT_STATUS_POLL_INTERVAL_MS = 750;
 export const IMPORT_STATUS_MAX_POLLS = 40;
 export const IMPORT_STATUS_TOTAL_TIMEOUT_MS = 35_000;
+export const JOB_TRACKING_STORAGE_KEY = "codetrail.active-jobs.v1";
+export const JOB_POLL_INITIAL_MS = 1_000;
+export const JOB_POLL_MAX_MS = 5_000;
+
+export type TrackedJob = { jobId: string; projectId: string | null; kind: JobStatusResponse["kind"] };
+
+export function jobStatusLabel(status: JobStatus, phase: string): string {
+  if (status === "queued") return "排队中";
+  if (status === "running") {
+    const labels: Record<string, string> = { resolving: "解析中", downloading: "下载中", acquiring: "下载中", indexing: "索引中", cleaning: "清理中" };
+    return labels[phase] ?? "运行中";
+  }
+  return ({ retry_wait: "等待重试", succeeded: "已完成", failed: "失败", cancel_requested: "取消中", cancelled: "已取消", timed_out: "已超时" } as const)[status];
+}
+
+export function importStatusFromJob(job: JobStatusResponse): ImportStatus {
+  if (job.status === "queued") return "queued";
+  if (job.status === "running") return job.phase === "indexing" ? "indexing" : "acquiring";
+  if (job.status === "retry_wait") return "retry_wait";
+  if (job.status === "succeeded") return "ready";
+  if (job.status === "cancel_requested") return "cancel_requested";
+  if (job.status === "cancelled") return "cancelled";
+  if (job.status === "timed_out") return "timed_out";
+  return "failed";
+}
+
+export async function resolveGitHubImportJobResult(
+  job: JobStatusResponse,
+  readImportStatus: (attemptId: string) => Promise<ImportAttemptResponse>,
+): Promise<GitHubImportResponse | null> {
+  if (isGitHubImportResponse(job.result)) return job.result;
+  const result = job.result;
+  if (job.status !== "succeeded" || result?.truncated !== true ||
+    typeof result.project_id !== "string" || typeof result.attempt_id !== "string") return null;
+  const status = await readImportStatus(result.attempt_id);
+  if (status.project.project_id !== result.project_id || status.attempt.attempt_id !== result.attempt_id ||
+    status.attempt.status !== "ready" || status.attempt.source_kind !== "github" ||
+    typeof status.attempt.source_url !== "string") return null;
+  return {
+    schema_version: status.schema_version,
+    source_url: status.attempt.source_url,
+    requested_ref: status.attempt.requested_ref,
+    resolved_ref: status.attempt.resolved_ref,
+    resolved_commit: status.attempt.resolved_commit,
+    content_hash: status.attempt.content_hash,
+    cleanup_status: status.attempt.cleanup_status,
+    cleanup_error: status.attempt.cleanup_error,
+    project: status.project,
+    attempt: status.attempt,
+    index: status.latest_index,
+  };
+}
+
+export function jobErrorMessage(code: string | null, summary: string | null): string {
+  const messages: Record<string, string> = {
+    download_timeout: "GitHub 下载超时，可稍后重试或调整服务端下载时限。",
+    index_timeout: "索引构建超时，可稍后重试或调整 CODETRAIL_INDEX_TIMEOUT。",
+    rate_limited: "GitHub 请求受到限流，请稍后重试或配置 GitHub token。",
+    budget_exceeded: "GitHub 限流等待预算已用尽，请稍后重试。",
+    worker_lost: "后台工作进程中断，任务已按策略恢复或终止。",
+    queue_wait_timeout: "任务等待队列超时，请稍后重新提交。",
+    job_timeout: "任务执行超时，请稍后重试。",
+    job_total_timeout: "任务总执行时间超限，请稍后重试。",
+  };
+  const localized = code ? messages[code] : undefined;
+  return localized && summary ? `${localized}（${summary}）` : localized ?? summary ?? "任务失败。";
+}
+
+export function loadTrackedJobs(storage?: Pick<Storage, "getItem">): TrackedJob[] {
+  try {
+    const target = storage ?? window.localStorage;
+    const value: unknown = JSON.parse(target.getItem(JOB_TRACKING_STORAGE_KEY) ?? "[]");
+    if (!Array.isArray(value)) return [];
+    return value.filter((item): item is TrackedJob => typeof item === "object" && item !== null &&
+      typeof item.jobId === "string" && (typeof item.projectId === "string" || item.projectId === null) &&
+      ["github_import", "github_retry", "github_cleanup", "github_refresh", "project_index_refresh"].includes(item.kind));
+  } catch { return []; }
+}
+
+export function trackJob(job: JobStatusResponse, storage?: Pick<Storage, "getItem" | "setItem">): void {
+  try {
+    const target = storage ?? window.localStorage;
+    const jobs = loadTrackedJobs(target).filter((item) => item.jobId !== job.job_id);
+    if (!["succeeded", "failed", "cancelled", "timed_out"].includes(job.status)) {
+      jobs.push({ jobId: job.job_id, projectId: job.project_id, kind: job.kind });
+    }
+    target.setItem(JOB_TRACKING_STORAGE_KEY, JSON.stringify(jobs));
+  } catch {
+    // Storage can be disabled; keep polling for this page session.
+  }
+}
+
+export function clearTrackedJob(jobId: string, storage?: Pick<Storage, "getItem" | "setItem">): void {
+  try {
+    const target = storage ?? window.localStorage;
+    target.setItem(JOB_TRACKING_STORAGE_KEY, JSON.stringify(loadTrackedJobs(target).filter((item) => item.jobId !== jobId)));
+  } catch {
+    // Storage can be disabled; terminal status is still shown in memory.
+  }
+}
+
+export async function waitForJob(
+  initial: JobStatusResponse,
+  readStatus: (job: JobStatusResponse, signal: AbortSignal) => Promise<JobStatusResponse>,
+  signal: AbortSignal,
+  onUpdate: (job: JobStatusResponse) => void = () => undefined,
+  options: { initialDelayMs?: number; maxDelayMs?: number; storage?: Pick<Storage, "getItem" | "setItem"> } = {},
+): Promise<JobStatusResponse> {
+  const storage = options.storage;
+  let job = initial;
+  let delay = options.initialDelayMs ?? JOB_POLL_INITIAL_MS;
+  const maxDelay = options.maxDelayMs ?? JOB_POLL_MAX_MS;
+  trackJob(job, storage);
+  onUpdate(job);
+  while (!["succeeded", "failed", "cancelled", "timed_out"].includes(job.status)) {
+    await waitForPoll(delay, signal);
+    if (signal.aborted) throw new DOMException("The operation was aborted", "AbortError");
+    try {
+      job = await readStatus(job, signal);
+    } catch (error) {
+      if (signal.aborted || isJobNotFound(error)) throw error;
+      delay = Math.min(maxDelay, Math.ceil(delay * 1.5));
+      continue;
+    }
+    trackJob(job, storage);
+    onUpdate(job);
+    delay = Math.min(maxDelay, Math.ceil(delay * 1.5));
+  }
+  clearTrackedJob(job.job_id, storage);
+  return job;
+}
+
+function isJobNotFound(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "status" in error && error.status === 404;
+}
 
 export type ImportSubmissionKey = { signature: string; key: string };
 
@@ -39,6 +174,7 @@ const TERMINAL_IMPORT_STATUSES = new Set<ImportStatus>([
   "failed",
   "cancelled",
   "interrupted",
+  "timed_out",
 ]);
 
 export function isImportStatusTerminal(status: ImportStatus): boolean {

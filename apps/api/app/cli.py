@@ -128,6 +128,7 @@ def main() -> None:
     init.add_argument("--typescript-compiler")
     api = commands.add_parser("api", help="Start loopback HTTP API")
     api.add_argument("--port", type=int, default=8000)
+    commands.add_parser("worker", help="Start the Redis-backed asynchronous job worker")
     commands.add_parser("mcp", help="Start MCP stdio server")
     install = commands.add_parser("install", help="Register Codex MCP, preserving existing registration")
     install.add_argument("--replace", action="store_true")
@@ -178,8 +179,24 @@ def main() -> None:
             else:
                 subprocess.run(["codex", "mcp", "remove", "codetrail"], check=True)
             return
-        apply_settings(load_settings(path))
-        if args.command == "api":
+        if args.command == "worker" and not path.exists():
+            # Container workers can be configured entirely through their explicit environment.
+            # The worker does not need an interactive user's CLI settings file.
+            pass
+        else:
+            apply_settings(load_settings(path))
+        if args.command == "worker":
+            if not os.getenv("CODETRAIL_REDIS_URL"):
+                raise ValueError("CODETRAIL_REDIS_URL is required to run the worker")
+            import logging
+
+            logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+            from arq.worker import run_worker
+
+            from .worker import worker_settings
+
+            run_worker(worker_settings())
+        elif args.command == "api":
             import uvicorn
             uvicorn.run("app.main:app", host="127.0.0.1", port=args.port)
         else:

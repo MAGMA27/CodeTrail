@@ -165,7 +165,30 @@ export type ImportStatus =
   | "ready"
   | "failed"
   | "cancelled"
-  | "interrupted";
+  | "interrupted"
+  | "retry_wait"
+  | "cancel_requested"
+  | "timed_out";
+
+export type JobStatus = "queued" | "running" | "retry_wait" | "succeeded" | "failed" | "cancel_requested" | "cancelled" | "timed_out";
+export type JobStatusResponse = {
+  schema_version: typeof SCHEMA_VERSION;
+  job_id: string;
+  project_id: string | null;
+  kind: "github_import" | "github_retry" | "github_cleanup" | "github_refresh" | "project_index_refresh";
+  status: JobStatus;
+  phase: string;
+  progress: Record<string, unknown>;
+  attempts: Array<{ attempt: number; started_at: string; ended_at: string | null; error_code: string | null; retry_count: number; phase: string }>;
+  result: Record<string, unknown> | null;
+  error_code: string | null;
+  summary: string | null;
+  created_at: string;
+  updated_at: string;
+  deadline_at: string;
+  execution_deadline_at: string | null;
+  merged_into: string | null;
+};
 
 export type ImportAttempt = {
   schema_version: typeof SCHEMA_VERSION;
@@ -1299,6 +1322,21 @@ export function isGitHubImportResponse(value: unknown): value is GitHubImportRes
     isImportAttempt(value.attempt) &&
     (value.index === null || isIndexResponse(value.index))
   );
+}
+
+export function isJobStatusResponse(value: unknown): value is JobStatusResponse {
+  const statuses = ["queued", "running", "retry_wait", "succeeded", "failed", "cancel_requested", "cancelled", "timed_out"];
+  const kinds = ["github_import", "github_retry", "github_cleanup", "github_refresh", "project_index_refresh"];
+  return isRecord(value) && value.schema_version === SCHEMA_VERSION && isString(value.job_id) &&
+    (value.project_id === null || isString(value.project_id)) && kinds.includes(String(value.kind)) &&
+    statuses.includes(String(value.status)) && isString(value.phase) && isRecord(value.progress) &&
+    Array.isArray(value.attempts) && value.attempts.every((attempt) => isRecord(attempt) &&
+      isNumber(attempt.attempt) && isString(attempt.started_at) && isNullableString(attempt.ended_at) &&
+      isNullableString(attempt.error_code) && isNumber(attempt.retry_count) && isString(attempt.phase)) &&
+    (value.result === null || isRecord(value.result)) &&
+    isNullableString(value.error_code) && isNullableString(value.summary) && isString(value.created_at) &&
+    isString(value.updated_at) && isString(value.deadline_at) && isNullableString(value.execution_deadline_at) &&
+    isNullableString(value.merged_into);
 }
 
 export function isLocalImportResponse(value: unknown): value is LocalImportResponse {
@@ -3248,7 +3286,7 @@ export async function requestJson<T>(
 export const IMPORT_REQUEST_TIMEOUT_MS = 60_000;
 export const IMPORT_STATUS_REQUEST_TIMEOUT_MS = 10_000;
 
-export const DEFAULT_GITHUB_REQUEST_TIMEOUT_MS = 10 * 60_000;
+export const DEFAULT_GITHUB_REQUEST_TIMEOUT_MS = 30_000;
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 export function parseGitHubRequestTimeoutMs(value?: string): number {
@@ -3264,9 +3302,7 @@ export function parseGitHubRequestTimeoutMs(value?: string): number {
 }
 
 /**
- * Browser timeout for GitHub import, retry, and refresh requests. The 10 minute default
- * covers up to 320 seconds of acquisition and leaves 4 minutes 40 seconds for indexing and cleanup.
- * Any positive safe integer up to the platform timer limit can override it.
+ * Per-request timeout for job submission and status reads. Job execution is polled separately.
  */
 export const GITHUB_REQUEST_TIMEOUT_MS = parseGitHubRequestTimeoutMs(
   process.env.NEXT_PUBLIC_GITHUB_REQUEST_TIMEOUT_MS,
@@ -3305,10 +3341,10 @@ export function importGitHubRepository(
   ref?: string,
   idempotencyKey?: string,
   signal?: AbortSignal,
-): Promise<GitHubImportResponse> {
+): Promise<JobStatusResponse> {
   return requestJson(
     "/api/imports/github",
-    isGitHubImportResponse,
+    isJobStatusResponse,
     {
       method: "POST",
       signal,
@@ -3349,10 +3385,10 @@ export function retryLocalImport(
 export function retryGitHubImport(
   attemptId: string,
   signal?: AbortSignal,
-): Promise<GitHubImportResponse> {
+): Promise<JobStatusResponse> {
   return requestJson(
     `/api/imports/${encodeURIComponent(attemptId)}/retry-github`,
-    isGitHubImportResponse,
+    isJobStatusResponse,
     { method: "POST", signal, timeoutMs: GITHUB_REQUEST_TIMEOUT_MS },
   );
 }
@@ -3360,11 +3396,11 @@ export function retryGitHubImport(
 export function retryImportCleanup(
   attemptId: string,
   signal?: AbortSignal,
-): Promise<GitHubImportResponse> {
+): Promise<JobStatusResponse> {
   return requestJson(
     `/api/imports/${encodeURIComponent(attemptId)}/cleanup`,
-    isGitHubImportResponse,
-    { method: "POST", signal, timeoutMs: IMPORT_STATUS_REQUEST_TIMEOUT_MS },
+    isJobStatusResponse,
+    { method: "POST", signal, timeoutMs: GITHUB_REQUEST_TIMEOUT_MS },
   );
 }
 
@@ -3747,13 +3783,14 @@ export function refreshProjectIndex(
   revision: string,
   dirty: boolean,
   signal?: AbortSignal,
-): Promise<IndexRefreshResponse> {
+): Promise<JobStatusResponse> {
   return requestJson(
     `/api/projects/${encodeURIComponent(projectId)}/indexes/${encodeURIComponent(indexId)}/refresh`,
-    isIndexRefreshResponse,
+    isJobStatusResponse,
     {
       method: "POST",
       signal,
+      timeoutMs: GITHUB_REQUEST_TIMEOUT_MS,
       body: JSON.stringify({
         schema_version: SCHEMA_VERSION,
         revision,
@@ -3767,12 +3804,26 @@ export function refreshGitHubSource(
   projectId: string,
   indexId: string,
   signal?: AbortSignal,
-): Promise<IndexRefreshResponse> {
+): Promise<JobStatusResponse> {
   return requestJson(
     `/api/projects/${encodeURIComponent(projectId)}/indexes/${encodeURIComponent(indexId)}/github-refresh`,
-    isIndexRefreshResponse,
+    isJobStatusResponse,
     { method: "POST", signal, timeoutMs: GITHUB_REQUEST_TIMEOUT_MS },
   );
+}
+
+export function getJob(jobId: string, projectId?: string, signal?: AbortSignal): Promise<JobStatusResponse> {
+  const path = projectId
+    ? `/api/projects/${encodeURIComponent(projectId)}/jobs/${encodeURIComponent(jobId)}`
+    : `/api/jobs/${encodeURIComponent(jobId)}`;
+  return requestJson(path, isJobStatusResponse, { signal, timeoutMs: GITHUB_REQUEST_TIMEOUT_MS });
+}
+
+export function cancelJob(jobId: string, projectId?: string, signal?: AbortSignal): Promise<JobStatusResponse> {
+  const path = projectId
+    ? `/api/projects/${encodeURIComponent(projectId)}/jobs/${encodeURIComponent(jobId)}/cancel`
+    : `/api/jobs/${encodeURIComponent(jobId)}/cancel`;
+  return requestJson(path, isJobStatusResponse, { method: "POST", signal, timeoutMs: GITHUB_REQUEST_TIMEOUT_MS });
 }
 
 export function getHealth(signal?: AbortSignal): Promise<HealthResponse> {

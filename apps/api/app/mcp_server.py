@@ -36,6 +36,7 @@ from .contracts import (
     McpFeatureGenerationResponse,
     McpImportResponse,
     McpImportStatusResponse,
+    McpJobResponse,
     McpIndexResponse,
     McpIndexFreshnessResponse,
     McpIndexRefreshResponse,
@@ -359,8 +360,8 @@ def create_mcp_server(
             name="refresh_index",
             title="Refresh project index",
             description=(
-                "Explicitly recheck the project's current latest index and either reuse it or create a new immutable "
-                "snapshot. This write is separately enabled, source reads are bounded, and the baseline must remain latest."
+                "Submit a background recheck/rebuild for the project's current latest index and return a job ID; poll "
+                "get_job_status for its result. This write is separately enabled and the baseline must remain latest."
             ),
             structured_output=True,
         )
@@ -369,18 +370,17 @@ def create_mcp_server(
             index_id: _IndexId,
             revision: Annotated[str, Field(min_length=1, max_length=200)] = "working-tree",
             dirty: bool = True,
-        ) -> McpIndexRefreshResponse:
+        ) -> McpJobResponse:
             try:
-                result = service.refresh_project_index(
-                    project_id,
-                    index_id,
-                    RefreshProjectIndexRequest(revision=revision, dirty=dirty),
-                )
-                return McpIndexRefreshResponse(ok=True, result=result)
+                job = service.submit_job("project_index_refresh", project_id, {
+                    "index_id": index_id,
+                    "request": RefreshProjectIndexRequest(revision=revision, dirty=dirty).model_dump(mode="json", exclude={"schema_version"}),
+                })
+                return McpJobResponse(ok=True, job=job)
             except ServiceError as exc:
-                return _failure(McpIndexRefreshResponse, exc)
+                return _failure(McpJobResponse, exc)
             except Exception:
-                return _unexpected_failure("refresh_index", McpIndexRefreshResponse)
+                return _unexpected_failure("refresh_index", McpJobResponse)
 
     @server.tool(
         name="search_code",
@@ -1397,7 +1397,25 @@ def create_mcp_server(
             except Exception:
                 return _unexpected_failure("retry_local_import", McpImportResponse)
 
-    if local_import_enabled or github_import_enabled:
+    if local_import_enabled or github_import_enabled or index_write_enabled:
+
+        @server.tool(name="get_job_status", title="Get background job status", description="Poll one durable import or index job.", structured_output=True)
+        def get_job_status(job_id: _ProjectId, project_id: _ProjectId | None = None) -> McpJobResponse:
+            try:
+                return McpJobResponse(ok=True, job=service.get_job(job_id, project_id=project_id))
+            except ServiceError as exc:
+                return _failure(McpJobResponse, exc)
+            except Exception:
+                return _unexpected_failure("get_job_status", McpJobResponse)
+
+        @server.tool(name="cancel_job", title="Cancel background job", description="Request cancellation of an unbound import job or a project-owned job with its project ID.", structured_output=True)
+        def cancel_job(job_id: _ProjectId, project_id: _ProjectId | None = None) -> McpJobResponse:
+            try:
+                return McpJobResponse(ok=True, job=service.cancel_job(job_id, project_id=project_id))
+            except ServiceError as exc:
+                return _failure(McpJobResponse, exc)
+            except Exception:
+                return _unexpected_failure("cancel_job", McpJobResponse)
 
         @server.tool(
             name="get_import_status",
@@ -1426,8 +1444,8 @@ def create_mcp_server(
             name="import_github_repository",
             title="Import a public GitHub repository",
             description=(
-                "Resolve a public GitHub HTTPS repository ref to one commit, download only the official bounded archive, "
-                "index supported Python files, and return persisted source identity and cleanup status."
+                "Submit a public GitHub HTTPS repository import and return a durable job ID immediately. Poll "
+                "get_job_status and then get_import_status for the created attempt."
             ),
             structured_output=True,
         )
@@ -1436,58 +1454,57 @@ def create_mcp_server(
             url: Annotated[str, Field(min_length=1, max_length=4_000, description="Official GitHub HTTPS repository URL.")],
             ref: Annotated[str | None, Field(min_length=1, max_length=200, description="Optional branch, tag, or commit ref.")] = None,
             idempotency_key: Annotated[str | None, Field(min_length=1, max_length=200)] = None,
-        ) -> McpImportResponse:
+        ) -> McpJobResponse:
             try:
-                result = service.import_github(
-                    GitHubImportRequest(
+                request = GitHubImportRequest(
                         name=name,
                         url=url,
                         ref=ref,
                         idempotency_key=idempotency_key,
-                    ),
-                    via_mcp=True,
-                )
-                return _mcp_github_import_response(result)
+                    )
+                job = service.submit_job("github_import", None, request.model_dump(mode="json", exclude={"schema_version", "idempotency_key"}), idempotency_key=idempotency_key)
+                return McpJobResponse(ok=True, job=job)
             except ServiceError as exc:
-                return _failure(McpImportResponse, exc)
+                return _failure(McpJobResponse, exc)
             except Exception:
-                return _unexpected_failure("import_github_repository", McpImportResponse)
+                return _unexpected_failure("import_github_repository", McpJobResponse)
 
         @server.tool(
             name="refresh_github_source",
             title="Refresh a tracked GitHub source",
             description=(
-                "Explicitly check the tracked public GitHub ref and, only when requested, resolve one commit, download the "
-                "bounded official archive, and update the project's latest immutable index. A failed update keeps the old latest."
+                "Submit an explicit update for the tracked public GitHub ref and return a job ID. Poll get_job_status "
+                "for progress and terminal result; failed updates keep the old latest index."
             ),
             structured_output=True,
         )
         def refresh_github_source(
             project_id: _ProjectId,
             index_id: _IndexId,
-        ) -> McpIndexRefreshResponse:
+        ) -> McpJobResponse:
             try:
-                result = service.refresh_github_source(project_id, index_id, via_mcp=True)
-                return McpIndexRefreshResponse(ok=True, result=result)
+                job = service.submit_job("github_refresh", project_id, {"index_id": index_id})
+                return McpJobResponse(ok=True, job=job)
             except ServiceError as exc:
-                return _failure(McpIndexRefreshResponse, exc)
+                return _failure(McpJobResponse, exc)
             except Exception:
-                return _unexpected_failure("refresh_github_source", McpIndexRefreshResponse)
+                return _unexpected_failure("refresh_github_source", McpJobResponse)
 
         @server.tool(
             name="retry_github_import",
             title="Retry a GitHub import",
-            description="Retry one failed or interrupted fixed-commit GitHub import using its persisted request.",
+            description="Submit a retry for one failed or interrupted fixed-commit GitHub import and return its job ID.",
             structured_output=True,
         )
-        def retry_github_import(attempt_id: _ProjectId) -> McpImportResponse:
+        def retry_github_import(attempt_id: _ProjectId) -> McpJobResponse:
             try:
-                result = service.retry_github_import(attempt_id, via_mcp=True)
-                return _mcp_github_import_response(result)
+                attempt = service.registry.management_store.load_attempt(attempt_id)
+                job = service.submit_job("github_retry", attempt.project_id, {"attempt_id": attempt_id})
+                return McpJobResponse(ok=True, job=job)
             except ServiceError as exc:
-                return _failure(McpImportResponse, exc)
+                return _failure(McpJobResponse, exc)
             except Exception:
-                return _unexpected_failure("retry_github_import", McpImportResponse)
+                return _unexpected_failure("retry_github_import", McpJobResponse)
 
     return server
 

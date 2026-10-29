@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import os
 from collections.abc import AsyncIterator
 from collections.abc import Mapping
@@ -36,6 +37,7 @@ from .contracts import (
     GitHubImportRequest,
     GitHubImportResponse,
     ImportAttemptResponse,
+    JobStatusResponse,
     ImpactDirection,
     IndexResponse,
     IndexRefreshResponse,
@@ -69,6 +71,7 @@ from .contracts import (
 from .github import GitHubClient
 from .indexing import IndexingControl
 from .config import ModelProviderConfig
+from .factory import create_services
 from .feature_generation import FeatureModelAdapter
 from .issue_analysis import IssueModelAdapter
 from .run_sse import (
@@ -82,7 +85,7 @@ from .run_sse import (
     encode_sse_stream_end,
     resolve_sse_cursor,
 )
-from .service import IndexService, RepositoryRegistry, ServiceError, WorkspaceService, is_loopback_host
+from .service import ServiceError, WorkspaceService, is_loopback_host
 from .storage import StorageError
 
 
@@ -162,50 +165,33 @@ def create_app(
 ) -> FastAPI:
     """Create an API with a server-owned repository allow-list."""
 
-    registry = (
-        RepositoryRegistry.from_environment(
-            github_import_enabled=github_import_enabled,
-            mcp_github_import_enabled=mcp_github_import_enabled,
-            mcp_index_write_enabled=mcp_index_write_enabled,
-            mcp_session_write_enabled=mcp_session_write_enabled,
-            mcp_run_write_enabled=mcp_run_write_enabled,
-            mcp_external_run_enabled=mcp_external_run_enabled,
-            real_run_enabled=real_run_enabled,
-            mcp_real_run_enabled=mcp_real_run_enabled,
-            model_config=model_config,
-        )
-        if repository_roots is None
-        else RepositoryRegistry(
-            repository_roots,
-            data_root=data_root,
-            allowed_import_roots=allowed_import_roots,
-            github_import_enabled=github_import_enabled,
-            mcp_github_import_enabled=mcp_github_import_enabled,
-            mcp_index_write_enabled=mcp_index_write_enabled,
-            mcp_session_write_enabled=mcp_session_write_enabled,
-            mcp_run_write_enabled=mcp_run_write_enabled,
-            mcp_external_run_enabled=mcp_external_run_enabled,
-            real_run_enabled=real_run_enabled,
-            mcp_real_run_enabled=mcp_real_run_enabled,
-            model_config=model_config,
-        )
-    )
-    resolved_github_client = github_client or GitHubClient()
-    index_service = IndexService(registry, github_client=resolved_github_client)
-    workspace_service = WorkspaceService(
-        registry,
-        index_service,
-        github_client=resolved_github_client,
+    workspace_service = create_services(
+        repository_roots,
+        data_root=data_root,
+        allowed_import_roots=allowed_import_roots,
+        github_import_enabled=github_import_enabled,
+        mcp_github_import_enabled=mcp_github_import_enabled,
+        mcp_index_write_enabled=mcp_index_write_enabled,
+        mcp_session_write_enabled=mcp_session_write_enabled,
+        mcp_run_write_enabled=mcp_run_write_enabled,
+        mcp_external_run_enabled=mcp_external_run_enabled,
+        real_run_enabled=real_run_enabled,
+        mcp_real_run_enabled=mcp_real_run_enabled,
+        github_client=github_client,
         feature_adapter_factory=feature_adapter_factory,
         run_model_adapter_factory=run_model_adapter_factory,
         run_max_concurrent_runs=run_max_concurrent_runs,
+        model_config=model_config,
     )
+    registry = workspace_service.registry
+    index_service = workspace_service.index_service
     application = FastAPI(title="CodeTrail API", version="0.1.0")
     run_event_streams = RunEventStreamRegistry(run_sse_config)
     application.state.index_service = index_service
     application.state.registry = registry
     application.state.workspace_service = workspace_service
     application.state.run_event_streams = run_event_streams
+    application.router.on_shutdown.append(workspace_service.jobs.close)
     application.add_middleware(
         CORSMiddleware,
         allow_origins=_allowed_origins(),
@@ -263,12 +249,33 @@ def create_app(
 
     @application.post(
         "/api/imports/github",
-        response_model=GitHubImportResponse,
+        response_model=JobStatusResponse,
         responses=_API_ERROR_RESPONSES,
     )
-    async def import_github(http_request: Request, payload: GitHubImportRequest) -> GitHubImportResponse:
+    async def import_github(http_request: Request, payload: GitHubImportRequest) -> JobStatusResponse:
         _require_local_write(http_request)
-        return await _run_with_disconnect(http_request, workspace_service.import_github, payload)
+        return await run_in_threadpool(
+            workspace_service.submit_job, "github_import", None, payload.model_dump(mode="json", exclude={"schema_version", "idempotency_key"}),
+            idempotency_key=http_request.headers.get("Idempotency-Key") or payload.idempotency_key,
+        )
+
+    @application.get("/api/jobs/{job_id}", response_model=JobStatusResponse, responses=_API_ERROR_RESPONSES)
+    async def get_job(job_id: str, project_id: str | None = Query(default=None, max_length=200)) -> JobStatusResponse:
+        return await run_in_threadpool(workspace_service.get_job, job_id, project_id=project_id)
+
+    @application.post("/api/jobs/{job_id}/cancel", response_model=JobStatusResponse, responses=_API_ERROR_RESPONSES)
+    async def cancel_unbound_job(http_request: Request, job_id: str) -> JobStatusResponse:
+        _require_local_write(http_request)
+        return await run_in_threadpool(workspace_service.cancel_job, job_id)
+
+    @application.get("/api/projects/{project_id}/jobs/{job_id}", response_model=JobStatusResponse, responses=_API_ERROR_RESPONSES)
+    async def get_project_job(project_id: str, job_id: str) -> JobStatusResponse:
+        return await run_in_threadpool(workspace_service.get_job, job_id, project_id=project_id)
+
+    @application.post("/api/projects/{project_id}/jobs/{job_id}/cancel", response_model=JobStatusResponse, responses=_API_ERROR_RESPONSES)
+    async def cancel_job(http_request: Request, project_id: str, job_id: str) -> JobStatusResponse:
+        _require_local_write(http_request)
+        return await run_in_threadpool(workspace_service.cancel_job, job_id, project_id=project_id)
 
     @application.get(
         "/api/imports/{attempt_id}",
@@ -289,21 +296,25 @@ def create_app(
 
     @application.post(
         "/api/imports/{attempt_id}/retry-github",
-        response_model=GitHubImportResponse,
+        response_model=JobStatusResponse,
         responses=_API_ERROR_RESPONSES,
     )
-    async def retry_github_import(http_request: Request, attempt_id: str) -> GitHubImportResponse:
+    async def retry_github_import(http_request: Request, attempt_id: str) -> JobStatusResponse:
         _require_local_write(http_request)
-        return await _run_with_disconnect(http_request, workspace_service.retry_github_import, attempt_id)
+        attempt = await run_in_threadpool(workspace_service.registry.management_store.load_attempt, attempt_id)
+        return await run_in_threadpool(workspace_service.submit_job, "github_retry", attempt.project_id, {"attempt_id": attempt_id},
+                                       idempotency_key=http_request.headers.get("Idempotency-Key"))
 
     @application.post(
         "/api/imports/{attempt_id}/cleanup",
-        response_model=GitHubImportResponse,
+        response_model=JobStatusResponse,
         responses=_API_ERROR_RESPONSES,
     )
-    async def retry_import_cleanup(http_request: Request, attempt_id: str) -> GitHubImportResponse:
+    async def retry_import_cleanup(http_request: Request, attempt_id: str) -> JobStatusResponse:
         _require_local_write(http_request)
-        return await run_in_threadpool(workspace_service.retry_import_cleanup, attempt_id)
+        attempt = await run_in_threadpool(workspace_service.registry.management_store.load_attempt, attempt_id)
+        return await run_in_threadpool(workspace_service.submit_job, "github_cleanup", attempt.project_id, {"attempt_id": attempt_id},
+                                       idempotency_key=http_request.headers.get("Idempotency-Key"))
 
     @application.post(
         "/api/projects",
@@ -706,7 +717,7 @@ def create_app(
 
     @application.post(
         "/api/projects/{project_id}/indexes/{index_id}/refresh",
-        response_model=IndexRefreshResponse,
+        response_model=JobStatusResponse,
         responses=_INDEX_BUILD_ERROR_RESPONSES,
     )
     async def refresh_project_index(
@@ -714,33 +725,25 @@ def create_app(
         project_id: str,
         index_id: str,
         request: RefreshProjectIndexRequest,
-    ) -> IndexRefreshResponse:
+    ) -> JobStatusResponse:
         _require_local_write(http_request)
-        return await _run_with_disconnect(
-            http_request,
-            workspace_service.refresh_project_index,
-            project_id,
-            index_id,
-            request,
-        )
+        return await run_in_threadpool(workspace_service.submit_job, "project_index_refresh", project_id,
+                                       {"index_id": index_id, "request": request.model_dump(mode="json", exclude={"schema_version"})},
+                                       idempotency_key=http_request.headers.get("Idempotency-Key"))
 
     @application.post(
         "/api/projects/{project_id}/indexes/{index_id}/github-refresh",
-        response_model=IndexRefreshResponse,
+        response_model=JobStatusResponse,
         responses=_GITHUB_REFRESH_ERROR_RESPONSES,
     )
     async def refresh_github_source(
         http_request: Request,
         project_id: str,
         index_id: str,
-    ) -> IndexRefreshResponse:
+    ) -> JobStatusResponse:
         _require_local_write(http_request)
-        return await _run_with_disconnect(
-            http_request,
-            workspace_service.refresh_github_source,
-            project_id,
-            index_id,
-        )
+        return await run_in_threadpool(workspace_service.submit_job, "github_refresh", project_id, {"index_id": index_id},
+                                       idempotency_key=http_request.headers.get("Idempotency-Key"))
 
     @application.get(
         "/api/projects/{project_id}/indexes/{index_id}",
@@ -1028,8 +1031,24 @@ def create_app(
 
 def _require_local_write(request: Request) -> None:
     host = request.client.host if request.client is not None else None
-    if not is_loopback_host(host):
-        raise ServiceError("forbidden", 403, "local import writes require a loopback client")
+    if is_loopback_host(host):
+        return
+    try:
+        trusted_networks = [
+            ipaddress.ip_network(value.strip(), strict=False)
+            for value in os.getenv("CODETRAIL_TRUSTED_WRITE_NETWORKS", "").split(",")
+            if value.strip()
+        ]
+    except ValueError:
+        trusted_networks = []
+    try:
+        address = ipaddress.ip_address(host) if host is not None else None
+    except ValueError:
+        address = None
+    if address is None or not any(
+        address.version == network.version and address in network for network in trusted_networks
+    ):
+        raise ServiceError("forbidden", 403, "local import writes require a loopback or configured trusted network client")
 
 
 def _require_model_config_write(request: Request) -> None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from datetime import datetime, timezone
 
 import pytest
 
@@ -30,7 +31,14 @@ class _FakeKernel32:
 
 
 def _operation(*, pid: int | None, operation_id: str = "operation-1") -> SimpleNamespace:
-    return SimpleNamespace(owner_pid=pid, operation_id=operation_id, project_id="project-1")
+    return SimpleNamespace(
+        owner_pid=pid,
+        owner_namespace=None,
+        owner_lease_seconds=60,
+        operation_id=operation_id,
+        project_id="project-1",
+        updated_at=datetime.now(timezone.utc),
+    )
 
 
 def test_windows_process_liveness_uses_readonly_handle_and_closes_it() -> None:
@@ -97,6 +105,37 @@ def test_posix_probe_keeps_unknown_errors_from_triggering_recovery(monkeypatch: 
     monkeypatch.setattr(service_module.os, "kill", fail_with_unknown_error)
 
     assert service_module._process_liveness(456) == "unknown"
+
+
+def test_remote_pid_namespace_uses_owner_heartbeat_not_colliding_pid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CODETRAIL_JOB_LEASE_SECONDS", "5")
+    monkeypatch.setattr(service_module, "_current_pid_namespace", lambda: "pid:[api-container]")
+    monkeypatch.setattr(service_module.os, "getpid", lambda: 1)
+    monkeypatch.setattr(
+        service_module,
+        "_process_liveness",
+        lambda _pid: pytest.fail("must not probe a PID from another namespace"),
+    )
+    active = SimpleNamespace(
+        owner_pid=1,
+        owner_namespace="pid:[worker-container]",
+        owner_lease_seconds=5,
+        operation_id="remote-operation",
+        project_id="project-1",
+        updated_at=service_module.datetime.now(service_module.timezone.utc),
+    )
+    assert WorkspaceService._project_update_owner_liveness(active) == "alive"
+
+    stale = SimpleNamespace(
+        **{
+            **vars(active),
+            "updated_at": service_module.datetime.now(service_module.timezone.utc)
+            - service_module.timedelta(seconds=10),
+        }
+    )
+    assert WorkspaceService._project_update_owner_liveness(stale) == "exited"
 
 
 def test_unknown_owner_state_keeps_project_update_and_protects_active_attempts(

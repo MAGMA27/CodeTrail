@@ -1006,3 +1006,24 @@ code { font-family: var(--ct-mono); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+.ct-job-status {
+  position: fixed;
+  z-index: 1000;
+  top: 12px;
+  right: 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(720px, calc(100vw - 32px));
+  padding: 10px 14px;
+  border: 1px solid var(--ct-border, #cbd5e1);
+  border-radius: 10px;
+  background: var(--ct-surface, #fff);
+  color: var(--ct-text, #172033);
+  box-shadow: 0 8px 28px rgb(15 23 42 / 18%);
+  font-size: 13px;
+}
+
+.ct-job-status button {
+  flex: 0 0 auto;
+}
