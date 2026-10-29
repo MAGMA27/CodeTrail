@@ -2,6 +2,8 @@
 
 状态：UI-S2 已实现的工作区规范与验收记录，已包含 P3-I1 Run 报告候选位置与有界静态影响面板，以及 Codex external Run 的自动发现与实时展示边界。本文保留 UI-S1 的设计基线，同时记录生产 `/` 的迁移结果；可浏览原型位于 [apps/web/app/prototype/page.tsx](../../apps/web/app/prototype/page.tsx)，生产组件位于 [apps/web/app/workbench-ui.tsx](../../apps/web/app/workbench-ui.tsx)。
 
+本文约束工作区界面与交互；产品目标和面向非 CodeTrail 项目的理解验收标准见[项目理解产品目标规范](product-understanding-spec.md)。本规范已有的实现和验收状态仍以本文及[MVP 验收清单](../mvp-acceptance.md)中的证据为准。
+
 ## 设计读法
 
 产品面向 PC 端，当前设计与验收以桌面工作区为范围（用户于 2026-10-06 明确确认）。窄屏、移动端和平板专用适配不作为交付条件；下文既有响应式断点及移动截图仅保留为实现与历史证据，不要求补齐窄屏验收矩阵。
