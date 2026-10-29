@@ -79,6 +79,7 @@ codetrail install
 
 ## 配置与开发
 
+- [项目理解产品目标规范](docs/design/product-understanding-spec.md)：核心功能、MVP 边界与面向用户的通过标准；不代表当前全部实现。
 - [CLI、共享配置与 MCP](apps/api/mcp.md)：允许导入路径、编译器、GitHub token、模型配置和故障排查。
 - [工作台说明](apps/web/workbench.md) · [API 说明](apps/api/README.md)
 - [开发者联合操作流程](docs/mvp-operation.md) · [MVP 验收清单](docs/mvp-acceptance.md)
