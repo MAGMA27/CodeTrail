@@ -14,6 +14,7 @@ def test_github_import_defaults_enabled_and_can_be_disabled():
 
 
 def test_real_run_setting_maps_to_environment_without_overriding_explicit_value(tmp_path, monkeypatch):
+    monkeypatch.setattr(cli.os, "environ", dict(cli.os.environ))
     for key in (
         "CODETRAIL_DATA_DIR",
         "CODETRAIL_REPOSITORIES",
@@ -43,6 +44,7 @@ def test_direct_service_github_default_and_override(tmp_path, monkeypatch):
 
 
 def test_shared_config_and_environment_precedence(tmp_path, monkeypatch):
+    monkeypatch.setattr(cli.os, "environ", dict(cli.os.environ))
     config = tmp_path / "settings.json"
     configured_compiler = tmp_path / "configured-typescript.js"
     environment_compiler = tmp_path / "environment-typescript.js"
@@ -118,6 +120,7 @@ def test_init_defaults_to_current_root_and_discovers_locked_typescript(tmp_path,
 
 
 def test_runtime_discovers_typescript_without_rewriting_settings(tmp_path, monkeypatch):
+    monkeypatch.setattr(cli.os, "environ", dict(cli.os.environ))
     compiler = _make_workspace(tmp_path, "5.9.3")
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("CODETRAIL_TYPESCRIPT_COMPILER", raising=False)
