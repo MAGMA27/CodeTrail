@@ -21,6 +21,7 @@ class Settings(BaseModel):
     web_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000", "http://127.0.0.1:3000"])
     github_import_enabled: bool = True
     external_run_enabled: bool = True
+    real_run_enabled: bool = False
     typescript_compiler: str | None = None
 
 
@@ -110,6 +111,7 @@ def apply_settings(settings: Settings) -> None:
         "CODETRAIL_WEB_ORIGINS": ",".join(settings.web_origins),
         "CODETRAIL_GITHUB_IMPORT_ENABLED": str(int(settings.github_import_enabled)),
         "CODETRAIL_MCP_EXTERNAL_RUN_ENABLED": str(int(settings.external_run_enabled)),
+        "CODETRAIL_REAL_RUN_ENABLED": str(int(settings.real_run_enabled)),
     }
     compiler = settings.typescript_compiler or discover_typescript_compiler()
     if compiler:

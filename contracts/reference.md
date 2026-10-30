@@ -14,7 +14,7 @@ GitHub freshness 契约在 `IndexFreshness` 中额外区分 `remote_status` 的 
 
 ## 接口与依赖
 
-`GET/POST /api/model-config` 使用 `ModelConfigSettingsResponse` 和 `SaveModelConfigRequest`；状态只含 provider、base URL、model 与 `has_api_key`，保存请求允许留空保留密钥或用 `remove_api_key` 明确移除。provider/model 去除首尾空白后不能为空，base URL 必须是绝对 HTTP(S) URL 并拒绝 userinfo；密钥字段只在写请求中出现，不出现在响应 Schema 的属性中。
+`GET/POST /api/model-config` 使用 `ModelConfigSettingsResponse` 和 `SaveModelConfigRequest`；状态包含 provider、base URL、model、`has_api_key` 和服务端 HTTP real Run 开关 `real_run_enabled`，保存请求允许留空保留密钥或用 `remove_api_key` 明确移除。provider/model 去除首尾空白后不能为空，base URL 必须是绝对 HTTP(S) URL 并拒绝 userinfo；密钥字段只在写请求中出现，不出现在响应 Schema 的属性中。
 
 `FeatureGeneration` 和 `FeatureGenerationSummary` 以 `source=server|external` 区分内置生成与宿主提交，以 `source_scope=external_run` 标记外部结果；外部结果使用 `mode=real` 表示宿主 AI 结果，但模型名是自报信息，不代表服务端供应商。新外部结果会在 generation 和摘要中保留 `external_run_id` 与 `external_session_id`，用于回到来源 Run；旧外部记录可两字段均为空并显示来源未记录，单边缺失无效。服务端结果两字段为空。契约要求 external 结果的服务端 `model_calls`/`repair_calls` 为 0，逐次模型字符数组为空，token 为 null。MCP `submit_project_features` 使用同一 `FeatureModelOutput` 输入和 `McpFeatureGenerationResponse` 输出，应用服务从关联 external understanding Run 的已保存工具结果恢复 evidence，不接受客户端自行构造 evidence 实体。
 

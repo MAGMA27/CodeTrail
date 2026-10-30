@@ -2107,6 +2107,9 @@ export default function Workbench() {
     if (analysisKind === "understanding" && modelConfigSettings?.has_api_key === false) {
       return;
     }
+    if (modelConfigSettings?.has_api_key && !modelConfigSettings.real_run_enabled) {
+      return;
+    }
     if (!(await ensureModelConfigured())) return;
     const previous = runCreateRequest.current;
     const key = previous?.projectId === selectedProjectId &&
@@ -4953,6 +4956,7 @@ export default function Workbench() {
         runWriteStatus,
         runWriteError,
         modelApiKeyConfigured: modelConfigSettings?.has_api_key ?? null,
+        realRunEnabled: modelConfigSettings?.real_run_enabled ?? null,
         onOpenModelSettings: openModelSettings,
         onSelectRun: selectRun,
         onStartRun: startSessionRun,

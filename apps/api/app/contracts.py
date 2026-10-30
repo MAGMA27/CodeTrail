@@ -2834,6 +2834,7 @@ class ModelConfigSettingsResponse(VersionedModel):
     base_url: str
     model: str
     has_api_key: bool
+    real_run_enabled: bool
 
 
 McpErrorCode: TypeAlias = Literal[

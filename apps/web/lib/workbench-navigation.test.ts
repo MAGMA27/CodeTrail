@@ -113,6 +113,19 @@ test("production analysis actions send real mode without fixture scenarios", () 
   assert.equal(seen.size, 2);
 });
 
+test("Run panel blocks real runs when the server capability switch is off and keeps the Codex fallback", () => {
+  const source = ts.createSourceFile("workbench-ui.tsx", readFileSync(new URL("../app/workbench-ui.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const ui = source.text;
+  assert.match(ui, /const realRunDisabled = session\.modelApiKeyConfigured === true && session\.realRunEnabled === false/);
+  assert.match(ui, /服务端真实模型 Run 开关尚未启用/);
+  assert.match(ui, /"real_run_enabled": true/);
+  assert.match(ui, /CODETRAIL_REAL_RUN_ENABLED=1/);
+  assert.match(ui, /已保存的 Session 消息和有界源码证据会发送给模型供应商/);
+  assert.match(ui, /\(session\.modelApiKeyConfigured === false \|\| realRunDisabled\) && analysisKind === "understanding" \? <div className="ct-codex-task"/);
+  const workbench = readFileSync(new URL("../app/workbench.tsx", import.meta.url), "utf8");
+  assert.match(workbench, /modelConfigSettings\?\.has_api_key && !modelConfigSettings\.real_run_enabled/);
+});
+
 test("row trash actions keep an accessible disclosure and explicit close behavior", () => {
   const source = ts.createSourceFile("workbench-ui.tsx", readFileSync(new URL("../app/workbench-ui.tsx", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   let rowActionsMenu: ts.FunctionDeclaration | undefined;

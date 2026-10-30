@@ -207,6 +207,7 @@ type SessionUi = {
   runWriteStatus: UiAsyncStatus;
   runWriteError: string | null;
   modelApiKeyConfigured: boolean | null;
+  realRunEnabled: boolean | null;
   onOpenModelSettings: Action;
   onSelectRun: (runId: string) => void;
   onStartRun: (analysisKind: RunAnalysisKind) => void | Promise<void>;
@@ -2623,6 +2624,7 @@ function RunPanel({ session }: { session: SessionUi }) {
   const selectedRun = session.runs.find((run) => run.run_id === session.selectedRunId) ?? null;
   const currentRun = session.runStatusResponse?.run ?? selectedRun;
   const active = currentRun?.status === "queued" || currentRun?.status === "running";
+  const realRunDisabled = session.modelApiKeyConfigured === true && session.realRunEnabled === false;
   const draftPending = session.draft.trim().length > 0;
   const selectedSession = session.sessions.find((item) => item.session_id === session.selectedSessionId) ?? null;
   const externalTask = selectedSession ? codexUnderstandingTask(selectedSession) : "";
@@ -2653,17 +2655,18 @@ function RunPanel({ session }: { session: SessionUi }) {
           <option value="understanding">理解代码</option>
           <option value="issue">Issue 调查</option>
         </select></label>
-        {session.modelApiKeyConfigured === false && analysisKind === "understanding" ? null : <button type="button" className="ct-button ct-button-primary" onClick={() => void session.onStartRun(analysisKind)} disabled={!selectedSession || selectedSession.message_count === 0 || active || session.runWriteStatus === "loading" || session.messagesStatus === "loading"}>{session.runWriteStatus === "loading" ? "处理中…" : session.modelApiKeyConfigured === false ? "配置模型后启动" : analysisKind === "understanding" ? "开始代码理解" : "开始 Issue 调查"}</button>}
+        {session.modelApiKeyConfigured === false && analysisKind === "understanding" ? null : <button type="button" className="ct-button ct-button-primary" onClick={() => void session.onStartRun(analysisKind)} disabled={!selectedSession || selectedSession.message_count === 0 || active || session.runWriteStatus === "loading" || session.messagesStatus === "loading" || realRunDisabled}>{session.runWriteStatus === "loading" ? "处理中…" : session.modelApiKeyConfigured === false ? "配置模型后启动" : analysisKind === "understanding" ? "开始代码理解" : "开始 Issue 调查"}</button>}
       </div>
       {selectedSession?.message_count === 0 ? <p className="ct-run-draft-warning" role="status">请先保存至少一条消息，再启动分析。</p> : null}
-      {session.modelApiKeyConfigured === false && analysisKind === "understanding" ? <div className="ct-codex-task" role="status">
-        <p>尚未配置 CodeTrail 服务端模型。先在下方保存至少一条消息，再复制任务到 Codex；复制不会启动宿主。</p>
+      {(session.modelApiKeyConfigured === false || realRunDisabled) && analysisKind === "understanding" ? <div className="ct-codex-task" role="status">
+        <p>{realRunDisabled ? "服务端真实模型 Run 开关未开启。保存消息后可复制任务到 Codex，通过 MCP 显式发起；复制不会启动宿主。" : "尚未配置 CodeTrail 服务端模型。先在下方保存至少一条消息，再复制任务到 Codex；复制不会启动宿主。"}</p>
         <textarea aria-label="Codex MCP 理解任务文本" readOnly value={externalTask} onClick={(event) => event.currentTarget.select()} rows={8} />
         <button type="button" className="ct-button ct-button-secondary" onClick={() => void copyExternalTask()} disabled={!canCopyTask}>{taskCopyStatus === "copied" ? "已复制 Codex MCP 任务" : "复制 Codex MCP 理解任务"}</button>
         {taskCopyStatus === "copied" ? <small>现在到 Codex 发起 MCP Run；网页尚未启动任何宿主。</small> : taskCopyStatus === "manual" ? <small>剪贴板不可用，请选中上方文本并手动复制。</small> : !canCopyTask ? <small>{draftPending ? "请先保存当前草稿。" : selectedSession?.message_count ? "正在读取消息，请稍后复制。" : "保存消息后即可复制任务。"}</small> : null}
-        <button type="button" className="ct-link-button" onClick={() => void session.onOpenModelSettings()}>配置 CodeTrail 服务端模型</button>
+        <button type="button" className="ct-link-button" onClick={() => void session.onOpenModelSettings()}>{realRunDisabled ? "打开模型设置" : "配置 CodeTrail 服务端模型"}</button>
       </div> : null}
       {session.modelApiKeyConfigured === false && analysisKind === "issue" ? <div className="ct-model-config-needed" role="status"><span>尚未配置模型密钥。先完成配置，再开始 Issue 调查。</span><button type="button" className="ct-link-button" onClick={() => void session.onOpenModelSettings()}>打开设置</button></div> : null}
+      {realRunDisabled ? <div className="ct-model-config-needed" role="status"><span>服务端真实模型 Run 开关尚未启用。可在 ~/.config/codetrail/settings.json 设置 "real_run_enabled": true 并重启 codetrail api，或在 Docker Compose 的 .env 设置 CODETRAIL_REAL_RUN_ENABLED=1。启用后，已保存的 Session 消息和有界源码证据会发送给模型供应商，可能产生费用。</span></div> : null}
       {draftPending ? <p className="ct-run-draft-warning" role="status">当前有未保存草稿：启动 Run 不会包含它，请先保存消息。</p> : null}
       <p className="ct-run-real-warning" role="note">配置后显式启动才会把本次{analysisKind === "understanding" ? "代码理解请求" : "Issue 调查"}、已保存消息和有界源码证据发送到模型服务，可能产生调用费用。</p>
       {session.runWriteError ? <p className="ct-inline-error" role="alert">{session.runWriteError}</p> : null}

@@ -35126,6 +35126,10 @@
           "title": "Provider",
           "type": "string"
         },
+        "real_run_enabled": {
+          "title": "Real Run Enabled",
+          "type": "boolean"
+        },
         "schema_version": {
           "const": "0.1.0",
           "default": "0.1.0",
@@ -35137,7 +35141,8 @@
         "provider",
         "base_url",
         "model",
-        "has_api_key"
+        "has_api_key",
+        "real_run_enabled"
       ],
       "title": "ModelConfigSettingsResponse",
       "type": "object"

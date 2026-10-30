@@ -10,6 +10,29 @@ from app import cli
 def test_github_import_defaults_enabled_and_can_be_disabled():
     assert cli.Settings(data_dir="test").github_import_enabled is True
     assert cli.Settings(data_dir="test", github_import_enabled=False).github_import_enabled is False
+    assert cli.Settings(data_dir="test").real_run_enabled is False
+
+
+def test_real_run_setting_maps_to_environment_without_overriding_explicit_value(tmp_path, monkeypatch):
+    monkeypatch.setattr(cli.os, "environ", dict(cli.os.environ))
+    for key in (
+        "CODETRAIL_DATA_DIR",
+        "CODETRAIL_REPOSITORIES",
+        "CODETRAIL_ALLOWED_IMPORT_ROOTS",
+        "CODETRAIL_WORKBENCH_URL",
+        "CODETRAIL_WEB_ORIGINS",
+        "CODETRAIL_GITHUB_IMPORT_ENABLED",
+        "CODETRAIL_MCP_EXTERNAL_RUN_ENABLED",
+        "CODETRAIL_REAL_RUN_ENABLED",
+        "CODETRAIL_TYPESCRIPT_COMPILER",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    cli.apply_settings(cli.Settings(data_dir=str(tmp_path / "data"), real_run_enabled=True))
+    assert cli.os.environ["CODETRAIL_REAL_RUN_ENABLED"] == "1"
+
+    monkeypatch.setenv("CODETRAIL_REAL_RUN_ENABLED", "0")
+    cli.apply_settings(cli.Settings(data_dir=str(tmp_path / "other-data"), real_run_enabled=True))
+    assert cli.os.environ["CODETRAIL_REAL_RUN_ENABLED"] == "0"
 
 
 def test_direct_service_github_default_and_override(tmp_path, monkeypatch):
@@ -21,6 +44,7 @@ def test_direct_service_github_default_and_override(tmp_path, monkeypatch):
 
 
 def test_shared_config_and_environment_precedence(tmp_path, monkeypatch):
+    monkeypatch.setattr(cli.os, "environ", dict(cli.os.environ))
     config = tmp_path / "settings.json"
     configured_compiler = tmp_path / "configured-typescript.js"
     environment_compiler = tmp_path / "environment-typescript.js"
@@ -91,10 +115,12 @@ def test_init_defaults_to_current_root_and_discovers_locked_typescript(tmp_path,
     settings = cli.load_settings(config)
     assert settings.allowed_import_roots == [str(tmp_path.resolve())]
     assert settings.typescript_compiler == str(compiler)
+    assert settings.real_run_enabled is False
     assert capsys.readouterr().err == ""
 
 
 def test_runtime_discovers_typescript_without_rewriting_settings(tmp_path, monkeypatch):
+    monkeypatch.setattr(cli.os, "environ", dict(cli.os.environ))
     compiler = _make_workspace(tmp_path, "5.9.3")
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("CODETRAIL_TYPESCRIPT_COMPILER", raising=False)
