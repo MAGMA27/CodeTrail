@@ -1624,6 +1624,7 @@ class WorkspaceService:
             base_url=config.base_url,
             model=config.model,
             has_api_key=bool(config.api_key),
+            real_run_enabled=self.registry.real_run_enabled,
         )
 
     def save_model_config_settings(self, request: SaveModelConfigRequest) -> ModelConfigSettingsResponse:
@@ -1649,6 +1650,7 @@ class WorkspaceService:
             base_url=config.base_url,
             model=config.model,
             has_api_key=bool(config.api_key),
+            real_run_enabled=self.registry.real_run_enabled,
         )
 
     def _current_model_config(self) -> ModelProviderConfig:

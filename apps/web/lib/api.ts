@@ -1074,6 +1074,7 @@ export type ModelConfigSettings = {
   base_url: string;
   model: string;
   has_api_key: boolean;
+  real_run_enabled: boolean;
 };
 
 export type SaveModelConfigRequest = {
@@ -3197,7 +3198,8 @@ export function isModelConfigSettings(value: unknown): value is ModelConfigSetti
     isString(value.provider) &&
     isString(value.base_url) &&
     isString(value.model) &&
-    typeof value.has_api_key === "boolean"
+    typeof value.has_api_key === "boolean" &&
+    typeof value.real_run_enabled === "boolean"
   );
 }
 

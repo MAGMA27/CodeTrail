@@ -127,13 +127,14 @@ def create_request() -> dict:
 
 
 def test_model_config_settings_redact_secret_preserve_blank_and_remove_explicitly(tmp_path: Path, monkeypatch) -> None:
-    application = create_app({}, data_root=tmp_path / "data")
+    application = create_app({}, data_root=tmp_path / "data", real_run_enabled=False)
     second_application = create_app({}, data_root=tmp_path / "data")
     config_path = tmp_path / "data" / "config.json"
 
     status, initial = request(application, "GET", "/api/model-config")
     assert status == 200
     assert initial["has_api_key"] is False
+    assert initial["real_run_enabled"] is False
     assert "api_key" not in initial
 
     for invalid_settings in (
@@ -172,6 +173,7 @@ def test_model_config_settings_redact_secret_preserve_blank_and_remove_explicitl
     status, saved = request(application, "POST", "/api/model-config", payload)
     assert status == 200
     assert saved["has_api_key"] is True
+    assert saved["real_run_enabled"] is False
     assert "api_key" not in saved
     assert "codetrail-fake-key" not in json.dumps(saved)
     assert second_application.state.registry.model_config.api_key == "codetrail-fake-key"
@@ -210,6 +212,14 @@ def test_model_config_settings_redact_secret_preserve_blank_and_remove_explicitl
     assert status == 200
     assert removed["has_api_key"] is False
     assert json.loads(config_path.read_text(encoding="utf-8"))["api_key"] == ""
+
+    enabled_application = create_app({}, data_root=tmp_path / "enabled", real_run_enabled=True)
+    status, enabled_settings = request(enabled_application, "GET", "/api/model-config")
+    assert status == 200
+    assert enabled_settings["real_run_enabled"] is True
+    status, enabled_saved = request(enabled_application, "POST", "/api/model-config", payload)
+    assert status == 200
+    assert enabled_saved["real_run_enabled"] is True
 
 
 def test_model_config_write_requires_loopback_client(tmp_path: Path, monkeypatch) -> None:

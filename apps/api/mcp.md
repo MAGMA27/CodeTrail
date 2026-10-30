@@ -30,7 +30,7 @@ command = "codetrail"
 args = ["mcp"]
 ```
 
-API (`codetrail api`) 与 MCP (`codetrail mcp`) 都读取 `~/.config/codetrail/settings.json`，不把业务配置复制进 Codex。配置包含 `data_dir`、`allowed_import_roots`、`workbench_url`、`web_origins`、`github_import_enabled`、`external_run_enabled` 和可选 `typescript_compiler`。路径必须是绝对路径，导入根目录必须存在；未识别字段拒绝启动。环境变量优先。自定义文件使用 `--config` 或 `CODETRAIL_CONFIG`；`codetrail --config C:/path/settings.json install` 注册时保存同一文件位置。修改配置后重启 API/MCP，已运行进程不会热加载。
+API (`codetrail api`) 与 MCP (`codetrail mcp`) 都读取 `~/.config/codetrail/settings.json`，不把业务配置复制进 Codex。配置包含 `data_dir`、`allowed_import_roots`、`workbench_url`、`web_origins`、`github_import_enabled`、`external_run_enabled`、默认关闭的 `real_run_enabled` 和可选 `typescript_compiler`。`real_run_enabled` 控制 HTTP real Run；开启后会把已保存的 Session 消息和有界源码证据发送给配置的模型供应商，可能产生费用。设置为 true 后需重启 `codetrail api`；Docker Compose 可在根 `.env` 设置 `CODETRAIL_REAL_RUN_ENABLED=1`。路径必须是绝对路径，导入根目录必须存在；未识别字段拒绝启动。环境变量优先。自定义文件使用 `--config` 或 `CODETRAIL_CONFIG`；`codetrail --config C:/path/settings.json install` 注册时保存同一文件位置。修改配置后重启 API/MCP，已运行进程不会热加载。
 
 `codetrail install --print-config` 只预览注册内容；`status` 显示配置位置和宿主注册，`uninstall` 只移除 codetrail 注册，不删除项目数据或用户配置。安装后的包包含 stdio 服务和 TypeScript parser，但不包含 TypeScript 编译器。创建 settings 时，`codetrail init` 从 CodeTrail 源码工作区的 `apps/web/node_modules/typescript` 或根 `node_modules/typescript` 只读检查 package.json，只有版本为 5.9.3 时才记录路径；已有配置不改写。settings 未配置路径时，API/MCP 仅在从同一源码工作区启动时尝试发现；从其他目录启动需配置 `typescript_compiler` 或 `CODETRAIL_TYPESCRIPT_COMPILER`。没有编译器时 Python 可用，TypeScript/TSX 新索引会返回明确解析失败。可用 `--typescript-compiler` 或 `CODETRAIL_TYPESCRIPT_COMPILER` 指向锁定的 typescript.js。开发时 `uv run --directory apps/api codetrail ...` 使用相同入口。
 
@@ -40,7 +40,7 @@ API (`codetrail api`) 与 MCP (`codetrail mcp`) 都读取 `~/.config/codetrail/s
 
 内置 HTTP 功能生成和 Run 的 `real` 模式默认适配 DeepSeek，从服务数据目录的 `config.json` 读取配置；外部功能提交由宿主模型负责，不读取该配置，也不调用服务端模型；例如：
 
-工作台通过 `GET/POST /api/model-config` 查看和保存脱敏设置；留空密钥保留当前值，明确移除才清除。API 与 MCP 的新 real 任务每次读取同一文件，因此改模型配置不需重启服务；活动 Run 使用创建时捕获的配置。保存只写配置，不会试连供应商或发送源码。
+工作台通过 `GET/POST /api/model-config` 查看和保存脱敏设置；响应包含服务端 `real_run_enabled` 状态。留空密钥保留当前值，明确移除才清除。API 与 MCP 的新 real 任务每次读取同一文件，因此改模型配置不需重启服务；活动 Run 使用创建时捕获的配置。保存只写配置，不会试连供应商或发送源码。
 
 ```json
 {

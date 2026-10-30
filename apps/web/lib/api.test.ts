@@ -12,6 +12,7 @@ import {
   isIndexResponse,
   isIndexRefreshResponse,
   isModuleSymbolsPageResponse,
+  isModelConfigSettings,
   isNeighborsResponse,
   isProjectOverviewResponse,
   isProjectJourneyCatalogResponse,
@@ -39,6 +40,22 @@ const indexId = "index-overview-test";
 const moduleId = "symbol-module";
 const functionId = "symbol-main";
 const entryId = "entry-main";
+
+test("model config requires the server real-run capability flag", () => {
+  const settings = {
+    schema_version: SCHEMA_VERSION,
+    provider: "provider",
+    base_url: "https://model.example.test/v1",
+    model: "model",
+    has_api_key: true,
+    real_run_enabled: false,
+  };
+  assert.equal(isModelConfigSettings(settings), true);
+  assert.equal(isModelConfigSettings({ ...settings, real_run_enabled: true }), true);
+  const { real_run_enabled: _removed, ...missingFlag } = settings;
+  assert.equal(isModelConfigSettings(missingFlag), false);
+  assert.equal(isModelConfigSettings({ ...settings, real_run_enabled: "false" }), false);
+});
 
 function journeyFixture() {
   const index = {
