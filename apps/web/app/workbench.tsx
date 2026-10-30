@@ -143,6 +143,7 @@ import {
   trackJob,
   clearTrackedJob,
   resolveGitHubImportJobResult,
+  indexImportErrorMessage,
 } from "../lib/import-status";
 import {
   CALL_CHAIN_NODE_HEIGHT,
@@ -397,10 +398,10 @@ function importRequestErrorMessage(error: unknown): string {
     : errorMessage(error);
 }
 
-function localImportErrorMessage(message: string): string {
+function localImportErrorMessage(message: string, errorCode?: string): string {
   return message.includes("local import path is outside allowed roots")
     ? "API 当前未开放这个目录。请在 API 设置中加入本地可导入目录，重启 API 后再试。"
-    : message;
+    : indexImportErrorMessage(message, errorCode);
 }
 
 async function importIndexFromStatus(
@@ -2788,7 +2789,7 @@ export default function Workbench() {
     setImportError(
       response.attempt.status === "ready"
         ? null
-        : localImportErrorMessage(response.attempt.error_message ?? "本地导入未完成。"),
+        : localImportErrorMessage(response.attempt.error_message ?? "本地导入未完成。", response.attempt.error_code ?? undefined),
     );
     if (response.attempt.status === "ready") {
       applyImportedProject(response.project, response.index, navigationId === importNavigationId.current);
@@ -2974,7 +2975,10 @@ export default function Workbench() {
         return false;
       }
       setImportStatus(null);
-      setImportError(localImportErrorMessage(importRequestErrorMessage(error)));
+      setImportError(localImportErrorMessage(
+        importRequestErrorMessage(error),
+        error instanceof ApiRequestError ? error.code : undefined,
+      ));
       return false;
     } finally {
       importActionInFlight.current = false;
@@ -3068,7 +3072,10 @@ export default function Workbench() {
           return false;
         }
         setImportStatus(isUncertainImportRequestError(error) ? null : "failed");
-        setImportError(localImportErrorMessage(importRequestErrorMessage(error)));
+        setImportError(localImportErrorMessage(
+          importRequestErrorMessage(error),
+          error instanceof ApiRequestError ? error.code : undefined,
+        ));
         return false;
       } finally {
         importActionInFlight.current = false;
@@ -3104,7 +3111,10 @@ export default function Workbench() {
         return false;
       }
       setImportStatus(isUncertainImportRequestError(error) ? null : "failed");
-      setImportError(localImportErrorMessage(importRequestErrorMessage(error)));
+      setImportError(localImportErrorMessage(
+        importRequestErrorMessage(error),
+        error instanceof ApiRequestError ? error.code : undefined,
+      ));
       return false;
     } finally {
       importActionInFlight.current = false;
@@ -3480,7 +3490,7 @@ export default function Workbench() {
         return;
       }
       setIndexFreshnessError(
-        error instanceof ApiRequestError && ["download_timeout", "index_timeout"].includes(error.code)
+        error instanceof ApiRequestError && ["download_timeout", "index_timeout", "index_too_large", "index_source_rejected"].includes(error.code)
           ? githubImportErrorMessage(error.message, error.code)
           : errorMessage(error),
       );

@@ -12,7 +12,7 @@ import shutil
 import threading
 import time
 from collections import OrderedDict
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -133,6 +133,7 @@ from .indexing import (
     current_source_rules_version,
     extract_definitions,
     index_timeout_from_environment,
+    index_max_total_bytes_from_environment,
     index_configuration_hash,
     is_source_code_path,
     scan_source_manifest,
@@ -630,13 +631,25 @@ T = TypeVar("T")
 logger = logging.getLogger(__name__)
 
 _FRESHNESS_MAX_FILES = 2_000
-_FRESHNESS_MAX_TOTAL_BYTES = 20 * 1024 * 1024
 _FRESHNESS_MAX_SECONDS = 2.0
 _FRESHNESS_MAX_CHANGED_PATHS = 100
 _DEFINITION_CACHE_MAX_ENTRIES = 5_000
 _DEFINITION_CACHE_MAX_BYTES = 16 * 1024 * 1024
 # Internal and external Run ToolResult responses share this contract detail limit.
 _RUN_NEIGHBOR_UNRESOLVED_LIMIT = 40
+_INDEX_BUILD_BLOCKING_ISSUES = frozenset(
+    {
+        "decode_error",
+        "file_too_large",
+        "outside_root",
+        "read_error",
+        "symlink",
+        "capture_incomplete",
+        "parser_unavailable",
+        "parser_error",
+        "typescript_syntax_error",
+    }
+)
 _LEGACY_REBUILDABLE_FRESHNESS_REASONS: frozenset[FreshnessReasonCode] = frozenset(
     {
         "missing_index_metadata",
@@ -770,11 +783,16 @@ class IndexService:
         max_concurrent_indexes: int = 1,
         max_file_bytes: int = 1_000_000,
         freshness_max_files: int = _FRESHNESS_MAX_FILES,
-        freshness_max_total_bytes: int = _FRESHNESS_MAX_TOTAL_BYTES,
+        freshness_max_total_bytes: int | None = None,
         freshness_max_seconds: float = _FRESHNESS_MAX_SECONDS,
         definition_cache_max_entries: int = _DEFINITION_CACHE_MAX_ENTRIES,
         definition_cache_max_bytes: int = _DEFINITION_CACHE_MAX_BYTES,
     ) -> None:
+        freshness_max_total_bytes = (
+            index_max_total_bytes_from_environment()
+            if freshness_max_total_bytes is None
+            else freshness_max_total_bytes
+        )
         if (
             max_concurrent_indexes < 1
             or max_file_bytes < 1
@@ -799,7 +817,6 @@ class IndexService:
             identity_version=INDEX_BUILD_IDENTITY_VERSION,
             rules_version=self.rules_version,
             max_files=freshness_max_files,
-            max_total_bytes=freshness_max_total_bytes,
             max_seconds=freshness_max_seconds,
         )
         self._index_slots = threading.BoundedSemaphore(max_concurrent_indexes)
@@ -823,7 +840,8 @@ class IndexService:
         # it must not make an otherwise current source configuration stale.
         build_configuration_hash = self.configuration_hash
         control = control or IndexingControl()
-        control.start(index_timeout_from_environment())
+        index_timeout_seconds = index_timeout_from_environment()
+        control.start(index_timeout_seconds)
         if not self._index_slots.acquire(blocking=False):
             raise ServiceError("budget_exceeded", 429, "index capacity is currently busy")
         try:
@@ -837,12 +855,19 @@ class IndexService:
                     max_file_bytes=self.max_file_bytes,
                     max_files=self.freshness_max_files,
                     max_total_bytes=self.freshness_max_total_bytes,
-                    max_seconds=self.freshness_max_seconds,
+                    max_seconds=index_timeout_seconds,
                     rules_version=self.rules_version,
                     configuration_hash=build_configuration_hash,
                     control=control,
                 )
                 control.check()
+                if snapshot.index.status != "ready":
+                    raise _index_build_issue_error(
+                        snapshot.issues,
+                        max_total_bytes=self.freshness_max_total_bytes,
+                        max_files=self.freshness_max_files,
+                        max_seconds=index_timeout_seconds,
+                    )
                 if not any(is_source_code_path(source_file.path) for source_file in snapshot.files):
                     raise ServiceError(
                         "invalid_input",
@@ -879,6 +904,13 @@ class IndexService:
                     )
                 definitions = extract_definitions(snapshot, cached=cached_definitions, control=control)
                 control.check()
+                if definitions.snapshot.index.status != "ready":
+                    raise _index_build_issue_error(
+                        definitions.issues,
+                        max_total_bytes=self.freshness_max_total_bytes,
+                        max_files=self.freshness_max_files,
+                        max_seconds=index_timeout_seconds,
+                    )
                 relation = extract_relations(definitions, cached=cached_relation_facts, control=control)
                 control.check()
                 if on_snapshot_ready is not None:
@@ -3374,6 +3406,13 @@ class WorkspaceService:
                 cache_scope_id=project.project_id,
                 control=control,
             )
+            if response.index.status != "ready":
+                raise _index_build_issue_error(
+                    response.issues,
+                    max_total_bytes=self.index_service.freshness_max_total_bytes,
+                    max_files=self.index_service.freshness_max_files,
+                    max_seconds=index_timeout_from_environment(),
+                )
             with self.registry.store_for_repository(project.repository_id) as store:
                 store.finish_project_index(
                     project.project_id,
@@ -3490,11 +3529,24 @@ class WorkspaceService:
             )
             if imported.attempt.status != "ready" or imported.index is None:
                 error_code = imported.attempt.error_code or "conflict"
-                if error_code not in {"budget_exceeded", "connection_error", "download_timeout", "index_timeout", "forbidden", "not_found", "conflict", "internal_error"}:
+                if error_code not in {
+                    "budget_exceeded",
+                    "connection_error",
+                    "download_timeout",
+                    "index_too_large",
+                    "index_source_rejected",
+                    "index_timeout",
+                    "forbidden",
+                    "not_found",
+                    "conflict",
+                    "internal_error",
+                }:
                     error_code = "conflict"
                 status_code = {
                     "budget_exceeded": 429,
                     "download_timeout": 504,
+                    "index_too_large": 413,
+                    "index_source_rejected": 422,
                     "connection_error": 503,
                     "index_timeout": 504,
                     "forbidden": 403,
@@ -5608,6 +5660,57 @@ def _index_response(relation) -> IndexResponse:
         truncation_reason=relation.truncation_reason,
         unresolved_truncated=relation.unresolved_truncated,
         unresolved_truncation_reason=relation.unresolved_truncation_reason,
+    )
+
+
+def _index_build_issue_error(
+    issues: Iterable[SnapshotIssue | IndexIssue],
+    *,
+    max_total_bytes: int,
+    max_files: int,
+    max_seconds: float,
+) -> ServiceError:
+    """Translate blocking snapshot/parser issues into actionable API failures."""
+
+    issue = next(
+        (item for item in issues if item.kind in _INDEX_BUILD_BLOCKING_ISSUES),
+        None,
+    )
+    if issue is None:
+        return ServiceError("index_source_rejected", 422, "index source was rejected")
+
+    if issue.kind == "capture_incomplete":
+        if issue.message in {"max_total_bytes", "max_total_bytes_after_read"}:
+            if issue.size is None:
+                measured = "source size could not be measured"
+            else:
+                measured = f"at least {issue.size} bytes"
+            return ServiceError(
+                "index_too_large",
+                413,
+                f"indexed source exceeds max_total_bytes: {measured} > limit {max_total_bytes} bytes; "
+                "raise CODETRAIL_INDEX_MAX_TOTAL_BYTES",
+            )
+        if issue.message == "max_files":
+            count = getattr(issue, "count", None)
+            measured = "file count could not be measured" if count is None else f"at least {count} files"
+            return ServiceError(
+                "index_too_large",
+                413,
+                f"indexed source exceeds max_files: {measured} > limit {max_files} files",
+            )
+        if issue.message == "max_seconds":
+            return ServiceError(
+                "index_timeout",
+                504,
+                f"source scan exceeded max_seconds: limit {max_seconds:g} seconds; "
+                "raise CODETRAIL_INDEX_TIMEOUT",
+            )
+
+    return ServiceError(
+        "index_source_rejected",
+        422,
+        f"index source rejected: {issue.kind} at {issue.path}",
     )
 
 

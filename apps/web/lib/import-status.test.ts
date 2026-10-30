@@ -6,6 +6,7 @@ import {
   clearTrackedJob,
   finishImportSubmissionKey,
   githubImportErrorMessage,
+  indexImportErrorMessage,
   importStatusFromJob,
   isImportStatusTerminal,
   jobErrorMessage,
@@ -124,6 +125,8 @@ test("job status labels and error codes are localized", () => {
   assert.equal(jobStatusLabel("retry_wait", "retry_wait"), "等待重试");
   assert.match(jobErrorMessage("worker_lost", null), /工作进程中断/);
   assert.match(jobErrorMessage("rate_limited", null), /限流/);
+  assert.match(jobErrorMessage("index_too_large", "at least 100 bytes > limit 20 bytes"), /CODETRAIL_INDEX_MAX_TOTAL_BYTES/);
+  assert.match(jobErrorMessage("index_source_rejected", "file.py: decode_error"), /路径与原因/);
   assert.equal(importStatusFromJob(makeJob("running", "downloading")), "acquiring");
   assert.equal(importStatusFromJob(makeJob("running", "indexing")), "indexing");
 });
@@ -238,4 +241,26 @@ test("explains GitHub index timeouts with the server setting", () => {
   assert.match(message, /^仓库索引构建超时/);
   assert.match(message, /CODETRAIL_INDEX_TIMEOUT/);
   assert.match(message, /Indexing timed out/);
+});
+
+test("explains local and GitHub source-size errors while preserving API details", () => {
+  const detail = "indexed source exceeds max_total_bytes: at least 21159504 bytes > limit 20971520 bytes; raise CODETRAIL_INDEX_MAX_TOTAL_BYTES";
+  const message = githubImportErrorMessage(detail, "index_too_large");
+  assert.match(message, /^源码总量超过索引上限/);
+  assert.match(message, /CODETRAIL_INDEX_MAX_TOTAL_BYTES/);
+  assert.match(message, /at least 21159504 bytes/);
+  assert.match(message, /limit 20971520 bytes/);
+  const localMessage = indexImportErrorMessage(detail, "index_too_large");
+  assert.match(localMessage, /settings\.json 的 index_max_total_bytes/);
+  assert.match(localMessage, /at least 21159504 bytes/);
+  assert.match(localMessage, /limit 20971520 bytes/);
+});
+
+test("explains rejected source files and preserves their server path and issue", () => {
+  const detail = "indexed source rejected: file.py (decode_error)";
+  const message = indexImportErrorMessage(detail, "index_source_rejected");
+  assert.match(message, /^源码文件无法安全纳入索引/);
+  assert.match(message, /file\.py/);
+  assert.match(message, /decode_error/);
+  assert.equal(indexImportErrorMessage("other failure", "other_code"), "other failure");
 });

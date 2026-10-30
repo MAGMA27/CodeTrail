@@ -891,11 +891,17 @@ def test_local_import_is_bounded_persistent_idempotent_and_retryable(tmp_path: P
     assert status == 200
     assert failed["attempt"]["status"] == "failed"
     assert failed["attempt"]["error_code"] == "internal_error"
+    failed_attempt = application.state.registry.management_store.find_attempt_by_idempotency(
+        "local-import-failure"
+    )
+    assert failed_attempt is not None
+    assert failed_attempt.status == "failed"
+    assert failed_attempt.error_code == "internal_error"
     status, after_failure = request(application, "GET", f"/api/projects/{project_id}")
     assert status == 200
     assert after_failure["latest_index_id"] == reindexed["index"]["index"]["index_id"]
 
-    status, retried = request(application, "POST", f"/api/imports/{failed['attempt']['attempt_id']}/retry")
+    status, retried = request(application, "POST", f"/api/imports/{failed_attempt.attempt_id}/retry")
     assert status == 200
     assert retried["attempt"]["status"] == "ready", (
         retried["attempt"]["error_code"],
@@ -926,6 +932,10 @@ def test_local_import_is_bounded_persistent_idempotent_and_retryable(tmp_path: P
     assert status == 200
     assert unsupported["attempt"]["status"] == "failed"
     assert unsupported["attempt"]["error_code"] == "invalid_input"
+    unsupported_attempt = application.state.registry.management_store.find_attempt_by_idempotency("empty-source")
+    assert unsupported_attempt is not None
+    assert unsupported_attempt.status == "failed"
+    assert unsupported_attempt.error_code == "invalid_input"
 
     status, denied = request(
         application,
@@ -959,6 +969,69 @@ def test_local_import_is_bounded_persistent_idempotent_and_retryable(tmp_path: P
     status, attempt_status = request(reopened, "GET", f"/api/imports/{first_attempt_id}")
     assert status == 200
     assert attempt_status["attempt"]["status"] == "ready"
+
+
+def test_local_import_exposes_total_source_limit_failure_and_keeps_project_unindexed(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    source = tmp_path / "large-source"
+    source.mkdir()
+    source_bytes = b"value = '0123456789012345678901234567890123456789'\n"
+    (source / "sample.py").write_bytes(source_bytes)
+    limit = 16
+    monkeypatch.setenv("CODETRAIL_INDEX_MAX_TOTAL_BYTES", str(limit))
+    application = create_app({}, data_root=tmp_path / "service-data", allowed_import_roots=(tmp_path,))
+
+    status, rejected = request(
+        application,
+        "POST",
+        "/api/imports/local",
+        {
+            "name": "Over limit source",
+            "path": str(source),
+            "revision": "local-v1",
+            "dirty": False,
+            "idempotency_key": "local-import-over-byte-limit",
+        },
+    )
+
+    assert status == 200
+    assert rejected["attempt"]["status"] == "failed"
+    assert rejected["attempt"]["error_code"] == "index_too_large"
+    assert f"at least {len(source_bytes)} bytes" in rejected["attempt"]["error_message"]
+    assert f"limit {limit} bytes" in rejected["attempt"]["error_message"]
+    attempt = application.state.registry.management_store.find_attempt_by_idempotency(
+        "local-import-over-byte-limit"
+    )
+    assert attempt is not None
+    assert attempt.status == "failed"
+    assert attempt.error_code == "index_too_large"
+    assert f"at least {len(source_bytes)} bytes" in (attempt.error_message or "")
+    assert f"limit {limit} bytes" in (attempt.error_message or "")
+
+    status, project = request(application, "GET", f"/api/projects/{attempt.project_id}")
+    assert status == 200
+    assert project["latest_index_id"] is None
+    assert project["available_index_ids"] == []
+    assert rejected["attempt"]["index_id"] is None
+    status, indexes = request(application, "GET", f"/api/projects/{attempt.project_id}/indexes")
+    assert status == 200
+    assert indexes["indexes"] == []
+
+    status, direct_rebuild_error = request(
+        application,
+        "POST",
+        f"/api/projects/{attempt.project_id}/indexes",
+        {"revision": "direct-rebuild", "dirty": False},
+    )
+    assert status == 413
+    assert direct_rebuild_error["code"] == "index_too_large"
+    assert f"at least {len(source_bytes)} bytes" in direct_rebuild_error["message"]
+    assert f"limit {limit} bytes" in direct_rebuild_error["message"]
+    status, project_after_rebuild = request(application, "GET", f"/api/projects/{attempt.project_id}")
+    assert status == 200
+    assert project_after_rebuild["latest_index_id"] is None
 
 
 def test_restart_marks_active_local_import_interrupted_without_losing_latest(tmp_path: Path) -> None:

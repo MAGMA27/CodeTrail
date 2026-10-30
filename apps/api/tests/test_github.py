@@ -41,6 +41,7 @@ def _clear_task_environment(monkeypatch: pytest.MonkeyPatch) -> None:
         "CODETRAIL_WORKER_CONCURRENCY",
         "CODETRAIL_DATA_DIR",
         "CODETRAIL_INDEX_TIMEOUT",
+        "CODETRAIL_INDEX_MAX_TOTAL_BYTES",
         "CODETRAIL_GITHUB_TOKEN",
         "CODETRAIL_GITHUB_IMPORT_ENABLED",
         "CODETRAIL_GITHUB_DOWNLOAD_IDLE_TIMEOUT",
@@ -392,6 +393,55 @@ def test_index_timeout_returns_failed_attempt_and_cleans_github_temp(
     )
     assert list((data_root / "github-imports").glob("*")) == []
     assert application.state.registry.management_store.list_project_updates() == ()
+
+
+def test_github_total_source_limit_is_persisted_for_import_and_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("CODETRAIL_INDEX_MAX_TOTAL_BYTES", "1")
+    archive_url = "https://api.github.com/repos/owner/repo/tarball/" + "b" * 40
+    opener = _FakeOpener(
+        {
+            _COMMIT_URL: [_FakeResponse(200, _COMMIT_BODY)],
+            archive_url: [
+                _FakeResponse(200, _archive_bytes(("repo-root/module.py", b"VALUE = 1\n", "file")))
+            ],
+        }
+    )
+    application = create_app(
+        {},
+        data_root=tmp_path / "service-data",
+        github_import_enabled=True,
+        github_client=GitHubClient(token="", opener=opener),
+    )
+
+    status, response = _submit_and_wait_job(
+        application,
+        "/api/imports/github",
+        {"name": "Large source", "url": "https://github.com/owner/repo", "ref": "main"},
+    )
+
+    attempt = response["attempt"]
+    assert status == 200
+    assert attempt["status"] == "failed"
+    assert attempt["error_code"] == "index_too_large"
+    assert "at least 10 bytes" in attempt["error_message"]
+    assert "limit 1 bytes" in attempt["error_message"]
+    assert attempt["index_id"] is None
+    assert response["project"]["latest_index_id"] is None
+
+    opener.responses[archive_url] = [
+        _FakeResponse(200, _archive_bytes(("repo-root/module.py", b"VALUE = 1\n", "file")))
+    ]
+    retry_status, retried = _submit_and_wait_job(
+        application,
+        f"/api/imports/{attempt['attempt_id']}/retry-github",
+    )
+    assert retry_status == 200
+    assert retried["attempt"]["status"] == "failed"
+    assert retried["attempt"]["error_code"] == "index_too_large"
+    assert "at least 10 bytes" in retried["attempt"]["error_message"]
+    assert "limit 1 bytes" in retried["attempt"]["error_message"]
 
 def test_github_refresh_index_timeout_returns_504(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

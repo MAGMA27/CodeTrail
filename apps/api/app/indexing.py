@@ -41,6 +41,7 @@ SUBSYSTEM_MANIFEST_MAX_GROUPS = 80
 SUBSYSTEM_MANIFEST_MAX_OWNERS = 400
 SUBSYSTEM_MANIFEST_MAX_PATH_LENGTH = 500
 _SUBSYSTEM_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")
+DEFAULT_INDEX_MAX_TOTAL_BYTES = 50 * 1024 * 1024
 
 _EXCLUDED_DIRECTORIES = {
     ".codetrail",
@@ -127,6 +128,16 @@ def index_timeout_from_environment() -> float:
     return value if math.isfinite(value) and value > 0 else 240.0
 
 
+def index_max_total_bytes_from_environment() -> int:
+    """Read the positive source byte limit, defaulting to 50 MiB."""
+    raw_value = os.getenv("CODETRAIL_INDEX_MAX_TOTAL_BYTES")
+    try:
+        value = int(raw_value) if raw_value is not None else DEFAULT_INDEX_MAX_TOTAL_BYTES
+    except (TypeError, ValueError):
+        return DEFAULT_INDEX_MAX_TOTAL_BYTES
+    return value if value > 0 else DEFAULT_INDEX_MAX_TOTAL_BYTES
+
+
 @dataclass(frozen=True)
 class SnapshotIssue:
     """A file or request that could not be safely included in a snapshot."""
@@ -135,6 +146,7 @@ class SnapshotIssue:
     kind: IssueKind
     message: str
     size: int | None = None
+    count: int | None = None
 
 
 @dataclass(frozen=True)
@@ -213,6 +225,8 @@ class SourceManifestScan:
     scan_complete: bool
     scan_truncated: bool
     scan_truncation_reason: str | None
+    scan_truncation_size: int | None = None
+    scan_truncation_count: int | None = None
     unstable_paths: tuple[str, ...] = ()
 
     @property
@@ -493,7 +507,7 @@ def build_source_snapshot(
     identity_version: str = "source-v1",
     max_file_bytes: int = 1_000_000,
     max_files: int = 2_000,
-    max_total_bytes: int = 20 * 1024 * 1024,
+    max_total_bytes: int = DEFAULT_INDEX_MAX_TOTAL_BYTES,
     max_seconds: float = 2.0,
     rules_version: str | None = None,
     configuration_hash: str | None = None,
@@ -526,7 +540,15 @@ def build_source_snapshot(
     issues = list(scan.issues)
     if scan.scan_truncated or not scan.scan_complete:
         detail = scan.scan_truncation_reason or "source changed or could not be fully inspected"
-        issues.append(SnapshotIssue("__snapshot__", "capture_incomplete", detail))
+        issues.append(
+            SnapshotIssue(
+                "__snapshot__",
+                "capture_incomplete",
+                detail,
+                size=scan.scan_truncation_size,
+                count=scan.scan_truncation_count,
+            )
+        )
     issues.sort(key=lambda issue: (issue.path, issue.kind))
     snapshot_hash = _snapshot_hash(snapshot_files, issues)
     generated_index_id = index_id or _make_index_id(repository_id, snapshot_hash, identity_version)
@@ -575,19 +597,17 @@ def index_configuration_hash(
     identity_version: str,
     rules_version: str,
     max_files: int = 2_000,
-    max_total_bytes: int = 20 * 1024 * 1024,
     max_seconds: float = 2.0,
 ) -> str:
     """Fingerprint the source/index settings that can change index contents."""
 
-    if max_file_bytes < 1 or max_files < 1 or max_total_bytes < 1 or max_seconds <= 0:
+    if max_file_bytes < 1 or max_files < 1 or max_seconds <= 0:
         raise ValueError("source capture budgets must be positive")
     payload = {
         "identity_version": identity_version,
         "max_file_bytes": max_file_bytes,
         "max_files": max_files,
         "max_seconds": max_seconds,
-        "max_total_bytes": max_total_bytes,
         "rules_version": rules_version,
     }
     return _sha256(
@@ -600,7 +620,7 @@ def scan_source_manifest(
     *,
     max_file_bytes: int = 1_000_000,
     max_files: int = 2_000,
-    max_total_bytes: int = 20 * 1024 * 1024,
+    max_total_bytes: int = DEFAULT_INDEX_MAX_TOTAL_BYTES,
     max_seconds: float = 2.0,
     control: IndexingControl | None = None,
 ) -> SourceManifestScan:
@@ -626,12 +646,22 @@ def scan_source_manifest(
     scan_complete = True
     scan_truncated = False
     scan_truncation_reason: str | None = None
+    scan_truncation_size: int | None = None
+    scan_truncation_count: int | None = None
 
-    def truncate(reason: str) -> None:
+    def truncate(
+        reason: str,
+        *,
+        measured_size: int | None = None,
+        measured_count: int | None = None,
+    ) -> None:
         nonlocal scan_complete, scan_truncated, scan_truncation_reason
+        nonlocal scan_truncation_size, scan_truncation_count
         scan_complete = False
         scan_truncated = True
         scan_truncation_reason = reason
+        scan_truncation_size = measured_size
+        scan_truncation_count = measured_count
 
     def check_time() -> bool:
         if control is not None:
@@ -727,7 +757,7 @@ def scan_source_manifest(
             if not is_subsystem_manifest and not is_source_code_path(relative):
                 continue
             if not is_subsystem_manifest and scanned_source_files >= max_files:
-                truncate("max_files")
+                truncate("max_files", measured_count=scanned_source_files + 1)
                 return
             scanned_files += 1
             if not is_subsystem_manifest:
@@ -765,7 +795,10 @@ def scan_source_manifest(
                 )
                 continue
             if not is_subsystem_manifest and scanned_source_bytes + before.st_size > max_total_bytes:
-                truncate("max_total_bytes")
+                truncate(
+                    "max_total_bytes",
+                    measured_size=scanned_source_bytes + before.st_size,
+                )
                 return
             try:
                 if is_subsystem_manifest:
@@ -784,7 +817,10 @@ def scan_source_manifest(
             if not is_subsystem_manifest:
                 scanned_source_bytes += len(raw)
             if not is_subsystem_manifest and scanned_source_bytes > max_total_bytes:
-                truncate("max_total_bytes_after_read")
+                truncate(
+                    "max_total_bytes_after_read",
+                    measured_size=scanned_source_bytes,
+                )
                 return
             try:
                 after = entry.stat()
@@ -848,6 +884,8 @@ def scan_source_manifest(
         scan_complete=scan_complete and not scan_truncated,
         scan_truncated=scan_truncated,
         scan_truncation_reason=scan_truncation_reason,
+        scan_truncation_size=scan_truncation_size,
+        scan_truncation_count=scan_truncation_count,
         unstable_paths=tuple(unstable_paths),
     )
 
