@@ -3,6 +3,7 @@ import test from "node:test";
 
 import type { CodeEdge, ContextualCall, NeighborsResponse, SymbolRecord } from "./api.ts";
 import {
+  describeRelationTruncation,
   CALL_CHAIN_NODE_HEIGHT,
   CALL_CHAIN_NODE_WIDTH,
   CALL_CHAIN_ROW_STEP,
@@ -479,4 +480,12 @@ test("calls-only entry chains stay on the requested graph and expose bounded cyc
     edge("edge-out", root.symbol_id, child.symbol_id),
     edge("edge-back", child.symbol_id, root.symbol_id),
   ]), true);
+});
+
+test("relation truncation reasons are explained in Chinese", () => {
+  assert.equal(describeRelationTruncation("max_seconds exceeded"), "关系提取超过时间预算，只保存了超时前已解析的关系");
+  assert.equal(describeRelationTruncation("max_edges reached"), "关系边达到数量上限，超出部分未保存");
+  assert.equal(describeRelationTruncation("max_unresolved reached"), "未解析引用达到数量上限，超出部分未保存");
+  assert.equal(describeRelationTruncation("TypeScript call facts truncated"), "关系提取被截断（TypeScript call facts truncated）");
+  assert.equal(describeRelationTruncation(null), "原因未记录");
 });

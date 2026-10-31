@@ -6,6 +6,19 @@ import type {
   UnresolvedReference,
 } from "./api.ts";
 
+const RELATION_TRUNCATION_LABELS: Record<string, string> = {
+  "max_seconds exceeded": "关系提取超过时间预算，只保存了超时前已解析的关系",
+  "max_edges reached": "关系边达到数量上限，超出部分未保存",
+  "max_unresolved reached": "未解析引用达到数量上限，超出部分未保存",
+};
+
+/** Chinese explanation for an index relation truncation reason; unknown reasons stay visible. */
+export function describeRelationTruncation(reason: string | null | undefined): string {
+  if (!reason) return "原因未记录";
+  const label = RELATION_TRUNCATION_LABELS[reason];
+  return label ? label : `关系提取被截断（${reason}）`;
+}
+
 export type GraphState = {
   symbols: SymbolRecord[];
   edges: CodeEdge[];

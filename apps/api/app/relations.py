@@ -5,6 +5,8 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import math
+import os
 import posixpath
 import time
 from collections.abc import Mapping
@@ -34,7 +36,61 @@ RELATION_FACT_EXTRACTION_RULES_VERSION = "python-relation-facts-v4"
 _RELATION_FACTS_FORMAT_VERSION = "relation-facts-v4"
 # This namespace is part of generated immutable index IDs. Bump it when source
 # boundaries or build rules can change an index with the same content hash.
-INDEX_BUILD_IDENTITY_VERSION = "relations-v13"
+INDEX_BUILD_IDENTITY_VERSION = "relations-v14"
+
+# Relation budgets. Defaults come from measured full extractions (see
+# apps/api/indexing.md); each one can be overridden by its environment variable.
+DEFAULT_RELATION_MAX_SECONDS = 60.0
+DEFAULT_RELATION_MAX_EDGES = 100_000
+DEFAULT_RELATION_MAX_UNRESOLVED = 50_000
+# Share of max_seconds available to fact gathering; the rest is kept for
+# resolving and storing whatever was gathered.
+RELATION_FACT_TIME_SHARE = 0.75
+
+
+@dataclass(frozen=True)
+class RelationBudgets:
+    max_seconds: float = DEFAULT_RELATION_MAX_SECONDS
+    max_edges: int = DEFAULT_RELATION_MAX_EDGES
+    max_unresolved: int = DEFAULT_RELATION_MAX_UNRESOLVED
+
+
+def _positive_int_from_environment(name: str, default: int) -> int:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError):
+        return default
+    return value if value > 0 else default
+
+
+def _positive_float_from_environment(name: str, default: float) -> float:
+    raw_value = os.getenv(name)
+    if raw_value is None:
+        return default
+    try:
+        value = float(raw_value)
+    except (TypeError, ValueError):
+        return default
+    return value if math.isfinite(value) and value > 0 else default
+
+
+def relation_budgets_from_environment() -> RelationBudgets:
+    """Read relation budgets; missing or invalid values fall back to defaults."""
+
+    return RelationBudgets(
+        max_seconds=_positive_float_from_environment(
+            "CODETRAIL_RELATION_MAX_SECONDS", DEFAULT_RELATION_MAX_SECONDS
+        ),
+        max_edges=_positive_int_from_environment(
+            "CODETRAIL_RELATION_MAX_EDGES", DEFAULT_RELATION_MAX_EDGES
+        ),
+        max_unresolved=_positive_int_from_environment(
+            "CODETRAIL_RELATION_MAX_UNRESOLVED", DEFAULT_RELATION_MAX_UNRESOLVED
+        ),
+    )
 
 
 def relation_coverage_limitations(
@@ -321,7 +377,11 @@ class _RelationBudget:
     def __init__(self, max_edges: int, max_unresolved: int, max_seconds: float) -> None:
         self.max_edges = max_edges
         self.max_unresolved = max_unresolved
-        self.deadline = time.monotonic() + max_seconds
+        started = time.monotonic()
+        self.deadline = started + max_seconds
+        # Fact gathering may use only part of the time budget so that whatever was
+        # gathered can still be resolved and stored before the overall deadline.
+        self.fact_deadline = started + max_seconds * RELATION_FACT_TIME_SHARE
         self.edge_count = 0
         self.unresolved_count = 0
         self.truncated = False
@@ -394,12 +454,18 @@ def extract_relations(
     definitions: DefinitionIndex,
     *,
     cached: Mapping[str, RelationFileFacts] | None = None,
-    max_edges: int = 6_000,
-    max_unresolved: int = 5_000,
-    max_seconds: float = 5.0,
+    max_edges: int = DEFAULT_RELATION_MAX_EDGES,
+    max_unresolved: int = DEFAULT_RELATION_MAX_UNRESOLVED,
+    max_seconds: float = DEFAULT_RELATION_MAX_SECONDS,
     control: IndexingControl | None = None,
 ) -> RelationIndex:
-    """Resolve file syntax facts against the current immutable definition set."""
+    """Resolve file syntax facts against the current immutable definition set.
+
+    Budgets never discard finished work. If fact gathering runs past its share
+    of ``max_seconds``, the files gathered so far are still resolved (direct
+    imports and calls only; constructor-attribute and contextual inference
+    need every file) and the result is marked truncated.
+    """
 
     if max_edges < 1 or max_unresolved < 1 or max_seconds <= 0:
         raise ValueError("relation budgets must be positive")
@@ -426,6 +492,7 @@ def extract_relations(
         issue.path for issue in definitions.issues if issue.kind == "syntax_error"
     }
     facts_by_path: dict[str, RelationFileFacts] = {}
+    facts_complete = True
 
     for source_file in snapshot.files:
         if control is not None:
@@ -455,10 +522,10 @@ def extract_relations(
                     facts, parsed = _extract_relation_facts(
                         source_file,
                         tree=tree,
-                        deadline=budget.deadline,
+                        deadline=budget.fact_deadline,
                     )
                 except _RelationFactsIncomplete:
-                    budget._stop("max_seconds exceeded")
+                    facts_complete = False
                     break
             ast_parse_count += parsed
             fact_cache_entries.append((source_file.path, facts))
@@ -478,7 +545,7 @@ def extract_relations(
     escaped_instance_site_ids: set[str] = set()
     binding_mutation_after_escape_unverified_site_ids: set[str] = set()
     multisegment_attribute_writes: dict[str, list[Symbol | None]] = {}
-    if not budget.truncated:
+    if facts_complete and not budget.truncated:
         for source_file in snapshot.files:
             facts = facts_by_path.get(source_file.path)
             module_symbol = maps.modules_by_path.get(source_file.path)
@@ -507,19 +574,25 @@ def extract_relations(
             )
             resolver.visit_scope()
 
-    constructor_attribute_bindings, constructor_writes, indirect_constructor_writes = _resolve_constructor_attribute_bindings(
-        facts_by_path,
-        scope_facts_by_key,
-        maps,
-        constructor_sites,
-        unsafe_constructor_classes,
-        bypassed_constructor_classes,
-        multisegment_attribute_writes,
-        budget,
-    )
+    constructor_attribute_bindings: dict[tuple[str, str], Symbol] = {}
+    constructor_writes: dict[str, list[RelationAssignmentFact]] = {}
+    indirect_constructor_writes: dict[str, list[RelationAssignmentFact]] = {}
+    if facts_complete:
+        constructor_attribute_bindings, constructor_writes, indirect_constructor_writes = _resolve_constructor_attribute_bindings(
+            facts_by_path,
+            scope_facts_by_key,
+            maps,
+            constructor_sites,
+            unsafe_constructor_classes,
+            bypassed_constructor_classes,
+            multisegment_attribute_writes,
+            budget,
+        )
 
     if not budget.truncated:
         for source_file in snapshot.files:
+            if budget.truncated:
+                break
             facts = facts_by_path.get(source_file.path)
             if facts is None or facts.syntax_error or facts.scope is None:
                 continue
@@ -671,20 +744,24 @@ def extract_relations(
                 )
             )
 
-    contextual_calls = _resolve_contextual_calls(
-        snapshot.index.index_id,
-        constructor_sites,
-        activation_call_sites,
-        unsafe_constructor_classes,
-        escaped_instance_site_ids,
-        binding_mutation_after_escape_unverified_site_ids,
-        scope_facts_by_key,
-        maps,
-        constructor_writes,
-        indirect_constructor_writes,
-        multisegment_attribute_writes,
-        edges,
-        budget,
+    contextual_calls = (
+        _resolve_contextual_calls(
+            snapshot.index.index_id,
+            constructor_sites,
+            activation_call_sites,
+            unsafe_constructor_classes,
+            escaped_instance_site_ids,
+            binding_mutation_after_escape_unverified_site_ids,
+            scope_facts_by_key,
+            maps,
+            constructor_writes,
+            indirect_constructor_writes,
+            multisegment_attribute_writes,
+            edges,
+            budget,
+        )
+        if facts_complete
+        else []
     )
 
     export_targets: dict[tuple[str, str], list[tuple[str, int]]] = {}
@@ -773,6 +850,8 @@ def extract_relations(
                 end_line=fact.end_line,
             ))
 
+    if not facts_complete and not budget.truncated:
+        budget._stop("max_seconds exceeded")
     if definitions.typescript_calls_truncated and not budget.truncated:
         budget._stop(definitions.typescript_calls_truncation_reason or "TypeScript call facts truncated")
 
@@ -800,9 +879,9 @@ def build_relation_index(
     definitions: DefinitionIndex,
     *,
     cached: Mapping[str, RelationFileFacts] | None = None,
-    max_edges: int = 6_000,
-    max_unresolved: int = 5_000,
-    max_seconds: float = 5.0,
+    max_edges: int = DEFAULT_RELATION_MAX_EDGES,
+    max_unresolved: int = DEFAULT_RELATION_MAX_UNRESOLVED,
+    max_seconds: float = DEFAULT_RELATION_MAX_SECONDS,
 ) -> RelationIndex:
     """Named entry point for callers that treat relations as an index stage."""
 
@@ -827,6 +906,7 @@ class _DefinitionMaps:
         self.modules_by_path: dict[str, Symbol] = {}
         self.modules_by_name: dict[str, Symbol] = {}
         self.simple_candidates: dict[str, list[Symbol]] = {}
+        self._sorted_candidates: dict[str, list[Symbol]] = {}
         self.package_aliases: dict[str, str] = {}
         for symbol in symbols:
             self.by_key[(symbol.path, symbol.qualified_name, symbol.kind, symbol.start_line)] = symbol
@@ -885,10 +965,64 @@ class _DefinitionMaps:
         return canonical_values[0] if len(canonical_values) == 1 else None
 
     def candidates(self, name: str) -> list[Symbol]:
-        return sorted(self.simple_candidates.get(name, []), key=lambda symbol: symbol.symbol_id)
+        # Read-only for callers; memoized because large repositories ask for the
+        # same simple names once per unresolved call.
+        cached = self._sorted_candidates.get(name)
+        if cached is None:
+            cached = sorted(self.simple_candidates.get(name, []), key=lambda symbol: symbol.symbol_id)
+            self._sorted_candidates[name] = cached
+        return cached
+
+
+def _ast_node_types(*bases: type[ast.AST]) -> frozenset[type[ast.AST]]:
+    found: set[type[ast.AST]] = set()
+    pending = list(bases)
+    while pending:
+        current = pending.pop()
+        if current in found:
+            continue
+        found.add(current)
+        pending.extend(current.__subclasses__())
+    return frozenset(item for item in found if not item.__subclasses__())
+
+
+# Nodes whose subtrees can never hold a definition, assignment, import or call.
+# Both fact walks short-circuit them; the result is identical to visiting them.
+_TOKEN_NODE_TYPES = _ast_node_types(ast.expr_context, ast.operator, ast.unaryop, ast.cmpop, ast.boolop)
+_LEAF_BINDING_NODE_TYPES = _TOKEN_NODE_TYPES | {ast.Constant, ast.Pass, ast.Break, ast.Continue}
+_LEAF_RELATION_NODE_TYPES = _LEAF_BINDING_NODE_TYPES | {ast.Name, ast.Global, ast.Nonlocal}
+# Node kinds with a dedicated branch in _extract_relation_events; every other
+# kind only forwards its children.
+_RELATION_EVENT_NODE_TYPES = frozenset(
+    {
+        ast.Import,
+        ast.ImportFrom,
+        ast.FunctionDef,
+        ast.AsyncFunctionDef,
+        ast.ClassDef,
+        ast.Assign,
+        ast.AnnAssign,
+        ast.AugAssign,
+        ast.NamedExpr,
+        ast.Delete,
+        ast.For,
+        ast.AsyncFor,
+        ast.With,
+        ast.AsyncWith,
+        ast.ExceptHandler,
+        ast.comprehension,
+        ast.Call,
+        ast.Return,
+    }
+)
 
 
 class _BindingCollector(ast.NodeVisitor):
+    def visit(self, node: ast.AST) -> None:
+        if type(node) in _LEAF_BINDING_NODE_TYPES:
+            return None
+        return super().visit(node)
+
     def __init__(self) -> None:
         self.imports: list[ast.Import | ast.ImportFrom] = []
         self.assigned: set[str] = set()
@@ -1117,8 +1251,19 @@ def _extract_relation_events(
     deadline: float,
     certainty: Literal["definite", "uncertain"] = "definite",
 ) -> list[RelationEvent]:
+    node_type = type(node)
+    if node_type in _LEAF_RELATION_NODE_TYPES:
+        return []
     if time.monotonic() >= deadline:
         raise _RelationFactsIncomplete
+    if node_type not in _RELATION_EVENT_NODE_TYPES:
+        # Most nodes only forward their children; skip the per-kind checks below.
+        return _extract_child_relation_events(
+            node,
+            parent_qualified_name=parent_qualified_name,
+            deadline=deadline,
+            certainty=certainty,
+        )
     if isinstance(node, (ast.Import, ast.ImportFrom)):
         return [RelationImportEvent(_import_fact_from_node(node))]
     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
@@ -1307,11 +1452,28 @@ def _extract_relation_events(
                 )
             )
         return events
-    events = []
-    child_certainty = (
+    return _extract_child_relation_events(
+        node,
+        parent_qualified_name=parent_qualified_name,
+        deadline=deadline,
+        certainty=certainty,
+    )
+
+
+def _extract_child_relation_events(
+    node: ast.AST,
+    *,
+    parent_qualified_name: str,
+    deadline: float,
+    certainty: Literal["definite", "uncertain"],
+) -> list[RelationEvent]:
+    events: list[RelationEvent] = []
+    child_certainty: Literal["definite", "uncertain"] = (
         "uncertain" if isinstance(node, _UNCERTAIN_RELATION_NODES) else certainty
     )
     for child in ast.iter_child_nodes(node):
+        if type(child) in _LEAF_RELATION_NODE_TYPES:
+            continue
         events.extend(
             _extract_relation_events(
                 child,

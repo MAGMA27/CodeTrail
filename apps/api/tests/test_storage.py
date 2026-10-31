@@ -1126,3 +1126,23 @@ def test_dynamic_unresolved_references_are_not_static_neighbors(tmp_path: Path) 
         assert "timeout_demo.handlers.handle" not in names
         assert "timeout_demo.other_handlers.handle" not in names
         assert any(item.reason == "dynamic_call_target" for item in relation.unresolved)
+
+
+def test_legacy_project_does_not_claim_index_that_a_project_is_building(tmp_path: Path) -> None:
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc)
+    legacy = fixture_relation(revision="legacy", index_id="index-legacy-race-old")
+    building = fixture_relation(revision="building", index_id="index-legacy-race-new")
+    with IndexStore(tmp_path / "legacy-race.sqlite3") as store:
+        store.write_index(legacy)
+        store.create_project("project-building", "Building", "timeout-demo", now)
+        store.set_project_building("project-building", building.snapshot.index.index_id)
+        store.write_index(building)
+
+        store.ensure_legacy_project("project-legacy-test", "timeout-demo", "timeout-demo", now)
+
+        assert store.project_has_index("project-legacy-test", legacy.snapshot.index.index_id)
+        assert not store.project_has_index("project-legacy-test", building.snapshot.index.index_id)
+        store.finish_project_index("project-building", building.snapshot.index.index_id)
+        assert store.project_has_index("project-building", building.snapshot.index.index_id)

@@ -87,7 +87,7 @@ import {
   STRUCTURE_DETAIL_WIDTH_STORAGE_KEY,
   type StructureDetailWidthRange,
 } from "../lib/structure-detail-width";
-import { graphFitNodeIds, graphViewportLayoutKey, groupUnresolvedReferences, moduleDefinitionRows as buildModuleDefinitionRows, type CallChainEdgeRoute, type DirectImportTarget, type GraphState } from "../lib/graph";
+import { describeRelationTruncation, graphFitNodeIds, graphViewportLayoutKey, groupUnresolvedReferences, moduleDefinitionRows as buildModuleDefinitionRows, type CallChainEdgeRoute, type DirectImportTarget, type GraphState } from "../lib/graph";
 import { architectureEntryModule, architectureEntrySummary, architectureOverviewEdgeVisible, architectureEdgeSides, architectureRelationEdgeType, architectureRelationsForFocusedModule, buildArchitectureGraph, type ArchitectureDirectory, type ArchitecturePosition } from "../lib/architecture-graph";
 
 export type UiAsyncStatus = "idle" | "loading" | "success" | "empty" | "error";
@@ -1907,7 +1907,7 @@ function ArchitectureSection({ overview, knowledge, graph, panelMode, onPanelMod
             <div className="ct-architecture-drilldown-status" role="status">
               <strong>{graph.codeStatus === "loading" ? "正在读取一跳静态 imports" : graph.codeStatus === "error" ? "静态 imports 读取失败" : graph.codeStatus === "empty" ? "当前查询没有返回静态 imports" : `${graph.directImportTargets.length} 个关联文件 · ${graph.codeEdgeCount} 条已返回静态边`}</strong>
               {graph.codeTruncated ? <span>导入查询已截断 · {graph.codeTruncationReason}；未显示的目标文件仍可能存在。</span> : null}
-              {graph.codeIndexTruncated ? <span>固定索引关系提取未完成 · {graph.codeIndexTruncationReason}；空结果不能证明没有依赖。</span> : null}
+              {graph.codeIndexTruncated ? <span>固定索引关系图不完整 · {describeRelationTruncation(graph.codeIndexTruncationReason)}；空结果不能证明没有依赖。</span> : null}
               {graph.codeError ? <span role="alert">{graph.codeError}<button type="button" className="ct-link-button" onClick={() => architectureRoot && void knowledge.onOpenModuleImports(architectureRoot, graph.moduleImportRetryDirection ?? graph.moduleImportDirection)}>重试</button></span> : null}
             </div>
             <div className="ct-architecture-import-direction">
@@ -1924,7 +1924,7 @@ function ArchitectureSection({ overview, knowledge, graph, panelMode, onPanelMod
             <div className="ct-architecture-drilldown-status" role="status">
               <strong>{graph.codeStatus === "loading" ? `正在读取 ${callRoot?.qualified_name ?? "所选符号"} 的静态调用` : graph.codeStatus === "error" ? "静态调用读取失败" : graph.codeStatus === "empty" ? "当前符号没有返回静态调用边" : `${graph.codeSymbolCount} 个符号 · ${graph.codeEdgeCount} 条静态 calls`}</strong>
               {graph.codeTruncated ? <span>调用查询已截断 · {graph.codeTruncationReason}；未显示的调用仍可能存在。</span> : null}
-              {graph.codeIndexTruncated ? <span>固定索引关系提取未完成 · {graph.codeIndexTruncationReason}；空结果不能证明没有调用。</span> : null}
+              {graph.codeIndexTruncated ? <span>固定索引关系图不完整 · {describeRelationTruncation(graph.codeIndexTruncationReason)}；空结果不能证明没有调用。</span> : null}
               {graph.codeError ? <span role="alert">{graph.codeError}<button type="button" className="ct-link-button" onClick={() => callRoot && knowledge.onOpenSymbolCalls(callRoot)}>重试</button></span> : null}
             </div>
             <p className="ct-muted">以 <code>{callRoot?.qualified_name}</code> 为锚点的一跳静态 calls；静态证据不确认运行时一定执行。</p>
@@ -2815,7 +2815,7 @@ function GraphPanel({ graph }: { graph: GraphUi }) {
   const selectedDiffersFromFocus = Boolean(graph.selectedSymbol && graph.selectedSymbol.symbol_id !== focusSymbol?.symbol_id);
   const chainCoverageLabels: string[] = [];
   if (graph.codeTruncated) chainCoverageLabels.push("查询截断");
-  if (graph.codeIndexTruncated) chainCoverageLabels.push("索引关系提取未完成");
+  if (graph.codeIndexTruncated) chainCoverageLabels.push("索引关系图不完整");
   if (graph.codeIndexUnresolvedTruncated === true) chainCoverageLabels.push("unresolved 详情截断");
   if (graph.codeSymbolCount > 0 && graph.codeIndexUnresolvedTruncated === null) chainCoverageLabels.push("旧索引覆盖状态未知");
   if (graph.codeStatus === "empty") chainCoverageLabels.push("空结果范围");
@@ -2957,8 +2957,8 @@ function GraphPanel({ graph }: { graph: GraphUi }) {
         {chainCoverageLabels.length > 0 ? <details className="ct-entry-chain-coverage">
           <summary>覆盖与边界 · {chainCoverageLabels.join("、")}</summary>
           {graph.codeTruncated ? <p className="ct-graph-coverage-warning">查询已截断 · {graph.codeTruncationReason ?? "未提供原因"}。</p> : null}
-          {graph.codeIndexTruncated ? <p className="ct-graph-coverage-warning">当前固定索引的关系提取未完成 · {graph.codeIndexTruncationReason}；空邻接不能证明没有关系。</p> : null}
-          {graph.codeIndexUnresolvedTruncated === true ? <p className="ct-graph-coverage-warning">当前固定索引的 unresolved 详情已截断 · {graph.codeIndexUnresolvedTruncationReason}；未返回的 unresolved 不能被当作不存在。</p> : null}
+          {graph.codeIndexTruncated ? <p className="ct-graph-coverage-warning">当前固定索引的关系图不完整 · {describeRelationTruncation(graph.codeIndexTruncationReason)}；空邻接不能证明没有关系。</p> : null}
+          {graph.codeIndexUnresolvedTruncated === true ? <p className="ct-graph-coverage-warning">当前固定索引的 unresolved 详情已截断 · {describeRelationTruncation(graph.codeIndexUnresolvedTruncationReason)}；未返回的 unresolved 不能被当作不存在。</p> : null}
           {graph.codeSymbolCount > 0 && graph.codeIndexUnresolvedTruncated === null ? <p className="ct-graph-coverage-warning">当前旧索引未记录 unresolved 覆盖状态；不把缺失的 unresolved 当作不存在。</p> : null}
           {graph.codeStatus === "empty" ? <p className="ct-graph-coverage-warning">空结果只表示当前固定快照的{entryTraceIsInitial ? "入口初始两层" : "一跳"}关系查询没有返回边；不能证明不存在其他关系或未解析目标。</p> : null}
           {graph.codeHasCycle ? <p className="ct-graph-coverage-warning">当前返回的 calls 中检测到循环边；相同符号按 ID 合并显示，循环边保留。</p> : null}
@@ -2990,8 +2990,8 @@ function GraphPanel({ graph }: { graph: GraphUi }) {
         <div className="ct-graph-toolbar"><label>方向<select value={graph.direction} onChange={(event) => graph.onChangeDirection(event.target.value as NeighborDirection)} disabled={!graph.selectedId}><option value="both">双向</option><option value="callers">调用方</option><option value="callees">被调用方</option></select></label><label className="ct-check-field"><input type="checkbox" checked={graph.edgeKinds.includes("calls")} onChange={() => graph.onToggleEdgeKind("calls")} disabled={!graph.selectedId} /><span>calls</span></label><label className="ct-check-field"><input type="checkbox" checked={graph.edgeKinds.includes("imports")} onChange={() => graph.onToggleEdgeKind("imports")} disabled={!graph.selectedId} /><span>imports</span></label>{graph.selectedSymbol ? <button type="button" className="ct-link-button" onClick={() => void graph.onExplainCode(graph.selectedSymbol!, null)} disabled={graph.explainDraftStatus === "loading"}>{graph.explainDraftStatus === "loading" ? "准备会话…" : "解释此功能"}</button> : null}<button type="button" className="ct-link-button" onClick={() => { if (graph.flowInstance) { void graph.flowInstance.fitBounds(graphCanvasFitBounds(graph.flowInstance, codeViewModel, codeFitNodeIds), { padding: 0.18, duration: 240 }); } }} disabled={graph.codeModel.nodes.length === 0}>聚焦</button></div>
         {graph.explainDraftError ? <p className="ct-inline-error" role="alert">创建理解会话失败 · {graph.explainDraftError}</p> : null}
         <div className="ct-panel-status"><span data-state={graph.codeStatus}>{graph.codeStatus === "loading" ? "载入关系中" : graph.codeStatus === "error" ? "关系请求失败" : graph.codeStatus === "empty" ? graph.codeIndexTruncated ? "当前结果为空（索引关系未完整分析）" : graph.codeIndexUnresolvedTruncated === true ? "当前结果为空（unresolved 详情不完整）" : "当前方向没有静态边" : graph.codeStatus === "success" ? `${graph.codeSymbolCount} 个节点 · ${graph.codeEdgeCount} 条边` : "选择搜索命中后载入关系"}</span>{graph.codeTruncated ? <small>查询已截断 · {graph.codeTruncationReason}</small> : null}</div>
-        {graph.codeIndexTruncated ? <p className="ct-graph-coverage-warning" role="status">当前固定索引的关系提取未完成 · {graph.codeIndexTruncationReason}；空邻接不能证明没有关系。</p> : null}
-        {graph.codeIndexUnresolvedTruncated === true ? <p className="ct-graph-coverage-warning" role="status">当前固定索引的 unresolved 详情已截断 · {graph.codeIndexUnresolvedTruncationReason}；未返回的 unresolved 不能被当作不存在。</p> : null}
+        {graph.codeIndexTruncated ? <p className="ct-graph-coverage-warning" role="status">当前固定索引的关系图不完整 · {describeRelationTruncation(graph.codeIndexTruncationReason)}；空邻接不能证明没有关系。</p> : null}
+        {graph.codeIndexUnresolvedTruncated === true ? <p className="ct-graph-coverage-warning" role="status">当前固定索引的 unresolved 详情已截断 · {describeRelationTruncation(graph.codeIndexUnresolvedTruncationReason)}；未返回的 unresolved 不能被当作不存在。</p> : null}
         {graph.codeSymbolCount > 0 && graph.codeIndexUnresolvedTruncated === null ? <p className="ct-graph-coverage-warning" role="status">当前旧索引未记录 unresolved 覆盖状态；不把缺失的 unresolved 当作不存在。</p> : null}
         {graph.codeError ? <p className="ct-inline-error" role="alert">{graph.codeError}</p> : null}
         <div className="ct-graph-legend"><span><i className="is-calls" />calls</span><span><i className="is-imports" />imports</span><small>局部静态子图 · 视口聚焦 {graph.codeFocusNodeIds.length > 0 ? `${codeFocusNodeIds.length} 个节点` : "全部节点"}</small></div>

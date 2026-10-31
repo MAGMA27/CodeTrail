@@ -1906,7 +1906,11 @@ class IndexStore:
         unowned = self._connection.execute(
             "SELECT 1 FROM index_snapshots AS i "
             "LEFT JOIN project_indexes AS pi ON pi.index_id = i.index_id "
-            "WHERE i.repository_id = ? AND pi.index_id IS NULL LIMIT 1",
+            "WHERE i.repository_id = ? AND pi.index_id IS NULL "
+            # An index between write_index and finish_project_index belongs to the
+            # project that is building it, not to the legacy project.
+            "AND i.index_id NOT IN (SELECT building_index_id FROM projects WHERE building_index_id IS NOT NULL) "
+            "LIMIT 1",
             (repository_id,),
         ).fetchone()
         if existing is None and unowned is None:
@@ -1928,7 +1932,9 @@ class IndexStore:
             rows = self._connection.execute(
                 "SELECT i.index_id FROM index_snapshots AS i "
                 "LEFT JOIN project_indexes AS pi ON pi.index_id = i.index_id "
-                "WHERE i.repository_id = ? AND pi.index_id IS NULL ORDER BY i.rowid",
+                "WHERE i.repository_id = ? AND pi.index_id IS NULL "
+                "AND i.index_id NOT IN (SELECT building_index_id FROM projects WHERE building_index_id IS NOT NULL) "
+                "ORDER BY i.rowid",
                 (repository_id,),
             ).fetchall()
             association_time = _datetime_text(datetime.now(timezone.utc))
@@ -5285,16 +5291,19 @@ class IndexStore:
             )
         except ValidationError as exc:
             raise StorageInputError(str(exc)) from exc
+        # Count lines once per file; splitting a file per edge was quadratic on large graphs.
+        line_counts = {path: len(_source_lines(source_file.text)) for path, source_file in files.items()}
         for edge in relation.edges:
             location = edge.source_location
-            source_file = files.get(location.path)
-            if source_file is None or location.end_line > len(_source_lines(source_file.text)):
+            line_count = line_counts.get(location.path)
+            if line_count is None or location.end_line > line_count:
                 raise StorageInputError("edge source location is outside the snapshot")
         for unresolved in relation.unresolved:
-            source_file = files.get(unresolved.path)
-            if source_file is None or unresolved.end_line > len(_source_lines(source_file.text)):
+            line_count = line_counts.get(unresolved.path)
+            if line_count is None or unresolved.end_line > line_count:
                 raise StorageInputError("unresolved location is outside the snapshot")
-            if not set(unresolved.possible_target_ids).issubset(symbol_by_id):
+            # Membership per ID: set.issubset(dict) rebuilt a set of every symbol per reference.
+            if not all(target_id in symbol_by_id for target_id in unresolved.possible_target_ids):
                 raise StorageInputError("unresolved candidate crosses the snapshot boundary")
         request_ids: set[str] = set()
         for request in relation.http_client_requests:

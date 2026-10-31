@@ -49,6 +49,48 @@ def test_index_max_total_bytes_setting_maps_only_when_configured(tmp_path, monke
     assert cli.os.environ["CODETRAIL_INDEX_MAX_TOTAL_BYTES"] == "67890"
 
 
+def test_relation_budget_settings_map_only_when_configured(tmp_path, monkeypatch):
+    names = ("CODETRAIL_RELATION_MAX_SECONDS", "CODETRAIL_RELATION_MAX_EDGES", "CODETRAIL_RELATION_MAX_UNRESOLVED")
+    monkeypatch.setattr(cli.os, "environ", dict(cli.os.environ))
+    for name in names:
+        monkeypatch.delenv(name, raising=False)
+    cli.apply_settings(cli.Settings(data_dir=str(tmp_path / "default-data")))
+    assert not any(name in cli.os.environ for name in names)
+
+    cli.apply_settings(
+        cli.Settings(
+            data_dir=str(tmp_path / "configured-data"),
+            relation_max_seconds=12.5,
+            relation_max_edges=321,
+            relation_max_unresolved=654,
+        )
+    )
+    assert [cli.os.environ[name] for name in names] == ["12.5", "321", "654"]
+    monkeypatch.setenv("CODETRAIL_RELATION_MAX_EDGES", "999")
+    cli.apply_settings(cli.Settings(data_dir=str(tmp_path / "other-data"), relation_max_edges=321))
+    assert cli.os.environ["CODETRAIL_RELATION_MAX_EDGES"] == "999"
+    with pytest.raises(ValueError):
+        cli.Settings(data_dir=str(tmp_path), relation_max_edges=0)
+
+
+def test_index_service_uses_relation_budgets_in_configuration(tmp_path, monkeypatch):
+    from app.relations import RelationBudgets
+    from app.service import IndexService, RepositoryRegistry
+
+    for name in ("CODETRAIL_RELATION_MAX_SECONDS", "CODETRAIL_RELATION_MAX_EDGES", "CODETRAIL_RELATION_MAX_UNRESOLVED"):
+        monkeypatch.delenv(name, raising=False)
+    registry = RepositoryRegistry({}, data_root=tmp_path / "data")
+    default_service = IndexService(registry)
+    assert default_service.relation_budgets == RelationBudgets()
+
+    monkeypatch.setenv("CODETRAIL_RELATION_MAX_EDGES", "321")
+    configured = IndexService(registry)
+    assert configured.relation_budgets == RelationBudgets(max_edges=321)
+    assert configured.configuration_hash != default_service.configuration_hash
+    with pytest.raises(ValueError):
+        IndexService(registry, relation_budgets=RelationBudgets(max_unresolved=0))
+
+
 def test_direct_service_github_default_and_override(tmp_path, monkeypatch):
     from app.service import RepositoryRegistry
     monkeypatch.delenv("CODETRAIL_GITHUB_IMPORT_ENABLED", raising=False)
