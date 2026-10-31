@@ -1906,7 +1906,11 @@ class IndexStore:
         unowned = self._connection.execute(
             "SELECT 1 FROM index_snapshots AS i "
             "LEFT JOIN project_indexes AS pi ON pi.index_id = i.index_id "
-            "WHERE i.repository_id = ? AND pi.index_id IS NULL LIMIT 1",
+            "WHERE i.repository_id = ? AND pi.index_id IS NULL "
+            # An index between write_index and finish_project_index belongs to the
+            # project that is building it, not to the legacy project.
+            "AND i.index_id NOT IN (SELECT building_index_id FROM projects WHERE building_index_id IS NOT NULL) "
+            "LIMIT 1",
             (repository_id,),
         ).fetchone()
         if existing is None and unowned is None:
@@ -1928,7 +1932,9 @@ class IndexStore:
             rows = self._connection.execute(
                 "SELECT i.index_id FROM index_snapshots AS i "
                 "LEFT JOIN project_indexes AS pi ON pi.index_id = i.index_id "
-                "WHERE i.repository_id = ? AND pi.index_id IS NULL ORDER BY i.rowid",
+                "WHERE i.repository_id = ? AND pi.index_id IS NULL "
+                "AND i.index_id NOT IN (SELECT building_index_id FROM projects WHERE building_index_id IS NOT NULL) "
+                "ORDER BY i.rowid",
                 (repository_id,),
             ).fetchall()
             association_time = _datetime_text(datetime.now(timezone.utc))
