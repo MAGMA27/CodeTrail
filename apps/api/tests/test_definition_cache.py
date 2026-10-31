@@ -721,8 +721,8 @@ def test_relation_cache_corruption_and_shared_capacity_are_bounded(tmp_path: Pat
         )
         assert store.load_relation_cache(**_relation_cache_kwargs(snapshot)) == {}
         unsupported = original["result_json"].replace(
+            '"format_version":"relation-facts-v5"',
             '"format_version":"relation-facts-v4"',
-            '"format_version":"relation-facts-v3"',
         )
         store.connection.execute(
             "UPDATE relation_cache SET result_json = ?, result_bytes = ? WHERE scope_id = ?",
