@@ -1567,7 +1567,7 @@ def _project_indexes_response(result: ProjectIndexListResponse, limit: int) -> M
 
 
 def _mcp_error(exc: ServiceError) -> McpError:
-    code = exc.code if exc.code in {"not_found", "invalid_input", "conflict", "budget_exceeded", "download_timeout", "index_timeout", "index_cancelled", "internal_error", "forbidden"} else "internal_error"
+    code = exc.code if exc.code in {"not_found", "invalid_input", "conflict", "budget_exceeded", "download_timeout", "index_too_large", "index_source_rejected", "index_timeout", "index_cancelled", "internal_error", "forbidden"} else "internal_error"
     message = exc.message if code == exc.code else "local MCP query failed"
     return McpError(code=code, message=message, retryable=code in _RETRYABLE_CODES)
 

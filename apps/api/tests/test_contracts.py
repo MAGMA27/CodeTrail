@@ -14,6 +14,7 @@ from app.contracts import (
     CodeEdge,
     CodeExplanation,
     CodeUnderstandingFinal,
+    ApiErrorResponse,
     CreateRunRequest,
     ContextualCall,
     EvidenceReference,
@@ -22,6 +23,7 @@ from app.contracts import (
     GetNeighborsSuccess,
     IndexFreshness,
     McpSourceResponse,
+    McpError,
     ModuleSymbolsPageResponse,
     Neighbor,
     NeighborsIndexResponse,
@@ -76,6 +78,12 @@ def test_success_bundle_keeps_static_and_candidate_edges_separate() -> None:
         "sym-primary-handle",
         "sym-secondary-handle",
     ]
+
+
+@pytest.mark.parametrize("code", ["index_too_large", "index_source_rejected", "index_timeout"])
+def test_index_build_error_codes_are_valid_for_http_and_mcp(code: str) -> None:
+    assert ApiErrorResponse(code=code, message="index build failed").code == code
+    assert McpError(code=code, message="index build failed", retryable=False).code == code
 
 
 def test_contextual_call_contract_binds_returned_activation_edge() -> None:

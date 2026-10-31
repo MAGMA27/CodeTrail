@@ -125,12 +125,14 @@ async def _run_with_disconnect(request: Request, operation: Callable[..., object
         if not task.done():
             control.cancel()
 
+
 _GITHUB_REFRESH_ERROR_RESPONSES = {
     **_API_ERROR_RESPONSES,
     504: {"model": ApiErrorResponse},
 }
 _INDEX_BUILD_ERROR_RESPONSES = {
     **_API_ERROR_RESPONSES,
+    413: {"model": ApiErrorResponse},
     504: {"model": ApiErrorResponse},
 }
 

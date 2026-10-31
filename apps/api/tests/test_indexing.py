@@ -17,6 +17,7 @@ from app.indexing import (
     build_source_snapshot,
     extract_definitions,
     index_timeout_from_environment,
+    index_max_total_bytes_from_environment,
     parse_subsystem_manifest,
     scan_source_manifest,
 )
@@ -47,6 +48,16 @@ def test_index_timeout_environment_uses_positive_finite_seconds(monkeypatch: pyt
     for invalid in ("0", "-1", "inf", "nan", "bad"):
         monkeypatch.setenv("CODETRAIL_INDEX_TIMEOUT", invalid)
         assert index_timeout_from_environment() == 240.0
+
+
+def test_index_max_total_bytes_environment_uses_positive_integer(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("CODETRAIL_INDEX_MAX_TOTAL_BYTES", raising=False)
+    assert index_max_total_bytes_from_environment() == 50 * 1024 * 1024
+    monkeypatch.setenv("CODETRAIL_INDEX_MAX_TOTAL_BYTES", "12345")
+    assert index_max_total_bytes_from_environment() == 12345
+    for invalid in ("0", "-1", "1.5", "large"):
+        monkeypatch.setenv("CODETRAIL_INDEX_MAX_TOTAL_BYTES", invalid)
+        assert index_max_total_bytes_from_environment() == 50 * 1024 * 1024
 
 
 def test_timeout_demo_snapshot_is_reproducible_and_contract_aligned() -> None:

@@ -24,6 +24,7 @@ def test_real_run_setting_maps_to_environment_without_overriding_explicit_value(
         "CODETRAIL_GITHUB_IMPORT_ENABLED",
         "CODETRAIL_MCP_EXTERNAL_RUN_ENABLED",
         "CODETRAIL_REAL_RUN_ENABLED",
+        "CODETRAIL_INDEX_MAX_TOTAL_BYTES",
         "CODETRAIL_TYPESCRIPT_COMPILER",
     ):
         monkeypatch.delenv(key, raising=False)
@@ -33,6 +34,19 @@ def test_real_run_setting_maps_to_environment_without_overriding_explicit_value(
     monkeypatch.setenv("CODETRAIL_REAL_RUN_ENABLED", "0")
     cli.apply_settings(cli.Settings(data_dir=str(tmp_path / "other-data"), real_run_enabled=True))
     assert cli.os.environ["CODETRAIL_REAL_RUN_ENABLED"] == "0"
+
+
+def test_index_max_total_bytes_setting_maps_only_when_configured(tmp_path, monkeypatch):
+    monkeypatch.setattr(cli.os, "environ", dict(cli.os.environ))
+    monkeypatch.delenv("CODETRAIL_INDEX_MAX_TOTAL_BYTES", raising=False)
+    cli.apply_settings(cli.Settings(data_dir=str(tmp_path / "default-data")))
+    assert "CODETRAIL_INDEX_MAX_TOTAL_BYTES" not in cli.os.environ
+
+    cli.apply_settings(cli.Settings(data_dir=str(tmp_path / "configured-data"), index_max_total_bytes=12345))
+    assert cli.os.environ["CODETRAIL_INDEX_MAX_TOTAL_BYTES"] == "12345"
+    monkeypatch.setenv("CODETRAIL_INDEX_MAX_TOTAL_BYTES", "67890")
+    cli.apply_settings(cli.Settings(data_dir=str(tmp_path / "other-data"), index_max_total_bytes=12345))
+    assert cli.os.environ["CODETRAIL_INDEX_MAX_TOTAL_BYTES"] == "67890"
 
 
 def test_direct_service_github_default_and_override(tmp_path, monkeypatch):

@@ -22,6 +22,7 @@ class Settings(BaseModel):
     github_import_enabled: bool = True
     external_run_enabled: bool = True
     real_run_enabled: bool = False
+    index_max_total_bytes: int | None = Field(default=None, gt=0)
     typescript_compiler: str | None = None
 
 
@@ -118,6 +119,8 @@ def apply_settings(settings: Settings) -> None:
         values["CODETRAIL_TYPESCRIPT_COMPILER"] = str(compiler)
     for key, value in values.items():
         os.environ.setdefault(key, value)
+    if settings.index_max_total_bytes is not None:
+        os.environ.setdefault("CODETRAIL_INDEX_MAX_TOTAL_BYTES", str(settings.index_max_total_bytes))
 
 
 def main() -> None:

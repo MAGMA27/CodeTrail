@@ -60,6 +60,8 @@ export function jobErrorMessage(code: string | null, summary: string | null): st
   const messages: Record<string, string> = {
     download_timeout: "GitHub 下载超时，可稍后重试或调整服务端下载时限。",
     index_timeout: "索引构建超时，可稍后重试或调整 CODETRAIL_INDEX_TIMEOUT。",
+    index_too_large: "源码总量超过索引上限，可调大 CODETRAIL_INDEX_MAX_TOTAL_BYTES 或 settings.json 的 index_max_total_bytes。",
+    index_source_rejected: "源码包含无法安全纳入索引的文件，请检查服务端给出的路径与原因。",
     rate_limited: "GitHub 请求受到限流，请稍后重试或配置 GitHub token。",
     budget_exceeded: "GitHub 限流等待预算已用尽，请稍后重试。",
     worker_lost: "后台工作进程中断，任务已按策略恢复或终止。",
@@ -141,13 +143,27 @@ function isJobNotFound(error: unknown): boolean {
 
 export type ImportSubmissionKey = { signature: string; key: string };
 
+/** Localize indexing failures while preserving the API's measured size/path details. */
+export function indexImportErrorMessage(message: string, errorCode?: string): string {
+  if (errorCode === "index_too_large") {
+    return `源码总量超过索引上限，可调大 CODETRAIL_INDEX_MAX_TOTAL_BYTES 或 settings.json 的 index_max_total_bytes。服务端信息：${message}`;
+  }
+  if (errorCode === "index_source_rejected") {
+    return `源码文件无法安全纳入索引，导入未完成。服务端信息：${message}`;
+  }
+  if (errorCode === "index_timeout") {
+    return `仓库索引构建超时，操作未完成。可重试，或在 API 服务端调高 CODETRAIL_INDEX_TIMEOUT 后重启服务。（${message}）`;
+  }
+  return message;
+}
+
 /** Explain GitHub failures while preserving the API message for troubleshooting. */
 export function githubImportErrorMessage(message: string, errorCode?: string): string {
   if (errorCode === "download_timeout") {
     return `GitHub 仓库归档下载超时，操作未完成。可能是网络较慢或仓库较大；可重试，或在 API 服务端调高 CODETRAIL_GITHUB_DOWNLOAD_TIMEOUT 后重启服务。（${message}）`;
   }
-  if (errorCode === "index_timeout") {
-    return `仓库索引构建超时，操作未完成。可重试，或在 API 服务端调高 CODETRAIL_INDEX_TIMEOUT 后重启服务。（${message}）`;
+  if (["index_too_large", "index_source_rejected", "index_timeout"].includes(errorCode ?? "")) {
+    return indexImportErrorMessage(message, errorCode);
   }
   return /rate limit/i.test(message)
     ? `GitHub API 限流，导入未完成。可稍后重试，或在 API 服务端设置 CODETRAIL_GITHUB_TOKEN 提高限额。（${message}）`
