@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from functools import lru_cache
 from pathlib import PurePosixPath
 from typing import Annotated, Literal, TypeAlias
 
@@ -40,6 +41,14 @@ class VersionedModel(ContractModel):
 
 
 def _validate_relative_path(value: str) -> str:
+    # Indexing builds hundreds of thousands of locations over a few hundred
+    # distinct paths; the check is pure, so reuse earlier verdicts. Invalid
+    # paths raise and are never cached.
+    return _validated_relative_path(value)
+
+
+@lru_cache(maxsize=65_536)
+def _validated_relative_path(value: str) -> str:
     normalized = value.replace("\\", "/")
     if normalized.startswith("/") or (len(normalized) > 1 and normalized[1] == ":"):
         raise ValueError("path must be relative to the indexed repository")

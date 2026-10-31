@@ -16,8 +16,10 @@ from app.relations import (
     _DefinitionMaps,
     _RelationBudget,
     _resolve_constructor_attribute_bindings,
+    RelationBudgets,
     deserialize_relation_file_facts,
     extract_relations,
+    relation_budgets_from_environment,
     serialize_relation_file_facts,
 )
 
@@ -131,6 +133,74 @@ def test_relation_time_budget_is_observable() -> None:
 
     assert result.truncated is True
     assert result.truncation_reason == "max_seconds exceeded"
+
+
+def test_fact_deadline_keeps_relations_gathered_before_timeout(tmp_path: Path, monkeypatch) -> None:
+    package = tmp_path / "sample"
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    for name in ("a", "b", "c", "d"):
+        (package / f"{name}_mod.py").write_text(
+            "from sample import base\n\n\n"
+            f"def {name}_run() -> None:\n"
+            "    base.helper()\n",
+            encoding="utf-8",
+        )
+    (package / "base.py").write_text("def helper() -> None:\n    pass\n", encoding="utf-8")
+    definitions = extract_definitions(
+        build_source_snapshot(tmp_path, repository_id="partial", revision="fixture-v1", dirty=False)
+    )
+    complete = extract_relations(definitions)
+
+    class Clock:
+        now = 0.0
+
+    clock = Clock()
+    original = relations_module._extract_relation_facts
+    gathered: list[str] = []
+
+    def slow_facts(source_file, **kwargs):
+        result = original(source_file, **kwargs)
+        gathered.append(source_file.path)
+        if len(gathered) == 3:
+            clock.now = 8.0  # past the 75% fact share of 10 s, before the overall deadline
+        return result
+
+    monkeypatch.setattr(relations_module.time, "monotonic", lambda: clock.now)
+    monkeypatch.setattr(relations_module, "_extract_relation_facts", slow_facts)
+    partial = extract_relations(definitions, max_seconds=10.0)
+
+    assert complete.truncated is False
+    assert partial.truncated is True
+    assert partial.truncation_reason == "max_seconds exceeded"
+    assert partial.edges, "edges resolved before the deadline must be kept"
+    gathered_paths = set(gathered[:3])
+    assert {edge.source_location.path for edge in partial.edges} <= gathered_paths
+    complete_edges = {edge.model_dump_json() for edge in complete.edges}
+    assert {edge.model_dump_json() for edge in partial.edges} <= complete_edges
+    assert len(partial.edges) < len(complete.edges)
+    assert {path for path, _ in partial.fact_cache_entries} <= gathered_paths
+
+
+def test_relation_budgets_come_from_environment(monkeypatch) -> None:
+    for name in (
+        "CODETRAIL_RELATION_MAX_SECONDS",
+        "CODETRAIL_RELATION_MAX_EDGES",
+        "CODETRAIL_RELATION_MAX_UNRESOLVED",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    assert relation_budgets_from_environment() == RelationBudgets(60.0, 100_000, 50_000)
+
+    monkeypatch.setenv("CODETRAIL_RELATION_MAX_SECONDS", "2.5")
+    monkeypatch.setenv("CODETRAIL_RELATION_MAX_EDGES", "123")
+    monkeypatch.setenv("CODETRAIL_RELATION_MAX_UNRESOLVED", "45")
+    assert relation_budgets_from_environment() == RelationBudgets(2.5, 123, 45)
+
+    for invalid in ("0", "-1", "nan", "inf", "many"):
+        monkeypatch.setenv("CODETRAIL_RELATION_MAX_SECONDS", invalid)
+        monkeypatch.setenv("CODETRAIL_RELATION_MAX_EDGES", invalid)
+        monkeypatch.setenv("CODETRAIL_RELATION_MAX_UNRESOLVED", invalid)
+        assert relation_budgets_from_environment() == RelationBudgets()
 
 
 def test_constructor_binding_collection_checks_deadline_per_event(monkeypatch) -> None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes
+import gc
 import hashlib
 import ipaddress
 import json
@@ -151,7 +152,9 @@ from .relations import (
     INDEX_BUILD_IDENTITY_VERSION,
     RELATION_FACT_EXTRACTION_RULES_VERSION,
     RELATION_SEMANTICS_VERSION,
+    RelationBudgets,
     extract_relations,
+    relation_budgets_from_environment,
     relation_coverage_limitations,
 )
 from .overview import RULES_VERSION, build_project_overview
@@ -632,6 +635,35 @@ logger = logging.getLogger(__name__)
 
 _FRESHNESS_MAX_FILES = 2_000
 _FRESHNESS_MAX_SECONDS = 2.0
+_gc_pause_lock = threading.Lock()
+_gc_pause_depth = 0
+_gc_pause_reenable = False
+
+
+@contextmanager
+def _paused_cyclic_gc() -> Iterator[None]:
+    """Pause cyclic GC while building definitions and relations.
+
+    Extraction allocates millions of small, acyclic objects; generational GC
+    rescanning them roughly doubled extraction time on large repositories.
+    Reference counting still frees memory. Nested or concurrent builds share
+    one pause, and GC is re-enabled only if it was enabled when the first
+    build started.
+    """
+
+    global _gc_pause_depth, _gc_pause_reenable
+    with _gc_pause_lock:
+        if _gc_pause_depth == 0:
+            _gc_pause_reenable = gc.isenabled()
+            gc.disable()
+        _gc_pause_depth += 1
+    try:
+        yield
+    finally:
+        with _gc_pause_lock:
+            _gc_pause_depth -= 1
+            if _gc_pause_depth == 0 and _gc_pause_reenable:
+                gc.enable()
 _FRESHNESS_MAX_CHANGED_PATHS = 100
 _DEFINITION_CACHE_MAX_ENTRIES = 5_000
 _DEFINITION_CACHE_MAX_BYTES = 16 * 1024 * 1024
@@ -787,7 +819,9 @@ class IndexService:
         freshness_max_seconds: float = _FRESHNESS_MAX_SECONDS,
         definition_cache_max_entries: int = _DEFINITION_CACHE_MAX_ENTRIES,
         definition_cache_max_bytes: int = _DEFINITION_CACHE_MAX_BYTES,
+        relation_budgets: RelationBudgets | None = None,
     ) -> None:
+        relation_budgets = relation_budgets or relation_budgets_from_environment()
         freshness_max_total_bytes = (
             index_max_total_bytes_from_environment()
             if freshness_max_total_bytes is None
@@ -801,6 +835,9 @@ class IndexService:
             or freshness_max_seconds <= 0
             or definition_cache_max_entries < 1
             or definition_cache_max_bytes < 1
+            or relation_budgets.max_seconds <= 0
+            or relation_budgets.max_edges < 1
+            or relation_budgets.max_unresolved < 1
         ):
             raise ValueError("service budgets must be positive")
         self.registry = registry
@@ -811,6 +848,7 @@ class IndexService:
         self.freshness_max_seconds = freshness_max_seconds
         self.definition_cache_max_entries = definition_cache_max_entries
         self.definition_cache_max_bytes = definition_cache_max_bytes
+        self.relation_budgets = relation_budgets
         self.rules_version = current_source_rules_version(RELATION_SEMANTICS_VERSION)
         self.configuration_hash = index_configuration_hash(
             max_file_bytes=max_file_bytes,
@@ -818,6 +856,11 @@ class IndexService:
             rules_version=self.rules_version,
             max_files=freshness_max_files,
             max_seconds=freshness_max_seconds,
+            relation_budgets={
+                "max_edges": relation_budgets.max_edges,
+                "max_seconds": relation_budgets.max_seconds,
+                "max_unresolved": relation_budgets.max_unresolved,
+            },
         )
         self._index_slots = threading.BoundedSemaphore(max_concurrent_indexes)
 
@@ -902,16 +945,24 @@ class IndexService:
                         "derived cache read failed; continuing with cold extraction: %s",
                         exc,
                     )
-                definitions = extract_definitions(snapshot, cached=cached_definitions, control=control)
-                control.check()
-                if definitions.snapshot.index.status != "ready":
-                    raise _index_build_issue_error(
-                        definitions.issues,
-                        max_total_bytes=self.freshness_max_total_bytes,
-                        max_files=self.freshness_max_files,
-                        max_seconds=index_timeout_seconds,
+                with _paused_cyclic_gc():
+                    definitions = extract_definitions(snapshot, cached=cached_definitions, control=control)
+                    control.check()
+                    if definitions.snapshot.index.status != "ready":
+                        raise _index_build_issue_error(
+                            definitions.issues,
+                            max_total_bytes=self.freshness_max_total_bytes,
+                            max_files=self.freshness_max_files,
+                            max_seconds=index_timeout_seconds,
+                        )
+                    relation = extract_relations(
+                        definitions,
+                        cached=cached_relation_facts,
+                        max_edges=self.relation_budgets.max_edges,
+                        max_unresolved=self.relation_budgets.max_unresolved,
+                        max_seconds=self.relation_budgets.max_seconds,
+                        control=control,
                     )
-                relation = extract_relations(definitions, cached=cached_relation_facts, control=control)
                 control.check()
                 if on_snapshot_ready is not None:
                     on_snapshot_ready(snapshot.index.index_id)

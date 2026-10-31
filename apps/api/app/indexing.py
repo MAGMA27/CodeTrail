@@ -598,18 +598,25 @@ def index_configuration_hash(
     rules_version: str,
     max_files: int = 2_000,
     max_seconds: float = 2.0,
+    relation_budgets: Mapping[str, int | float] | None = None,
 ) -> str:
-    """Fingerprint the source/index settings that can change index contents."""
+    """Fingerprint the source/index settings that can change index contents.
+
+    Relation budgets are included when given because a truncated relation graph
+    depends on them; changing a budget therefore marks indexes rebuildable.
+    """
 
     if max_file_bytes < 1 or max_files < 1 or max_seconds <= 0:
         raise ValueError("source capture budgets must be positive")
-    payload = {
+    payload: dict[str, object] = {
         "identity_version": identity_version,
         "max_file_bytes": max_file_bytes,
         "max_files": max_files,
         "max_seconds": max_seconds,
         "rules_version": rules_version,
     }
+    if relation_budgets is not None:
+        payload["relation_budgets"] = dict(sorted(relation_budgets.items()))
     return _sha256(
         json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     )

@@ -23,6 +23,9 @@ class Settings(BaseModel):
     external_run_enabled: bool = True
     real_run_enabled: bool = False
     index_max_total_bytes: int | None = Field(default=None, gt=0)
+    relation_max_seconds: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    relation_max_edges: int | None = Field(default=None, gt=0)
+    relation_max_unresolved: int | None = Field(default=None, gt=0)
     typescript_compiler: str | None = None
 
 
@@ -121,6 +124,13 @@ def apply_settings(settings: Settings) -> None:
         os.environ.setdefault(key, value)
     if settings.index_max_total_bytes is not None:
         os.environ.setdefault("CODETRAIL_INDEX_MAX_TOTAL_BYTES", str(settings.index_max_total_bytes))
+    for name, value in (
+        ("CODETRAIL_RELATION_MAX_SECONDS", settings.relation_max_seconds),
+        ("CODETRAIL_RELATION_MAX_EDGES", settings.relation_max_edges),
+        ("CODETRAIL_RELATION_MAX_UNRESOLVED", settings.relation_max_unresolved),
+    ):
+        if value is not None:
+            os.environ.setdefault(name, str(value))
 
 
 def main() -> None:

@@ -5285,16 +5285,19 @@ class IndexStore:
             )
         except ValidationError as exc:
             raise StorageInputError(str(exc)) from exc
+        # Count lines once per file; splitting a file per edge was quadratic on large graphs.
+        line_counts = {path: len(_source_lines(source_file.text)) for path, source_file in files.items()}
         for edge in relation.edges:
             location = edge.source_location
-            source_file = files.get(location.path)
-            if source_file is None or location.end_line > len(_source_lines(source_file.text)):
+            line_count = line_counts.get(location.path)
+            if line_count is None or location.end_line > line_count:
                 raise StorageInputError("edge source location is outside the snapshot")
         for unresolved in relation.unresolved:
-            source_file = files.get(unresolved.path)
-            if source_file is None or unresolved.end_line > len(_source_lines(source_file.text)):
+            line_count = line_counts.get(unresolved.path)
+            if line_count is None or unresolved.end_line > line_count:
                 raise StorageInputError("unresolved location is outside the snapshot")
-            if not set(unresolved.possible_target_ids).issubset(symbol_by_id):
+            # Membership per ID: set.issubset(dict) rebuilt a set of every symbol per reference.
+            if not all(target_id in symbol_by_id for target_id in unresolved.possible_target_ids):
                 raise StorageInputError("unresolved candidate crosses the snapshot boundary")
         request_ids: set[str] = set()
         for request in relation.http_client_requests:
