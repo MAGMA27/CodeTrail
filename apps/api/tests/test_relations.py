@@ -777,11 +777,8 @@ def test_code_trail_workspace_service_reader_stays_unresolved_after_new_bypass()
     ]
     assert len(unresolved) == 1
     assert unresolved[0].reason == "object_method_not_resolved"
-    # The async-jobs change moved WorkspaceService construction into factory.py.
-    # The extractor does not follow the returned service through create_services,
-    # so the handler's callback argument no longer proves an instance context.
-    handler_name = "apps.api.app.main.create_app.read_project_source"
-    assert handler_name in names.values()
+    # WorkspaceService is built by factory.create_services(); the extractor follows
+    # the returned instance back to that constructor call.
     handler_contexts = [
         context
         for context in result.contextual_calls
@@ -789,7 +786,30 @@ def test_code_trail_workspace_service_reader_stays_unresolved_after_new_bypass()
         and context.target.qualified_name == "apps.api.app.service.IndexService.read_source"
         and context.activation_location.path == "apps/api/app/main.py"
     ]
-    assert handler_contexts == []
+    assert len(handler_contexts) == 1
+    assert handler_contexts[0].field_name == "index_service"
+    assert handler_contexts[0].binding_mutation_after_escape_unverified is True
+    assert handler_contexts[0].activation_source.qualified_name == (
+        "apps.api.app.main.create_app.read_project_source"
+    )
+    factory_lines = (ROOT / "apps" / "api" / "app" / "factory.py").read_text(encoding="utf-8").splitlines()
+    expected_constructor_line = next(
+        line_number
+        for line_number, line in enumerate(factory_lines, start=1)
+        if line.strip().startswith("return WorkspaceService(")
+    )
+    assert handler_contexts[0].receiver_constructor_location.path == "apps/api/app/factory.py"
+    assert handler_contexts[0].receiver_constructor_location.start_line == expected_constructor_line
+    service_lines = (ROOT / "apps" / "api" / "app" / "service.py").read_text(
+        encoding="utf-8"
+    ).splitlines()
+    expected_assignment_line = next(
+        line_number
+        for line_number, line in enumerate(service_lines, start=1)
+        if line.strip() == "self.index_service = index_service"
+    )
+    assert handler_contexts[0].field_assignment_location.path == "apps/api/app/service.py"
+    assert handler_contexts[0].field_assignment_location.start_line == expected_assignment_line
 
 
 def test_contextual_calls_bind_each_constructor_site_and_reject_unproven_transfers(
@@ -1167,3 +1187,288 @@ def test_pluggy_hook_dispatch_stays_unresolved_with_same_name_candidates(tmp_pat
         edge.kind == "calls" and names[edge.target_id] == "demo.plugin.demo_greet"
         for edge in result.edges
     )
+
+
+def _write_factory_repository(root: Path) -> None:
+    package = root / "pkg"
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "models.py").write_text(
+        "class Engine:\n"
+        "    def start(self) -> None:\n"
+        "        pass\n"
+        "\n\n"
+        "class Services:\n"
+        "    def __init__(self, engine):\n"
+        "        self.engine = engine\n"
+        "\n"
+        "    def run(self) -> None:\n"
+        "        pass\n"
+        "\n\n"
+        "class Pair:\n"
+        "    def left(self) -> None:\n"
+        "        pass\n"
+        "\n\n"
+        "class Base:\n"
+        "    def act(self) -> None:\n"
+        "        pass\n"
+        "\n\n"
+        "class Child(Base):\n"
+        "    def act(self) -> None:\n"
+        "        pass\n",
+        encoding="utf-8",
+    )
+    (package / "factory.py").write_text(
+        "from .models import Base, Engine, Pair, Services\n"
+        "\n\n"
+        "def create_services() -> Services:\n"
+        "    engine = Engine()\n"
+        "    return Services(engine)\n"
+        "\n\n"
+        "def via_local():\n"
+        "    services = Services(Engine())\n"
+        "    return services\n"
+        "\n\n"
+        "def annotated_only(flag) -> Engine:\n"
+        "    return build_somehow(flag)\n"
+        "\n\n"
+        "def unknown(flag):\n"
+        "    return build_somehow(flag)\n"
+        "\n\n"
+        "def both():\n"
+        "    return Engine(), Pair()\n"
+        "\n\n"
+        "def gen():\n"
+        "    yield Engine()\n"
+        "\n\n"
+        "def conflicting(flag):\n"
+        "    if flag:\n"
+        "        return Engine()\n"
+        "    return Pair()\n"
+        "\n\n"
+        "def base_annotated(flag) -> Base:\n"
+        "    return build_somehow(flag)\n"
+        "\n\n"
+        "def wrapped(function):\n"
+        "    return function\n"
+        "\n\n"
+        "@wrapped\n"
+        "def decorated():\n"
+        "    return Engine()\n"
+        "\n\n"
+        "def nested_factory():\n"
+        "    return create_services()\n",
+        encoding="utf-8",
+    )
+    (package / "main.py").write_text(
+        "from . import factory\n"
+        "from .factory import (\n"
+        "    annotated_only, base_annotated, both, conflicting, create_services, decorated, gen,\n"
+        "    nested_factory, unknown, via_local,\n"
+        ")\n"
+        "\n\n"
+        "def main() -> None:\n"
+        "    svc = create_services()\n"
+        "    svc.run()\n"
+        "    svc.engine.start()\n"
+        "    other = factory.create_services()\n"
+        "    other.run()\n"
+        "    local = via_local()\n"
+        "    local.run()\n"
+        "    eng = annotated_only(1)\n"
+        "    eng.start()\n"
+        "    engine, pair = both()\n"
+        "    engine.start()\n"
+        "    pair.left()\n"
+        "    deep = nested_factory()\n"
+        "    deep.run()\n"
+        "    unk = unknown(1)\n"
+        "    unk.run()\n"
+        "    g = gen()\n"
+        "    g.start()\n"
+        "    mixed = conflicting(1)\n"
+        "    mixed.start()\n"
+        "    base = base_annotated(1)\n"
+        "    base.act()\n"
+        "    dec = decorated()\n"
+        "    dec.start()\n",
+        encoding="utf-8",
+    )
+
+
+def test_factory_return_values_resolve_method_calls_conservatively(tmp_path: Path) -> None:
+    _write_factory_repository(tmp_path)
+    result = extract_relations(
+        extract_definitions(
+            build_source_snapshot(tmp_path, repository_id="factory", revision="fixture-v1", dirty=False)
+        )
+    )
+    names = {symbol.symbol_id: symbol.qualified_name for symbol in result.symbols}
+    main_lines = (tmp_path / "pkg" / "main.py").read_text(encoding="utf-8").splitlines()
+    main_calls = {
+        (main_lines[edge.source_location.start_line - 1].strip(), names[edge.target_id])
+        for edge in result.edges
+        if edge.kind == "calls" and names[edge.source_id] == "pkg.main.main"
+    }
+    unresolved = {
+        item.expression
+        for item in result.unresolved
+        if names[item.source_symbol_id] == "pkg.main.main"
+    }
+
+    # Return annotation plus constructor return, and an attribute chain through
+    # the constructor-bound field.
+    assert ("svc.run()", "pkg.models.Services.run") in main_calls
+    assert ("svc.engine.start()", "pkg.models.Engine.start") in main_calls
+    # module.factory() is resolved like the existing import resolution.
+    assert ("other = factory.create_services()", "pkg.factory.create_services") in main_calls
+    assert ("other.run()", "pkg.models.Services.run") in main_calls
+    # Returned unique local, annotation-only, tuple unpacking, factory of a factory.
+    assert ("local.run()", "pkg.models.Services.run") in main_calls
+    assert ("eng.start()", "pkg.models.Engine.start") in main_calls
+    assert ("engine.start()", "pkg.models.Engine.start") in main_calls
+    assert ("pair.left()", "pkg.models.Pair.left") in main_calls
+    assert ("deep.run()", "pkg.models.Services.run") in main_calls
+    # No inferable type, generators, conflicting returns, annotations naming a
+    # class with subclasses, and decorated factories stay unresolved.
+    for expression in ("unk.run()", "g.start()", "mixed.start()", "base.act()", "dec.start()"):
+        assert expression in unresolved, expression
+        assert not any(line == expression for line, _target in main_calls), expression
+
+
+def test_factory_facts_round_trip_through_the_relation_cache(tmp_path: Path) -> None:
+    _write_factory_repository(tmp_path)
+    (tmp_path / "pkg" / "kwargs.py").write_text(
+        "def call(function, options):\n    return function(**options)\n",
+        encoding="utf-8",
+    )
+    result = extract_relations(
+        extract_definitions(
+            build_source_snapshot(tmp_path, repository_id="factory", revision="fixture-v1", dirty=False)
+        )
+    )
+
+    assert result.fact_cache_entries
+    for path, facts in result.fact_cache_entries:
+        # ``**options`` used to fail cache validation; it now round-trips too.
+        assert deserialize_relation_file_facts(
+            serialize_relation_file_facts(facts), expected_path=path
+        ) == facts
+
+
+def _factory_context_calls(tmp_path: Path, patched_attribute: str | None):
+    package = tmp_path / "sample"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "dependencies.py").write_text(
+        "class First:\n    def work(self) -> None:\n        pass\n",
+        encoding="utf-8",
+    )
+    (package / "wrappers.py").write_text(
+        "from .dependencies import First\n\n"
+        "class Wrapper:\n"
+        "    def __init__(self, dependency) -> None:\n"
+        "        self.backend = dependency\n"
+        "    def read(self) -> None:\n"
+        "        self.backend.work()\n"
+        "    def helper(self) -> None:\n"
+        "        pass\n\n"
+        "def build() -> Wrapper:\n"
+        "    return Wrapper(First())\n",
+        encoding="utf-8",
+    )
+    (package / "app.py").write_text(
+        "from .wrappers import build\n\n"
+        "def handler() -> None:\n"
+        "    wrapper = build()\n"
+        "    wrapper.read()\n\n"
+        "def escaping_caller() -> None:\n"
+        "    other = build()\n"
+        "    consume(other)\n"
+        "    other.read()\n",
+        encoding="utf-8",
+    )
+    if patched_attribute is not None:
+        (package / "test_patch.py").write_text(
+            "from .dependencies import First\n"
+            "from .wrappers import Wrapper\n\n"
+            "def test_patch(monkeypatch) -> None:\n"
+            f"    monkeypatch.setattr({'First' if patched_attribute == 'work' else 'Wrapper'}, "
+            f"{patched_attribute!r}, lambda self: None)\n",
+            encoding="utf-8",
+        )
+    definitions = extract_definitions(
+        build_source_snapshot(package.parent, repository_id="factory-context", revision="v1", dirty=True)
+    )
+    return extract_relations(definitions).contextual_calls
+
+
+def test_factory_built_receivers_keep_per_caller_contextual_calls(tmp_path: Path) -> None:
+    contexts = _factory_context_calls(tmp_path, None)
+
+    # Each caller gets its own instance; the escaping caller does not poison the
+    # handler, and the constructor location points at the factory's return.
+    assert len(contexts) == 1
+    assert contexts[0].activation_source.qualified_name == "sample.app.handler"
+    assert contexts[0].source.qualified_name == "sample.wrappers.Wrapper.read"
+    assert contexts[0].target.qualified_name == "sample.dependencies.First.work"
+    assert contexts[0].receiver_constructor_location.path == "sample/wrappers.py"
+    assert contexts[0].receiver_constructor_location.start_line == 12
+
+
+def test_literal_setattr_only_blocks_the_patched_attribute(tmp_path: Path) -> None:
+    assert len(_factory_context_calls(tmp_path / "helper", "helper")) == 1
+    assert len(_factory_context_calls(tmp_path / "read", "read")) == 0
+    assert len(_factory_context_calls(tmp_path / "work", "work")) == 0
+    assert len(_factory_context_calls(tmp_path / "backend", "backend")) == 0
+
+
+def test_from_imported_module_calls_resolve_unless_the_name_is_rebound(tmp_path: Path) -> None:
+    package = tmp_path / "pkg"
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "helpers.py").write_text(
+        "def run():\n    pass\n\nclass Err(Exception):\n    pass\n",
+        encoding="utf-8",
+    )
+    (package / "main.py").write_text(
+        "from . import helpers\n\n"
+        "class Other:\n"
+        "    def run(self):\n"
+        "        pass\n\n"
+        "def plain():\n"
+        "    helpers.run()\n\n"
+        "def raising():\n"
+        "    raise helpers.Err('x')\n\n"
+        "def local_rebind():\n"
+        "    helpers = Other()\n"
+        "    helpers.run()\n\n"
+        "def param(helpers):\n"
+        "    helpers.run()\n\n"
+        "def except_rebind():\n"
+        "    try:\n"
+        "        pass\n"
+        "    except Exception as helpers:\n"
+        "        helpers.run()\n",
+        encoding="utf-8",
+    )
+    result = extract_relations(
+        extract_definitions(
+            build_source_snapshot(tmp_path, repository_id="module-calls", revision="v1", dirty=False)
+        )
+    )
+    names = {symbol.symbol_id: symbol.qualified_name for symbol in result.symbols}
+    calls = {
+        (names[edge.source_id], names[edge.target_id]) for edge in result.edges if edge.kind == "calls"
+    }
+
+    assert ("pkg.main.plain", "pkg.helpers.run") in calls
+    assert ("pkg.main.raising", "pkg.helpers.Err") in calls
+    assert ("pkg.main.local_rebind", "pkg.main.Other.run") in calls
+    assert not any(target == "pkg.helpers.run" and source != "pkg.main.plain" for source, target in calls)
+    rebound = {
+        names[item.source_symbol_id]
+        for item in result.unresolved
+        if item.expression == "helpers.run()" and item.reason == "name_rebound_in_scope"
+    }
+    assert rebound == {"pkg.main.param", "pkg.main.except_rebind"}
