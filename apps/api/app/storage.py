@@ -30,7 +30,9 @@ from .contracts import (
     ImpactPath,
     IndexSnapshot,
     ModuleSymbolsPageResponse,
+    NEIGHBOR_POSSIBLE_CALLER_SAMPLE_LIMIT,
     Neighbor,
+    NeighborCompleteness,
     ReadSourceParams,
     Report,
     Run,
@@ -256,6 +258,70 @@ class RelationCoverage:
     index_unresolved_truncation_reason: str | None
 
 
+_CALLABLE_NAME = re.compile(r"[A-Za-z_$][A-Za-z0-9_$]*")
+# Unresolved reasons that already prove the call leaves the snapshot or names a
+# different module member, so a name match cannot be a hidden caller.
+_OUTSIDE_TARGET_REASONS = (
+    "external_import",
+    "external_import_or_path_alias",
+    "module_attribute_not_in_snapshot",
+    "call_target_not_in_snapshot",
+)
+_COMPLETENESS_HINT_LIMIT = 1_000
+
+
+def _neighbor_completeness(
+    *,
+    root: Symbol,
+    truncated: bool,
+    truncation_reason: str | None,
+    index_truncated: bool,
+    index_truncation_reason: str | None,
+    index_unresolved_truncated: bool | None,
+    possible_caller_count: int | None,
+    unresolved_outgoing_count: int | None,
+) -> NeighborCompleteness:
+    reasons: list[str] = []
+    hints: list[str] = []
+    name = root.qualified_name.rsplit(".", 1)[-1]
+    if possible_caller_count:
+        reasons.append("possible_unresolved_callers")
+        hints.append(
+            f"{possible_caller_count} unresolved call(s) in this index name `{name}` or list it as a "
+            "possible target; static analysis could not prove their receiver, so they are not "
+            "returned as callers. Check possible_unresolved_callers with read_source before "
+            "concluding there are no other callers (count covers the root only)."
+        )
+    if unresolved_outgoing_count:
+        reasons.append("unresolved_outgoing_calls")
+        hints.append(
+            f"{unresolved_outgoing_count} call(s) made by the returned nodes were not resolved "
+            "(see unresolved), so callees may be missing."
+        )
+    if truncated:
+        reasons.append("query_truncated")
+        hints.append(f"This query stopped at a budget ({truncation_reason}).")
+    if index_truncated:
+        reasons.append("index_truncated")
+        hints.append(f"The index itself is truncated ({index_truncation_reason}).")
+    if index_unresolved_truncated is True:
+        reasons.append("unresolved_details_truncated")
+        hints.append("The index kept only part of its unresolved calls, so counts are lower bounds.")
+    elif index_unresolved_truncated is None:
+        reasons.append("unresolved_coverage_unknown")
+        hints.append("This index predates unresolved coverage tracking; rebuild it for reliable counts.")
+    hint = " ".join(hints)
+    if len(hint) > _COMPLETENESS_HINT_LIMIT:
+        hint = hint[: _COMPLETENESS_HINT_LIMIT - 1] + "…"
+    return NeighborCompleteness(
+        status="possibly_incomplete" if reasons else "complete",
+        reasons=reasons,  # type: ignore[arg-type]
+        possible_unresolved_caller_count=possible_caller_count,
+        unresolved_outgoing_count=unresolved_outgoing_count,
+        hint=hint or None,
+    )
+
+
 @dataclass(frozen=True)
 class NeighborQueryResult:
     """Bounded static neighbors and all nodes needed to render their edges."""
@@ -272,6 +338,8 @@ class NeighborQueryResult:
     index_unresolved_truncated: bool | None
     index_unresolved_truncation_reason: str | None
     contextual_calls: tuple[ContextualCall, ...] = ()
+    possible_unresolved_callers: tuple[UnresolvedReference, ...] = ()
+    completeness: NeighborCompleteness | None = None
 
 
 @dataclass(frozen=True)
@@ -4790,7 +4858,9 @@ class IndexStore:
                                 stop("max_nodes reached")
                                 break
                             loaded_neighbor = self._load_symbol(index_id, neighbor_id)
-                        candidate = Neighbor(symbol=loaded_neighbor, edge=edge)
+                        candidate = Neighbor(
+                            symbol=loaded_neighbor, edge=edge, depth=current_depth + 1
+                        )
                         candidate_size = _model_size(candidate)
                         if neighbor is None:
                             candidate_size += _model_size(loaded_neighbor)
@@ -4844,12 +4914,33 @@ class IndexStore:
         finally:
             self._connection.set_progress_handler(None, 0)
 
+        # Outgoing unresolved calls only answer "what else might these nodes call";
+        # a callers query must not be padded with them.
+        unresolved = (
+            () if direction == "callers" else self._load_unresolved(index_id, tuple(nodes))
+        )
+        possible_caller_count: int | None = None
+        possible_callers: tuple[UnresolvedReference, ...] = ()
+        if direction != "callees" and "calls" in edge_kinds:
+            possible_caller_count, possible_callers = self._possible_unresolved_callers(index_id, root)
+        completeness = _neighbor_completeness(
+            root=root,
+            truncated=truncated,
+            truncation_reason=truncation_reason,
+            index_truncated=index_truncated,
+            index_truncation_reason=index_truncation_reason,
+            index_unresolved_truncated=index_unresolved_truncated,
+            possible_caller_count=possible_caller_count,
+            unresolved_outgoing_count=None if direction == "callers" else len(unresolved),
+        )
         return NeighborQueryResult(
             index_id=index_id,
             root=root,
             nodes=tuple(nodes.values()),
             neighbors=tuple(neighbors),
-            unresolved=self._load_unresolved(index_id, tuple(nodes)),
+            unresolved=unresolved,
+            possible_unresolved_callers=possible_callers,
+            completeness=completeness,
             truncated=truncated,
             truncation_reason=truncation_reason,
             index_truncated=index_truncated,
@@ -5020,6 +5111,67 @@ class IndexStore:
             index_unresolved_truncation_reason=index_unresolved_truncation_reason,
         )
 
+    def _possible_unresolved_callers(
+        self,
+        index_id: str,
+        root: Symbol,
+    ) -> tuple[int, tuple[UnresolvedReference, ...]]:
+        """Count unresolved calls that may target ``root``.
+
+        A reference matches when it lists ``root`` as a possible target, or when its
+        expression calls the root's simple name (``name(`` or ``<receiver>.name(``)
+        and its reason does not already prove an outside target.
+        """
+
+        clauses = [
+            "EXISTS (SELECT 1 FROM unresolved_targets t WHERE t.index_id = r.index_id "
+            "AND t.unresolved_id = r.unresolved_id AND t.target_symbol_id = ?)"
+        ]
+        parameters: list[object] = [root.symbol_id]
+        name = root.qualified_name.rsplit(".", 1)[-1]
+        if root.kind in {"class", "function", "test"} and _CALLABLE_NAME.fullmatch(name):
+            placeholders = ",".join("?" for _ in _OUTSIDE_TARGET_REASONS)
+            clauses.append(
+                f"(r.reason NOT IN ({placeholders}) AND (r.expression GLOB ? OR r.expression GLOB ?))"
+            )
+            parameters.extend(_OUTSIDE_TARGET_REASONS)
+            parameters.extend((f"{name}(*", f"*[^A-Za-z0-9_$]{name}(*"))
+        where = f"r.index_id = ? AND ({' OR '.join(clauses)})"
+        count = int(
+            self._connection.execute(
+                f"SELECT COUNT(*) FROM unresolved_references r WHERE {where}",
+                (index_id, *parameters),
+            ).fetchone()[0]
+        )
+        if not count:
+            return 0, ()
+        sample_rows = self._connection.execute(
+            f"SELECT r.unresolved_id FROM unresolved_references r WHERE {where} "
+            "ORDER BY r.path COLLATE BINARY, r.start_line, r.expression, r.unresolved_id LIMIT ?",
+            (index_id, *parameters, NEIGHBOR_POSSIBLE_CALLER_SAMPLE_LIMIT),
+        ).fetchall()
+        return count, self._load_unresolved_by_ids(
+            index_id, tuple(row["unresolved_id"] for row in sample_rows)
+        )
+
+    def _load_unresolved_by_ids(
+        self,
+        index_id: str,
+        unresolved_ids: tuple[str, ...],
+    ) -> tuple[UnresolvedReference, ...]:
+        if not unresolved_ids:
+            return ()
+        placeholders = ",".join("?" for _ in unresolved_ids)
+        return self._unresolved_from_rows(
+            index_id,
+            self._connection.execute(
+                "SELECT unresolved_id, source_symbol_id, path, expression, reason, start_line, end_line "
+                f"FROM unresolved_references WHERE index_id = ? AND unresolved_id IN ({placeholders}) "
+                "ORDER BY path COLLATE BINARY, start_line, expression, unresolved_id",
+                (index_id, *unresolved_ids),
+            ).fetchall(),
+        )
+
     def _load_unresolved(
         self,
         index_id: str,
@@ -5034,6 +5186,13 @@ class IndexStore:
             f"{placeholders}) ORDER BY path COLLATE BINARY, start_line, expression, unresolved_id",
             (index_id, *symbol_ids),
         ).fetchall()
+        return self._unresolved_from_rows(index_id, unresolved_rows)
+
+    def _unresolved_from_rows(
+        self,
+        index_id: str,
+        unresolved_rows: list[sqlite3.Row],
+    ) -> tuple[UnresolvedReference, ...]:
         if not unresolved_rows:
             return ()
         unresolved_ids = tuple(row["unresolved_id"] for row in unresolved_rows)

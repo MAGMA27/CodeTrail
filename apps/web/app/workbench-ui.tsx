@@ -66,7 +66,7 @@ import type {
   SymbolRecord,
   UnresolvedReference,
 } from "../lib/api";
-import { SCHEMA_VERSION } from "../lib/api";
+import { SCHEMA_VERSION, classificationCoverageLimited } from "../lib/api";
 import {
   IMPACT_LAYER_LABELS,
   describeImpactPanel,
@@ -1274,7 +1274,7 @@ function KnowledgeView({
                 <span title={`index ${overview.index.index_id} · snapshot ${overview.index.snapshot_hash}`} className="ct-knowledge-revision">固定版本 · {shortHash(overview.index.snapshot_hash)}</span>
                 <button type="button" className="ct-link-button" onClick={() => { setView("architecture"); setDetailRequest((current) => current + 1); setDetail("search"); }}>搜索符号</button>
                 <button type="button" className="ct-link-button" onClick={() => { setView("architecture"); setDetailRequest((current) => current + 1); setDetail("http"); }}>HTTP 关联 · {overview.http_associations.length}</button>
-                <button type="button" className="ct-link-button" onClick={() => { setView("architecture"); setDetailRequest((current) => current + 1); setDetail("coverage"); }}>版本与覆盖{overview.truncated || overview.classification_coverage.truncated || overview.http_association_coverage.analysis_status === "incomplete" ? " · 部分分析" : ""}</button>
+                <button type="button" className="ct-link-button" onClick={() => { setView("architecture"); setDetailRequest((current) => current + 1); setDetail("coverage"); }}>版本与覆盖{overview.truncated || classificationCoverageLimited(overview.classification_coverage) || overview.http_association_coverage.analysis_status === "incomplete" ? " · 部分分析" : ""}</button>
               </div>
               <div className="ct-knowledge-architecture" hidden={view !== "architecture"}>
                 <ArchitectureSection overview={overview} knowledge={knowledge} graph={graph} panelMode={panelMode} onPanelModeChange={onPanelModeChange} detail={detail} detailRequest={detailRequest} active={view === "architecture"} onDetailChange={setDetail} />
@@ -1732,7 +1732,7 @@ function ArchitectureSection({ overview, knowledge, graph, panelMode, onPanelMod
     overview.coverage.visible_groups < overview.coverage.total_groups ? `概览仅返回 ${overview.coverage.visible_groups}/${overview.coverage.total_groups} 组（含 HTTP 路由组）` : null,
     overview.coverage.visible_modules < overview.coverage.total_modules ? `概览仅返回 ${overview.coverage.visible_modules}/${overview.coverage.total_modules} 个模块` : null,
     overview.coverage.visible_module_relations < overview.coverage.total_module_relations ? `概览仅返回 ${overview.coverage.visible_module_relations}/${overview.coverage.total_module_relations} 条模块关系` : null,
-    overview.classification_coverage.truncated ? `分类记录已返回，但部分角色尚未识别或分析受限： ${overview.classification_coverage.visible}/${overview.classification_coverage.total} 条分类记录` : null,
+    classificationCoverageLimited(overview.classification_coverage) ? `分类记录已返回，但部分角色尚未识别或分析受限： ${overview.classification_coverage.visible}/${overview.classification_coverage.total} 条分类记录` : null,
     overview.unresolved.length > 0 ? `${overview.unresolved.length} 条调用尚不能确定目标，未绘制为确定依赖` : null,
     model.omittedRelationCount > 0 ? `${model.omittedRelationCount} 条关系（${model.omittedRelationEdgeCount} 边）因端点不在可见源码目录中未绘制` : null,
     model.unmatchedHttpModuleCount > 0 ? `所选 HTTP 路由有 ${model.unmatchedHttpModuleCount} 个模块未映射到可见源码目录` : null,
@@ -2030,7 +2030,7 @@ function ArchitectureSection({ overview, knowledge, graph, panelMode, onPanelMod
       </div>
       {!isModuleDrilldown && (coverageWarnings.length > 0 || overview.truncated) ? <details className="ct-architecture-warnings">
         <summary>{overview.coverage.visible_modules === overview.coverage.total_modules && overview.coverage.visible_module_relations === overview.coverage.total_module_relations
-          ? `概览条目已返回完整（${overview.coverage.visible_modules}/${overview.coverage.total_modules} 模块）；路径、分类或证据覆盖${overview.truncated || overview.classification_coverage.truncated || overview.http_association_coverage.analysis_status === "incomplete" ? "仍有限" : "请查看详情"} · ${coverageWarnings.length} 项提示`
+          ? `概览条目已返回完整（${overview.coverage.visible_modules}/${overview.coverage.total_modules} 模块）；路径、分类或证据覆盖${overview.truncated || classificationCoverageLimited(overview.classification_coverage) || overview.http_association_coverage.analysis_status === "incomplete" ? "仍有限" : "请查看详情"} · ${coverageWarnings.length} 项提示`
           : `概览条目有省略 · ${coverageWarnings.length} 项覆盖与诊断提示`}</summary>
         {coverageWarnings.map((warning) => <span key={warning}>{warning}</span>)}
         {overview.truncation_reason ? overview.truncation_reason.split(/;\s*/).map((reason) => {
@@ -2356,7 +2356,7 @@ function OverviewClassificationList({
       <div className="ct-classification-summary"><ClassificationCounts counts={counts} /></div>
       <p className="ct-muted">当前组只统计本次固定快照返回且匹配该组的分类记录；全项目覆盖数字不表示当前组已完整。分类只表示规则识别到的源码声明，“未识别”表示本次规则没有归类。</p>
       {unreturnedClassificationCount > 0 ? <p className="ct-warning">全项目分类记录有 {unreturnedClassificationCount} 条未返回（{overview.classification_coverage.visible}/{overview.classification_coverage.total}）。</p> : null}
-      {overview.classification_coverage.truncated ? <p className="ct-warning">全项目角色分析仍有未知或受限项{unreturnedClassificationCount === 0 ? `；分类记录已返回全部 ${overview.classification_coverage.visible}/${overview.classification_coverage.total} 条` : ""}，不能据此推断当前组有未返回的分类记录。</p> : null}
+      {classificationCoverageLimited(overview.classification_coverage) ? <p className="ct-warning">全项目角色分析仍有未知或受限项{unreturnedClassificationCount === 0 ? `；分类记录已返回全部 ${overview.classification_coverage.visible}/${overview.classification_coverage.total} 条` : ""}，不能据此推断当前组有未返回的分类记录。</p> : null}
       {classifications.length > 0 ? (
         <div className="ct-classification-list">
           {visible.map((classification) => {
@@ -2382,7 +2382,7 @@ function OverviewClassificationList({
           })}
         </div>
       ) : (
-        <p className="ct-muted">{overview.classification_coverage.truncated ? "项目分类记录覆盖不完整，当前组未显示的分类不能据此判断为不存在。" : "当前组没有已返回的规则分类记录。"}</p>
+        <p className="ct-muted">{classificationCoverageLimited(overview.classification_coverage) ? "项目分类记录覆盖不完整，当前组未显示的分类不能据此判断为不存在。" : "当前组没有已返回的规则分类记录。"}</p>
       )}
       {classifications.length > visible.length ? <p className="ct-muted">当前组仅显示前 {visible.length} 项分类记录。</p> : null}
     </section>

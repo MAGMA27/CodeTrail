@@ -398,6 +398,13 @@ def test_http_index_query_and_snapshot_evidence_flow(tmp_path: Path) -> None:
         neighbor["symbol"]["qualified_name"] == "timeout_demo.app.start"
         for neighbor in neighbors["neighbors"]
     )
+    assert {neighbor["depth"] for neighbor in neighbors["neighbors"]} == {1}
+    assert neighbors["unresolved"] == []
+    assert neighbors["completeness"]["status"] in {"complete", "possibly_incomplete"}
+    assert neighbors["completeness"]["unresolved_outgoing_count"] is None
+    assert len(neighbors["possible_unresolved_callers"]) <= min(
+        10, neighbors["completeness"]["possible_unresolved_caller_count"]
+    )
 
     status, source = request(
         application,

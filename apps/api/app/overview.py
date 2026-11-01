@@ -23,6 +23,7 @@ from .contracts import (
     OverviewModule,
     OverviewModuleRelation,
     OverviewPath,
+    OverviewSectionCoverage,
     ProjectOverview,
     OverviewCoverage,
     Symbol,
@@ -46,6 +47,7 @@ DEFAULT_MAX_MODULES = 100
 DEFAULT_MAX_GROUPS = 80
 DEFAULT_MAX_MODULE_RELATIONS = 200
 DEFAULT_MAX_SECONDS = 2.0
+DEFAULT_MAX_CLASSIFICATIONS = 200
 _MAX_EVIDENCE_LINES = 200
 _MAX_ENTRY_CANDIDATES = 200
 _MAX_RELATION_EDGE_SAMPLES = 8
@@ -137,6 +139,7 @@ def build_project_overview(
     max_groups: int = DEFAULT_MAX_GROUPS,
     max_module_relations: int = DEFAULT_MAX_MODULE_RELATIONS,
     max_seconds: float = DEFAULT_MAX_SECONDS,
+    max_classifications: int = DEFAULT_MAX_CLASSIFICATIONS,
 ) -> ProjectOverview:
     """Build a bounded overview from persisted symbols, edges, and source text only."""
 
@@ -146,6 +149,7 @@ def build_project_overview(
         or max_modules < 1
         or max_groups < 1
         or max_module_relations < 1
+        or max_classifications < 1
         or max_seconds <= 0
     ):
         raise ValueError("overview budgets must be positive")
@@ -391,6 +395,7 @@ def build_project_overview(
         read_evidence=read_evidence,
         deadline=deadline,
         entry_candidates_truncated=entry_candidates_truncated,
+        max_classifications=max_classifications,
     )
     notes.append(
         "架构分类只说明当前固定规则识别到的入口、__all__ 公共 API 与 pluggy hookspec；"
@@ -410,6 +415,7 @@ def build_project_overview(
         for unresolved in relation.unresolved
         if unresolved.source_symbol_id in reachable_symbol_ids
     ]
+    total_visible_unresolved = len(visible_unresolved)
     max_unresolved = max(1, max_paths * 2)
     if len(visible_unresolved) > max_unresolved:
         visible_unresolved = visible_unresolved[:max_unresolved]
@@ -526,6 +532,58 @@ def build_project_overview(
         reasons.append("max_http_associations reached")
     if _deadline_reached(deadline):
         reasons.append("max_seconds reached")
+    if (
+        architecture_classification_coverage.truncated
+        and architecture_classification_coverage.visible >= min(_MAX_CLASSIFICATION_ITEMS, max_classifications)
+    ):
+        reasons.append("max_classifications reached")
+    section_coverage = [
+        OverviewSectionCoverage(
+            section="entries",
+            total=None if entry_candidates_truncated else len(entries),
+            returned=len(entries),
+            truncated=entry_candidates_truncated,
+        ),
+        OverviewSectionCoverage(
+            section="groups", total=total_groups, returned=len(groups), truncated=total_groups > len(groups)
+        ),
+        OverviewSectionCoverage(
+            section="modules",
+            total=total_modules,
+            returned=len(module_models),
+            truncated=total_modules > len(module_models),
+        ),
+        OverviewSectionCoverage(
+            section="classifications",
+            total=architecture_classification_coverage.total,
+            returned=architecture_classification_coverage.visible,
+            truncated=architecture_classification_coverage.truncated,
+        ),
+        OverviewSectionCoverage(
+            section="module_relations",
+            total=total_module_relations,
+            returned=len(module_relations),
+            truncated=total_module_relations > len(module_relations),
+        ),
+        OverviewSectionCoverage(
+            section="http_associations",
+            total=http_association_coverage.matched_count,
+            returned=len(http_associations),
+            truncated=http_association_coverage.matched_count > len(http_associations),
+        ),
+        OverviewSectionCoverage(
+            section="paths",
+            total=None if "max_paths reached" in reasons else len(paths),
+            returned=len(paths),
+            truncated="max_paths reached" in reasons,
+        ),
+        OverviewSectionCoverage(
+            section="unresolved",
+            total=total_visible_unresolved,
+            returned=len(visible_unresolved),
+            truncated=total_visible_unresolved > len(visible_unresolved),
+        ),
+    ]
     entry_status = (
         "not_identified"
         if not entries
@@ -565,6 +623,7 @@ def build_project_overview(
             total_module_relations=total_module_relations,
             visible_module_relations=len(module_relations),
         ),
+        section_coverage=section_coverage,
         notes=notes,
         truncated=truncated,
         truncation_reason=truncation_reason,
@@ -958,6 +1017,7 @@ def _build_architecture_classifications(
     read_evidence: EvidenceReader,
     deadline: float,
     entry_candidates_truncated: bool,
+    max_classifications: int = DEFAULT_MAX_CLASSIFICATIONS,
 ) -> tuple[
     list[OverviewClassification],
     OverviewClassificationCoverage,
@@ -980,7 +1040,9 @@ def _build_architecture_classifications(
         function_list.sort(key=lambda item: (item.qualified_name, item.symbol_id))
 
     specs: list[_ArchitectureClassificationSpec] = []
-    incomplete = entry_candidates_truncated
+    incomplete_reasons: dict[str, None] = {}
+    if entry_candidates_truncated:
+        incomplete_reasons["entry candidate scan truncated"] = None
     for entry in entries:
         target = entry.handler_symbol or symbols_by_id.get(entry.symbol_id or "")
         module = module_by_path.get(target.path) if target is not None else module_by_path.get(entry.path)
@@ -1009,7 +1071,7 @@ def _build_architecture_classifications(
     files_by_path = {source_file.path: source_file for source_file in relation.snapshot.files}
     for source_file in sorted(relation.snapshot.files, key=lambda item: item.path):
         if _deadline_reached(deadline) or len(specs) >= _MAX_CLASSIFICATION_SCAN:
-            incomplete = True
+            incomplete_reasons['classification scan budget or max_seconds reached'] = None
             break
         if not source_file.path.lower().endswith(".py"):
             continue
@@ -1019,7 +1081,7 @@ def _build_architecture_classifications(
         try:
             tree = ast.parse(source_file.text, filename=source_file.path, type_comments=True)
         except SyntaxError:
-            incomplete = True
+            incomplete_reasons['a Python module could not be parsed'] = None
             continue
 
         exports = _static_all_exports(tree)
@@ -1051,7 +1113,7 @@ def _build_architecture_classifications(
 
             for export_name, export_line in exports if not bound_names.get("*", 0) else ():
                 if _deadline_reached(deadline):
-                    incomplete = True
+                    incomplete_reasons['max_seconds reached during __all__ scan'] = None
                     break
                 if bound_names.get(export_name, 0) != 1:
                     continue
@@ -1084,7 +1146,7 @@ def _build_architecture_classifications(
                     )
                 )
                 if len(specs) >= _MAX_CLASSIFICATION_SCAN:
-                    incomplete = True
+                    incomplete_reasons['classification scan budget reached'] = None
                     break
 
         specs.extend(
@@ -1097,7 +1159,7 @@ def _build_architecture_classifications(
             )
         )
         if len(specs) >= _MAX_CLASSIFICATION_SCAN:
-            incomplete = True
+            incomplete_reasons['classification scan budget reached'] = None
             break
 
     known_module_ids = {
@@ -1107,7 +1169,7 @@ def _build_architecture_classifications(
     }
     for module in modules:
         if _deadline_reached(deadline) or len(specs) >= _MAX_CLASSIFICATION_SCAN:
-            incomplete = True
+            incomplete_reasons['classification scan budget or max_seconds reached'] = None
             break
         if module.symbol_id in known_module_ids:
             continue
@@ -1147,12 +1209,10 @@ def _build_architecture_classifications(
     for item in specs:
         counts[item.module_id][item.category] += 1
         category_counts[item.category] += 1
+    # Items omitted here (outside the visible modules or over the item limit) are
+    # reported through total > visible, not as an analysis gap.
     visible_specs = [item for item in specs if item.module_id in visible_module_ids]
-    if len(visible_specs) != len(specs):
-        incomplete = True
-    if len(visible_specs) > _MAX_CLASSIFICATION_ITEMS:
-        visible_specs = visible_specs[:_MAX_CLASSIFICATION_ITEMS]
-        incomplete = True
+    visible_specs = visible_specs[: min(_MAX_CLASSIFICATION_ITEMS, max_classifications)]
 
     visible_category_counts = {"application_entry": 0, "public_api": 0, "extension_point": 0, "unknown": 0}
     for item in visible_specs:
@@ -1167,7 +1227,7 @@ def _build_architecture_classifications(
     evidence_chars_used = 0
     for item in visible_specs:
         if _deadline_reached(deadline):
-            incomplete = True
+            incomplete_reasons['max_seconds reached while reading evidence'] = None
             break
         evidence: list[Evidence] = []
         evidence_error: str | None = None
@@ -1175,13 +1235,13 @@ def _build_architecture_classifications(
             line_count = end_line - start_line + 1
             if evidence_lines_used + line_count > _MAX_CLASSIFICATION_EVIDENCE_LINES:
                 evidence_error = "classification evidence line budget reached"
-                incomplete = True
+                incomplete_reasons['classification evidence line budget reached'] = None
                 break
             try:
                 source_evidence = read_evidence(index_id, path, start_line, end_line)
                 if evidence_chars_used + len(source_evidence.excerpt) > _MAX_CLASSIFICATION_EVIDENCE_CHARS:
                     evidence_error = "classification evidence character budget reached"
-                    incomplete = True
+                    incomplete_reasons['classification evidence character budget reached'] = None
                     break
                 evidence.append(source_evidence)
                 evidence_lines_used += line_count
@@ -1191,7 +1251,7 @@ def _build_architecture_classifications(
         if item.evidence_locations and not evidence and evidence_error is None:
             evidence_error = "classification source evidence is unavailable in the persisted snapshot"
         if evidence_error is not None:
-            incomplete = True
+            incomplete_reasons[evidence_error] = None
         identity_parts = [
             RULES_VERSION,
             index_id,
@@ -1221,8 +1281,6 @@ def _build_architecture_classifications(
                 evidence_error=evidence_error,
             )
         )
-    if len(result) != len(visible_specs):
-        incomplete = True
 
     coverage = OverviewClassificationCoverage(
         total=len(specs),
@@ -1234,9 +1292,16 @@ def _build_architecture_classifications(
                 for category in category_order
             }
         ),
-        truncated=incomplete,
+        truncated=len(result) < len(specs),
+        analysis_incomplete=bool(incomplete_reasons),
+        incomplete_reasons=list(incomplete_reasons)[:8],
     )
-    return result, coverage, classification_counts_by_module, incomplete
+    return (
+        result,
+        coverage,
+        classification_counts_by_module,
+        coverage.truncated or coverage.analysis_incomplete,
+    )
 
 
 def _static_all_exports(tree: ast.Module) -> list[tuple[str, int]] | None:
@@ -2308,3 +2373,206 @@ def _edge_allowed(candidate: _EntryCandidate, root_id: str, edge: CodeEdge) -> b
 
 def _deadline_reached(deadline: float) -> bool:
     return time.monotonic() >= deadline
+
+
+# Sections trimmed by ``bound_overview_output``, with the minimum items each keeps.
+# One entry is always kept so an identified overview stays identified; dropping an
+# entry also drops the paths, HTTP associations, application classifications, and
+# HTTP path groups that reference it.
+_OUTPUT_TRIMMABLE_SECTIONS: dict[str, int] = {
+    "module_relations": 0,
+    "classifications": 0,
+    "modules": 0,
+    "unresolved": 0,
+    "paths": 0,
+    "http_associations": 0,
+    "groups": 1,
+    "entries": 1,
+}
+_OUTPUT_BYTES_REASON = "max_output_bytes reached"
+
+
+def bound_overview_output(
+    overview: ProjectOverview,
+    measure: Callable[[ProjectOverview], int],
+    max_output_bytes: int,
+) -> ProjectOverview:
+    """Trim whole items from the largest sections until ``measure`` fits the budget.
+
+    Items are dropped from the end of each section, which keeps the deterministic
+    section ordering (reachable modules and earlier relations first). Dependent
+    items are dropped with what they reference. Coverage and ``section_coverage``
+    keep the found totals and report the returned counts. The only content never
+    trimmed is the index metadata, notes, coverage, one group, and one entry.
+    """
+
+    if max_output_bytes < 1:
+        raise ValueError("max_output_bytes must be positive")
+    size = measure(overview)
+    if size <= max_output_bytes:
+        return overview
+    items: dict[str, list] = {name: list(getattr(overview, name)) for name in _OUTPUT_TRIMMABLE_SECTIONS}
+    costs = _calibrated_item_costs(overview, items, measure, size)
+    bounded = overview
+    target = max_output_bytes
+    for _ in range(8):
+        estimate = size
+        while estimate > target:
+            candidates = [
+                name
+                for name, minimum in _OUTPUT_TRIMMABLE_SECTIONS.items()
+                if len(items[name]) > minimum
+            ]
+            if not candidates:
+                break
+            name = max(candidates, key=lambda section: (sum(costs[section]), section))
+            items[name].pop()
+            estimate -= costs[name].pop()
+            if name in {"modules", "entries"}:
+                estimate -= _drop_dependents(items, costs)
+        bounded = _overview_with_items(overview, items)
+        size = measure(bounded)
+        if size <= max_output_bytes or not any(
+            len(items[name]) > minimum for name, minimum in _OUTPUT_TRIMMABLE_SECTIONS.items()
+        ):
+            break
+        # Item costs are estimates; tighten the target by the observed overshoot.
+        target -= size - max_output_bytes
+    return bounded
+
+
+def _calibrated_item_costs(
+    overview: ProjectOverview,
+    items: Mapping[str, list],
+    measure: Callable[[ProjectOverview], int],
+    size: int,
+) -> dict[str, list[int]]:
+    """Split each section's measured share of ``size`` across its items.
+
+    The share includes nesting indentation and derived output such as evidence
+    references, which a standalone item dump does not see.
+    """
+
+    raw = {
+        name: [len(item.model_dump_json(indent=2)) + 1 for item in values]
+        for name, values in items.items()
+    }
+    costs: dict[str, list[int]] = {}
+    scales: list[float] = []
+    for name, values in items.items():
+        minimum = _OUTPUT_TRIMMABLE_SECTIONS[name]
+        if len(values) <= minimum or name == "entries":
+            continue
+        reduced = {section: list(section_items) for section, section_items in items.items()}
+        reduced[name] = values[:minimum]
+        removed_dependents = 0
+        if name == "modules":
+            removed_dependents = len(reduced["classifications"])
+            reduced["classifications"] = []
+        share = size - measure(_overview_with_items(overview, reduced))
+        if removed_dependents:
+            share -= sum(costs.get("classifications", []))
+        scale = max(share, 0) / sum(raw[name][minimum:])
+        scales.append(scale)
+        costs[name] = [0] * minimum + [max(1, round(cost * scale)) for cost in raw[name][minimum:]]
+    average_scale = sum(scales) / len(scales) if scales else 1.0
+    for name, values in items.items():
+        if name not in costs:
+            minimum = _OUTPUT_TRIMMABLE_SECTIONS[name]
+            costs[name] = [0] * min(minimum, len(values)) + [
+                max(1, round(cost * average_scale)) for cost in raw[name][minimum:]
+            ]
+    return costs
+
+
+def _drop_dependents(items: dict[str, list], costs: dict[str, list[int]]) -> int:
+    """Drop items that reference removed modules or entries; return their cost."""
+
+    entry_ids = {entry.entry_point_id for entry in items["entries"]}
+    module_ids = {module.module_id for module in items["modules"]}
+    keep_rules: dict[str, Callable[[object], bool]] = {
+        "classifications": lambda item: item.module_id in module_ids  # type: ignore[attr-defined]
+        and (item.entry_point_id is None or item.entry_point_id in entry_ids),  # type: ignore[attr-defined]
+        "paths": lambda item: item.entry_point_id in entry_ids,  # type: ignore[attr-defined]
+        "http_associations": lambda item: item.route_entry_point_id in entry_ids,  # type: ignore[attr-defined]
+        "groups": lambda item: item.group_kind != "http_path"  # type: ignore[attr-defined]
+        or bool(entry_ids.intersection(item.entry_point_ids)),  # type: ignore[attr-defined]
+    }
+    removed = 0
+    for name, keep in keep_rules.items():
+        kept = [(item, cost) for item, cost in zip(items[name], costs[name]) if keep(item)]
+        removed += sum(costs[name]) - sum(cost for _, cost in kept)
+        items[name] = [item for item, _ in kept]
+        costs[name] = [cost for _, cost in kept]
+    return removed
+
+
+def _overview_with_items(overview: ProjectOverview, items: Mapping[str, list]) -> ProjectOverview:
+    entry_ids = {entry.entry_point_id for entry in items["entries"]}
+    classifications = items["classifications"]
+    category_names = ("application_entry", "public_api", "extension_point", "unknown")
+    classification_coverage = overview.classification_coverage.model_copy(
+        update={
+            "visible": len(classifications),
+            "visible_category_counts": OverviewClassificationCounts(
+                **{
+                    name: sum(1 for item in classifications if item.category == name)
+                    for name in category_names
+                }
+            ),
+            "truncated": len(classifications) < overview.classification_coverage.total,
+        }
+    )
+    coverage = overview.coverage.model_copy(
+        update={
+            "visible_modules": len(items["modules"]),
+            "visible_groups": len(items["groups"]),
+            "visible_module_relations": len(items["module_relations"]),
+            "unresolved_count": len(items["unresolved"]),
+        }
+    )
+    http_association_coverage = overview.http_association_coverage.model_copy(
+        update={"visible_match_count": len(items["http_associations"])}
+    )
+    section_coverage = []
+    for section in overview.section_coverage:
+        returned = len(items[section.section]) if section.section in items else section.returned
+        total = section.total
+        section_coverage.append(
+            section.model_copy(
+                update={
+                    "returned": returned,
+                    "truncated": section.truncated or (total is not None and returned < total),
+                }
+            )
+        )
+    reasons = [reason for reason in (overview.truncation_reason or "").split("; ") if reason]
+    if _OUTPUT_BYTES_REASON not in reasons:
+        reasons.append(_OUTPUT_BYTES_REASON)
+
+    def without_missing_entries(item) -> dict:
+        payload = item.model_dump()
+        payload["entry_point_ids"] = [entry_id for entry_id in item.entry_point_ids if entry_id in entry_ids]
+        return payload
+
+    payload = overview.model_dump()
+    payload.update(
+        {
+            "entries": [item.model_dump() for item in items["entries"]],
+            "modules": [without_missing_entries(item) for item in items["modules"]],
+            "groups": [without_missing_entries(item) for item in items["groups"]],
+            "classifications": [item.model_dump() for item in classifications],
+            "module_relations": [item.model_dump() for item in items["module_relations"]],
+            "http_associations": [item.model_dump() for item in items["http_associations"]],
+            "paths": [item.model_dump() for item in items["paths"]],
+            "unresolved": [item.model_dump() for item in items["unresolved"]],
+            "classification_coverage": classification_coverage.model_dump(),
+            "coverage": coverage.model_dump(),
+            "http_association_coverage": http_association_coverage.model_dump(),
+            "section_coverage": [item.model_dump() for item in section_coverage],
+            "truncated": True,
+            "truncation_reason": "; ".join(reasons)[:1_000],
+            "entry_status": "partial" if items["entries"] else overview.entry_status,
+        }
+    )
+    return ProjectOverview.model_validate(payload)

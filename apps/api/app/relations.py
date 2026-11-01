@@ -9,7 +9,7 @@ import math
 import os
 import posixpath
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -30,13 +30,13 @@ RelationKind = Literal["imports", "calls"]
 BindingKind = Literal["module", "symbol"]
 RelationScopeKind = Literal["module", "class", "function"]
 # The semantic version changes when the graph/unresolved meaning changes.
-RELATION_SEMANTICS_VERSION = "relations-v11"
+RELATION_SEMANTICS_VERSION = "relations-v12"
 # This version only governs the persisted, index-independent facts payload.
-RELATION_FACT_EXTRACTION_RULES_VERSION = "python-relation-facts-v5"
-_RELATION_FACTS_FORMAT_VERSION = "relation-facts-v5"
+RELATION_FACT_EXTRACTION_RULES_VERSION = "python-relation-facts-v6"
+_RELATION_FACTS_FORMAT_VERSION = "relation-facts-v6"
 # This namespace is part of generated immutable index IDs. Bump it when source
 # boundaries or build rules can change an index with the same content hash.
-INDEX_BUILD_IDENTITY_VERSION = "relations-v15"
+INDEX_BUILD_IDENTITY_VERSION = "relations-v16"
 
 # Relation budgets. Defaults come from measured full extractions (see
 # apps/api/indexing.md); each one can be overridden by its environment variable.
@@ -206,6 +206,11 @@ class RelationAssignmentFact:
     unpack_names: tuple[str, ...] = ()
     # ``x = obj.field``: the dotted value when it is a plain attribute chain.
     value_parts: tuple[str, ...] = ()
+    # ``with Cls(...) as x``: the bound value is what ``__enter__`` /
+    # ``__aenter__`` returns, not the constructed object itself.
+    context_enter: Literal["sync", "async"] | None = None
+    # ``x: T`` / ``self.x: T = ...``: a simple class-like annotation.
+    annotation: RelationCallTargetFact | None = None
 
 
 @dataclass(frozen=True)
@@ -262,6 +267,19 @@ class RelationScopeFacts:
     returns_value: bool = False
     # Class scopes: last identifier of each base expression; "*" if not simple.
     base_names: tuple[str, ...] = ()
+    # Class scopes: each base expression in source order (``Base[T]`` is
+    # recorded as ``Base``); None when the expression is not a dotted name.
+    base_targets: tuple[RelationCallTargetFact | None, ...] = ()
+    # Class scopes: ``keyword=dotted.value`` per class keyword, "*" value when
+    # the keyword value is not a dotted name.
+    class_keywords: tuple[str, ...] = ()
+    # Class and function scopes: dotted decorator names in source order
+    # (``@dataclass(frozen=True)`` is ``dataclass``); "*" when not simple.
+    decorator_names: tuple[str, ...] = ()
+    # Function scopes: parameters with a simple class-like annotation.
+    parameter_annotations: tuple[tuple[str, RelationCallTargetFact], ...] = ()
+    # Function scopes: ``async def``.
+    is_async: bool = False
 
 
 @dataclass(frozen=True)
@@ -351,6 +369,14 @@ class _Scope:
     blocked_threadpool_names: set[str]
     # ``name = obj.field`` where ``obj`` is a known object.
     field_aliases: dict[str, _FieldOf] = field(default_factory=dict)
+    # Parameters whose static type is declared (``self``/``cls`` of a method,
+    # ``param: Cls``); the object may be an instance of a subclass.
+    declared_types: dict[str, Symbol] = field(default_factory=dict)
+    # name -> (binding count, any uncertain binding), built on first use.
+    binding_counts: dict[str, tuple[int, bool]] | None = None
+    # Objects bound by repeated same-class constructor assignments: visible to
+    # this scope only, never to closures, which may run after a rebinding.
+    repeated_object_names: set[str] = field(default_factory=set)
 
 
 @dataclass(frozen=True)
@@ -574,6 +600,14 @@ def extract_relations(
         scope_facts_by_key=scope_facts_by_key,
         budget=budget,
     )
+    hierarchy = _ClassHierarchy(
+        facts_by_path=facts_by_path,
+        maps=maps,
+        scope_facts_by_key=scope_facts_by_key,
+        budget=budget,
+        factory_returns=factory_returns,
+    )
+    factory_returns.hierarchy = hierarchy
     constructor_sites: list[_ConstructorCallSite] = []
     activation_call_sites: list[_ActivationCallSite] = []
     unsafe_constructor_classes: set[str] = set()
@@ -608,6 +642,7 @@ def extract_relations(
                 multisegment_attribute_writes=multisegment_attribute_writes,
                 collect_only=True,
                 factory_returns=factory_returns,
+                hierarchy=hierarchy,
             )
             resolver.visit_scope()
 
@@ -648,6 +683,7 @@ def extract_relations(
                 unresolved=unresolved,
                 constructor_attribute_bindings=constructor_attribute_bindings,
                 factory_returns=factory_returns,
+                hierarchy=hierarchy,
             )
             resolver.visit_scope()
 
@@ -1160,7 +1196,7 @@ class _BindingCollector(ast.NodeVisitor):
         self.generic_visit(node)
 
     def _collect_attribute_write_names(self, targets: list[ast.expr]) -> None:
-        for target in targets:
+        for target in _flatten_targets(targets):
             if isinstance(target, ast.Attribute):
                 self.attribute_write_names.add(target.attr)
                 if _attribute_parts(target) is None:
@@ -1326,6 +1362,27 @@ def _extract_scope_facts(
             if isinstance(node, ast.ClassDef)
             else ()
         ),
+        base_targets=(
+            tuple(_base_target(base) for base in node.bases)
+            if isinstance(node, ast.ClassDef)
+            else ()
+        ),
+        class_keywords=(
+            tuple(_class_keyword(keyword) for keyword in node.keywords)
+            if isinstance(node, ast.ClassDef)
+            else ()
+        ),
+        decorator_names=(
+            tuple(_decorator_name(decorator) for decorator in node.decorator_list)
+            if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+            else ()
+        ),
+        parameter_annotations=(
+            _parameter_annotations(node)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            else ()
+        ),
+        is_async=isinstance(node, ast.AsyncFunctionDef),
     )
 
 
@@ -1337,6 +1394,71 @@ def _return_annotation_fact(node: ast.expr) -> RelationCallTargetFact | None:
             return None
     target = _call_target_from_node(node)
     return target
+
+
+def _dotted_name(node: ast.expr) -> str | None:
+    parts = _attribute_parts(node) if isinstance(node, ast.Attribute) else None
+    if isinstance(node, ast.Name):
+        return node.id
+    return ".".join(parts) if parts else None
+
+
+def _base_target(node: ast.expr) -> RelationCallTargetFact | None:
+    if isinstance(node, ast.Subscript):
+        node = node.value
+    return _call_target_from_node(node)
+
+
+def _class_keyword(keyword: ast.keyword) -> str:
+    value = _dotted_name(keyword.value) or "*"
+    return f"{keyword.arg or '**'}={value}"[:500]
+
+
+def _decorator_name(node: ast.expr) -> str:
+    if isinstance(node, ast.Call):
+        node = node.func
+    return (_dotted_name(node) or "*")[:500]
+
+
+def _annotation_target(node: ast.expr | None, depth: int = 0) -> RelationCallTargetFact | None:
+    """A class-like annotation: ``T``, ``pkg.T``, ``"T"``, ``Optional[T]``, ``T | None``."""
+
+    if node is None or depth > 4:
+        return None
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        if len(node.value) > 500:
+            return None
+        try:
+            parsed = ast.parse(node.value.strip(), mode="eval").body
+        except SyntaxError:
+            return None
+        return _annotation_target(parsed, depth + 1)
+    if isinstance(node, (ast.Name, ast.Attribute)):
+        return _call_target_from_node(node)
+    if isinstance(node, ast.Subscript):
+        container = _dotted_name(node.value)
+        if container in {"Optional", "typing.Optional", "t.Optional"}:
+            return _annotation_target(node.slice, depth + 1)
+        return None
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+        left_none = isinstance(node.left, ast.Constant) and node.left.value is None
+        right_none = isinstance(node.right, ast.Constant) and node.right.value is None
+        if right_none and not left_none:
+            return _annotation_target(node.left, depth + 1)
+        if left_none and not right_none:
+            return _annotation_target(node.right, depth + 1)
+    return None
+
+
+def _parameter_annotations(
+    node: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> tuple[tuple[str, RelationCallTargetFact], ...]:
+    annotations: list[tuple[str, RelationCallTargetFact]] = []
+    for argument in (*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs):
+        target = _annotation_target(argument.annotation)
+        if target is not None:
+            annotations.append((argument.arg, target))
+    return tuple(annotations)
 
 
 def _base_name(node: ast.expr) -> str:
@@ -1464,10 +1586,47 @@ def _extract_relation_events(
         return events
     if isinstance(node, (ast.With, ast.AsyncWith)):
         events = []
+        end_line = getattr(node, "end_lineno", node.lineno) or node.lineno
+        other_targets: list[ast.expr] = []
+        for item in node.items:
+            if item.optional_vars is None:
+                continue
+            context = item.context_expr
+            call_parts = (
+                _attribute_parts(context.func)
+                if isinstance(context, ast.Call) and isinstance(context.func, ast.Attribute)
+                else None
+            )
+            if (
+                isinstance(item.optional_vars, ast.Name)
+                and isinstance(context, ast.Call)
+                and (isinstance(context.func, ast.Name) or call_parts)
+            ):
+                # ``with Cls(...) as name``: bound to the ``__enter__`` result,
+                # which the resolver accepts only when it provably returns self.
+                events.append(
+                    RelationAssignmentEvent(
+                        RelationAssignmentFact(
+                            target_names=(item.optional_vars.id,),
+                            target_attributes=(),
+                            constructor_name=(
+                                context.func.id if isinstance(context.func, ast.Name) else None
+                            ),
+                            value_name=None,
+                            certainty=certainty,
+                            start_line=node.lineno,
+                            end_line=end_line,
+                            constructor_parts=tuple(call_parts) if call_parts else (),
+                            context_enter="async" if isinstance(node, ast.AsyncWith) else "sync",
+                        )
+                    )
+                )
+            else:
+                other_targets.append(item.optional_vars)
         assignment = _assignment_fact_from_targets(
-            [item.optional_vars for item in node.items if item.optional_vars is not None],
+            other_targets,
             start_line=node.lineno,
-            end_line=getattr(node, "end_lineno", node.lineno) or node.lineno,
+            end_line=end_line,
             certainty="uncertain",
         )
         if assignment is not None:
@@ -1620,6 +1779,12 @@ def _assignment_fact_from_node(
         value = None
 
     unpack_names: tuple[str, ...] = ()
+    annotation = (
+        _annotation_target(node.annotation)
+        if isinstance(node, ast.AnnAssign)
+        and isinstance(node.target, (ast.Name, ast.Attribute))
+        else None
+    )
     if (
         certainty == "definite"
         and len(targets) == 1
@@ -1676,6 +1841,7 @@ def _assignment_fact_from_node(
         start_line=node.lineno,
         end_line=getattr(node, "end_lineno", node.lineno) or node.lineno,
         certainty=certainty,
+        annotation=annotation,
     )
 
 
@@ -1690,6 +1856,7 @@ def _assignment_fact_from_targets(
     constructor_parts: tuple[str, ...] = (),
     unpack_names: tuple[str, ...] = (),
     value_parts: tuple[str, ...] = (),
+    annotation: RelationCallTargetFact | None = None,
 ) -> RelationAssignmentFact | None:
     target_names = tuple(sorted(_target_names(targets)))
     target_attributes = tuple(
@@ -1708,6 +1875,7 @@ def _assignment_fact_from_targets(
         constructor_parts=constructor_parts,
         unpack_names=unpack_names,
         value_parts=value_parts,
+        annotation=annotation,
     )
 
 
@@ -1734,10 +1902,26 @@ def _target_names(targets: list[ast.expr]) -> set[str]:
 def _target_attributes(targets: list[ast.expr]) -> set[RelationCallTargetFact]:
     return {
         RelationCallTargetFact("attribute", None, tuple(parts))
-        for target in targets
+        for target in _flatten_targets(targets)
         if isinstance(target, ast.Attribute)
         and (parts := _attribute_parts(target)) is not None
     }
+
+
+def _flatten_targets(targets: list[ast.expr]) -> list[ast.expr]:
+    """Assignment targets with tuple/list/star unpacking expanded."""
+
+    flat: list[ast.expr] = []
+    pending = list(reversed(targets))
+    while pending:
+        target = pending.pop()
+        if isinstance(target, (ast.Tuple, ast.List)):
+            pending.extend(reversed(target.elts))
+        elif isinstance(target, ast.Starred):
+            pending.append(target.value)
+        else:
+            flat.append(target)
+    return flat
 
 
 def _collect_scope_facts(
@@ -1882,6 +2066,7 @@ class _FactoryReturns:
         self._in_progress: set[str] = set()
         self._chains: dict[str, dict[tuple[str, RelationScopeKind, int], tuple[RelationScopeFacts, ...]]] = {}
         self._base_names: set[str] | None = None
+        self.hierarchy: _ClassHierarchy | None = None
         # Caller-specific instance IDs -> the constructor site inside the factory.
         self.site_aliases: dict[str, str] = {}
 
@@ -1951,6 +2136,7 @@ class _FactoryReturns:
                 annotation.target_kind,  # type: ignore[arg-type]
                 annotation.target_name,
                 annotation.target_parts,
+                through_receivers=False,
             )
         finally:
             resolver.scope = function_scope
@@ -2000,6 +2186,7 @@ class _FactoryReturns:
             unresolved=[],
             collect_only=True,
             factory_returns=self,
+            hierarchy=self.hierarchy,
         )
         for scope_facts in chain:
             symbol = self.maps.by_key.get(
@@ -2066,6 +2253,639 @@ def _combine_returns(values: list[tuple[_Produced | None, ...] | None]) -> _Fact
     return _FactoryResult(None, tuple(elements))
 
 
+# Base expressions that add no attributes a static method lookup could hit.
+_TRANSPARENT_BASE_NAMES = frozenset({"object", "Generic", "Protocol", "ABC"})
+# Class decorators that return the decorated class itself.
+_SAME_CLASS_DECORATORS = frozenset(
+    {
+        "dataclass",
+        "dataclasses.dataclass",
+        "total_ordering",
+        "functools.total_ordering",
+        "final",
+        "typing.final",
+        "typing_extensions.final",
+        "runtime_checkable",
+        "typing.runtime_checkable",
+        "typing_extensions.runtime_checkable",
+        "unique",
+        "enum.unique",
+    }
+)
+# Method decorators that keep ``obj.method()`` calling the decorated function.
+_TRANSPARENT_METHOD_DECORATORS = frozenset(
+    {
+        "staticmethod",
+        "classmethod",
+        "abstractmethod",
+        "abc.abstractmethod",
+        "override",
+        "typing.override",
+        "typing_extensions.override",
+        "final",
+        "typing.final",
+        "typing_extensions.final",
+    }
+)
+_TRANSPARENT_METACLASSES = frozenset({"metaclass=ABCMeta", "metaclass=abc.ABCMeta"})
+
+
+@dataclass(frozen=True)
+class _ClassShape:
+    """What a static method lookup may assume about one in-repo class."""
+
+    # In-repo classes in method resolution order, starting with the class.
+    lookup_order: tuple[Symbol, ...]
+    # False when an unresolved base could contribute attributes after ``mro[0]``.
+    complete: bool
+    # False for a custom metaclass or ``__getattribute__`` anywhere in ``mro``.
+    supported: bool
+    # A class decorator outside the same-class allowlist sits on some class in ``mro``.
+    decorated: bool
+    # ``Protocol`` is a base: instances need not inherit from the class.
+    protocol: bool
+    # ``__new__`` is defined in ``mro``: ``Cls()`` may return another type.
+    custom_new: bool
+
+
+@dataclass(frozen=True)
+class _ReceiverType:
+    """The static type of a call receiver."""
+
+    class_symbol: Symbol
+    # True when the object is exactly this class, not possibly a subclass.
+    exact: bool
+    # True when the receiver is the class object itself (``Cls.method()``).
+    class_object: bool = False
+
+
+@dataclass(frozen=True)
+class _AttributeWrite:
+    path: str
+    owner: Symbol | None
+    scope: RelationScopeFacts
+    fact: RelationAssignmentFact
+
+
+def _c3_merge(sequences: list[list[Symbol]]) -> list[Symbol] | None:
+    pending = [list(sequence) for sequence in sequences if sequence]
+    result: list[Symbol] = []
+    while pending:
+        for sequence in pending:
+            head = sequence[0]
+            if not any(head in other[1:] for other in pending):
+                break
+        else:
+            return None
+        result.append(head)
+        pending = [
+            [item for item in sequence if item is not head] if sequence[0] is head else sequence
+            for sequence in pending
+        ]
+        pending = [sequence for sequence in pending if sequence]
+    return result
+
+
+class _ClassHierarchy:
+    """In-repo class bases, method resolution order and attribute types.
+
+    Everything is derived from cached syntax facts and resolved lazily. When a
+    base, decorator or metaclass is not understood, lookups that could depend
+    on it report an explicit reason instead of guessing a target.
+    """
+
+    def __init__(
+        self,
+        *,
+        facts_by_path: Mapping[str, RelationFileFacts],
+        maps: _DefinitionMaps,
+        scope_facts_by_key: Mapping[tuple[str, str, RelationScopeKind, int], RelationScopeFacts],
+        budget: _RelationBudget,
+        factory_returns: _FactoryReturns | None,
+    ) -> None:
+        self.facts_by_path = facts_by_path
+        self.maps = maps
+        self.scope_facts_by_key = scope_facts_by_key
+        self.budget = budget
+        self.factory_returns = factory_returns
+        self._chains: dict[str, dict[tuple[str, RelationScopeKind, int], tuple[RelationScopeFacts, ...]]] = {}
+        self._resolvers: dict[tuple[str, str, RelationScopeKind, int], _RelationFactResolver | None] = {}
+        self._bases: dict[str, tuple[tuple[Symbol | None, ...], bool]] = {}
+        self._shapes: dict[str, _ClassShape] = {}
+        self._shapes_in_progress: set[str] = set()
+        self._children: dict[str, list[Symbol]] | None = None
+        self._unresolved_subclasses: dict[str, list[Symbol]] = {}
+        self._descendants: dict[str, tuple[Symbol, ...]] = {}
+        self._writes: dict[str, list[_AttributeWrite]] | None = None
+        self._indirect_writes: set[str] = set()
+        self._attribute_types: dict[tuple[str, str, bool], _ReceiverType | None] = {}
+        self._attribute_in_progress: set[tuple[str, str, bool]] = set()
+
+    # -- scopes ------------------------------------------------------------
+
+    def class_scope(self, class_symbol: Symbol) -> RelationScopeFacts | None:
+        return self.scope_facts_by_key.get(
+            (class_symbol.path, class_symbol.qualified_name, "class", class_symbol.start_line)
+        )
+
+    def _chain(self, path: str) -> dict[tuple[str, RelationScopeKind, int], tuple[RelationScopeFacts, ...]]:
+        chains = self._chains.get(path)
+        if chains is not None:
+            return chains
+        chains = {}
+        facts = self.facts_by_path.get(path)
+
+        def walk(scope: RelationScopeFacts, prefix: tuple[RelationScopeFacts, ...]) -> None:
+            for event in scope.events:
+                if isinstance(event, RelationScopeEvent):
+                    nested = (*prefix, event.scope)
+                    chains[(event.scope.qualified_name, event.scope.kind, event.scope.start_line)] = nested
+                    walk(event.scope, nested)
+
+        if facts is not None and facts.scope is not None:
+            walk(facts.scope, ())
+        self._chains[path] = chains
+        return chains
+
+    def resolver_at(self, path: str, scope: RelationScopeFacts | None) -> _RelationFactResolver | None:
+        """A static resolver positioned in ``scope`` (the module when None)."""
+
+        facts = self.facts_by_path.get(path)
+        module_symbol = self.maps.modules_by_path.get(path)
+        if facts is None or facts.scope is None or facts.syntax_error or module_symbol is None:
+            return None
+        target = facts.scope if scope is None else scope
+        key = (path, target.qualified_name, target.kind, target.start_line)
+        if key in self._resolvers:
+            return self._resolvers[key]
+        resolver: _RelationFactResolver | None = _RelationFactResolver(
+            path=path,
+            module_name=facts.module_name,
+            scope_facts=facts.scope,
+            module_symbol=module_symbol,
+            maps=self.maps,
+            scope_facts_by_key=self.scope_facts_by_key,
+            budget=self.budget,
+            edges=[],
+            unresolved=[],
+            collect_only=True,
+            factory_returns=self.factory_returns,
+            hierarchy=self,
+        )
+        assert resolver is not None
+        if scope is not None and scope is not facts.scope:
+            chain = self._chain(path).get((scope.qualified_name, scope.kind, scope.start_line))
+            if chain is None:
+                resolver = None
+            else:
+                for scope_facts in chain:
+                    symbol = self.maps.by_key.get(
+                        (path, scope_facts.qualified_name, scope_facts.kind, scope_facts.start_line)
+                    )
+                    if symbol is None:
+                        resolver = None
+                        break
+                    parent = resolver.scope
+                    lexical_parent = (
+                        parent.parent if scope_facts.kind == "function" and parent.kind == "class" else parent
+                    )
+                    resolver.scope = resolver._make_scope(scope_facts, symbol, lexical_parent)
+        self._resolvers[key] = resolver
+        return resolver
+
+    def _defining_resolver(self, symbol: Symbol) -> _RelationFactResolver | None:
+        chain = self._chain(symbol.path).get(
+            (symbol.qualified_name, symbol.kind, symbol.start_line)  # type: ignore[arg-type]
+        )
+        if chain is None:
+            return None
+        parent = chain[-2] if len(chain) >= 2 else None
+        if parent is not None and parent.kind == "class":
+            # Class bodies do not form closures; names resolve like the class's parent.
+            parent = chain[-3] if len(chain) >= 3 else None
+        return self.resolver_at(symbol.path, parent)
+
+    # -- bases and MRO -----------------------------------------------------
+
+    def _resolved_bases(self, class_symbol: Symbol) -> tuple[tuple[Symbol | None, ...], bool]:
+        cached = self._bases.get(class_symbol.symbol_id)
+        if cached is not None:
+            return cached
+        scope = self.class_scope(class_symbol)
+        if scope is None:
+            result: tuple[tuple[Symbol | None, ...], bool] = ((None,), False)
+            self._bases[class_symbol.symbol_id] = result
+            return result
+        resolver = self._defining_resolver(class_symbol)
+        bases: list[Symbol | None] = []
+        protocol = False
+        for target in scope.base_targets:
+            if target is None:
+                bases.append(None)
+                continue
+            symbol: Symbol | None = None
+            if resolver is not None:
+                symbol, _reason, _candidates = resolver._resolve_call_target_parts_statically(
+                    target.target_kind,  # type: ignore[arg-type]
+                    target.target_name,
+                    target.target_parts,
+                    through_receivers=False,
+                )
+            if symbol is not None and symbol.kind == "class" and symbol.symbol_id != class_symbol.symbol_id:
+                bases.append(symbol)
+                continue
+            last_name = target.target_name or target.target_parts[-1]
+            if symbol is None and last_name in _TRANSPARENT_BASE_NAMES:
+                protocol = protocol or last_name == "Protocol"
+                continue
+            bases.append(None)
+        result = (tuple(bases), protocol)
+        self._bases[class_symbol.symbol_id] = result
+        return result
+
+    def shape(self, class_symbol: Symbol) -> _ClassShape:
+        cached = self._shapes.get(class_symbol.symbol_id)
+        if cached is not None:
+            return cached
+        scope = self.class_scope(class_symbol)
+        if scope is None or class_symbol.symbol_id in self._shapes_in_progress:
+            return _ClassShape((class_symbol,), False, False, True, False, False)
+        self._shapes_in_progress.add(class_symbol.symbol_id)
+        try:
+            shape = self._compute_shape(class_symbol, scope)
+        finally:
+            self._shapes_in_progress.discard(class_symbol.symbol_id)
+        self._shapes[class_symbol.symbol_id] = shape
+        return shape
+
+    def _compute_shape(self, class_symbol: Symbol, scope: RelationScopeFacts) -> _ClassShape:
+        own_names = (*scope.bindings.definition_names, *scope.bindings.assigned)
+        supported = "__getattribute__" not in own_names and all(
+            keyword in _TRANSPARENT_METACLASSES for keyword in scope.class_keywords
+        )
+        decorated = any(name not in _SAME_CLASS_DECORATORS for name in scope.decorator_names)
+        custom_new = "__new__" in own_names
+        bases, protocol = self._resolved_bases(class_symbol)
+        if any(base is None for base in bases):
+            return _ClassShape((class_symbol,), False, supported, decorated, protocol, custom_new)
+        base_shapes = [self.shape(base) for base in bases if base is not None]
+        supported = supported and all(item.supported for item in base_shapes)
+        decorated = decorated or any(item.decorated for item in base_shapes)
+        protocol = protocol or any(item.protocol for item in base_shapes)
+        custom_new = custom_new or any(item.custom_new for item in base_shapes)
+        if not all(item.complete for item in base_shapes):
+            return _ClassShape((class_symbol,), False, supported, decorated, protocol, custom_new)
+        merged = _c3_merge(
+            [list(item.lookup_order) for item in base_shapes] + [[base for base in bases if base is not None]]
+        )
+        if merged is None:
+            return _ClassShape((class_symbol,), False, False, decorated, protocol, custom_new)
+        return _ClassShape((class_symbol, *merged), True, supported, decorated, protocol, custom_new)
+
+    def _build_children(self) -> dict[str, list[Symbol]]:
+        if self._children is not None:
+            return self._children
+        children: dict[str, list[Symbol]] = {}
+        unresolved: dict[str, list[Symbol]] = {}
+        for (path, qualified_name, kind, start_line), scope in self.scope_facts_by_key.items():
+            if kind != "class":
+                continue
+            if time.monotonic() >= self.budget.deadline:
+                self.budget._stop("max_seconds exceeded")
+                break
+            symbol = self.maps.by_key.get((path, qualified_name, "class", start_line))
+            if symbol is None:
+                continue
+            bases, _protocol = self._resolved_bases(symbol)
+            for base in bases:
+                if base is not None:
+                    children.setdefault(base.symbol_id, []).append(symbol)
+            for target, base in zip(scope.base_targets, bases if len(bases) == len(scope.base_targets) else ()):
+                if base is None and target is not None:
+                    last_name = target.target_name or target.target_parts[-1]
+                    unresolved.setdefault(last_name, []).append(symbol)
+            if any(target is None for target in scope.base_targets):
+                unresolved.setdefault("*", []).append(symbol)
+        self._children = children
+        self._unresolved_subclasses = unresolved
+        return children
+
+    def descendants(self, class_symbol: Symbol) -> tuple[Symbol, ...]:
+        cached = self._descendants.get(class_symbol.symbol_id)
+        if cached is not None:
+            return cached
+        children = self._build_children()
+        seen: dict[str, Symbol] = {}
+        pending = list(children.get(class_symbol.symbol_id, []))
+        while pending:
+            current = pending.pop()
+            if current.symbol_id in seen or current.symbol_id == class_symbol.symbol_id:
+                continue
+            seen[current.symbol_id] = current
+            pending.extend(children.get(current.symbol_id, []))
+        result = tuple(sorted(seen.values(), key=lambda symbol: symbol.symbol_id))
+        self._descendants[class_symbol.symbol_id] = result
+        return result
+
+    def possible_unresolved_subclasses(self, class_symbol: Symbol) -> tuple[Symbol, ...]:
+        """Classes whose unresolved base shares this class's simple name."""
+
+        self._build_children()
+        simple_name = class_symbol.qualified_name.rsplit(".", 1)[-1]
+        return tuple(self._unresolved_subclasses.get(simple_name, ()))
+
+    # -- methods -----------------------------------------------------------
+
+    def _members(self, class_symbol: Symbol, name: str) -> list[Symbol]:
+        return [
+            symbol
+            for symbol in self.maps.by_qualified_name.get(f"{class_symbol.qualified_name}.{name}", [])
+            if symbol.path == class_symbol.path and symbol.kind in {"function", "test", "class"}
+        ]
+
+    def _defines(self, class_symbol: Symbol, name: str) -> bool:
+        scope = self.class_scope(class_symbol)
+        return scope is not None and (
+            name in scope.bindings.definition_names
+            or name in scope.bindings.assigned
+            or self._writes_own_attribute(class_symbol, name)
+        )
+
+    def _writes_own_attribute(self, class_symbol: Symbol, name: str) -> bool:
+        """``self.name = ...`` in a method, or a literal/unknown ``setattr`` in the class."""
+
+        scope = self.class_scope(class_symbol)
+        if scope is None:
+            return True
+        if _scope_has_indirect_attribute_write(scope, name):
+            return True
+        for write in self._collect_writes().get(name, []):
+            if write.owner is None or write.owner.symbol_id != class_symbol.symbol_id:
+                continue
+            positional = write.scope.bindings.positional_parameter_names
+            if positional and any(
+                target.target_parts == (positional[0], name) for target in write.fact.target_attributes
+            ):
+                return True
+        return False
+
+    def resolve_method(
+        self,
+        receiver: _ReceiverType,
+        name: str,
+        candidates: Callable[[str], list[str]],
+    ) -> tuple[Symbol | None, str, list[str]]:
+        shape = self.shape(receiver.class_symbol)
+        if not shape.supported:
+            return None, "class_shape_not_supported", candidates(name)
+        if receiver.exact and (shape.decorated or (shape.custom_new and not receiver.class_object)):
+            # ``Cls()`` / ``Cls`` may not be the class whose body we read.
+            return None, "class_shape_not_supported", candidates(name)
+        if shape.protocol and not receiver.exact:
+            return None, "structural_protocol_receiver", candidates(name)
+        target: Symbol | None = None
+        for class_symbol in shape.lookup_order:
+            scope = self.class_scope(class_symbol)
+            if scope is None:
+                return None, "class_shape_not_supported", candidates(name)
+            if name in scope.bindings.assigned:
+                return None, "method_rebound_by_attribute_write", candidates(name)
+            if name not in scope.bindings.definition_names:
+                continue
+            members = self._members(class_symbol, name)
+            if len(members) != 1:
+                return None, "ambiguous_method_definition", sorted(symbol.symbol_id for symbol in members)
+            member = members[0]
+            if member.kind != "class":
+                member_scope = self.scope_facts_by_key.get(
+                    (member.path, member.qualified_name, "function", member.start_line)
+                )
+                if member_scope is None:
+                    return None, "ambiguous_method_definition", [member.symbol_id]
+                if any(
+                    decorator not in _TRANSPARENT_METHOD_DECORATORS
+                    for decorator in member_scope.decorator_names
+                ):
+                    return None, "decorated_method_not_resolved", [member.symbol_id]
+            target = member
+            break
+        if target is None:
+            reason = "method_not_found_in_class_hierarchy" if shape.complete else "base_class_not_in_snapshot"
+            return None, reason, candidates(name)
+        for class_symbol in shape.lookup_order:
+            if self._writes_own_attribute(class_symbol, name):
+                return None, "method_rebound_by_attribute_write", [target.symbol_id]
+        if not receiver.exact:
+            overrides = {
+                member.symbol_id
+                for descendant in self.descendants(receiver.class_symbol)
+                if self._defines(descendant, name)
+                for member in (self._members(descendant, name) or [descendant])
+            }
+            overrides.update(
+                member.symbol_id
+                for subclass in self.possible_unresolved_subclasses(receiver.class_symbol)
+                if self._defines(subclass, name)
+                for member in (self._members(subclass, name) or [subclass])
+            )
+            if overrides:
+                return None, "method_overridden_in_subclass", sorted({target.symbol_id, *overrides})
+        return target, "", []
+
+    def enter_returns_self(self, class_symbol: Symbol, mode: Literal["sync", "async"]) -> bool:
+        """Whether ``with Cls(...) as x`` binds ``x`` to the constructed object."""
+
+        shape = self.shape(class_symbol)
+        if not shape.supported or shape.decorated or shape.custom_new:
+            return False
+        method_name = "__aenter__" if mode == "async" else "__enter__"
+        for owner in shape.lookup_order:
+            scope = self.class_scope(owner)
+            if scope is None or method_name in scope.bindings.assigned:
+                return False
+            if method_name not in scope.bindings.definition_names:
+                continue
+            members = self._members(owner, method_name)
+            if len(members) != 1 or members[0].kind == "class":
+                return False
+            method = self.scope_facts_by_key.get(
+                (members[0].path, members[0].qualified_name, "function", members[0].start_line)
+            )
+            if method is None or method.decorator_names:
+                return False
+            if mode == "async" and not method.is_async:
+                return False
+            if mode == "sync" and not method.returns_value:
+                return False
+            positional = method.bindings.positional_parameter_names
+            if not positional or positional[0] in method.bindings.assigned:
+                return False
+            returns = [event for event in method.events if isinstance(event, RelationReturnEvent)]
+            return bool(returns) and all(
+                event.elements is None
+                and event.target is not None
+                and event.target.target_kind == "name"
+                and event.target.target_name == positional[0]
+                for event in returns
+            )
+        return False
+
+    # -- attributes --------------------------------------------------------
+
+    def _collect_writes(self) -> dict[str, list[_AttributeWrite]]:
+        if self._writes is not None:
+            return self._writes
+        writes: dict[str, list[_AttributeWrite]] = {}
+
+        def walk(path: str, scope: RelationScopeFacts, owner: Symbol | None) -> None:
+            self._indirect_writes.update(scope.bindings.indirect_attribute_write_names)
+            for event in scope.events:
+                if isinstance(event, RelationAssignmentEvent):
+                    for target in event.fact.target_attributes:
+                        writes.setdefault(target.target_parts[-1], []).append(
+                            _AttributeWrite(path, owner, scope, event.fact)
+                        )
+                elif isinstance(event, RelationScopeEvent):
+                    nested_owner: Symbol | None = None
+                    if scope.kind == "class" and event.scope.kind == "function":
+                        nested_owner = self.maps.by_key.get(
+                            (path, scope.qualified_name, "class", scope.start_line)
+                        )
+                    walk(path, event.scope, nested_owner)
+
+        for path, facts in self.facts_by_path.items():
+            if facts.scope is not None:
+                walk(path, facts.scope, None)
+        self._writes = writes
+        return writes
+
+    def _annotation_class(
+        self,
+        resolver: _RelationFactResolver | None,
+        annotation: RelationCallTargetFact,
+    ) -> Symbol | None:
+        if resolver is None:
+            return None
+        symbol, _reason, _candidates = resolver._resolve_call_target_parts_statically(
+            annotation.target_kind,  # type: ignore[arg-type]
+            annotation.target_name,
+            annotation.target_parts,
+            through_receivers=False,
+        )
+        return symbol if symbol is not None and symbol.kind == "class" else None
+
+    def attribute_type(self, receiver: _ReceiverType, attribute: str) -> _ReceiverType | None:
+        """The type of ``receiver.attribute`` from annotations or every write of it."""
+
+        if receiver.class_object:
+            return None
+        key = (receiver.class_symbol.symbol_id, attribute, receiver.exact)
+        if key in self._attribute_types:
+            return self._attribute_types[key]
+        if key in self._attribute_in_progress:
+            return None
+        self._attribute_in_progress.add(key)
+        try:
+            result = self._infer_attribute_type(receiver, attribute)
+        finally:
+            self._attribute_in_progress.discard(key)
+        self._attribute_types[key] = result
+        return result
+
+    def _infer_attribute_type(self, receiver: _ReceiverType, attribute: str) -> _ReceiverType | None:
+        shape = self.shape(receiver.class_symbol)
+        if not shape.supported:
+            return None
+        related = list(shape.lookup_order)
+        if not receiver.exact:
+            related.extend(self.descendants(receiver.class_symbol))
+        related_ids = {symbol.symbol_id for symbol in related}
+        # Classes whose methods can run with ``self`` bound to such an object.
+        writer_ids = set(related_ids)
+        for symbol in related:
+            writer_ids.update(item.symbol_id for item in self.shape(symbol).lookup_order)
+        writes = self._collect_writes()
+        if attribute in self._indirect_writes or "*" in self._indirect_writes:
+            return None
+        declared: list[Symbol] = []
+        constructed: list[Symbol] = []
+        for class_symbol in related:
+            scope = self.class_scope(class_symbol)
+            if scope is None or attribute in scope.bindings.definition_names:
+                return None
+            for event in scope.events:
+                if not isinstance(event, RelationAssignmentEvent) or attribute not in event.fact.target_names:
+                    continue
+                fact = event.fact
+                if fact.annotation is None or fact.target_names != (attribute,):
+                    return None
+                annotated = self._annotation_class(self._defining_resolver(class_symbol), fact.annotation)
+                if annotated is None:
+                    return None
+                declared.append(annotated)
+        for write in writes.get(attribute, []):
+            fact = write.fact
+            scope = write.scope
+            positional = scope.bindings.positional_parameter_names
+            self_write = (
+                write.owner is not None
+                and bool(positional)
+                and "staticmethod" not in scope.decorator_names
+                and any(
+                    target.target_parts == (positional[0], attribute)
+                    for target in fact.target_attributes
+                )
+            )
+            if not self_write:
+                # ``other.attribute = ...`` may write any object's attribute.
+                return None
+            assert write.owner is not None
+            if write.owner.symbol_id not in writer_ids:
+                # ``self.attribute`` of an unrelated class.
+                continue
+            if (
+                not positional
+                or "staticmethod" in scope.decorator_names
+                or positional[0] in scope.bindings.assigned
+                or fact.certainty != "definite"
+                or fact.target_names
+                or fact.target_attributes
+                != (RelationCallTargetFact("attribute", None, (positional[0], attribute)),)
+            ):
+                return None
+            resolver = self.resolver_at(write.path, scope)
+            if resolver is None:
+                return None
+            if fact.annotation is not None:
+                annotated = self._annotation_class(resolver, fact.annotation)
+                if annotated is None:
+                    return None
+                declared.append(annotated)
+            elif (fact.constructor_name is not None or fact.constructor_parts) and not fact.unpack_names:
+                produced = resolver._call_result(fact.constructor_name, fact.constructor_parts, fact.start_line)
+                if produced is None:
+                    return None
+                constructed.append(produced.class_symbol)
+            elif fact.value_name is not None and fact.value_name != positional[0]:
+                annotation = dict(scope.parameter_annotations).get(fact.value_name)
+                if (
+                    annotation is None
+                    or fact.value_name in scope.bindings.assigned
+                    or _nested_scope_reassigns(scope, fact.value_name)
+                ):
+                    return None
+                annotated = self._annotation_class(self.resolver_at(write.path, scope), annotation)
+                if annotated is None:
+                    return None
+                declared.append(annotated)
+            else:
+                return None
+        classes = {symbol.symbol_id: symbol for symbol in (*declared, *constructed)}
+        if len(classes) != 1:
+            return None
+        return _ReceiverType(next(iter(classes.values())), exact=not declared)
+
+
 class _RelationFactResolver:
     def __init__(
         self,
@@ -2091,8 +2911,10 @@ class _RelationFactResolver:
         constructor_attribute_bindings: Mapping[tuple[str, str], Symbol] | None = None,
         collect_only: bool = False,
         factory_returns: _FactoryReturns | None = None,
+        hierarchy: _ClassHierarchy | None = None,
     ) -> None:
         self.path = path
+        self.hierarchy = hierarchy
         self.module_name = module_name
         self.scope_facts = scope_facts
         self.maps = maps
@@ -2205,6 +3027,9 @@ class _RelationFactResolver:
                 self.scope.field_aliases[fact.target_names[0]] = field_read
         if fact.certainty != "definite" or (fact.constructor_name is None and not fact.constructor_parts):
             return
+        if fact.context_enter is not None:
+            self._bind_context_value(fact)
+            return
         if fact.unpack_names:
             if not all(self._is_unique_constructor_assignment(fact, name) for name in fact.unpack_names):
                 return
@@ -2221,6 +3046,58 @@ class _RelationFactResolver:
             produced = self._call_result(fact.constructor_name, fact.constructor_parts, fact.start_line)
             if produced is not None:
                 self._bind_object(fact.target_names[0], produced)
+        elif len(fact.target_names) == 1 and self._repeats_same_constructor(fact):
+            # ``x = Cls(...)`` repeated: every binding has the same class, but the
+            # instances differ, so no construction site is attached.
+            produced = _strip_site(
+                self._call_result(fact.constructor_name, fact.constructor_parts, fact.start_line)
+            )
+            if produced is not None:
+                self._bind_object(fact.target_names[0], produced)
+                self.scope.repeated_object_names.add(fact.target_names[0])
+
+    def _bind_context_value(self, fact: RelationAssignmentFact) -> None:
+        name = fact.target_names[0]
+        if self.hierarchy is None or fact.context_enter is None:
+            return
+        if not (self._is_unique_constructor_assignment(fact) or self._repeats_same_constructor(fact)):
+            return
+        target = self._resolve_value_call(fact.constructor_name, fact.constructor_parts)
+        if target is None or target.kind != "class":
+            return
+        if self.hierarchy.enter_returns_self(target, fact.context_enter):
+            self._bind_object(name, _Produced(target, None))
+            if not self._is_unique_constructor_assignment(fact):
+                self.scope.repeated_object_names.add(name)
+
+    def _repeats_same_constructor(self, fact: RelationAssignmentFact) -> bool:
+        name = fact.target_names[0]
+        facts = self.scope.facts
+        bindings = facts.bindings
+        if (
+            name in bindings.definition_names
+            or name in bindings.parameter_names
+            or name in bindings.global_names
+            or name in bindings.nonlocal_names
+            or name in bindings.dynamic_names
+            or any(name in _import_binding_names(item) for item in bindings.imports)
+            or _nested_scope_reassigns(facts, name)
+        ):
+            return False
+        key = (fact.constructor_name, fact.constructor_parts, fact.context_enter)
+        assignments = [
+            event.fact
+            for event in facts.events
+            if isinstance(event, RelationAssignmentEvent) and name in event.fact.target_names
+        ]
+        return len(assignments) > 1 and all(
+            item.certainty == "definite"
+            and item.target_names == (name,)
+            and not item.target_attributes
+            and not item.unpack_names
+            and (item.constructor_name, item.constructor_parts, item.context_enter) == key
+            for item in assignments
+        )
 
     def _bind_object(self, name: str, produced: _Produced) -> None:
         self.scope.object_bindings[name] = produced.class_symbol
@@ -2613,11 +3490,17 @@ class _RelationFactResolver:
                 verified_threadpool_wrappers.add(name)
             else:
                 blocked_threadpool_names.add(name)
+        declared_types = (
+            self._declared_parameter_types(scope_facts, symbol)
+            if scope_facts.kind == "function" and self.hierarchy is not None
+            else {}
+        )
         return _Scope(
             facts=scope_facts,
             kind=scope_facts.kind,
             symbol=symbol,
             parent=parent,
+            declared_types=declared_types,
             bindings=bindings,
             shadowed=shadowed,
             dynamic_names=set(binding_facts.dynamic_names),
@@ -2634,6 +3517,59 @@ class _RelationFactResolver:
             active_threadpool_wrappers=set(),
             blocked_threadpool_names=blocked_threadpool_names,
         )
+
+    def _declared_parameter_types(
+        self,
+        scope_facts: RelationScopeFacts,
+        symbol: Symbol,
+    ) -> dict[str, Symbol]:
+        """``self``/``cls`` and class-annotated parameters that are never rebound."""
+
+        bindings = scope_facts.bindings
+        blocked = {
+            *bindings.assigned,
+            *bindings.dynamic_names,
+            *bindings.global_names,
+            *bindings.nonlocal_names,
+        }
+        declared: dict[str, Symbol] = {}
+        positional = bindings.positional_parameter_names
+        owner_name = symbol.qualified_name.rsplit(".", 1)[0]
+        owners = [
+            candidate
+            for candidate in self.maps.by_qualified_name.get(owner_name, [])
+            if candidate.path == self.path and candidate.kind == "class"
+        ]
+        if (
+            len(owners) == 1
+            and positional
+            and positional[0] not in blocked
+            and "staticmethod" not in scope_facts.decorator_names
+            and not _nested_scope_reassigns(scope_facts, positional[0])
+        ):
+            declared[positional[0]] = owners[0]
+        if not scope_facts.parameter_annotations:
+            return declared
+        annotation_scope = getattr(self, "scope", None)
+        if annotation_scope is None:
+            return declared
+        current = self.scope
+        try:
+            self.scope = annotation_scope
+            for name, annotation in scope_facts.parameter_annotations:
+                if name in declared or name in blocked or _nested_scope_reassigns(scope_facts, name):
+                    continue
+                target, _reason, _candidates = self._resolve_call_target_parts_statically(
+                    annotation.target_kind,  # type: ignore[arg-type]
+                    annotation.target_name,
+                    annotation.target_parts,
+                    through_receivers=False,
+                )
+                if target is not None and target.kind == "class":
+                    declared[name] = target
+        finally:
+            self.scope = current
+        return declared
 
     def _symbol_for_scope(self, scope_facts: RelationScopeFacts) -> Symbol | None:
         return self.maps.by_key.get(
@@ -2736,7 +3672,16 @@ class _RelationFactResolver:
         target_kind: Literal["name", "attribute", "dynamic"],
         target_name: str | None,
         target_parts: tuple[str, ...],
+        *,
+        through_receivers: bool = True,
     ) -> tuple[Symbol | None, str, list[str]]:
+        """Resolve one call target; ``through_receivers=False`` stops at names and modules.
+
+        Class bases use the restricted form: a base reached through an object or
+        attribute is dynamic, and resolving it through receiver types would re-enter
+        the class hierarchy that is being built.
+        """
+
         if target_kind == "name" and target_name is not None:
             binding, lookup_reason = self._lookup(target_name)
             if binding is not None and binding.symbol is not None and binding.kind == "symbol":
@@ -2749,34 +3694,6 @@ class _RelationFactResolver:
             return None, "call_target_not_in_snapshot", candidates
         if target_kind == "attribute" and target_parts:
             parts = target_parts
-            if len(parts) == 3:
-                owner = self._instance_receiver_class(parts[0])
-                if owner is None:
-                    owner = self._object_receiver_class(parts[0])
-                if owner is None:
-                    return None, "object_method_not_resolved", self._candidate_ids(parts[-1])
-                attribute_class = self.constructor_attribute_bindings.get(
-                    (owner.symbol_id, parts[1])
-                )
-                if attribute_class is None:
-                    return None, "object_method_not_resolved", self._candidate_ids(parts[-1])
-                target = self._direct_method(attribute_class, parts[2])
-                if target is not None:
-                    return target, "", []
-                return None, "object_method_not_resolved", self._candidate_ids(parts[-1])
-            if len(parts) == 2:
-                object_target, object_reason = self._lookup_object(parts[0])
-                if object_target is not None:
-                    target = self._direct_method(object_target, parts[1])
-                    if target is not None:
-                        return target, "", []
-                    return None, "object_method_not_resolved", self._candidate_ids(parts[-1])
-                if object_reason:
-                    # Import bindings are "invalidated" as objects, but a bound
-                    # module still resolves ``module.function()`` below.
-                    module_binding, _module_reason = self._lookup(parts[0])
-                    if module_binding is None or module_binding.kind != "module":
-                        return None, object_reason, []
             binding, lookup_reason = self._lookup(parts[0])
             if binding is not None and binding.kind == "module" and binding.module_name:
                 target_name = ".".join((binding.module_name, *parts[1:]))
@@ -2784,8 +3701,52 @@ class _RelationFactResolver:
                 if target is not None:
                     return target, "", []
                 return None, "module_attribute_not_in_snapshot", self._candidate_ids(parts[-1])
-            return None, lookup_reason or "object_method_not_resolved", []
+            if not through_receivers:
+                return None, "object_method_not_resolved", []
+            if len(parts) == 3:
+                owner = self._instance_receiver_class(parts[0])
+                if owner is None:
+                    owner = self._object_receiver_class(parts[0])
+                if owner is not None:
+                    attribute_class = self.constructor_attribute_bindings.get(
+                        (owner.symbol_id, parts[1])
+                    )
+                    if attribute_class is not None:
+                        target = self._direct_method(attribute_class, parts[2])
+                        if target is not None:
+                            return target, "", []
+            if self.hierarchy is None:
+                return self._resolve_object_call_without_hierarchy(parts, lookup_reason)
+            receiver, receiver_reason = self._receiver_type(parts[0])
+            if receiver is None:
+                return None, receiver_reason or lookup_reason or "object_method_not_resolved", []
+            if len(parts) == 3:
+                attribute_type = self.hierarchy.attribute_type(receiver, parts[1])
+                if attribute_type is None:
+                    return None, "attribute_type_unknown", self._candidate_ids(parts[-1])
+                receiver = attribute_type
+            elif len(parts) != 2:
+                return None, "object_method_not_resolved", self._candidate_ids(parts[-1])
+            if self._scope_chain_has_attribute_write(parts[-1]):
+                return None, "method_rebound_by_attribute_write", self._candidate_ids(parts[-1])
+            return self.hierarchy.resolve_method(receiver, parts[-1], self._candidate_ids)
         return None, "dynamic_call_target", []
+
+    def _resolve_object_call_without_hierarchy(
+        self,
+        parts: tuple[str, ...],
+        lookup_reason: str | None,
+    ) -> tuple[Symbol | None, str, list[str]]:
+        if len(parts) == 2:
+            object_target, object_reason = self._lookup_object(parts[0])
+            if object_target is not None:
+                target = self._direct_method(object_target, parts[1])
+                if target is not None:
+                    return target, "", []
+                return None, "object_method_not_resolved", self._candidate_ids(parts[-1])
+            if object_reason:
+                return None, object_reason, []
+        return None, lookup_reason or "object_method_not_resolved", self._candidate_ids(parts[-1]) if len(parts) == 3 else []
 
     def _object_receiver_class(self, receiver_name: str) -> Symbol | None:
         """Class of a local object bound by a constructor or a resolved factory."""
@@ -2899,12 +3860,78 @@ class _RelationFactResolver:
             if name in scope.object_invalidated:
                 if name in scope.dynamic_names:
                     return None, "dynamic_call_target"
+                return None, self._unbound_object_reason(scope, name)
+            if scope is not self.scope and name in scope.repeated_object_names:
                 return None, "name_rebound_in_scope"
             target = scope.object_bindings.get(name)
             if target is not None:
                 return target, None
             scope = scope.parent
         return None, None
+
+    def _unbound_object_reason(self, scope: _Scope, name: str) -> str:
+        """Why ``name`` has no known object in ``scope``.
+
+        Parameters and single plain assignments simply have no inferable type;
+        only a name bound more than once, conditionally, or shadowing an outer
+        binding is reported as rebound.
+        """
+
+        if name in scope.bindings or name in scope.facts.bindings.definition_names:
+            return "name_rebound_in_scope"
+        if scope.binding_counts is None:
+            counts: dict[str, tuple[int, bool]] = {
+                parameter: (1, False) for parameter in scope.facts.bindings.parameter_names
+            }
+            for event in scope.facts.events:
+                if isinstance(event, RelationAssignmentEvent):
+                    for target in event.fact.target_names:
+                        count, uncertain = counts.get(target, (0, False))
+                        counts[target] = (count + 1, uncertain or event.fact.certainty != "definite")
+            scope.binding_counts = counts
+        count, uncertain = scope.binding_counts.get(name, (0, False))
+        if count > 1 or uncertain or _nested_scope_reassigns(scope.facts, name):
+            return "name_rebound_in_scope"
+        parent = scope.parent
+        while parent is not None:
+            if (
+                name in parent.bindings
+                or name in parent.object_bindings
+                or name in parent.declared_types
+            ):
+                return "name_rebound_in_scope"
+            parent = parent.parent
+        return "receiver_type_unknown"
+
+    def _lookup_declared(self, name: str) -> Symbol | None:
+        scope: _Scope | None = self.scope
+        while scope is not None:
+            declared = scope.declared_types.get(name)
+            if declared is not None:
+                return declared
+            if name in scope.object_invalidated or name in scope.object_bindings:
+                return None
+            scope = scope.parent
+        return None
+
+    def _receiver_type(self, name: str) -> tuple[_ReceiverType | None, str | None]:
+        exact, reason = self._lookup_object(name)
+        if exact is not None:
+            return _ReceiverType(exact, exact=True), None
+        if reason == "dynamic_call_target":
+            return None, reason
+        declared = self._lookup_declared(name)
+        if declared is not None:
+            return _ReceiverType(declared, exact=False), None
+        binding, lookup_reason = self._lookup(name)
+        if (
+            binding is not None
+            and binding.kind == "symbol"
+            and binding.symbol is not None
+            and binding.symbol.kind == "class"
+        ):
+            return _ReceiverType(binding.symbol, exact=True, class_object=True), None
+        return None, reason or lookup_reason
 
     def _field_read(self, parts: tuple[str, ...]) -> _FieldOf | None:
         owner, _reason = self._lookup_object(parts[0])
@@ -3102,6 +4129,19 @@ def _nested_scope_reassigns(scope: RelationScopeFacts, name: str) -> bool:
         ) or _nested_scope_reassigns(nested, name):
             return True
     return False
+
+
+def _scope_has_indirect_attribute_write(scope: RelationScopeFacts, attribute_name: str) -> bool:
+    if (
+        attribute_name in scope.bindings.indirect_attribute_write_names
+        or "*" in scope.bindings.indirect_attribute_write_names
+    ):
+        return True
+    return any(
+        isinstance(event, RelationScopeEvent)
+        and _scope_has_indirect_attribute_write(event.scope, attribute_name)
+        for event in scope.events
+    )
 
 
 def _scope_has_attribute_write(scope: RelationScopeFacts, attribute_name: str) -> bool:
@@ -3890,6 +4930,17 @@ def _relation_scope_to_json(scope: RelationScopeFacts) -> dict[str, object]:
         ),
         "returns_value": scope.returns_value,
         "base_names": list(scope.base_names),
+        "base_targets": [
+            _relation_call_target_to_json(target) if target is not None else None
+            for target in scope.base_targets
+        ],
+        "class_keywords": list(scope.class_keywords),
+        "decorator_names": list(scope.decorator_names),
+        "parameter_annotations": [
+            {"name": name, "target": _relation_call_target_to_json(target)}
+            for name, target in scope.parameter_annotations
+        ],
+        "is_async": scope.is_async,
     }
 
 
@@ -3975,6 +5026,10 @@ def _relation_assignment_to_json(fact: RelationAssignmentFact) -> dict[str, obje
         "constructor_parts": list(fact.constructor_parts),
         "unpack_names": list(fact.unpack_names),
         "value_parts": list(fact.value_parts),
+        "context_enter": fact.context_enter,
+        "annotation": (
+            _relation_call_target_to_json(fact.annotation) if fact.annotation is not None else None
+        ),
     }
 
 
@@ -4000,6 +5055,11 @@ def _relation_scope_from_json(raw_scope: object) -> RelationScopeFacts:
             "return_annotation",
             "returns_value",
             "base_names",
+            "base_targets",
+            "class_keywords",
+            "decorator_names",
+            "parameter_annotations",
+            "is_async",
         },
         "relation scope",
     )
@@ -4076,6 +5136,32 @@ def _relation_scope_from_json(raw_scope: object) -> RelationScopeFacts:
         ),
         returns_value=_require_bool(raw_scope["returns_value"], "relation scope returns flag"),
         base_names=_relation_names_from_json(raw_scope["base_names"], "base names"),
+        base_targets=tuple(
+            None if item is None else _relation_call_target_from_json(item)
+            for item in _require_list(raw_scope["base_targets"], "relation scope base targets", 1_000)
+        ),
+        class_keywords=tuple(
+            _require_text(item, "relation class keyword", 500)
+            for item in _require_list(raw_scope["class_keywords"], "relation class keywords", 1_000)
+        ),
+        decorator_names=tuple(
+            _require_text(item, "relation decorator name", 500)
+            for item in _require_list(raw_scope["decorator_names"], "relation decorator names", 1_000)
+        ),
+        parameter_annotations=tuple(
+            (
+                _require_text(
+                    _require_dict(item, {"name", "target"}, "relation parameter annotation")["name"],
+                    "relation parameter annotation name",
+                    500,
+                ),
+                _relation_call_target_from_json(item["target"]),
+            )
+            for item in _require_list(
+                raw_scope["parameter_annotations"], "relation parameter annotations", 20_000
+            )
+        ),
+        is_async=_require_bool(raw_scope["is_async"], "relation scope async flag"),
     )
 
 
@@ -4255,6 +5341,8 @@ def _relation_assignment_from_json(raw_fact: object) -> RelationAssignmentFact:
             "constructor_parts",
             "unpack_names",
             "value_parts",
+            "context_enter",
+            "annotation",
         },
         "relation assignment fact",
     )
@@ -4295,6 +5383,9 @@ def _relation_assignment_from_json(raw_fact: object) -> RelationAssignmentFact:
         or len(raw_value_parts) > 100
     ):
         raise ValueError("relation assignment call metadata is invalid")
+    context_enter = raw_fact["context_enter"]
+    if context_enter not in {None, "sync", "async"}:
+        raise ValueError("relation assignment context metadata is invalid")
     return RelationAssignmentFact(
         target_names,
         target_attributes,
@@ -4306,6 +5397,10 @@ def _relation_assignment_from_json(raw_fact: object) -> RelationAssignmentFact:
         tuple(_require_text(part, "relation assignment constructor part", 500) for part in raw_parts),
         tuple(_require_text(name, "relation assignment unpack name", 500) for name in raw_unpack),
         tuple(_require_text(part, "relation assignment value part", 500) for part in raw_value_parts),
+        context_enter,  # type: ignore[arg-type]
+        None
+        if raw_fact["annotation"] is None
+        else _relation_call_target_from_json(raw_fact["annotation"]),
     )
 
 
@@ -4327,6 +5422,12 @@ def _relation_parameter_names_from_json(raw_names: object) -> tuple[str, ...]:
     if len(names) != len(set(names)):
         raise ValueError("relation positional parameter names are not unique")
     return names
+
+
+def _require_list(value: object, label: str, max_length: int) -> list[object]:
+    if not isinstance(value, list) or len(value) > max_length:
+        raise ValueError(f"{label} are invalid")
+    return value
 
 
 def _require_dict(value: object, keys: set[str], label: str) -> dict[str, object]:
@@ -4405,6 +5506,44 @@ def _validate_relation_scope(
         scope.base_names and scope.kind != "class"
     ):
         raise ValueError("relation scope base names are not canonical")
+    if (
+        not isinstance(scope.base_targets, tuple)
+        or len(scope.base_targets) > 1_000
+        or (scope.base_targets and scope.kind != "class")
+    ):
+        raise ValueError("relation scope base targets are invalid")
+    for target in scope.base_targets:
+        if target is not None:
+            _validate_relation_call_target(target)
+            if target.target_kind == "constructor":
+                raise ValueError("relation scope base target is invalid")
+    for label, values in (
+        ("class keywords", scope.class_keywords),
+        ("decorator names", scope.decorator_names),
+    ):
+        if not isinstance(values, tuple) or len(values) > 1_000:
+            raise ValueError(f"relation scope {label} are invalid")
+        for value in values:
+            _require_text(value, f"relation scope {label}", 500)
+    if not isinstance(scope.is_async, bool) or (scope.is_async and scope.kind != "function"):
+        raise ValueError("relation scope async flag is invalid")
+    if scope.class_keywords and scope.kind != "class":
+        raise ValueError("relation scope class keywords are invalid")
+    if scope.decorator_names and scope.kind == "module":
+        raise ValueError("relation scope decorator names are invalid")
+    if (
+        not isinstance(scope.parameter_annotations, tuple)
+        or len(scope.parameter_annotations) > 20_000
+        or (scope.parameter_annotations and scope.kind != "function")
+    ):
+        raise ValueError("relation scope parameter annotations are invalid")
+    for item in scope.parameter_annotations:
+        if not isinstance(item, tuple) or len(item) != 2:
+            raise ValueError("relation scope parameter annotation is invalid")
+        _require_text(item[0], "relation parameter annotation name", 500)
+        _validate_relation_call_target(item[1])
+        if item[1].target_kind == "constructor":
+            raise ValueError("relation parameter annotation target is invalid")
     _require_positive_int(scope.start_line, "relation scope line")
     bindings = scope.bindings
     if not isinstance(bindings.has_variadic_parameters, bool):
@@ -4613,6 +5752,18 @@ def _validate_relation_assignment(fact: RelationAssignmentFact) -> None:
             raise ValueError("relation assignment constructor target is invalid")
     if fact.value_name is not None:
         _require_text(fact.value_name, "relation assignment value name", 500)
+    if fact.context_enter is not None and (
+        fact.context_enter not in {"sync", "async"}
+        or len(fact.target_names) != 1
+        or fact.target_attributes
+        or (fact.constructor_name is None and not fact.constructor_parts)
+        or fact.unpack_names
+    ):
+        raise ValueError("relation assignment context metadata is invalid")
+    if fact.annotation is not None:
+        _validate_relation_call_target(fact.annotation)
+        if fact.annotation.target_kind == "constructor":
+            raise ValueError("relation assignment annotation is invalid")
     if fact.certainty not in {"definite", "uncertain"}:
         raise ValueError("relation assignment certainty is invalid")
     _validate_line_range(fact.start_line, fact.end_line, "relation assignment")

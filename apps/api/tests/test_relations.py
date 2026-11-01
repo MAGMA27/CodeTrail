@@ -657,7 +657,6 @@ def test_constructed_object_method_resolution_rejects_unsafe_patterns(tmp_path: 
             "sample.caller.parameter_shadow",
             "sample.caller.conditional",
             "sample.caller.constructor_shadow",
-            "sample.caller.inherited",
             "sample.caller.decorated",
             "sample.caller.class_override",
             "sample.caller.instance_override",
@@ -673,14 +672,23 @@ def test_constructed_object_method_resolution_rejects_unsafe_patterns(tmp_path: 
             "sample.caller.Duplicate.run",
         }
     )
+    # ``Inherited()`` is exactly ``Inherited``; its own ``run`` wins the MRO.
+    assert ("sample.caller.inherited", "sample.caller.Inherited.run") in calls
+    assert ("sample.caller.inherited", "sample.caller.Plain.run") not in calls
     unresolved_by_source = {
-        names[item.source_symbol_id]: item.reason for item in result.unresolved
+        names[item.source_symbol_id]: item.reason
+        for item in result.unresolved
+        if item.expression.startswith(("obj.run", "getattr(obj, 'run')()"))
     }
-    assert unresolved_by_source["sample.caller.parameter_shadow"] == "name_rebound_in_scope"
+    assert unresolved_by_source["sample.caller.reassigned"] == "name_rebound_in_scope"
+    # A parameter is not a rebinding; its type is simply unknown.
+    assert unresolved_by_source["sample.caller.parameter_shadow"] == "receiver_type_unknown"
     assert unresolved_by_source["sample.caller.conditional"] == "name_rebound_in_scope"
-    assert unresolved_by_source["sample.caller.inherited"] == "object_method_not_resolved"
-    assert unresolved_by_source["sample.caller.decorated"] == "object_method_not_resolved"
-    assert unresolved_by_source["sample.caller.call_site_override"] == "object_method_not_resolved"
+    assert unresolved_by_source["sample.caller.decorated"] == "decorated_method_not_resolved"
+    assert unresolved_by_source["sample.caller.class_override"] == "method_rebound_by_attribute_write"
+    assert unresolved_by_source["sample.caller.instance_override"] == "method_rebound_by_attribute_write"
+    assert unresolved_by_source["sample.caller.call_site_override"] == "method_rebound_by_attribute_write"
+    assert unresolved_by_source["sample.caller.duplicate"] == "ambiguous_method_definition"
     assert unresolved_by_source["sample.caller.dynamic"] == "dynamic_call_target"
 
 
@@ -776,7 +784,10 @@ def test_code_trail_workspace_service_reader_stays_unresolved_after_new_bypass()
         and item.expression.startswith("self.index_service.read_source(")
     ]
     assert len(unresolved) == 1
-    assert unresolved[0].reason == "object_method_not_resolved"
+    # tests/test_freshness.py reassigns ``workspace_service.index_service`` from
+    # outside the class, so the field type stays unknown even though the
+    # constructor parameter is annotated ``IndexService``.
+    assert unresolved[0].reason == "attribute_type_unknown"
     # WorkspaceService is built by factory.create_services(); the extractor follows
     # the returned instance back to that constructor call.
     handler_contexts = [
@@ -1472,3 +1483,269 @@ def test_from_imported_module_calls_resolve_unless_the_name_is_rebound(tmp_path:
         if item.expression == "helpers.run()" and item.reason == "name_rebound_in_scope"
     }
     assert rebound == {"pkg.main.param", "pkg.main.except_rebind"}
+
+
+def _relation_fixture(tmp_path: Path, files: dict[str, str]):
+    package = tmp_path / "sample"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    for name, text in files.items():
+        (package / name).write_text(text, encoding="utf-8")
+    definitions = extract_definitions(
+        build_source_snapshot(tmp_path, repository_id="methods", revision="fixture-v1", dirty=True)
+    )
+    result = extract_relations(definitions)
+    for path, facts in result.fact_cache_entries:
+        # New method facts (bases, decorators, annotations, ``with``) survive the cache.
+        assert deserialize_relation_file_facts(
+            serialize_relation_file_facts(facts), expected_path=path
+        ) == facts
+    names = {symbol.symbol_id: symbol.qualified_name for symbol in result.symbols}
+    calls = {
+        (names[edge.source_id], names[edge.target_id])
+        for edge in result.edges
+        if edge.kind == "calls"
+    }
+    unresolved = {
+        (names[item.source_symbol_id], item.expression): item
+        for item in result.unresolved
+    }
+    return result, names, calls, unresolved
+
+
+def test_self_and_cls_calls_follow_in_repo_mro(tmp_path: Path) -> None:
+    result, names, calls, unresolved = _relation_fixture(
+        tmp_path,
+        {
+            "base.py": (
+                "class Base:\n"
+                "    def helper(self) -> None:\n"
+                "        pass\n"
+                "    def template(self) -> None:\n"
+                "        self.hook()\n"
+                "    def hook(self) -> None:\n"
+                "        pass\n"
+                "    @classmethod\n"
+                "    def build(cls) -> None:\n"
+                "        cls.helper(None)\n"
+            ),
+            "client.py": (
+                "import abc\n"
+                "from .base import Base\n"
+                "from external import Mixin\n\n"
+                "class Client(Base):\n"
+                "    def send(self) -> None:\n"
+                "        self.helper()\n"
+                "        self._send_once()\n"
+                "    def _send_once(self) -> None:\n"
+                "        pass\n"
+                "    def hook(self) -> None:\n"
+                "        pass\n"
+                "    @staticmethod\n"
+                "    def static(value) -> None:\n"
+                "        value.helper()\n\n"
+                "class Mixed(Mixin):\n"
+                "    def own(self) -> None:\n"
+                "        pass\n"
+                "    def run(self) -> None:\n"
+                "        self.own()\n"
+                "        self.inherited()\n\n"
+                "def use() -> None:\n"
+                "    Client.build()\n"
+            ),
+        },
+    )
+
+    assert ("sample.client.Client.send", "sample.base.Base.helper") in calls
+    assert ("sample.client.Client.send", "sample.client.Client._send_once") in calls
+    assert ("sample.base.Base.build", "sample.base.Base.helper") in calls
+    assert ("sample.client.use", "sample.base.Base.build") in calls
+    assert ("sample.client.Mixed.run", "sample.client.Mixed.own") in calls
+    # ``self`` in Base may be a Client, which overrides ``hook``.
+    hook = unresolved[("sample.base.Base.template", "self.hook()")]
+    assert hook.reason == "method_overridden_in_subclass"
+    assert {names[item] for item in hook.possible_target_ids} == {
+        "sample.base.Base.hook",
+        "sample.client.Client.hook",
+    }
+    # An external base may supply ``inherited``; a staticmethod has no ``self``.
+    assert unresolved[("sample.client.Mixed.run", "self.inherited()")].reason == "base_class_not_in_snapshot"
+    assert unresolved[("sample.client.Client.static", "value.helper()")].reason == "receiver_type_unknown"
+    assert not any(item.reason == "name_rebound_in_scope" for item in result.unresolved)
+
+
+def test_instance_attribute_with_and_annotated_receivers(tmp_path: Path) -> None:
+    result, names, calls, unresolved = _relation_fixture(
+        tmp_path,
+        {
+            "transport.py": (
+                "class Transport:\n"
+                "    def handle(self) -> None:\n"
+                "        pass\n\n"
+                "class Pool:\n"
+                "    def acquire(self) -> None:\n"
+                "        pass\n\n"
+                "class Session:\n"
+                "    def __enter__(self):\n"
+                "        return self\n"
+                "    def __exit__(self, *args) -> None:\n"
+                "        pass\n"
+                "    def get(self) -> None:\n"
+                "        pass\n\n"
+                "class Opaque:\n"
+                "    def __enter__(self):\n"
+                "        return Transport()\n"
+                "    def __exit__(self, *args) -> None:\n"
+                "        pass\n"
+                "    def get(self) -> None:\n"
+                "        pass\n"
+            ),
+            "client.py": (
+                "from .transport import Opaque, Pool, Session, Transport\n\n"
+                "class Client:\n"
+                "    pool: Pool\n"
+                "    def __init__(self, transport: Transport) -> None:\n"
+                "        self.transport = transport\n"
+                "        self.fresh = Transport()\n"
+                "        self.mutable = Transport()\n"
+                "        self.pair, self.spare = Transport(), Pool()\n"
+                "    def send(self) -> None:\n"
+                "        self.pair.handle()\n"
+                "        self.transport.handle()\n"
+                "        self.fresh.handle()\n"
+                "        self.pool.acquire()\n"
+                "        self.mutable.handle()\n\n"
+                "def rebind(client: Client) -> None:\n"
+                "    client.mutable = object()\n\n"
+                "def annotated(client: Client, other: 'Transport | None') -> None:\n"
+                "    client.send()\n"
+                "    other.handle()\n\n"
+                "def reassigned(client: Client) -> None:\n"
+                "    client = make()\n"
+                "    client.send()\n\n"
+                "def context() -> None:\n"
+                "    with Session() as session:\n"
+                "        session.get()\n"
+                "    with Opaque() as opaque:\n"
+                "        opaque.get()\n\n"
+                "def repeated() -> None:\n"
+                "    item = Transport()\n"
+                "    item.handle()\n"
+                "    item = Transport()\n"
+                "    item.handle()\n"
+            ),
+        },
+    )
+
+    assert ("sample.client.Client.send", "sample.transport.Transport.handle") in calls
+    assert ("sample.client.Client.send", "sample.transport.Pool.acquire") in calls
+    assert ("sample.client.annotated", "sample.client.Client.send") in calls
+    assert ("sample.client.annotated", "sample.transport.Transport.handle") in calls
+    assert ("sample.client.context", "sample.transport.Session.get") in calls
+    assert ("sample.client.repeated", "sample.transport.Transport.handle") in calls
+    # ``mutable`` is also written from outside the class: its type is unknown.
+    assert unresolved[("sample.client.Client.send", "self.mutable.handle()")].reason == "attribute_type_unknown"
+    # Tuple-unpacked attribute writes count as writes of an unknown value.
+    assert unresolved[("sample.client.Client.send", "self.pair.handle()")].reason == "attribute_type_unknown"
+    assert ("sample.client.reassigned", "sample.client.Client.send") not in calls
+    assert unresolved[("sample.client.reassigned", "client.send()")].reason == "name_rebound_in_scope"
+    # ``Opaque.__enter__`` does not return self, so ``opaque`` stays unknown.
+    assert ("sample.client.context", "sample.transport.Opaque.get") not in calls
+    assert unresolved[("sample.client.context", "opaque.get()")].reason == "receiver_type_unknown"
+
+
+def test_method_resolution_keeps_conservative_guards(tmp_path: Path) -> None:
+    result, names, calls, unresolved = _relation_fixture(
+        tmp_path,
+        {
+            "shapes.py": (
+                "from typing import Protocol\n"
+                "from external import Meta, magic\n\n"
+                "class Reader(Protocol):\n"
+                "    def read(self) -> None:\n"
+                "        ...\n\n"
+                "class Managed(metaclass=Meta):\n"
+                "    def run(self) -> None:\n"
+                "        pass\n\n"
+                "@magic\n"
+                "class Wrapped:\n"
+                "    def run(self) -> None:\n"
+                "        pass\n"
+                "    def again(self) -> None:\n"
+                "        self.run()\n\n"
+                "class Plain:\n"
+                "    def run(self) -> None:\n"
+                "        pass\n\n"
+                "def protocol(reader: Reader) -> None:\n"
+                "    reader.read()\n\n"
+                "def managed() -> None:\n"
+                "    Managed().run()\n"
+                "    item = Managed()\n"
+                "    item.run()\n\n"
+                "def wrapped() -> None:\n"
+                "    item = Wrapped()\n"
+                "    item.run()\n\n"
+                "def patched(monkeypatch) -> None:\n"
+                "    monkeypatch.setattr(Plain, 'run', lambda self: None)\n"
+                "    item = Plain()\n"
+                "    item.run()\n"
+            ),
+        },
+    )
+
+    assert unresolved[("sample.shapes.protocol", "reader.read()")].reason == "structural_protocol_receiver"
+    assert unresolved[("sample.shapes.managed", "item.run()")].reason == "class_shape_not_supported"
+    # An unknown class decorator may replace ``Wrapped()``, but not the methods ``self`` runs.
+    assert unresolved[("sample.shapes.wrapped", "item.run()")].reason == "class_shape_not_supported"
+    assert ("sample.shapes.Wrapped.again", "sample.shapes.Wrapped.run") in calls
+    assert unresolved[("sample.shapes.patched", "item.run()")].reason == "method_rebound_by_attribute_write"
+    assert not any(target.endswith(".run") and source != "sample.shapes.Wrapped.again" for source, target in calls)
+
+
+def test_class_bases_through_receivers_stay_unknown_without_recursion(tmp_path: Path) -> None:
+    # Regression: resolving a base such as ``self.holder.Base`` through receiver types
+    # re-entered the class hierarchy that was being built (RecursionError on sqlalchemy).
+    result, names, calls, unresolved = _relation_fixture(
+        tmp_path,
+        {
+            "fixture.py": (
+                "class Holder:\n"
+                "    def ping(self) -> None:\n"
+                "        pass\n"
+                "class Fixture:\n"
+                "    class Base:\n"
+                "        def ping(self) -> None:\n"
+                "            pass\n"
+                "    def __init__(self) -> None:\n"
+                "        self.holder = Holder()\n"
+                "    @classmethod\n"
+                "    def define(cls) -> None:\n"
+                "        class Parent(cls.Basic):\n"
+                "            def run(self) -> None:\n"
+                "                self.helper()\n"
+                "        class Child(self_holder_base()):\n"
+                "            pass\n"
+                "    def via_self(self) -> None:\n"
+                "        class Local(self.Base):\n"
+                "            def go(self) -> None:\n"
+                "                self.ping()\n"
+                "    def nested(self) -> None:\n"
+                "        class Deep(self.holder.Base):\n"
+                "            def go(self) -> None:\n"
+                "                self.ping()\n"
+                "        self.holder.ping()\n"
+                "def self_holder_base():\n"
+                "    return object\n"
+            ),
+        },
+    )
+
+    assert ("sample.fixture.Fixture.nested", "sample.fixture.Holder.ping") in calls
+    # Bases reached through an object are dynamic, so their members stay unknown.
+    assert unresolved[("sample.fixture.Fixture.nested.Deep.go", "self.ping()")].reason == (
+        "base_class_not_in_snapshot"
+    )
+    assert ("sample.fixture.Fixture.define.Parent.run", "self.helper()") in unresolved
+    assert unresolved[("sample.fixture.Fixture.via_self.Local.go", "self.ping()")].reason == (
+        "base_class_not_in_snapshot"
+    )

@@ -600,7 +600,7 @@ def test_cached_object_method_facts_rebind_to_changed_and_restored_targets(tmp_p
             cached=store.load_relation_cache(**_relation_cache_kwargs(snapshot_two)),
         )
         assert any(
-            item.reason == "object_method_not_resolved"
+            item.reason == "method_not_found_in_class_hierarchy"
             for item in relations_two.unresolved
             if item.expression == "obj.run()"
         )
@@ -721,8 +721,8 @@ def test_relation_cache_corruption_and_shared_capacity_are_bounded(tmp_path: Pat
         )
         assert store.load_relation_cache(**_relation_cache_kwargs(snapshot)) == {}
         unsupported = original["result_json"].replace(
+            '"format_version":"relation-facts-v6"',
             '"format_version":"relation-facts-v5"',
-            '"format_version":"relation-facts-v4"',
         )
         store.connection.execute(
             "UPDATE relation_cache SET result_json = ?, result_bytes = ? WHERE scope_id = ?",

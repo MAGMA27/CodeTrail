@@ -1438,6 +1438,17 @@
               "title": "Completed Sequence",
               "type": "integer"
             },
+            "completeness": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/NeighborCompleteness"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
             "contextual_calls": {
               "items": {
                 "$ref": "#/$defs/ContextualCall"
@@ -1514,6 +1525,14 @@
               },
               "maxItems": 40,
               "title": "Nodes",
+              "type": "array"
+            },
+            "possible_unresolved_callers": {
+              "items": {
+                "$ref": "#/$defs/UnresolvedReference"
+              },
+              "maxItems": 10,
+              "title": "Possible Unresolved Callers",
               "type": "array"
             },
             "request_id": {
@@ -1698,6 +1717,20 @@
         "Neighbor": {
           "additionalProperties": false,
           "properties": {
+            "depth": {
+              "anyOf": [
+                {
+                  "maximum": 3,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Depth"
+            },
             "edge": {
               "$ref": "#/$defs/CodeEdge"
             },
@@ -1710,6 +1743,80 @@
             "edge"
           ],
           "title": "Neighbor",
+          "type": "object"
+        },
+        "NeighborCompleteness": {
+          "additionalProperties": false,
+          "description": "Whether static neighbors may miss callers or callees.\n\nStatic analysis only resolves calls it can prove. ``possible_unresolved_caller_count``\ncounts unresolved calls anywhere in the index that name the root symbol (or list it\nas a possible target); it is computed for the root only. ``unresolved_outgoing_count``\ncounts unresolved calls made by the returned nodes.",
+          "properties": {
+            "hint": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Hint"
+            },
+            "possible_unresolved_caller_count": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Possible Unresolved Caller Count"
+            },
+            "reasons": {
+              "items": {
+                "enum": [
+                  "query_truncated",
+                  "index_truncated",
+                  "unresolved_details_truncated",
+                  "unresolved_coverage_unknown",
+                  "possible_unresolved_callers",
+                  "unresolved_outgoing_calls"
+                ],
+                "type": "string"
+              },
+              "maxItems": 6,
+              "title": "Reasons",
+              "type": "array"
+            },
+            "status": {
+              "enum": [
+                "complete",
+                "possibly_incomplete"
+              ],
+              "title": "Status",
+              "type": "string"
+            },
+            "unresolved_outgoing_count": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Unresolved Outgoing Count"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "title": "NeighborCompleteness",
           "type": "object"
         },
         "ReadSourceFailure": {
@@ -3639,6 +3746,17 @@
               "title": "Completed Sequence",
               "type": "integer"
             },
+            "completeness": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/NeighborCompleteness"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
             "contextual_calls": {
               "items": {
                 "$ref": "#/$defs/ContextualCall"
@@ -3715,6 +3833,14 @@
               },
               "maxItems": 40,
               "title": "Nodes",
+              "type": "array"
+            },
+            "possible_unresolved_callers": {
+              "items": {
+                "$ref": "#/$defs/UnresolvedReference"
+              },
+              "maxItems": 10,
+              "title": "Possible Unresolved Callers",
               "type": "array"
             },
             "request_id": {
@@ -3899,6 +4025,20 @@
         "Neighbor": {
           "additionalProperties": false,
           "properties": {
+            "depth": {
+              "anyOf": [
+                {
+                  "maximum": 3,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Depth"
+            },
             "edge": {
               "$ref": "#/$defs/CodeEdge"
             },
@@ -3911,6 +4051,80 @@
             "edge"
           ],
           "title": "Neighbor",
+          "type": "object"
+        },
+        "NeighborCompleteness": {
+          "additionalProperties": false,
+          "description": "Whether static neighbors may miss callers or callees.\n\nStatic analysis only resolves calls it can prove. ``possible_unresolved_caller_count``\ncounts unresolved calls anywhere in the index that name the root symbol (or list it\nas a possible target); it is computed for the root only. ``unresolved_outgoing_count``\ncounts unresolved calls made by the returned nodes.",
+          "properties": {
+            "hint": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Hint"
+            },
+            "possible_unresolved_caller_count": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Possible Unresolved Caller Count"
+            },
+            "reasons": {
+              "items": {
+                "enum": [
+                  "query_truncated",
+                  "index_truncated",
+                  "unresolved_details_truncated",
+                  "unresolved_coverage_unknown",
+                  "possible_unresolved_callers",
+                  "unresolved_outgoing_calls"
+                ],
+                "type": "string"
+              },
+              "maxItems": 6,
+              "title": "Reasons",
+              "type": "array"
+            },
+            "status": {
+              "enum": [
+                "complete",
+                "possibly_incomplete"
+              ],
+              "title": "Status",
+              "type": "string"
+            },
+            "unresolved_outgoing_count": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Unresolved Outgoing Count"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "title": "NeighborCompleteness",
           "type": "object"
         },
         "ReadSourceFailure": {
@@ -10664,6 +10878,17 @@
               "title": "Completed Sequence",
               "type": "integer"
             },
+            "completeness": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/NeighborCompleteness"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
             "contextual_calls": {
               "items": {
                 "$ref": "#/$defs/ContextualCall"
@@ -10740,6 +10965,14 @@
               },
               "maxItems": 40,
               "title": "Nodes",
+              "type": "array"
+            },
+            "possible_unresolved_callers": {
+              "items": {
+                "$ref": "#/$defs/UnresolvedReference"
+              },
+              "maxItems": 10,
+              "title": "Possible Unresolved Callers",
               "type": "array"
             },
             "request_id": {
@@ -11154,6 +11387,20 @@
         "Neighbor": {
           "additionalProperties": false,
           "properties": {
+            "depth": {
+              "anyOf": [
+                {
+                  "maximum": 3,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Depth"
+            },
             "edge": {
               "$ref": "#/$defs/CodeEdge"
             },
@@ -11166,6 +11413,80 @@
             "edge"
           ],
           "title": "Neighbor",
+          "type": "object"
+        },
+        "NeighborCompleteness": {
+          "additionalProperties": false,
+          "description": "Whether static neighbors may miss callers or callees.\n\nStatic analysis only resolves calls it can prove. ``possible_unresolved_caller_count``\ncounts unresolved calls anywhere in the index that name the root symbol (or list it\nas a possible target); it is computed for the root only. ``unresolved_outgoing_count``\ncounts unresolved calls made by the returned nodes.",
+          "properties": {
+            "hint": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Hint"
+            },
+            "possible_unresolved_caller_count": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Possible Unresolved Caller Count"
+            },
+            "reasons": {
+              "items": {
+                "enum": [
+                  "query_truncated",
+                  "index_truncated",
+                  "unresolved_details_truncated",
+                  "unresolved_coverage_unknown",
+                  "possible_unresolved_callers",
+                  "unresolved_outgoing_calls"
+                ],
+                "type": "string"
+              },
+              "maxItems": 6,
+              "title": "Reasons",
+              "type": "array"
+            },
+            "status": {
+              "enum": [
+                "complete",
+                "possibly_incomplete"
+              ],
+              "title": "Status",
+              "type": "string"
+            },
+            "unresolved_outgoing_count": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Unresolved Outgoing Count"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "title": "NeighborCompleteness",
           "type": "object"
         },
         "ReadSourceFailure": {
@@ -24692,6 +25013,20 @@
         "Neighbor": {
           "additionalProperties": false,
           "properties": {
+            "depth": {
+              "anyOf": [
+                {
+                  "maximum": 3,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Depth"
+            },
             "edge": {
               "$ref": "#/$defs/CodeEdge"
             },
@@ -24706,9 +25041,94 @@
           "title": "Neighbor",
           "type": "object"
         },
+        "NeighborCompleteness": {
+          "additionalProperties": false,
+          "description": "Whether static neighbors may miss callers or callees.\n\nStatic analysis only resolves calls it can prove. ``possible_unresolved_caller_count``\ncounts unresolved calls anywhere in the index that name the root symbol (or list it\nas a possible target); it is computed for the root only. ``unresolved_outgoing_count``\ncounts unresolved calls made by the returned nodes.",
+          "properties": {
+            "hint": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Hint"
+            },
+            "possible_unresolved_caller_count": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Possible Unresolved Caller Count"
+            },
+            "reasons": {
+              "items": {
+                "enum": [
+                  "query_truncated",
+                  "index_truncated",
+                  "unresolved_details_truncated",
+                  "unresolved_coverage_unknown",
+                  "possible_unresolved_callers",
+                  "unresolved_outgoing_calls"
+                ],
+                "type": "string"
+              },
+              "maxItems": 6,
+              "title": "Reasons",
+              "type": "array"
+            },
+            "status": {
+              "enum": [
+                "complete",
+                "possibly_incomplete"
+              ],
+              "title": "Status",
+              "type": "string"
+            },
+            "unresolved_outgoing_count": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Unresolved Outgoing Count"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "title": "NeighborCompleteness",
+          "type": "object"
+        },
         "NeighborsIndexResponse": {
           "additionalProperties": false,
           "properties": {
+            "completeness": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/NeighborCompleteness"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
             "contextual_calls": {
               "items": {
                 "$ref": "#/$defs/ContextualCall"
@@ -24778,6 +25198,14 @@
                 "$ref": "#/$defs/Symbol"
               },
               "title": "Nodes",
+              "type": "array"
+            },
+            "possible_unresolved_callers": {
+              "items": {
+                "$ref": "#/$defs/UnresolvedReference"
+              },
+              "maxItems": 10,
+              "title": "Possible Unresolved Callers",
               "type": "array"
             },
             "root": {
@@ -25498,8 +25926,23 @@
         "OverviewClassificationCoverage": {
           "additionalProperties": false,
           "properties": {
+            "analysis_incomplete": {
+              "default": false,
+              "title": "Analysis Incomplete",
+              "type": "boolean"
+            },
             "category_counts": {
               "$ref": "#/$defs/OverviewClassificationCounts"
+            },
+            "incomplete_reasons": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 8,
+              "title": "Incomplete Reasons",
+              "type": "array"
             },
             "total": {
               "minimum": 0,
@@ -26182,6 +26625,56 @@
           "title": "OverviewPath",
           "type": "object"
         },
+        "OverviewSectionCoverage": {
+          "additionalProperties": false,
+          "description": "How many items one overview section returned out of the items it found.",
+          "properties": {
+            "returned": {
+              "minimum": 0,
+              "title": "Returned",
+              "type": "integer"
+            },
+            "section": {
+              "enum": [
+                "entries",
+                "groups",
+                "modules",
+                "classifications",
+                "module_relations",
+                "http_associations",
+                "paths",
+                "unresolved",
+                "references"
+              ],
+              "title": "Section",
+              "type": "string"
+            },
+            "total": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Total"
+            },
+            "truncated": {
+              "title": "Truncated",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "section",
+            "total",
+            "returned",
+            "truncated"
+          ],
+          "title": "OverviewSectionCoverage",
+          "type": "object"
+        },
         "ProjectOverview": {
           "additionalProperties": false,
           "description": "Deterministic, rule-only overview of one project index snapshot.",
@@ -26302,6 +26795,14 @@
               "default": "0.1.0",
               "title": "Schema Version",
               "type": "string"
+            },
+            "section_coverage": {
+              "items": {
+                "$ref": "#/$defs/OverviewSectionCoverage"
+              },
+              "maxItems": 16,
+              "title": "Section Coverage",
+              "type": "array"
             },
             "truncated": {
               "default": false,
@@ -26523,6 +27024,17 @@
           "anyOf": [
             {
               "$ref": "#/$defs/ProjectOverview"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "reference_coverage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OverviewSectionCoverage"
             },
             {
               "type": "null"
@@ -27754,6 +28266,17 @@
               "title": "Completed Sequence",
               "type": "integer"
             },
+            "completeness": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/NeighborCompleteness"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
             "contextual_calls": {
               "items": {
                 "$ref": "#/$defs/ContextualCall"
@@ -27830,6 +28353,14 @@
               },
               "maxItems": 40,
               "title": "Nodes",
+              "type": "array"
+            },
+            "possible_unresolved_callers": {
+              "items": {
+                "$ref": "#/$defs/UnresolvedReference"
+              },
+              "maxItems": 10,
+              "title": "Possible Unresolved Callers",
               "type": "array"
             },
             "request_id": {
@@ -28060,6 +28591,20 @@
         "Neighbor": {
           "additionalProperties": false,
           "properties": {
+            "depth": {
+              "anyOf": [
+                {
+                  "maximum": 3,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Depth"
+            },
             "edge": {
               "$ref": "#/$defs/CodeEdge"
             },
@@ -28072,6 +28617,80 @@
             "edge"
           ],
           "title": "Neighbor",
+          "type": "object"
+        },
+        "NeighborCompleteness": {
+          "additionalProperties": false,
+          "description": "Whether static neighbors may miss callers or callees.\n\nStatic analysis only resolves calls it can prove. ``possible_unresolved_caller_count``\ncounts unresolved calls anywhere in the index that name the root symbol (or list it\nas a possible target); it is computed for the root only. ``unresolved_outgoing_count``\ncounts unresolved calls made by the returned nodes.",
+          "properties": {
+            "hint": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Hint"
+            },
+            "possible_unresolved_caller_count": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Possible Unresolved Caller Count"
+            },
+            "reasons": {
+              "items": {
+                "enum": [
+                  "query_truncated",
+                  "index_truncated",
+                  "unresolved_details_truncated",
+                  "unresolved_coverage_unknown",
+                  "possible_unresolved_callers",
+                  "unresolved_outgoing_calls"
+                ],
+                "type": "string"
+              },
+              "maxItems": 6,
+              "title": "Reasons",
+              "type": "array"
+            },
+            "status": {
+              "enum": [
+                "complete",
+                "possibly_incomplete"
+              ],
+              "title": "Status",
+              "type": "string"
+            },
+            "unresolved_outgoing_count": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Unresolved Outgoing Count"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "title": "NeighborCompleteness",
           "type": "object"
         },
         "ReadSourceFailure": {
@@ -32799,6 +33418,17 @@
               "title": "Completed Sequence",
               "type": "integer"
             },
+            "completeness": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/NeighborCompleteness"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
             "contextual_calls": {
               "items": {
                 "$ref": "#/$defs/ContextualCall"
@@ -32875,6 +33505,14 @@
               },
               "maxItems": 40,
               "title": "Nodes",
+              "type": "array"
+            },
+            "possible_unresolved_callers": {
+              "items": {
+                "$ref": "#/$defs/UnresolvedReference"
+              },
+              "maxItems": 10,
+              "title": "Possible Unresolved Callers",
               "type": "array"
             },
             "request_id": {
@@ -32992,6 +33630,20 @@
         "Neighbor": {
           "additionalProperties": false,
           "properties": {
+            "depth": {
+              "anyOf": [
+                {
+                  "maximum": 3,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Depth"
+            },
             "edge": {
               "$ref": "#/$defs/CodeEdge"
             },
@@ -33004,6 +33656,80 @@
             "edge"
           ],
           "title": "Neighbor",
+          "type": "object"
+        },
+        "NeighborCompleteness": {
+          "additionalProperties": false,
+          "description": "Whether static neighbors may miss callers or callees.\n\nStatic analysis only resolves calls it can prove. ``possible_unresolved_caller_count``\ncounts unresolved calls anywhere in the index that name the root symbol (or list it\nas a possible target); it is computed for the root only. ``unresolved_outgoing_count``\ncounts unresolved calls made by the returned nodes.",
+          "properties": {
+            "hint": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Hint"
+            },
+            "possible_unresolved_caller_count": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Possible Unresolved Caller Count"
+            },
+            "reasons": {
+              "items": {
+                "enum": [
+                  "query_truncated",
+                  "index_truncated",
+                  "unresolved_details_truncated",
+                  "unresolved_coverage_unknown",
+                  "possible_unresolved_callers",
+                  "unresolved_outgoing_calls"
+                ],
+                "type": "string"
+              },
+              "maxItems": 6,
+              "title": "Reasons",
+              "type": "array"
+            },
+            "status": {
+              "enum": [
+                "complete",
+                "possibly_incomplete"
+              ],
+              "title": "Status",
+              "type": "string"
+            },
+            "unresolved_outgoing_count": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Unresolved Outgoing Count"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "title": "NeighborCompleteness",
           "type": "object"
         },
         "ReadSourceFailure": {
@@ -37430,8 +38156,23 @@
         "OverviewClassificationCoverage": {
           "additionalProperties": false,
           "properties": {
+            "analysis_incomplete": {
+              "default": false,
+              "title": "Analysis Incomplete",
+              "type": "boolean"
+            },
             "category_counts": {
               "$ref": "#/$defs/OverviewClassificationCounts"
+            },
+            "incomplete_reasons": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 8,
+              "title": "Incomplete Reasons",
+              "type": "array"
             },
             "total": {
               "minimum": 0,
@@ -38114,6 +38855,56 @@
           "title": "OverviewPath",
           "type": "object"
         },
+        "OverviewSectionCoverage": {
+          "additionalProperties": false,
+          "description": "How many items one overview section returned out of the items it found.",
+          "properties": {
+            "returned": {
+              "minimum": 0,
+              "title": "Returned",
+              "type": "integer"
+            },
+            "section": {
+              "enum": [
+                "entries",
+                "groups",
+                "modules",
+                "classifications",
+                "module_relations",
+                "http_associations",
+                "paths",
+                "unresolved",
+                "references"
+              ],
+              "title": "Section",
+              "type": "string"
+            },
+            "total": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Total"
+            },
+            "truncated": {
+              "title": "Truncated",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "section",
+            "total",
+            "returned",
+            "truncated"
+          ],
+          "title": "OverviewSectionCoverage",
+          "type": "object"
+        },
         "SourceLocation": {
           "additionalProperties": false,
           "properties": {
@@ -38395,6 +39186,14 @@
           "default": "0.1.0",
           "title": "Schema Version",
           "type": "string"
+        },
+        "section_coverage": {
+          "items": {
+            "$ref": "#/$defs/OverviewSectionCoverage"
+          },
+          "maxItems": 16,
+          "title": "Section Coverage",
+          "type": "array"
         },
         "truncated": {
           "default": false,
@@ -40793,6 +41592,17 @@
               "title": "Completed Sequence",
               "type": "integer"
             },
+            "completeness": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/NeighborCompleteness"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
             "contextual_calls": {
               "items": {
                 "$ref": "#/$defs/ContextualCall"
@@ -40869,6 +41679,14 @@
               },
               "maxItems": 40,
               "title": "Nodes",
+              "type": "array"
+            },
+            "possible_unresolved_callers": {
+              "items": {
+                "$ref": "#/$defs/UnresolvedReference"
+              },
+              "maxItems": 10,
+              "title": "Possible Unresolved Callers",
               "type": "array"
             },
             "request_id": {
@@ -41053,6 +41871,20 @@
         "Neighbor": {
           "additionalProperties": false,
           "properties": {
+            "depth": {
+              "anyOf": [
+                {
+                  "maximum": 3,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Depth"
+            },
             "edge": {
               "$ref": "#/$defs/CodeEdge"
             },
@@ -41065,6 +41897,80 @@
             "edge"
           ],
           "title": "Neighbor",
+          "type": "object"
+        },
+        "NeighborCompleteness": {
+          "additionalProperties": false,
+          "description": "Whether static neighbors may miss callers or callees.\n\nStatic analysis only resolves calls it can prove. ``possible_unresolved_caller_count``\ncounts unresolved calls anywhere in the index that name the root symbol (or list it\nas a possible target); it is computed for the root only. ``unresolved_outgoing_count``\ncounts unresolved calls made by the returned nodes.",
+          "properties": {
+            "hint": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Hint"
+            },
+            "possible_unresolved_caller_count": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Possible Unresolved Caller Count"
+            },
+            "reasons": {
+              "items": {
+                "enum": [
+                  "query_truncated",
+                  "index_truncated",
+                  "unresolved_details_truncated",
+                  "unresolved_coverage_unknown",
+                  "possible_unresolved_callers",
+                  "unresolved_outgoing_calls"
+                ],
+                "type": "string"
+              },
+              "maxItems": 6,
+              "title": "Reasons",
+              "type": "array"
+            },
+            "status": {
+              "enum": [
+                "complete",
+                "possibly_incomplete"
+              ],
+              "title": "Status",
+              "type": "string"
+            },
+            "unresolved_outgoing_count": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Unresolved Outgoing Count"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "title": "NeighborCompleteness",
           "type": "object"
         },
         "ReadSourceFailure": {
@@ -44708,6 +45614,17 @@
               "title": "Completed Sequence",
               "type": "integer"
             },
+            "completeness": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/NeighborCompleteness"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
             "contextual_calls": {
               "items": {
                 "$ref": "#/$defs/ContextualCall"
@@ -44786,6 +45703,14 @@
               "title": "Nodes",
               "type": "array"
             },
+            "possible_unresolved_callers": {
+              "items": {
+                "$ref": "#/$defs/UnresolvedReference"
+              },
+              "maxItems": 10,
+              "title": "Possible Unresolved Callers",
+              "type": "array"
+            },
             "request_id": {
               "maxLength": 200,
               "minLength": 1,
@@ -44855,6 +45780,20 @@
         "Neighbor": {
           "additionalProperties": false,
           "properties": {
+            "depth": {
+              "anyOf": [
+                {
+                  "maximum": 3,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Depth"
+            },
             "edge": {
               "$ref": "#/$defs/CodeEdge"
             },
@@ -44867,6 +45806,80 @@
             "edge"
           ],
           "title": "Neighbor",
+          "type": "object"
+        },
+        "NeighborCompleteness": {
+          "additionalProperties": false,
+          "description": "Whether static neighbors may miss callers or callees.\n\nStatic analysis only resolves calls it can prove. ``possible_unresolved_caller_count``\ncounts unresolved calls anywhere in the index that name the root symbol (or list it\nas a possible target); it is computed for the root only. ``unresolved_outgoing_count``\ncounts unresolved calls made by the returned nodes.",
+          "properties": {
+            "hint": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Hint"
+            },
+            "possible_unresolved_caller_count": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Possible Unresolved Caller Count"
+            },
+            "reasons": {
+              "items": {
+                "enum": [
+                  "query_truncated",
+                  "index_truncated",
+                  "unresolved_details_truncated",
+                  "unresolved_coverage_unknown",
+                  "possible_unresolved_callers",
+                  "unresolved_outgoing_calls"
+                ],
+                "type": "string"
+              },
+              "maxItems": 6,
+              "title": "Reasons",
+              "type": "array"
+            },
+            "status": {
+              "enum": [
+                "complete",
+                "possibly_incomplete"
+              ],
+              "title": "Status",
+              "type": "string"
+            },
+            "unresolved_outgoing_count": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Unresolved Outgoing Count"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "title": "NeighborCompleteness",
           "type": "object"
         },
         "ReadSourceFailure": {
@@ -46777,6 +47790,17 @@
               "title": "Completed Sequence",
               "type": "integer"
             },
+            "completeness": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/NeighborCompleteness"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
             "contextual_calls": {
               "items": {
                 "$ref": "#/$defs/ContextualCall"
@@ -46853,6 +47877,14 @@
               },
               "maxItems": 40,
               "title": "Nodes",
+              "type": "array"
+            },
+            "possible_unresolved_callers": {
+              "items": {
+                "$ref": "#/$defs/UnresolvedReference"
+              },
+              "maxItems": 10,
+              "title": "Possible Unresolved Callers",
               "type": "array"
             },
             "request_id": {
@@ -47037,6 +48069,20 @@
         "Neighbor": {
           "additionalProperties": false,
           "properties": {
+            "depth": {
+              "anyOf": [
+                {
+                  "maximum": 3,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Depth"
+            },
             "edge": {
               "$ref": "#/$defs/CodeEdge"
             },
@@ -47049,6 +48095,80 @@
             "edge"
           ],
           "title": "Neighbor",
+          "type": "object"
+        },
+        "NeighborCompleteness": {
+          "additionalProperties": false,
+          "description": "Whether static neighbors may miss callers or callees.\n\nStatic analysis only resolves calls it can prove. ``possible_unresolved_caller_count``\ncounts unresolved calls anywhere in the index that name the root symbol (or list it\nas a possible target); it is computed for the root only. ``unresolved_outgoing_count``\ncounts unresolved calls made by the returned nodes.",
+          "properties": {
+            "hint": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Hint"
+            },
+            "possible_unresolved_caller_count": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Possible Unresolved Caller Count"
+            },
+            "reasons": {
+              "items": {
+                "enum": [
+                  "query_truncated",
+                  "index_truncated",
+                  "unresolved_details_truncated",
+                  "unresolved_coverage_unknown",
+                  "possible_unresolved_callers",
+                  "unresolved_outgoing_calls"
+                ],
+                "type": "string"
+              },
+              "maxItems": 6,
+              "title": "Reasons",
+              "type": "array"
+            },
+            "status": {
+              "enum": [
+                "complete",
+                "possibly_incomplete"
+              ],
+              "title": "Status",
+              "type": "string"
+            },
+            "unresolved_outgoing_count": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Unresolved Outgoing Count"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "title": "NeighborCompleteness",
           "type": "object"
         },
         "ReadSourceFailure": {
@@ -49163,6 +50283,17 @@
               "title": "Completed Sequence",
               "type": "integer"
             },
+            "completeness": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/NeighborCompleteness"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
             "contextual_calls": {
               "items": {
                 "$ref": "#/$defs/ContextualCall"
@@ -49241,6 +50372,14 @@
               "title": "Nodes",
               "type": "array"
             },
+            "possible_unresolved_callers": {
+              "items": {
+                "$ref": "#/$defs/UnresolvedReference"
+              },
+              "maxItems": 10,
+              "title": "Possible Unresolved Callers",
+              "type": "array"
+            },
             "request_id": {
               "maxLength": 200,
               "minLength": 1,
@@ -49310,6 +50449,20 @@
         "Neighbor": {
           "additionalProperties": false,
           "properties": {
+            "depth": {
+              "anyOf": [
+                {
+                  "maximum": 3,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Depth"
+            },
             "edge": {
               "$ref": "#/$defs/CodeEdge"
             },
@@ -49322,6 +50475,80 @@
             "edge"
           ],
           "title": "Neighbor",
+          "type": "object"
+        },
+        "NeighborCompleteness": {
+          "additionalProperties": false,
+          "description": "Whether static neighbors may miss callers or callees.\n\nStatic analysis only resolves calls it can prove. ``possible_unresolved_caller_count``\ncounts unresolved calls anywhere in the index that name the root symbol (or list it\nas a possible target); it is computed for the root only. ``unresolved_outgoing_count``\ncounts unresolved calls made by the returned nodes.",
+          "properties": {
+            "hint": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Hint"
+            },
+            "possible_unresolved_caller_count": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Possible Unresolved Caller Count"
+            },
+            "reasons": {
+              "items": {
+                "enum": [
+                  "query_truncated",
+                  "index_truncated",
+                  "unresolved_details_truncated",
+                  "unresolved_coverage_unknown",
+                  "possible_unresolved_callers",
+                  "unresolved_outgoing_calls"
+                ],
+                "type": "string"
+              },
+              "maxItems": 6,
+              "title": "Reasons",
+              "type": "array"
+            },
+            "status": {
+              "enum": [
+                "complete",
+                "possibly_incomplete"
+              ],
+              "title": "Status",
+              "type": "string"
+            },
+            "unresolved_outgoing_count": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Unresolved Outgoing Count"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "title": "NeighborCompleteness",
           "type": "object"
         },
         "ReadSourceFailure": {

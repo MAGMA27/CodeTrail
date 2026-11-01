@@ -1168,6 +1168,50 @@ class SearchMatch(ContractModel):
 class Neighbor(ContractModel):
     symbol: Symbol
     edge: CodeEdge
+    # BFS hop at which the edge was reached; 1 means the edge touches the root.
+    # None only for results persisted before hop tracking existed.
+    depth: int | None = Field(default=None, ge=1, le=3)
+
+
+NeighborCompletenessReason: TypeAlias = Literal[
+    "query_truncated",
+    "index_truncated",
+    "unresolved_details_truncated",
+    "unresolved_coverage_unknown",
+    "possible_unresolved_callers",
+    "unresolved_outgoing_calls",
+]
+NEIGHBOR_POSSIBLE_CALLER_SAMPLE_LIMIT = 10
+
+
+class NeighborCompleteness(ContractModel):
+    """Whether static neighbors may miss callers or callees.
+
+    Static analysis only resolves calls it can prove. ``possible_unresolved_caller_count``
+    counts unresolved calls anywhere in the index that name the root symbol (or list it
+    as a possible target); it is computed for the root only. ``unresolved_outgoing_count``
+    counts unresolved calls made by the returned nodes.
+    """
+
+    status: Literal["complete", "possibly_incomplete"]
+    reasons: list[NeighborCompletenessReason] = Field(default_factory=list, max_length=6)
+    possible_unresolved_caller_count: int | None = Field(default=None, ge=0)
+    unresolved_outgoing_count: int | None = Field(default=None, ge=0)
+    hint: str | None = Field(default=None, max_length=1_000)
+
+    @model_validator(mode="after")
+    def validate_status(self) -> NeighborCompleteness:
+        if len(set(self.reasons)) != len(self.reasons):
+            raise ValueError("completeness reasons must be unique")
+        if (self.status == "complete") != (not self.reasons):
+            raise ValueError("complete neighbor results cannot list reasons; incomplete ones must")
+        if self.status == "possibly_incomplete" and not self.hint:
+            raise ValueError("possibly incomplete neighbor results must include a hint")
+        if ("possible_unresolved_callers" in self.reasons) != bool(self.possible_unresolved_caller_count):
+            raise ValueError("possible_unresolved_callers must match a positive caller count")
+        if ("unresolved_outgoing_calls" in self.reasons) != bool(self.unresolved_outgoing_count):
+            raise ValueError("unresolved_outgoing_calls must match a positive outgoing count")
+        return self
 
 
 class ContextualCall(ContractModel):
@@ -1258,6 +1302,10 @@ class GetNeighborsSuccess(ToolResultBase):
     neighbors: list[Neighbor]
     contextual_calls: list[ContextualCall] = Field(default_factory=list, max_length=200)
     unresolved: list[UnresolvedReference] = Field(default_factory=list, max_length=40)
+    possible_unresolved_callers: list[UnresolvedReference] = Field(
+        default_factory=list, max_length=NEIGHBOR_POSSIBLE_CALLER_SAMPLE_LIMIT
+    )
+    completeness: NeighborCompleteness | None = None
     truncated: bool = False
     truncation_reason: str | None = Field(default=None, max_length=1_000)
     index_truncated: bool = False
@@ -1305,6 +1353,15 @@ class GetNeighborsSuccess(ToolResultBase):
                 raise ValueError("contextual calls must bind to a returned activation edge")
         if len(context_ids) != len(self.contextual_calls):
             raise ValueError("contextual call IDs must be unique")
+        for unresolved in self.possible_unresolved_callers:
+            if unresolved.index_id != self.index_id:
+                raise ValueError("possible unresolved callers must use the result index_id")
+        if self.possible_unresolved_callers and (
+            self.completeness is None
+            or (self.completeness.possible_unresolved_caller_count or 0)
+            < len(self.possible_unresolved_callers)
+        ):
+            raise ValueError("possible unresolved caller samples must not exceed the reported count")
         if self.truncated and not self.truncation_reason:
             raise ValueError("truncated neighbor results must explain the truncation")
         if not self.truncated and self.truncation_reason:
@@ -1393,6 +1450,10 @@ class NeighborsIndexResponse(VersionedModel):
     neighbors: list[Neighbor] = Field(default_factory=list)
     contextual_calls: list[ContextualCall] = Field(default_factory=list, max_length=200)
     unresolved: list[UnresolvedReference] = Field(default_factory=list)
+    possible_unresolved_callers: list[UnresolvedReference] = Field(
+        default_factory=list, max_length=NEIGHBOR_POSSIBLE_CALLER_SAMPLE_LIMIT
+    )
+    completeness: NeighborCompleteness | None = None
     truncated: bool = False
     truncation_reason: str | None = Field(default=None, max_length=1_000)
     index_truncated: bool = False
@@ -1441,6 +1502,15 @@ class NeighborsIndexResponse(VersionedModel):
         for unresolved in self.unresolved:
             if unresolved.index_id != self.index_id or unresolved.source_symbol_id not in node_ids:
                 raise ValueError("unresolved reference must use returned nodes")
+        for unresolved in self.possible_unresolved_callers:
+            if unresolved.index_id != self.index_id:
+                raise ValueError("possible unresolved callers must use the response index_id")
+        if self.possible_unresolved_callers and (
+            self.completeness is None
+            or (self.completeness.possible_unresolved_caller_count or 0)
+            < len(self.possible_unresolved_callers)
+        ):
+            raise ValueError("possible unresolved caller samples must not exceed the reported count")
         if self.truncated and not self.truncation_reason:
             raise ValueError("truncated neighbor results must explain the truncation")
         if not self.truncated and self.truncation_reason:
@@ -1688,12 +1758,22 @@ class OverviewClassificationCoverage(ContractModel):
     visible: NonNegativeInt
     category_counts: OverviewClassificationCounts
     visible_category_counts: OverviewClassificationCounts
+    # True only when classification items were omitted (visible < total).
     truncated: bool
+    # Rule analysis stopped early or lacked evidence; unknown roles may remain.
+    analysis_incomplete: bool = False
+    incomplete_reasons: list[Annotated[str, Field(min_length=1, max_length=200)]] = Field(
+        default_factory=list, max_length=8
+    )
 
     @model_validator(mode="after")
     def validate_counts(self) -> OverviewClassificationCoverage:
         if self.visible > self.total or self.category_counts.total() != self.total:
             raise ValueError("architecture classification coverage counts are inconsistent")
+        if self.visible < self.total and not self.truncated:
+            raise ValueError("omitted architecture classifications must be marked truncated")
+        if self.analysis_incomplete != bool(self.incomplete_reasons):
+            raise ValueError("incomplete classification analysis must list its reasons")
         if self.visible_category_counts.total() != self.visible:
             raise ValueError("visible architecture classification counts are inconsistent")
         if any(
@@ -2125,6 +2205,41 @@ class ProjectJourney(VersionedModel):
         return self
 
 
+OverviewSection: TypeAlias = Literal[
+    "entries",
+    "groups",
+    "modules",
+    "classifications",
+    "module_relations",
+    "http_associations",
+    "paths",
+    "unresolved",
+    "references",
+]
+
+
+class OverviewSectionCoverage(ContractModel):
+    """How many items one overview section returned out of the items it found."""
+
+    section: OverviewSection
+    # None when the section stopped at a budget before counting everything.
+    total: NonNegativeInt | None
+    returned: NonNegativeInt
+    truncated: bool
+
+    @model_validator(mode="after")
+    def validate_section_counts(self) -> OverviewSectionCoverage:
+        if self.total is None:
+            if not self.truncated:
+                raise ValueError("uncounted overview sections must be truncated")
+            return self
+        if self.returned > self.total:
+            raise ValueError("overview sections cannot return more items than they found")
+        if self.truncated != (self.returned < self.total):
+            raise ValueError("overview section truncation must match its counts")
+        return self
+
+
 class ProjectOverview(VersionedModel):
     """Deterministic, rule-only overview of one project index snapshot."""
 
@@ -2163,6 +2278,7 @@ class ProjectOverview(VersionedModel):
     paths: list[OverviewPath] = Field(default_factory=list)
     unresolved: list[UnresolvedReference] = Field(default_factory=list)
     coverage: OverviewCoverage
+    section_coverage: list[OverviewSectionCoverage] = Field(default_factory=list, max_length=16)
     notes: list[str] = Field(default_factory=list)
     truncated: bool = False
     truncation_reason: str | None = Field(default=None, max_length=1_000)
@@ -2264,6 +2380,23 @@ class ProjectOverview(VersionedModel):
         for unresolved in self.unresolved:
             if unresolved.index_id != self.index.index_id:
                 raise ValueError("overview unresolved reference belongs to a different index_id")
+        sections = [item.section for item in self.section_coverage]
+        if len(set(sections)) != len(sections):
+            raise ValueError("overview section coverage must list each section once")
+        returned_counts = {
+            "entries": len(self.entries),
+            "groups": len(self.groups),
+            "modules": len(self.modules),
+            "classifications": len(self.classifications),
+            "module_relations": len(self.module_relations),
+            "http_associations": len(self.http_associations),
+            "paths": len(self.paths),
+            "unresolved": len(self.unresolved),
+        }
+        for item in self.section_coverage:
+            expected = returned_counts.get(item.section)
+            if expected is not None and item.returned != expected:
+                raise ValueError("overview section coverage must match returned items")
         if self.truncated and not self.truncation_reason:
             raise ValueError("truncated overviews must explain the truncation")
         if not self.truncated and self.truncation_reason:
@@ -2990,6 +3123,7 @@ class McpOverviewResponse(McpResultBase):
 
     overview: ProjectOverview | None = None
     references: list[EvidenceReference] = Field(default_factory=list)
+    reference_coverage: OverviewSectionCoverage | None = None
 
     @model_validator(mode="after")
     def validate_overview_result(self) -> McpOverviewResponse:
@@ -3011,6 +3145,11 @@ class McpOverviewResponse(McpResultBase):
             for reference in self.references:
                 if reference.index_id != self.overview.index.index_id or reference.evidence_id not in evidence_ids:
                     raise ValueError("overview references must match returned evidence")
+            if self.reference_coverage is not None and (
+                self.reference_coverage.section != "references"
+                or self.reference_coverage.returned != len(self.references)
+            ):
+                raise ValueError("overview reference coverage must match returned references")
         elif self.overview is not None or self.references:
             raise ValueError("failed overview results cannot include overview data")
         return self

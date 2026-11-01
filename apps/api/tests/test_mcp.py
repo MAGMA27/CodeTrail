@@ -1449,12 +1449,51 @@ async def _exercise_stdio(
         assert "project_id=" in reference["url"]
         assert "content_hash=" in reference["url"]
 
-        overview_result = await client.call_tool(
+        default_overview = await client.call_tool(
             "get_overview",
             {"project_id": project_id, "index_id": index_id},
         )
+        assert default_overview.structured_content["ok"] is True
+        # The default MCP response is hard-capped; the HTTP overview is not.
+        assert len(default_overview.content[0].text.encode()) <= 48_000
+        assert default_overview.structured_content["overview"]["truncated"] is True
+        assert "max_output_bytes reached" in default_overview.structured_content["overview"]["truncation_reason"]
+
+        overview_result = await client.call_tool(
+            "get_overview",
+            {"project_id": project_id, "index_id": index_id, "max_output_bytes": 1_000_000},
+        )
         assert overview_result.structured_content["ok"] is True
         assert overview_result.structured_content["overview"] == http_overview
+        reference_coverage = overview_result.structured_content["reference_coverage"]
+        assert reference_coverage["section"] == "references"
+        assert reference_coverage["truncated"] is False
+        assert reference_coverage["returned"] == len(overview_result.structured_content["references"])
+        assert {item["section"] for item in http_overview["section_coverage"]} == {
+            "entries",
+            "groups",
+            "modules",
+            "classifications",
+            "module_relations",
+            "http_associations",
+            "paths",
+            "unresolved",
+        }
+
+        bounded_result = await client.call_tool(
+            "get_overview",
+            {"project_id": project_id, "index_id": index_id, "max_output_bytes": 16_000},
+        )
+        bounded = bounded_result.structured_content
+        assert bounded["ok"] is True
+        assert len(bounded_result.content[0].text.encode()) <= 16_000
+        assert bounded["overview"]["truncated"] is True
+        assert "max_output_bytes reached" in bounded["overview"]["truncation_reason"]
+        bounded_sections = {item["section"]: item for item in bounded["overview"]["section_coverage"]}
+        assert any(item["truncated"] for item in bounded_sections.values())
+        for name in ("modules", "classifications", "module_relations"):
+            assert bounded_sections[name]["returned"] == len(bounded["overview"][name])
+        assert bounded["reference_coverage"]["returned"] == len(bounded["references"])
         references = overview_result.structured_content["references"]
         assert references
         assert all(reference["project_id"] == project_id for reference in references)
