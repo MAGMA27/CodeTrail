@@ -2896,9 +2896,8 @@ class WorkspaceService:
 
                 root_symbol_id: str | None = None
                 mapping_status = "mapped"
-                if report.outcome != "candidate_found":
-                    mapping_status = "unmapped"
-                elif candidate_id is not None:
+                # Unknown identifiers are a 404 whatever the report outcome is.
+                if candidate_id is not None:
                     candidate = next(
                         (item for item in report.candidate_links if item.candidate_id == candidate_id),
                         None,
@@ -2917,6 +2916,9 @@ class WorkspaceService:
                         root_symbol_id = finding.symbol_ids[0]
                     else:
                         mapping_status = "unmapped"
+                if report.outcome != "candidate_found":
+                    mapping_status = "unmapped"
+                    root_symbol_id = None
 
                 graph_symbol_ids = {symbol.symbol_id for symbol in report.graph.nodes}
                 if root_symbol_id is not None and root_symbol_id not in graph_symbol_ids:

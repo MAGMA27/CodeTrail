@@ -893,6 +893,7 @@ code { font-family: var(--ct-mono); }
 .ct-impact-layers span { color: var(--ct-muted); font-family: var(--ct-mono); font-size: 10px; }
 .ct-impact-layers small { grid-column: 1 / -1; color: var(--ct-muted); font-size: 10px; line-height: 1.45; }
 .ct-impact-failure { display: grid; gap: 8px; padding: 8px 12px 12px; }
+.ct-impact-error-detail { color: var(--ct-muted); font-family: var(--ct-mono); font-size: 11px; overflow-wrap: anywhere; }
 .ct-impact-unknown { background: var(--ct-warning-soft); }
 .ct-impact-unknown strong { color: var(--ct-warning); font-family: var(--ct-mono); font-size: 9px; }
 .ct-graph-scope-note { margin: 0; padding: 10px 12px 14px; color: var(--ct-faint); font-size: 9px; line-height: 1.5; }

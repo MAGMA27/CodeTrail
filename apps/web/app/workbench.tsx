@@ -172,6 +172,7 @@ import {
   type SessionDraftSubmission,
 } from "../lib/session-draft";
 import { readWorkbenchRoute, resolveWorkbenchProject, workbenchLocation } from "../lib/workbench-navigation";
+import { ImpactScopeMismatchError, impactErrorView, impactScopeMismatch, type ImpactErrorView } from "../lib/impact-layers";
 import WorkbenchUi from "./workbench-ui";
 
 type IndexUiStatus = "unindexed" | "creating" | "loading" | "ready" | "partial" | "error";
@@ -680,7 +681,7 @@ export default function Workbench() {
   const [explainDraftError, setExplainDraftError] = useState<string | null>(null);
   const [runImpact, setRunImpact] = useState<RunImpactResponse | null>(null);
   const [runImpactStatus, setRunImpactStatus] = useState<AsyncStatus>("idle");
-  const [runImpactError, setRunImpactError] = useState<string | null>(null);
+  const [runImpactError, setRunImpactError] = useState<ImpactErrorView | null>(null);
   const [runImpactDirection, setRunImpactDirection] = useState<ImpactDirection>("callers");
   const [runImpactDepth, setRunImpactDepth] = useState(2);
   const [runImpactSelection, setRunImpactSelection] = useState<ImpactSelection | null>(null);
@@ -1892,7 +1893,7 @@ export default function Workbench() {
       }
       if (!selection.candidateId && !selection.findingId) {
         setRunImpactStatus("error");
-        setRunImpactError("影响查询缺少候选或发现标识。");
+        setRunImpactError({ message: "影响查询缺少候选或发现标识。", detail: null });
         return;
       }
       runImpactController.current?.abort();
@@ -1920,15 +1921,19 @@ export default function Workbench() {
           },
           controller.signal,
         );
-        const expectedIndexId = runStatusResponse?.run.index_id ?? runReport?.index_id;
-        if (
-          !isLatestRequest(requestId, runImpactRequestId.current) ||
-          response.project_id !== selectedProjectId ||
-          response.session_id !== selectedSessionId ||
-          response.run_id !== selectedRunId ||
-          (expectedIndexId !== undefined && response.index_id !== expectedIndexId)
-        ) {
+        if (!isLatestRequest(requestId, runImpactRequestId.current)) {
+          // A newer request or a reset owns the panel status now.
           return;
+        }
+        const expectedIndexId = runStatusResponse?.run.index_id ?? runReport?.index_id;
+        const mismatch = impactScopeMismatch(response, {
+          projectId: selectedProjectId,
+          sessionId: selectedSessionId,
+          runId: selectedRunId,
+          ...(expectedIndexId !== undefined ? { indexId: expectedIndexId } : {}),
+        });
+        if (mismatch) {
+          throw new ImpactScopeMismatchError(mismatch);
         }
         setRunImpact(response);
         setRunImpactStatus(
@@ -1940,7 +1945,7 @@ export default function Workbench() {
         }
         setRunImpact(null);
         setRunImpactStatus("error");
-        setRunImpactError(errorMessage(error));
+        setRunImpactError(impactErrorView(error));
       }
     },
     [runImpactDepth, runImpactDirection, runReport, runStatusResponse, selectedProjectId, selectedRunId, selectedSessionId],

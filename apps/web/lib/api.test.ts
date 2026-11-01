@@ -4,7 +4,9 @@ import test from "node:test";
 import {
   DEFAULT_GITHUB_REQUEST_TIMEOUT_MS,
   GITHUB_REQUEST_TIMEOUT_MS,
+  RUN_IMPACT_REQUEST_TIMEOUT_MS,
   RequestTimeoutError,
+  getProjectSessionRunImpact,
   isFeatureGenerationListResponse,
   isFeatureGenerationResponse,
   isFeatureGraphResponse,
@@ -1439,6 +1441,26 @@ test("requestJson preserves a timeout when response headers arrive before the bo
       requestJson("/api/imports/local", (value): value is object => Boolean(value), { timeoutMs: 5 }),
       (error: unknown) => error instanceof RequestTimeoutError,
     );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("run impact requests time out instead of loading forever", async (context) => {
+  const originalFetch = globalThis.fetch;
+  context.mock.timers.enable({ apis: ["setTimeout"] });
+  globalThis.fetch = ((_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+    init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+  })) as typeof fetch;
+
+  try {
+    const pending = getProjectSessionRunImpact("project-a", "session-a", "run-a", {
+      candidateId: "candidate-a",
+      direction: "callers",
+    });
+    context.mock.timers.tick(RUN_IMPACT_REQUEST_TIMEOUT_MS);
+    await assert.rejects(pending, (error: unknown) => error instanceof RequestTimeoutError);
+    assert.equal(RUN_IMPACT_REQUEST_TIMEOUT_MS, 20_000);
   } finally {
     globalThis.fetch = originalFetch;
   }

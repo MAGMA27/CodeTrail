@@ -3684,6 +3684,9 @@ export function getProjectSessionRunReport(
   );
 }
 
+/** Upper bound for one bounded impact query; server traversal itself is capped at a few seconds. */
+export const RUN_IMPACT_REQUEST_TIMEOUT_MS = 20_000;
+
 export function getProjectSessionRunImpact(
   projectId: string,
   sessionId: string,
@@ -3711,7 +3714,7 @@ export function getProjectSessionRunImpact(
   return requestJson(
     `/api/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/runs/${encodeURIComponent(runId)}/impact?${params.toString()}`,
     isRunImpactResponse,
-    { signal },
+    { signal, timeoutMs: RUN_IMPACT_REQUEST_TIMEOUT_MS },
   );
 }
 
