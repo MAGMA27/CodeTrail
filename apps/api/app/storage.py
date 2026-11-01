@@ -5118,9 +5118,9 @@ class IndexStore:
     ) -> tuple[int, tuple[UnresolvedReference, ...]]:
         """Count unresolved calls that may target ``root``.
 
-        A reference matches when it lists ``root`` as a possible target, or when its
-        expression calls the root's simple name (``name(`` or ``<receiver>.name(``)
-        and its reason does not already prove an outside target.
+        A reference matches when its reason does not already prove an outside target
+        and it lists ``root`` as a possible target or its expression calls the root's
+        simple name (``name(`` or ``<receiver>.name(``).
         """
 
         clauses = [
@@ -5130,13 +5130,13 @@ class IndexStore:
         parameters: list[object] = [root.symbol_id]
         name = root.qualified_name.rsplit(".", 1)[-1]
         if root.kind in {"class", "function", "test"} and _CALLABLE_NAME.fullmatch(name):
-            placeholders = ",".join("?" for _ in _OUTSIDE_TARGET_REASONS)
-            clauses.append(
-                f"(r.reason NOT IN ({placeholders}) AND (r.expression GLOB ? OR r.expression GLOB ?))"
-            )
-            parameters.extend(_OUTSIDE_TARGET_REASONS)
+            clauses.append("r.expression GLOB ? OR r.expression GLOB ?")
             parameters.extend((f"{name}(*", f"*[^A-Za-z0-9_$]{name}(*"))
-        where = f"r.index_id = ? AND ({' OR '.join(clauses)})"
+        placeholders = ",".join("?" for _ in _OUTSIDE_TARGET_REASONS)
+        where = (
+            f"r.index_id = ? AND r.reason NOT IN ({placeholders}) AND ({' OR '.join(clauses)})"
+        )
+        parameters = [*_OUTSIDE_TARGET_REASONS, *parameters]
         count = int(
             self._connection.execute(
                 f"SELECT COUNT(*) FROM unresolved_references r WHERE {where}",
