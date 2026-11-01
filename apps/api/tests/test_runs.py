@@ -489,6 +489,33 @@ def test_run_impact_is_report_scoped_bounded_and_empty_without_a_candidate(tmp_p
     assert unmapped["reachable_node_count"] == 0
     assert_impact_layers(unmapped)
 
+    # Unknown identifiers are 404 even when the report has no candidate_found outcome.
+    for query in ("finding_id=finding-not-in-report", "candidate_id=candidate-not-in-report"):
+        status, unknown = request(
+            application,
+            "GET",
+            f"/api/projects/{project_id}/sessions/{failed_session}/runs/{failed_run}/impact?{query}",
+        )
+        assert status == 404, unknown
+        assert unknown["code"] == "not_found"
+
+    insufficient_session = create_session(application, project_id, index_id, "insufficient impact")
+    insufficient_run = start_run(
+        application,
+        project_id,
+        insufficient_session,
+        run_payload(index_id, "insufficient-external-service"),
+    )
+    wait_for_terminal(application, project_id, insufficient_session, insufficient_run)
+    status, unknown = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/sessions/{insufficient_session}/runs/{insufficient_run}/impact"
+        "?finding_id=x",
+    )
+    assert status == 404, unknown
+    assert unknown["code"] == "not_found"
+
 
 def assert_impact_layers(payload: dict) -> None:
     layers = payload["layers"]

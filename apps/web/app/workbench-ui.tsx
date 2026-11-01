@@ -67,7 +67,14 @@ import type {
   UnresolvedReference,
 } from "../lib/api";
 import { SCHEMA_VERSION } from "../lib/api";
-import { IMPACT_LAYER_LABELS, describeImpactPanel, impactPanelStateAttribute } from "../lib/impact-layers";
+import {
+  IMPACT_LAYER_LABELS,
+  describeImpactPanel,
+  impactIndexTruncationMessage,
+  impactPanelStateAttribute,
+  impactUnresolvedTruncationMessage,
+  type ImpactErrorView,
+} from "../lib/impact-layers";
 import { canShowKnowledgeInspector, resolveGraphReturnPanel, type GraphPanelMode } from "../lib/workbench-navigation";
 import {
   clampSidebarWidth,
@@ -358,7 +365,7 @@ type GraphUi = {
   impactModel: { nodes: Node[]; edges: Edge[] };
   impact: RunImpactResponse | null;
   impactStatus: UiAsyncStatus;
-  impactError: string | null;
+  impactError: ImpactErrorView | null;
   impactDirection: ImpactDirection;
   impactDepth: number;
   onImpactDirectionChange: (direction: ImpactDirection) => void;
@@ -3007,10 +3014,10 @@ function GraphPanel({ graph }: { graph: GraphUi }) {
         <div className="ct-impact-panel" data-impact-state={impactState}>
         <div className="ct-graph-toolbar"><label>方向<select value={graph.impactDirection} onChange={(event) => graph.onImpactDirectionChange(event.target.value as ImpactDirection)}><option value="callers">调用方</option><option value="callees">被调用方</option></select></label><label>深度<select value={graph.impactDepth} onChange={(event) => graph.onImpactDepthChange(Number(event.target.value))}><option value={1}>1 层</option><option value={2}>2 层</option></select></label><button type="button" className="ct-link-button" onClick={() => graph.flowInstance?.fitView({ padding: 0.18, duration: 240 })} disabled={graph.impactModel.nodes.length === 0}>聚焦</button></div>
         <div className="ct-panel-status"><span data-state={graph.impactStatus}>{impactPanel.headline}</span></div>
-        {graph.impact?.index_truncated ? <p className="ct-graph-coverage-warning" role="status">影响查询使用的固定索引扫描未完成 · {graph.impact.index_truncation_reason}；空邻接不能证明没有关系。</p> : null}
-        {graph.impact?.index_unresolved_truncated === true ? <p className="ct-graph-coverage-warning" role="status">影响查询使用的 unresolved 详情已截断 · {graph.impact.index_unresolved_truncation_reason}；未返回的 unresolved 不能被当作不存在。</p> : null}
+        {graph.impact?.index_truncated ? <p className="ct-graph-coverage-warning" role="status">{impactIndexTruncationMessage(graph.impact.index_truncation_reason)}</p> : null}
+        {graph.impact?.index_unresolved_truncated === true ? <p className="ct-graph-coverage-warning" role="status">{impactUnresolvedTruncationMessage(graph.impact.index_unresolved_truncation_reason)}</p> : null}
         {graph.impact && graph.impact.index_unresolved_truncated === null ? <p className="ct-graph-coverage-warning" role="status">影响查询使用的旧索引未记录 unresolved 覆盖状态。</p> : null}
-        {impactPanel.mode === "error" ? <div className="ct-impact-failure" role="alert"><p className="ct-inline-error">{graph.impactError ?? "影响范围请求失败"}</p>{impactPanel.showRetry ? <button type="button" className="ct-link-button" onClick={graph.onRetryImpact}>重试影响查询</button> : null}</div> : null}
+        {impactPanel.mode === "error" ? <div className="ct-impact-failure" role="alert"><p className="ct-inline-error">{graph.impactError?.message ?? "影响范围请求失败"}</p>{graph.impactError?.detail ? <small className="ct-impact-error-detail">{graph.impactError.detail}</small> : null}{impactPanel.showRetry ? <button type="button" className="ct-link-button" onClick={graph.onRetryImpact}>重试影响查询</button> : null}</div> : null}
         {impactPanel.showUnmapped ? <EmptyState title="报告没有可遍历的唯一符号" detail="保留报告源码证据；不会根据同名符号猜测影响范围。" /> : null}
         {graph.impact && (impactPanel.mode === "unmapped" || impactPanel.mode === "result") ? <ol className="ct-impact-layers" aria-label="影响分层">{graph.impact.layers.map((layer) => <li key={layer.kind} data-layer={layer.kind}><strong>{IMPACT_LAYER_LABELS[layer.kind]}</strong><span>{layer.kind === "unknown" ? layer.unresolved_ids.length : layer.symbol_ids.length}</span><small>{layer.summary}</small></li>)}</ol> : null}
         {impactPanel.showTruncation ? <p className="ct-graph-coverage-warning" role="status">{impactPanel.truncationMessage}</p> : null}
