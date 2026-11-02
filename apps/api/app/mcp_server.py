@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
+import re
 import sys
-from typing import Annotated, Literal, TypeVar
+from enum import Enum
+from typing import Annotated, Any, Literal, TypeVar, get_args, get_origin
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
 from mcp.server import MCPServer
-from pydantic import Field, ValidationError
+from mcp.server.mcpserver.exceptions import ToolError
+from mcp.types import CallToolResult, TextContent
+from pydantic import Field, TypeAdapter, ValidationError
 
 from .contracts import (
     CandidateLink,
@@ -31,6 +36,7 @@ from .contracts import (
     AppendSessionMessageRequest,
     CreateSessionRequest,
     McpError,
+    McpErrorDetail,
     McpFeatureGenerationListResponse,
     McpFeatureGraphResponse,
     McpFeatureGenerationResponse,
@@ -96,6 +102,137 @@ from .service import IndexService, RepositoryRegistry, ServiceError, WorkspaceSe
 
 logger = logging.getLogger(__name__)
 
+
+class _CodeTrailMCPServer(MCPServer):
+    """Normalize CodeTrail tool failures and text output at the SDK boundary."""
+
+    async def call_tool(self, name: str, arguments: dict[str, Any], context: Any = None) -> Any:
+        try:
+            result = await super().call_tool(name, arguments, context)
+        except ToolError as exc:
+            cause = exc.__cause__
+            tool = self._tool_manager.get_tool(name)
+            response_model = tool.fn_metadata.output_model if tool is not None else None
+            if not isinstance(response_model, type) or not hasattr(response_model, "model_fields"):
+                raise
+            if isinstance(cause, ValidationError):
+                if any(item.get("type") == "extra_forbidden" for item in cause.errors()):
+                    raise
+                details = _validation_details(cause, tool.fn_metadata.arg_model)
+                count = len({detail.field.split(".", 1)[0] for detail in details})
+                error = McpError(
+                    code="invalid_input",
+                    message=f"{count} tool argument{'s are' if count != 1 else ' is'} invalid",
+                    details=details or None,
+                )
+            else:
+                logger.exception("MCP tool %s failed unexpectedly", name, exc_info=exc)
+                error = McpError(code="internal_error", message="local MCP query failed", retryable=True)
+            payload: dict[str, object] = {"ok": False, "error": error}
+            for field_name, field in response_model.model_fields.items():
+                if field_name in payload:
+                    continue
+                if not field.is_required():
+                    continue
+                if field_name == "ok":
+                    continue
+                if field_name not in arguments:
+                    continue
+                candidate = arguments[field_name]
+                try:
+                    candidate = TypeAdapter(field.annotation).validate_python(candidate)
+                except ValidationError:
+                    # Keep the caller's value for traceability. Validation has
+                    # already failed, so constructing without revalidating lets
+                    # the MCP error explain the bad argument without inventing
+                    # a replacement identifier.
+                    pass
+                payload[field_name] = candidate
+            try:
+                failure = response_model.model_validate(payload)
+            except ValidationError:
+                failure = response_model.model_construct(**payload)
+            structured = failure.model_dump(mode="json", by_alias=True)
+            return CallToolResult(
+                content=[TextContent(type="text", text=_compact_json(structured))],
+                structured_content=structured,
+                is_error=True,
+            )
+        if isinstance(result, CallToolResult) and result.structured_content is not None:
+            structured = result.structured_content
+            failed = isinstance(structured, dict) and structured.get("ok") is False
+            return result.model_copy(
+                update={
+                    "content": [TextContent(type="text", text=_compact_json(structured))],
+                    "is_error": result.is_error or failed,
+                }
+            )
+        return result
+
+
+def _compact_json(value: object) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def _validation_details(
+    error: ValidationError,
+    arg_model: type,
+) -> list[McpErrorDetail]:
+    details: list[McpErrorDetail] = []
+    mapping = {
+        "missing": "required", "literal_error": "not_allowed", "enum": "not_allowed",
+        "greater_than": "too_small", "greater_than_equal": "too_small",
+        "less_than": "too_large", "less_than_equal": "too_large",
+        "string_too_short": "too_short", "too_short": "too_short",
+        "string_too_long": "too_long", "too_long": "too_long",
+    }
+    for item in error.errors():
+        location = tuple(item.get("loc", ()))
+        field_path = ".".join(str(part) for part in location if part != "") or "arguments"
+        error_type = str(item.get("type", ""))
+        problem = mapping.get(error_type)
+        if problem is None:
+            problem = "wrong_type" if error_type.endswith(("_type", "_parsing")) else "invalid"
+        field_name = str(location[0]) if location else ""
+        field_info = arg_model.model_fields.get(field_name)
+        annotation = field_info.annotation if field_info is not None else None
+        union_args = get_args(annotation)
+        non_nullable_args = [item for item in union_args if item is not type(None)]
+        if len(non_nullable_args) == 1 and len(non_nullable_args) != len(union_args):
+            annotation = non_nullable_args[0]
+        if any(isinstance(part, int) for part in location[1:]):
+            annotation_args = get_args(annotation)
+            if annotation_args:
+                annotation = annotation_args[0]
+        if get_origin(annotation) is Literal:
+            allowed = list(get_args(annotation))
+        elif isinstance(annotation, type) and issubclass(annotation, Enum):
+            allowed = [item.value for item in annotation]
+        else:
+            allowed = None
+        ctx = item.get("ctx") or {}
+        limits = {
+            "min": ctx.get("ge", ctx.get("gt", ctx.get("min_length"))),
+            "max": ctx.get("le", ctx.get("lt", ctx.get("max_length"))),
+        }
+        if problem == "too_small" and limits["min"] is None:
+            limits["min"] = ctx.get("gt", ctx.get("ge"))
+        if problem == "too_large" and limits["max"] is None:
+            limits["max"] = ctx.get("lt", ctx.get("le"))
+        raw = item.get("input")
+        got = None if problem == "required" or isinstance(raw, (dict, list)) else str(raw)[:80]
+        details.append(
+            McpErrorDetail(
+                field=field_path,
+                problem=problem,
+                allowed=allowed,
+                min=limits["min"],
+                max=limits["max"],
+                got=got,
+            )
+        )
+    return details
+
 _WORKBENCH_URL_ENV = "CODETRAIL_WORKBENCH_URL"
 _DEFAULT_WORKBENCH_URL = "http://localhost:3000"
 _MAX_DISCOVERY_ITEMS = 100
@@ -137,7 +274,7 @@ _OverviewOutputBytes = Annotated[
         ),
     ),
 ]
-_OVERVIEW_DEFAULT_OUTPUT_BYTES = 48_000
+_OVERVIEW_DEFAULT_OUTPUT_BYTES = 36_000
 # Room for the reference coverage appended after bounding.
 _OVERVIEW_OUTPUT_MARGIN_BYTES = 512
 _FeatureHistoryCursor = Annotated[str | None, Field(max_length=500, description="Opaque history cursor from a previous page.")]
@@ -186,7 +323,7 @@ def create_mcp_server(
         else "Discover CodeTrail projects and query one explicitly selected immutable index. "
         "All tools are read-only and never execute repository code."
     )
-    server = MCPServer(
+    server = _CodeTrailMCPServer(
         name="codetrail",
         title="CodeTrail workspace" if local_import_enabled or github_import_enabled or index_write_enabled or session_write_enabled or run_write_enabled or external_run_enabled else "CodeTrail read-only workspace",
         description=server_description,
@@ -553,7 +690,7 @@ def create_mcp_server(
             "hookspec functions bound to a real HookspecMarker import. Classifications are independent from calls "
             "paths; unknown does not mean unused or unreachable, TypeScript export facts are not persisted, and "
             "the result and source evidence are bounded. The response is capped at max_output_bytes (default "
-            "48000): every section, including classifications and references, may be shortened. Check truncated, "
+            "36000): every section, including classifications and references, may be shortened. Check truncated, "
             "truncation_reason, overview.section_coverage, and reference_coverage (total vs returned per section) "
             "before treating a list as complete; classification_coverage.analysis_incomplete marks rule analysis that stopped early."
         ),
@@ -1605,7 +1742,14 @@ def _project_indexes_response(result: ProjectIndexListResponse, limit: int) -> M
 def _mcp_error(exc: ServiceError) -> McpError:
     code = exc.code if exc.code in {"not_found", "invalid_input", "conflict", "budget_exceeded", "download_timeout", "index_too_large", "index_source_rejected", "index_timeout", "index_cancelled", "internal_error", "forbidden"} else "internal_error"
     message = exc.message if code == exc.code else "local MCP query failed"
-    return McpError(code=code, message=message, retryable=code in _RETRYABLE_CODES)
+    if re.search(r"validation error for|errors\.pydantic\.dev", message, re.IGNORECASE):
+        message = "invalid input"
+    return McpError(
+        code=code,
+        message=message,
+        retryable=code in _RETRYABLE_CODES,
+        details=exc.details,
+    )
 
 
 def _mcp_import_response(result: LocalImportResponse) -> McpImportResponse:
@@ -1643,7 +1787,8 @@ def _bounded_overview_response(
     total_references = len(_mcp_overview_response(result, base_url).references)
 
     def measure(overview: ProjectOverview) -> int:
-        return len(_mcp_overview_response(overview, base_url).model_dump_json(indent=2).encode())
+        response = _mcp_overview_response(overview, base_url).model_dump(mode="json", by_alias=True)
+        return len(_compact_json(response).encode("utf-8"))
 
     bounded = bound_overview_output(
         result,

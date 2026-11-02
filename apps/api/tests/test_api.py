@@ -414,6 +414,18 @@ def test_http_index_query_and_snapshot_evidence_flow(tmp_path: Path) -> None:
     assert status == 200
     assert "load_settings" in source["evidence"]["excerpt"]
     assert source["evidence"]["index_id"] == index_id
+    for start_line, end_line, message in (
+        (1, 300, "read_source supports at most 200 lines"),
+        (50, 10, "start_line must be less than or equal to end_line"),
+    ):
+        status, error = request(
+            application,
+            "GET",
+            f"/api/indexes/{index_id}/source?path=timeout_demo%2Fconfig.py&start_line={start_line}&end_line={end_line}",
+        )
+        assert status == 400
+        assert error["code"] == "invalid_input"
+        assert error["message"] == message
 
     status, projects = request(application, "GET", "/api/projects")
     assert status == 200

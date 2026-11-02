@@ -17,6 +17,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from pydantic_core import PydanticCustomError
 
 from .config import normalize_model_config_base_url, normalize_model_config_text
 
@@ -1039,9 +1040,9 @@ class ReadSourceParams(ContractModel):
     @model_validator(mode="after")
     def validate_read_limit(self) -> ReadSourceParams:
         if self.end_line < self.start_line:
-            raise ValueError("end_line must be greater than or equal to start_line")
+            raise PydanticCustomError("start_after_end", "start_line must be less than or equal to end_line")
         if self.end_line - self.start_line + 1 > 200:
-            raise ValueError("read_source cannot return more than 200 lines")
+            raise PydanticCustomError("range_too_long", "read_source supports at most 200 lines", {"max": 200})
         return self
 
 
@@ -2996,12 +2997,27 @@ McpErrorCode: TypeAlias = Literal[
 ]
 
 
+class McpErrorDetail(ContractModel):
+    model_config = ConfigDict(extra="forbid", title="ErrorDetail")
+
+    field: str
+    problem: Literal[
+        "required", "not_allowed", "too_small", "too_large", "too_short", "too_long",
+        "wrong_type", "invalid", "beyond_end_of_file", "range_too_long", "start_after_end",
+    ]
+    allowed: list[object] | None = Field(default=None, exclude_if=lambda value: value is None)
+    min: int | float | None = Field(default=None, exclude_if=lambda value: value is None)
+    max: int | float | None = Field(default=None, exclude_if=lambda value: value is None)
+    got: str | None = Field(default=None, exclude_if=lambda value: value is None)
+
+
 class McpError(VersionedModel):
     """Domain failure returned inside a read-only MCP tool result."""
 
     code: McpErrorCode
     message: str = Field(min_length=1, max_length=2_000)
     retryable: bool = False
+    details: list[McpErrorDetail] | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class McpResultBase(VersionedModel):

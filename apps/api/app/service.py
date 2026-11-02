@@ -205,11 +205,12 @@ from .jobs import JobConflict, JobControl, JobFailure, JobResponse, JobService
 class ServiceError(RuntimeError):
     """A safe, stable error intended for an API response."""
 
-    def __init__(self, code: str, status_code: int, message: str) -> None:
+    def __init__(self, code: str, status_code: int, message: str, *, details: list[dict[str, object]] | None = None) -> None:
         super().__init__(message)
         self.code = code
         self.status_code = status_code
         self.message = message
+        self.details = details
 
 
 _ACTIVE_PROJECT_UPDATE_OPERATIONS: set[str] = set()
@@ -1583,7 +1584,12 @@ class IndexService:
         except StorageNotFoundError as exc:
             raise ServiceError("not_found", 404, "requested index, symbol, or source was not found") from exc
         except StorageInputError as exc:
-            raise ServiceError("invalid_input", 400, "query parameters are invalid") from exc
+            raise ServiceError(
+                "invalid_input",
+                400,
+                str(exc) if exc.detail is not None else "query parameters are invalid",
+                details=[exc.detail] if exc.detail is not None else None,
+            ) from exc
         except StorageError as exc:
             raise ServiceError("internal_error", 500, "local index storage failed") from exc
 

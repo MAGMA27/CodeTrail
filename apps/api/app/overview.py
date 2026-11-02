@@ -2436,8 +2436,57 @@ def bound_overview_output(
             len(items[name]) > minimum for name, minimum in _OUTPUT_TRIMMABLE_SECTIONS.items()
         ):
             break
-        # Item costs are estimates; tighten the target by the observed overshoot.
-        target -= size - max_output_bytes
+    # The calibrated estimates intentionally favor bounded work, but their
+    # per-item pretty-JSON costs can over-trim compact MCP output by a wide
+    # margin on repositories with many dependent sections. Refill the available
+    # space from the original deterministic prefixes, measuring each candidate
+    # with the caller's real serializer and preserving references.
+    if size < target * 0.7:
+        original = {name: list(getattr(overview, name)) for name in _OUTPUT_TRIMMABLE_SECTIONS}
+        while size < target * 0.7:
+            best: tuple[int, str, dict[str, list], ProjectOverview] | None = None
+            names = list(original)
+            if len(items["modules"]) < min(20, len(original["modules"])):
+                names = ["modules"]
+            for name in names:
+                values = original[name]
+                if len(items[name]) >= len(values):
+                    continue
+                candidate_items = {section: list(section_items) for section, section_items in items.items()}
+                candidate = values[len(candidate_items[name])]
+                candidate_items[name].append(candidate)
+                if name in {"classifications", "module_relations"}:
+                    module_ids = {item.module_id for item in candidate_items["modules"]}
+                    if name == "classifications":
+                        entry_ids = {item.entry_point_id for item in candidate_items["entries"]}
+                        if candidate.module_id not in module_ids or (
+                            candidate.entry_point_id is not None and candidate.entry_point_id not in entry_ids
+                        ):
+                            continue
+                    elif candidate.source_module_id not in module_ids or candidate.target_module_id not in module_ids:
+                        continue
+                if name == "entries":
+                    candidate_items["paths"].extend(
+                        item for item in original["paths"]
+                        if item.entry_point_id == candidate.entry_point_id
+                        and item not in candidate_items["paths"]
+                    )
+                    candidate_items["http_associations"].extend(
+                        item for item in original["http_associations"]
+                        if item.route_entry_point_id == candidate.entry_point_id
+                        and item not in candidate_items["http_associations"]
+                    )
+                try:
+                    candidate_overview = _overview_with_items(overview, candidate_items)
+                    candidate_size = measure(candidate_overview)
+                except (ValueError, TypeError):
+                    continue
+                if candidate_size <= max_output_bytes and candidate_size > size:
+                    if best is None or candidate_size > best[0]:
+                        best = (candidate_size, name, candidate_items, candidate_overview)
+            if best is None:
+                break
+            size, _, items, bounded = best
     return bounded
 
 
