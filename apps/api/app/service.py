@@ -68,6 +68,7 @@ from .contracts import (
     LocalImportRequest,
     LocalImportResponse,
     ModelConfigSettingsResponse,
+    NeighborCompleteness,
     NeighborsIndexResponse,
     ModuleSymbolsPageResponse,
     ProjectOverview,
@@ -1480,6 +1481,8 @@ class IndexService:
                 neighbors=list(result.neighbors),
                 contextual_calls=list(result.contextual_calls),
                 unresolved=list(result.unresolved),
+                possible_unresolved_callers=list(result.possible_unresolved_callers),
+                completeness=result.completeness,
                 truncated=result.truncated,
                 truncation_reason=result.truncation_reason,
                 index_truncated=result.index_truncated,
@@ -1539,6 +1542,9 @@ class IndexService:
                     else:
                         truncation_reason = unresolved_reason
                     truncated = True
+                completeness = result.completeness
+                if completeness is not None and truncated and "query_truncated" not in completeness.reasons:
+                    completeness = _with_query_truncation(completeness, truncation_reason)
                 return GetNeighborsSuccess(
                     request_id=request.request_id,
                     run_id=request.run_id,
@@ -1549,6 +1555,8 @@ class IndexService:
                     neighbors=result.neighbors,
                     contextual_calls=list(result.contextual_calls),
                     unresolved=unresolved,
+                    possible_unresolved_callers=result.possible_unresolved_callers,
+                    completeness=completeness,
                     truncated=truncated,
                     truncation_reason=truncation_reason,
                     index_truncated=result.index_truncated,
@@ -3908,6 +3916,7 @@ class WorkspaceService:
         max_modules: int = 100,
         max_groups: int = 80,
         max_module_relations: int = 200,
+        max_classifications: int = 200,
     ) -> ProjectOverview:
         """Build a deterministic entry/module overview from one persisted snapshot."""
 
@@ -3920,6 +3929,7 @@ class WorkspaceService:
             max_modules,
             max_groups,
             max_module_relations,
+            max_classifications,
         )
         with self._overview_cache_lock:
             cached = self._overview_cache.get(cache_key)
@@ -3938,6 +3948,7 @@ class WorkspaceService:
                     max_modules=max_modules,
                     max_groups=max_groups,
                     max_module_relations=max_module_relations,
+                    max_classifications=max_classifications,
                 )
             with self._overview_cache_lock:
                 cached = self._overview_cache.get(cache_key)
@@ -5764,6 +5775,21 @@ def _index_build_issue_error(
         "index_source_rejected",
         422,
         f"index source rejected: {issue.kind} at {issue.path}",
+    )
+
+
+def _with_query_truncation(
+    completeness: NeighborCompleteness,
+    truncation_reason: str | None,
+) -> NeighborCompleteness:
+    hint = f"{completeness.hint or ''} This result stopped at a budget ({truncation_reason}).".strip()
+    return NeighborCompleteness.model_validate(
+        {
+            **completeness.model_dump(),
+            "status": "possibly_incomplete",
+            "reasons": [*completeness.reasons, "query_truncated"],
+            "hint": hint[:1_000],
+        }
     )
 
 

@@ -68,6 +68,7 @@ from .contracts import (
     LocalImportRequest,
     LocalImportResponse,
     ProjectIndexListResponse,
+    OverviewSectionCoverage,
     ProjectOverview,
     ProjectJourney,
     ProjectJourneyCatalog,
@@ -89,6 +90,7 @@ from .contracts import (
     SessionReference,
     SessionResponse,
 )
+from .overview import bound_overview_output
 from .service import IndexService, RepositoryRegistry, ServiceError, WorkspaceService
 
 
@@ -119,6 +121,25 @@ _OverviewModuleRelations = Annotated[
     int,
     Field(ge=1, le=400, description="Maximum returned aggregated module relations."),
 ]
+_OverviewClassifications = Annotated[
+    int,
+    Field(ge=1, le=200, description="Maximum returned architecture classifications."),
+]
+_OverviewOutputBytes = Annotated[
+    int,
+    Field(
+        ge=16_000,
+        le=1_000_000,
+        description=(
+            "Hard cap on the serialized response size. Whole items are dropped from the largest "
+            "sections until the response fits; section_coverage reports total and returned counts. "
+            "Index metadata, notes, coverage, one group, and one entry are always kept."
+        ),
+    ),
+]
+_OVERVIEW_DEFAULT_OUTPUT_BYTES = 48_000
+# Room for the reference coverage appended after bounding.
+_OVERVIEW_OUTPUT_MARGIN_BYTES = 512
 _FeatureHistoryCursor = Annotated[str | None, Field(max_length=500, description="Opaque history cursor from a previous page.")]
 _ModuleSymbolsCursor = Annotated[str | None, Field(max_length=500, description="Opaque cursor from a previous module-symbol page.")]
 _FeatureGraphNodes = Annotated[int, Field(ge=1, le=40, description="Maximum feature graph nodes.")]
@@ -486,7 +507,14 @@ def create_mcp_server(
             "The result may separately include contextual_calls for one explicitly constructed receiver and its direct "
             "field binding. These are conditional records, not static call edges or confirmed impact; "
             "binding_mutation_after_escape_unverified marks a receiver stored through an attribute whose later "
-            "mutation is unknown. Dynamic or unresolved references remain marked and are not promoted to confirmed edges."
+            "mutation is unknown. Dynamic or unresolved references remain marked and are not promoted to confirmed edges. "
+            "Edges come from conservative static analysis: calls through receivers whose type cannot be proven "
+            "(unannotated parameters, star-import re-exports, dynamic dispatch, monkeypatched attributes, "
+            "decorated or overridden methods) are left unresolved, so an empty or short list is not proof of no "
+            "callers or callees. Always read completeness: status possibly_incomplete lists reasons and a hint; "
+            "possible_unresolved_callers samples unresolved calls that name the root symbol. In callers mode "
+            "unresolved is empty; in callees/both it lists unresolved calls made by returned nodes. Each neighbor "
+            "carries depth, the hop at which its edge was reached."
         ),
         structured_output=True,
     )
@@ -524,7 +552,10 @@ def create_mcp_server(
             "FastAPI routes with literal declared paths, public API names in static __all__, and top-level pluggy "
             "hookspec functions bound to a real HookspecMarker import. Classifications are independent from calls "
             "paths; unknown does not mean unused or unreachable, TypeScript export facts are not persisted, and "
-            "the result and source evidence are bounded."
+            "the result and source evidence are bounded. The response is capped at max_output_bytes (default "
+            "48000): every section, including classifications and references, may be shortened. Check truncated, "
+            "truncation_reason, overview.section_coverage, and reference_coverage (total vs returned per section) "
+            "before treating a list as complete; classification_coverage.analysis_incomplete marks rule analysis that stopped early."
         ),
         structured_output=True,
     )
@@ -536,6 +567,8 @@ def create_mcp_server(
         max_modules: _OverviewModules = 100,
         max_groups: _OverviewGroups = 80,
         max_module_relations: _OverviewModuleRelations = 200,
+        max_classifications: _OverviewClassifications = 200,
+        max_output_bytes: _OverviewOutputBytes = _OVERVIEW_DEFAULT_OUTPUT_BYTES,
     ) -> McpOverviewResponse:
         try:
             result = service.get_overview(
@@ -546,8 +579,9 @@ def create_mcp_server(
                 max_modules=max_modules,
                 max_groups=max_groups,
                 max_module_relations=max_module_relations,
+                max_classifications=max_classifications,
             )
-            return _mcp_overview_response(result, citation_url)
+            return _bounded_overview_response(result, citation_url, max_output_bytes)
         except ServiceError as exc:
             return _failure(McpOverviewResponse, exc)
         except Exception:
@@ -801,7 +835,9 @@ def create_mcp_server(
             "Read a bounded static calls impact view for exactly one candidate_id or finding_id from a saved Run report. "
             "The result stays on the Run's immutable index snapshot, defaults to callers at depth 2, and classifies four "
             "layers: report anchor, direct static calls, indirect static calls, and unknown unresolved references. "
-            "Static reachability is not confirmed impact. This tool never calls a model or executes repository source."
+            "Static reachability is not confirmed impact. Calls whose receiver type cannot be proven statically are "
+            "absent from the static layers, so missing callers or callees are possible; use get_neighbors completeness "
+            "for a per-symbol signal. This tool never calls a model or executes repository source."
         ),
         structured_output=True,
     )
@@ -1596,6 +1632,36 @@ def _mcp_github_import_response(result: GitHubImportResponse) -> McpImportRespon
         project=result.project,
         attempt=result.attempt,
         index=result.index,
+    )
+
+
+def _bounded_overview_response(
+    result: ProjectOverview,
+    base_url: str,
+    max_output_bytes: int,
+) -> McpOverviewResponse:
+    total_references = len(_mcp_overview_response(result, base_url).references)
+
+    def measure(overview: ProjectOverview) -> int:
+        return len(_mcp_overview_response(overview, base_url).model_dump_json(indent=2).encode())
+
+    bounded = bound_overview_output(
+        result,
+        measure,
+        max(1, max_output_bytes - _OVERVIEW_OUTPUT_MARGIN_BYTES),
+    )
+    response = _mcp_overview_response(bounded, base_url)
+    returned_references = len(response.references)
+    return McpOverviewResponse(
+        ok=True,
+        overview=bounded,
+        references=response.references,
+        reference_coverage=OverviewSectionCoverage(
+            section="references",
+            total=total_references,
+            returned=returned_references,
+            truncated=returned_references < total_references,
+        ),
     )
 
 

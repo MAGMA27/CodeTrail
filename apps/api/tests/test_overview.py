@@ -941,7 +941,13 @@ def test_overview_classification_item_and_evidence_budgets_are_explicit(tmp_path
     assert all(item["evidence_error"] is None for item in hookspecs[:100])
     assert hookspecs[-1]["evidence"] == []
     assert hookspecs[-1]["evidence_error"] == "classification evidence line budget reached"
-    assert evidence_overview["classification_coverage"]["truncated"] is True
+    # Every item was returned, so the list is not truncated; the evidence gap is an
+    # analysis limit reported separately.
+    evidence_coverage = evidence_overview["classification_coverage"]
+    assert evidence_coverage["truncated"] is False
+    assert evidence_coverage["visible"] == evidence_coverage["total"]
+    assert evidence_coverage["analysis_incomplete"] is True
+    assert evidence_coverage["incomplete_reasons"] == ["classification evidence line budget reached"]
 
     character_repository = tmp_path / "architecture-character-budget"
     character_repository.mkdir()
@@ -981,7 +987,8 @@ def test_overview_classification_item_and_evidence_budgets_are_explicit(tmp_path
         for item in character_overview["classifications"]
         for evidence in item["evidence"]
     ) <= 40_000
-    assert character_overview["classification_coverage"]["truncated"] is True
+    assert character_overview["classification_coverage"]["truncated"] is False
+    assert character_overview["classification_coverage"]["analysis_incomplete"] is True
 
 
 def test_overview_scope_and_budget_are_explicit(tmp_path: Path) -> None:
@@ -1175,3 +1182,65 @@ def test_overview_marks_pluggy_hookimpls_as_entries_without_trusting_shadowed_ma
     assert not any(entry["path"] == "demo/spoof.py" for entry in overview["entries"])
     assert not any(entry["path"] == "demo/hooks.py" for entry in overview["entries"])
     assert overview["rules_version"].startswith("python-entry-v7+")
+
+
+def test_bound_overview_output_trims_whole_items_and_keeps_counts_consistent(tmp_path: Path) -> None:
+    from app.contracts import ProjectOverview
+    from app.indexing import build_source_snapshot, extract_definitions
+    from app.overview import bound_overview_output, build_project_overview
+    from app.relations import extract_relations
+    from app.storage import IndexStore
+
+    repository = tmp_path / "bounded"
+    package = repository / "pkg"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text(
+        "from .core import *\n__all__ = [" + ", ".join(f"'api_{n}'" for n in range(30)) + "]\n"
+        + "".join(f"from .mod_{n} import api_{n}\n" for n in range(30)),
+        encoding="utf-8",
+    )
+    (package / "core.py").write_text("VALUE = 1\n", encoding="utf-8")
+    for n in range(30):
+        (package / f"mod_{n}.py").write_text(
+            f"from .core import VALUE\n__all__ = ['api_{n}']\ndef api_{n}():\n    return VALUE\n",
+            encoding="utf-8",
+        )
+    relation = extract_relations(
+        extract_definitions(
+            build_source_snapshot(repository, repository_id="bounded", revision="v1", dirty=False)
+        )
+    )
+    with IndexStore(tmp_path / "index.sqlite3") as store:
+        store.write_index(relation)
+        relation = store.load_index(relation.snapshot.index.index_id)
+        overview = build_project_overview("project-bounded", relation, store.read_evidence)
+
+    def measure(item: ProjectOverview) -> int:
+        return len(item.model_dump_json(indent=2).encode())
+
+    full_size = measure(overview)
+    full_sections = {item.section: item for item in overview.section_coverage}
+    assert full_sections["classifications"].truncated is False
+    assert overview.classification_coverage.truncated is False
+    assert bound_overview_output(overview, measure, full_size) == overview
+
+    budget = full_size // 3
+    bounded = bound_overview_output(overview, measure, budget)
+    assert measure(bounded) <= budget
+    assert bounded.truncated is True
+    assert "max_output_bytes reached" in (bounded.truncation_reason or "")
+    sections = {item.section: item for item in bounded.section_coverage}
+    for name in ("modules", "classifications", "module_relations"):
+        assert sections[name].returned == len(getattr(bounded, name))
+        assert sections[name].total == full_sections[name].total
+    assert sections["modules"].truncated is True
+    assert bounded.coverage.visible_modules == len(bounded.modules)
+    assert bounded.classification_coverage.visible == len(bounded.classifications)
+    assert bounded.classification_coverage.truncated is (
+        len(bounded.classifications) < bounded.classification_coverage.total
+    )
+    visible_module_ids = {module.module_id for module in bounded.modules}
+    assert all(item.module_id in visible_module_ids for item in bounded.classifications)
+    # Trimming keeps section order: the returned items are a prefix of the full lists.
+    assert bounded.modules == overview.modules[: len(bounded.modules)]
+    assert bounded.module_relations == overview.module_relations[: len(bounded.module_relations)]

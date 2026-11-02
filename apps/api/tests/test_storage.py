@@ -1146,3 +1146,67 @@ def test_legacy_project_does_not_claim_index_that_a_project_is_building(tmp_path
         assert not store.project_has_index("project-legacy-test", building.snapshot.index.index_id)
         store.finish_project_index("project-building", building.snapshot.index.index_id)
         assert store.project_has_index("project-building", building.snapshot.index.index_id)
+
+
+def test_neighbor_completeness_reports_possible_unresolved_callers(tmp_path: Path) -> None:
+    source = tmp_path / "repo" / "pkg"
+    source.mkdir(parents=True)
+    (source / "__init__.py").write_text("", encoding="utf-8")
+    (source / "models.py").write_text(
+        "class Response:\n"
+        "    def raise_for_status(self) -> None:\n"
+        "        self.check()\n"
+        "    def check(self) -> None:\n"
+        "        external_helper()\n"
+        "def proven(response: Response) -> None:\n"
+        "    response.raise_for_status()\n"
+        "def unknown(response) -> None:\n"
+        "    response.raise_for_status()\n"
+        "    print('raise_for_status')\n",
+        encoding="utf-8",
+    )
+    relation = extract_relations(
+        extract_definitions(
+            build_source_snapshot(tmp_path / "repo", repository_id="completeness", revision="v1", dirty=False)
+        )
+    )
+    index_id = relation.snapshot.index.index_id
+    by_name = {symbol.qualified_name: symbol for symbol in relation.symbols}
+    root_id = by_name["pkg.models.Response.raise_for_status"].symbol_id
+
+    with IndexStore(tmp_path / "index.sqlite3") as store:
+        store.write_index(relation)
+        callers = store.get_neighbors(index_id, root_id, "callers", depth=2, limit=40, edge_kinds=("calls",))
+        assert [(item.symbol.qualified_name, item.depth) for item in callers.neighbors] == [
+            ("pkg.models.proven", 1)
+        ]
+        # Callers mode is no longer padded with the root's own outgoing unresolved calls.
+        assert callers.unresolved == ()
+        assert callers.completeness is not None
+        assert callers.completeness.status == "possibly_incomplete"
+        assert callers.completeness.reasons == ["possible_unresolved_callers"]
+        assert callers.completeness.possible_unresolved_caller_count == 1
+        assert callers.completeness.unresolved_outgoing_count is None
+        assert "read_source" in (callers.completeness.hint or "")
+        assert [
+            (item.source_symbol_id, item.expression, item.reason)
+            for item in callers.possible_unresolved_callers
+        ] == [(by_name["pkg.models.unknown"].symbol_id, "response.raise_for_status()", "receiver_type_unknown")]
+
+        callees = store.get_neighbors(index_id, root_id, "callees", depth=2, limit=40, edge_kinds=("calls",))
+        assert [(item.symbol.qualified_name, item.depth) for item in callees.neighbors] == [
+            ("pkg.models.Response.check", 1)
+        ]
+        assert callees.possible_unresolved_callers == ()
+        assert callees.completeness is not None
+        assert callees.completeness.possible_unresolved_caller_count is None
+        assert callees.completeness.unresolved_outgoing_count == len(callees.unresolved) == 1
+        assert callees.completeness.reasons == ["unresolved_outgoing_calls"]
+
+        proven_id = by_name["pkg.models.proven"].symbol_id
+        complete = store.get_neighbors(index_id, proven_id, "callers", depth=1, limit=40, edge_kinds=("calls",))
+        assert complete.neighbors == ()
+        assert complete.completeness is not None
+        assert complete.completeness.status == "complete"
+        assert complete.completeness.reasons == []
+        assert complete.completeness.hint is None

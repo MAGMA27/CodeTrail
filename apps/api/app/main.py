@@ -787,6 +787,7 @@ def create_app(
         max_modules: int = Query(default=100, ge=1, le=200),
         max_groups: int = Query(default=80, ge=1, le=200),
         max_module_relations: int = Query(default=200, ge=1, le=400),
+        max_classifications: int = Query(default=200, ge=1, le=200),
     ) -> ProjectOverview:
         return await run_in_threadpool(
             workspace_service.get_overview,
@@ -797,6 +798,7 @@ def create_app(
             max_modules=max_modules,
             max_groups=max_groups,
             max_module_relations=max_module_relations,
+            max_classifications=max_classifications,
         )
 
     @application.get(

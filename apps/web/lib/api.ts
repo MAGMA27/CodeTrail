@@ -613,6 +613,16 @@ export type ModuleSymbolsPageResponse = {
 export type Neighbor = {
   symbol: SymbolRecord;
   edge: CodeEdge;
+  /** BFS hop at which the edge was reached; 1 touches the root. */
+  depth?: number | null;
+};
+
+export type NeighborCompleteness = {
+  status: "complete" | "possibly_incomplete";
+  reasons: string[];
+  possible_unresolved_caller_count: number | null;
+  unresolved_outgoing_count: number | null;
+  hint: string | null;
 };
 
 export type ContextualCall = {
@@ -638,6 +648,8 @@ export type NeighborsResponse = {
   neighbors: Neighbor[];
   contextual_calls?: ContextualCall[];
   unresolved: UnresolvedReference[];
+  possible_unresolved_callers?: UnresolvedReference[];
+  completeness?: NeighborCompleteness | null;
   truncated: boolean;
   truncation_reason: string | null;
   index_truncated: boolean;
@@ -697,8 +709,24 @@ export type OverviewClassificationCoverage = {
   visible: number;
   category_counts: OverviewClassificationCounts;
   visible_category_counts: OverviewClassificationCounts;
+  /** True only when classification items were omitted (visible < total). */
+  truncated: boolean;
+  /** Rule analysis stopped early or lacked evidence; unknown roles may remain. */
+  analysis_incomplete?: boolean;
+  incomplete_reasons?: string[];
+};
+
+export type OverviewSectionCoverage = {
+  section: string;
+  total: number | null;
+  returned: number;
   truncated: boolean;
 };
+
+/** Classification records were omitted or their rule analysis is incomplete. */
+export function classificationCoverageLimited(coverage: OverviewClassificationCoverage): boolean {
+  return coverage.truncated || coverage.analysis_incomplete === true;
+}
 
 export type OverviewGroup = {
   group_id: string;
@@ -790,6 +818,7 @@ export type ProjectOverview = {
   paths: OverviewPath[];
   unresolved: UnresolvedReference[];
   coverage: OverviewCoverage;
+  section_coverage?: OverviewSectionCoverage[];
   notes: string[];
   truncated: boolean;
   truncation_reason: string | null;
