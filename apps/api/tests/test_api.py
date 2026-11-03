@@ -485,34 +485,31 @@ def test_http_index_query_and_snapshot_evidence_flow(tmp_path: Path) -> None:
     )
 
 
-def test_http_errors_include_shared_details_only_when_available(tmp_path: Path, monkeypatch) -> None:
-    application = create_app({}, data_root=tmp_path / "data")
-    project_id = "project-error-test"
-    index_id = "index-error-test"
-
-    def fail_read_source(_project_id, _index_id, _path, start_line, end_line):
-        if start_line > end_line:
-            raise ServiceError(
-                "invalid_input", 400, "start_line must be less than or equal to end_line",
-                details=[{"field": "start_line", "problem": "start_after_end"}],
-            )
-        if end_line - start_line + 1 > 200:
-            raise ServiceError(
-                "invalid_input", 400, "read_source supports at most 200 lines",
-                details=[{"field": "end_line", "problem": "range_too_long", "max": 200}],
-            )
-        raise ServiceError(
-            "invalid_input", 400, "start_line is beyond the end of the file (25 lines)",
-            details=[{"field": "start_line", "problem": "beyond_end_of_file", "max": 25}],
-        )
-
-    monkeypatch.setattr(application.state.workspace_service, "read_source", fail_read_source)
-    source_url = f"/api/projects/{project_id}/indexes/{index_id}/source?path=timeout_demo%2Fconfig.py&start_line={{start}}&end_line={{end}}"
+def test_http_errors_include_shared_details_only_when_available(tmp_path: Path) -> None:
+    repository = copy_fixture(tmp_path)
+    application = create_app({"timeout-demo": repository}, data_root=tmp_path / "data")
+    status, created = request(application, "POST", "/api/indexes", create_request())
+    assert status == 200
+    index_id = created["index"]["index_id"]
+    status, projects = request(application, "GET", "/api/projects")
+    assert status == 200
+    project_id = next(
+        project["project_id"]
+        for project in projects["projects"]
+        if project["repository_id"] == "timeout-demo"
+    )
+    source_url = (
+        f"/api/indexes/{index_id}/source?path=timeout_demo%2Fconfig.py"
+        "&start_line={start}&end_line={end}"
+    )
+    line_count = len((repository / "timeout_demo" / "config.py").read_text(encoding="utf-8").splitlines())
 
     expected_details = {
         (1, 300): [{"field": "end_line", "problem": "range_too_long", "max": 200}],
         (50, 10): [{"field": "start_line", "problem": "start_after_end"}],
-        (100, 100): [{"field": "start_line", "problem": "beyond_end_of_file", "max": 25}],
+        (line_count + 1, line_count + 1): [
+            {"field": "start_line", "problem": "beyond_end_of_file", "max": line_count}
+        ],
     }
     for (start, end), details in expected_details.items():
         status, body = request(application, "GET", source_url.format(start=start, end=end))
