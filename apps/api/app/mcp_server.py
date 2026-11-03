@@ -47,6 +47,7 @@ from .contracts import (
     McpJourneyCatalogResponse,
     McpJourneyResponse,
     McpNeighborsResponse,
+    McpUnresolvedResponse,
     McpModuleSymbolsResponse,
     McpOverviewResponse,
     McpOverviewItemsResponse,
@@ -190,6 +191,7 @@ _NeighborEdgeKind = Literal["imports", "calls"]
 _ImpactDirection = Literal["callers", "callees"]
 _ProjectId = Annotated[Identifier, Field(description="Stable CodeTrail project ID.")]
 _IndexId = Annotated[Identifier, Field(description="Immutable CodeTrail index ID.")]
+_SymbolId = Annotated[Identifier, Field(description="Symbol ID in the selected immutable index.")]
 _ModuleId = Annotated[Identifier, Field(description="Module symbol ID from the selected immutable index.")]
 _Query = Annotated[str, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_QUERY_LENGTH, description="Symbol or source text query.")]
 _SearchLimit = Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_PAGE_SIZE, description="Maximum number of returned search items.")]
@@ -222,6 +224,12 @@ _OverviewPageLimit = Annotated[
     int,
     Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_OVERVIEW_PAGE_LIMIT, description="Maximum items in one overview section page."),
 ]
+_UnresolvedPageLimit = Annotated[
+    int,
+    Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_UNRESOLVED_PAGE_LIMIT, description="Maximum unresolved items in one page."),
+]
+_UnresolvedCursor = Annotated[str | None, Field(max_length=shared.MAX_OVERVIEW_CURSOR_LENGTH, description="Opaque unresolved cursor; round-trip unchanged.")]
+_UnresolvedReason = Annotated[str | None, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_REASON_LENGTH)]
 _OverviewCursor = Annotated[str | None, Field(max_length=shared.MAX_OVERVIEW_CURSOR_LENGTH, description="Opaque cursor from a previous page; round-trip it unchanged. Invalid or expired cursor values are rejected.")]
 _OverviewModuleFilter = Annotated[str | None, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_IDENTIFIER_LENGTH)]
 _OverviewClassifications = Annotated[
@@ -606,7 +614,9 @@ def create_mcp_server(
             "callers or callees. Always read completeness: status possibly_incomplete lists reasons and a hint; "
             "possible_unresolved_callers samples unresolved calls that name the root symbol. In callers mode "
             "unresolved is empty; in callees/both it lists unresolved calls made by returned nodes. Each neighbor "
-            "carries depth, the hop at which its edge was reached."
+            "carries depth, the hop at which its edge was reached. Default detail='summary' returns compact neighbors "
+            "with edge kind/orientation, unresolved counts and samples, and omits nodes/contextual_calls; use "
+            "detail='full' for the complete legacy response."
         ),
         structured_output=True,
     )
@@ -618,6 +628,7 @@ def create_mcp_server(
         depth: _Depth = shared.MAX_GRAPH_DEPTH,
         limit: _Limit = shared.MAX_PAGE_SIZE,
         edge_kinds: list[_NeighborEdgeKind] | None = None,
+        detail: _Detail = shared.MCP_DEFAULT_DETAIL,
     ) -> McpNeighborsResponse:
         try:
             result = service.neighbors(
@@ -628,12 +639,45 @@ def create_mcp_server(
                 depth,
                 limit,
                 tuple(edge_kinds) if edge_kinds else None,
+                detail=detail,
             )
             return McpNeighborsResponse(ok=True, result=result)
         except ServiceError as exc:
             return _failure(McpNeighborsResponse, exc)
         except Exception:
             return _unexpected_failure("get_neighbors", McpNeighborsResponse)
+
+    @server.tool(
+        name="list_unresolved",
+        title="List unresolved calls",
+        description=(
+            "Page unresolved references for one symbol or module in the selected project/index. "
+            "direction='outgoing' lists calls made by that scope; 'possible_incoming' requires symbol_id and "
+            "lists unresolved calls that may name that symbol. Filter by the open reason string when needed. "
+            "Round-trip page.next_cursor unchanged."
+        ),
+        structured_output=True,
+    )
+    def list_unresolved(
+        project_id: _ProjectId,
+        index_id: _IndexId,
+        symbol_id: _SymbolId | None = None,
+        module_id: _ModuleId | None = None,
+        direction: Literal["outgoing", "possible_incoming"] = shared.DEFAULT_UNRESOLVED_DIRECTION,
+        reason: _UnresolvedReason = None,
+        cursor: _UnresolvedCursor = None,
+        limit: _UnresolvedPageLimit = shared.DEFAULT_UNRESOLVED_PAGE_LIMIT,
+    ) -> McpUnresolvedResponse:
+        try:
+            result = service.list_unresolved(
+                project_id, index_id, symbol_id=symbol_id, module_id=module_id,
+                direction=direction, reason=reason, cursor=cursor, limit=limit,
+            )
+            return McpUnresolvedResponse(ok=True, result=result)
+        except ServiceError as exc:
+            return _failure(McpUnresolvedResponse, exc)
+        except Exception:
+            return _unexpected_failure("list_unresolved", McpUnresolvedResponse)
 
     @server.tool(
         name="get_overview",

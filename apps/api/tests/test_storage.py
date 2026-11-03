@@ -1230,6 +1230,10 @@ def test_neighbor_completeness_reports_possible_unresolved_callers(tmp_path: Pat
     index_id = relation.snapshot.index.index_id
     by_name = {symbol.qualified_name: symbol for symbol in relation.symbols}
     root_id = by_name["pkg.models.Response.raise_for_status"].symbol_id
+    module_id = next(
+        symbol.symbol_id for symbol in relation.symbols
+        if symbol.kind == "module" and symbol.path == "pkg/models.py"
+    )
 
     with IndexStore(tmp_path / "index.sqlite3") as store:
         store.write_index(relation)
@@ -1249,6 +1253,31 @@ def test_neighbor_completeness_reports_possible_unresolved_callers(tmp_path: Pat
             (item.source_symbol_id, item.expression, item.reason)
             for item in callers.possible_unresolved_callers
         ] == [(by_name["pkg.models.unknown"].symbol_id, "response.raise_for_status()", "receiver_type_unknown")]
+
+        incoming_total, incoming_first = store.list_unresolved(
+            index_id, symbol_id=root_id, direction="possible_incoming", limit=1
+        )
+        assert incoming_total == callers.completeness.possible_unresolved_caller_count
+        assert [item.unresolved_id for item in incoming_first] == [
+            item.unresolved_id for item in callers.possible_unresolved_callers
+        ]
+
+        module_total, module_page = store.list_unresolved(index_id, module_id=module_id, limit=1)
+        module_ids = [item.unresolved_id for item in module_page]
+        offset = len(module_page)
+        while offset < module_total:
+            _, next_page = store.list_unresolved(
+                index_id, module_id=module_id, limit=1, offset=offset
+            )
+            module_ids.extend(item.unresolved_id for item in next_page)
+            offset += len(next_page)
+        expected_module_ids = [
+            item.unresolved_id for item in sorted(
+                (item for item in relation.unresolved if item.path == "pkg/models.py"),
+                key=lambda item: (item.path, item.start_line, item.unresolved_id),
+            )
+        ]
+        assert module_ids == expected_module_ids
 
         callees = store.get_neighbors(index_id, root_id, "callees", depth=2, limit=40, edge_kinds=("calls",))
         assert [(item.symbol.qualified_name, item.depth) for item in callees.neighbors] == [

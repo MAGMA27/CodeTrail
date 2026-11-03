@@ -53,6 +53,11 @@ MCP_DEFAULT_SEARCH_LIMIT = 10
 HTTP_DEFAULT_DETAIL = "full"
 MCP_DEFAULT_DETAIL = "summary"
 DEFAULT_OVERVIEW_PAGE_DETAIL = "summary"
+DEFAULT_UNRESOLVED_PAGE_LIMIT = 20
+MAX_UNRESOLVED_PAGE_LIMIT = MAX_PAGE_SIZE
+DEFAULT_UNRESOLVED_DIRECTION = "outgoing"
+UNRESOLVED_SUMMARY_SAMPLE_LIMIT = 3
+POSSIBLE_CALLER_SUMMARY_SAMPLE_LIMIT = 3
 SEARCH_MAX_SCAN = 200
 SEARCH_SNIPPET_MAX_LENGTH = 120
 MIN_RUN_SEQUENCE = 0
@@ -1261,6 +1266,34 @@ class Neighbor(ContractModel):
     depth: int | None = Field(default=None, ge=1, le=3)
 
 
+class NeighborSummary(ContractModel):
+    to: SymbolRef
+    via: str = Field(min_length=MIN_REQUEST_VALUE, max_length=MAX_PATH_LENGTH + 24)
+    depth: int | None = Field(default=None, ge=1, le=3)
+    edge_kind: EdgeKind
+    orientation: Literal["outgoing", "incoming", "self"]
+
+
+class UnresolvedSummaryItem(ContractModel):
+    id: Identifier
+    at: str = Field(min_length=MIN_REQUEST_VALUE, max_length=MAX_PATH_LENGTH + 24)
+    expression: str = Field(min_length=MIN_REQUEST_VALUE, max_length=MAX_REASON_LENGTH)
+    reason: str = Field(min_length=MIN_REQUEST_VALUE, max_length=MAX_REASON_LENGTH)
+    source: SymbolRef | None = None
+    possible_target_count: NonNegativeInt
+
+
+class UnresolvedSummary(ContractModel):
+    total: NonNegativeInt
+    by_reason: dict[str, NonNegativeInt]
+    sample: list[UnresolvedSummaryItem] = Field(max_length=UNRESOLVED_SUMMARY_SAMPLE_LIMIT)
+
+
+class PossibleUnresolvedCallersSummary(ContractModel):
+    total: NonNegativeInt | None
+    sample: list[UnresolvedSummaryItem] = Field(max_length=POSSIBLE_CALLER_SUMMARY_SAMPLE_LIMIT)
+
+
 NeighborCompletenessReason: TypeAlias = Literal[
     "query_truncated",
     "index_truncated",
@@ -1539,11 +1572,12 @@ class SourceIndexResponse(VersionedModel):
 class NeighborsIndexResponse(VersionedModel):
     index_id: Identifier
     root: Symbol
-    nodes: list[Symbol] = Field(default_factory=list)
-    neighbors: list[Neighbor] = Field(default_factory=list)
+    nodes: list[Symbol] | None = Field(default_factory=list, exclude_if=lambda value: value is None)
+    neighbors: list[Neighbor | NeighborSummary] = Field(default_factory=list)
     contextual_calls: list[ContextualCall] = Field(default_factory=list, max_length=200)
-    unresolved: list[UnresolvedReference] = Field(default_factory=list)
-    possible_unresolved_callers: list[UnresolvedReference] = Field(
+    unresolved: list[UnresolvedReference] | None = Field(default_factory=list, exclude_if=lambda value: value is None)
+    unresolved_summary: UnresolvedSummary | None = None
+    possible_unresolved_callers: list[UnresolvedReference] | PossibleUnresolvedCallersSummary = Field(
         default_factory=list, max_length=NEIGHBOR_POSSIBLE_CALLER_SAMPLE_LIMIT
     )
     completeness: NeighborCompleteness | None = None
@@ -1558,23 +1592,28 @@ class NeighborsIndexResponse(VersionedModel):
     def validate_truncation(self) -> NeighborsIndexResponse:
         if self.root.index_id != self.index_id:
             raise ValueError("neighbor root must use the response index_id")
-        node_ids = {node.symbol_id for node in self.nodes}
-        if self.root.symbol_id not in node_ids:
-            raise ValueError("neighbor nodes must include the root symbol")
-        if len(node_ids) != len(self.nodes):
-            raise ValueError("neighbor nodes must have unique symbol IDs")
-        for node in self.nodes:
-            if node.index_id != self.index_id:
-                raise ValueError("neighbor node belongs to a different index_id")
+        node_ids = {node.symbol_id for node in self.nodes or []}
+        if self.nodes is not None:
+            if self.root.symbol_id not in node_ids:
+                raise ValueError("neighbor nodes must include the root symbol")
+            if len(node_ids) != len(self.nodes):
+                raise ValueError("neighbor nodes must have unique symbol IDs")
+            for node in self.nodes:
+                if node.index_id != self.index_id:
+                    raise ValueError("neighbor node belongs to a different index_id")
         for neighbor in self.neighbors:
+            if isinstance(neighbor, NeighborSummary):
+                if self.nodes is not None:
+                    raise ValueError("summary neighbors must use compact references without full nodes")
+                continue
             if neighbor.symbol.index_id != self.index_id or neighbor.edge.index_id != self.index_id:
                 raise ValueError("neighbor result belongs to a different index_id")
             if neighbor.symbol.symbol_id not in node_ids:
                 raise ValueError("neighbor result must reference a returned node")
             if neighbor.edge.source_id not in node_ids or neighbor.edge.target_id not in node_ids:
                 raise ValueError("neighbor edge must reference returned nodes")
-        neighbor_edges = {neighbor.edge.edge_id: neighbor.edge for neighbor in self.neighbors}
-        nodes_by_id = {node.symbol_id: node for node in self.nodes}
+        neighbor_edges = {neighbor.edge.edge_id: neighbor.edge for neighbor in self.neighbors if isinstance(neighbor, Neighbor)}
+        nodes_by_id = {node.symbol_id: node for node in self.nodes or []}
         context_ids: set[str] = set()
         for contextual_call in self.contextual_calls:
             context_ids.add(contextual_call.context_id)
@@ -1592,18 +1631,34 @@ class NeighborsIndexResponse(VersionedModel):
                 raise ValueError("contextual calls must bind to a returned activation edge")
         if len(context_ids) != len(self.contextual_calls):
             raise ValueError("contextual call IDs must be unique")
-        for unresolved in self.unresolved:
+        for unresolved in self.unresolved or []:
             if unresolved.index_id != self.index_id or unresolved.source_symbol_id not in node_ids:
                 raise ValueError("unresolved reference must use returned nodes")
-        for unresolved in self.possible_unresolved_callers:
-            if unresolved.index_id != self.index_id:
-                raise ValueError("possible unresolved callers must use the response index_id")
-        if self.possible_unresolved_callers and (
+        possible_callers = self.possible_unresolved_callers
+        if isinstance(possible_callers, list):
+            for unresolved in possible_callers:
+                if unresolved.index_id != self.index_id:
+                    raise ValueError("possible unresolved callers must use the response index_id")
+        if isinstance(possible_callers, list) and possible_callers and (
             self.completeness is None
             or (self.completeness.possible_unresolved_caller_count or 0)
-            < len(self.possible_unresolved_callers)
+            < len(possible_callers)
         ):
             raise ValueError("possible unresolved caller samples must not exceed the reported count")
+        if self.nodes is None and (self.unresolved is not None or self.unresolved_summary is None):
+            raise ValueError("summary neighbor responses must contain unresolved_summary and omit full unresolved items")
+        if self.nodes is None and not isinstance(possible_callers, PossibleUnresolvedCallersSummary):
+            raise ValueError("summary neighbor responses must contain possible caller counts and samples")
+        if isinstance(possible_callers, PossibleUnresolvedCallersSummary) and (
+            possible_callers.total is not None
+            and (
+                self.completeness is None
+                or (self.completeness.possible_unresolved_caller_count or 0) != possible_callers.total
+            )
+        ):
+            raise ValueError("possible caller summary total must match completeness")
+        if self.nodes is not None and self.unresolved_summary is not None:
+            raise ValueError("full neighbor responses cannot contain unresolved_summary")
         if self.truncated and not self.truncation_reason:
             raise ValueError("truncated neighbor results must explain the truncation")
         if not self.truncated and self.truncation_reason:
@@ -2520,10 +2575,64 @@ class OverviewPage(ContractModel):
     order: str = Field(min_length=1, max_length=100)
 
 
+UnresolvedDirection: TypeAlias = Literal["outgoing", "possible_incoming"]
+UnresolvedCompletenessReason: TypeAlias = Literal[
+    "more_items",
+    "index_unresolved_truncated",
+    "index_unresolved_coverage_unknown",
+]
+
+
+class UnresolvedScope(ContractModel):
+    symbol_id: Identifier | None = None
+    module_id: Identifier | None = None
+    direction: UnresolvedDirection
+    reason: str | None = Field(default=None, max_length=MAX_REASON_LENGTH)
+
+    @model_validator(mode="after")
+    def validate_scope(self) -> UnresolvedScope:
+        if (self.symbol_id is None) == (self.module_id is None):
+            raise ValueError("unresolved scope requires exactly one symbol_id or module_id")
+        if self.direction == "possible_incoming" and self.symbol_id is None:
+            raise ValueError("possible_incoming unresolved scope requires symbol_id")
+        return self
+
+
 class OverviewCompleteness(ContractModel):
     status: Literal["complete", "truncated", "possibly_incomplete"]
     reasons: list[OverviewIncompleteReason] = Field(default_factory=list)
     hint: str | None = None
+
+
+class UnresolvedCompleteness(ContractModel):
+    status: Literal["complete", "truncated", "possibly_incomplete"]
+    reasons: list[UnresolvedCompletenessReason] = Field(default_factory=list)
+    hint: str | None = None
+
+
+class UnresolvedPage(VersionedModel):
+    project_id: Identifier
+    index_id: Identifier
+    scope: UnresolvedScope
+    items: list[UnresolvedReference] = Field(max_length=MAX_UNRESOLVED_PAGE_LIMIT)
+    page: OverviewPage
+    completeness: UnresolvedCompleteness
+
+    @model_validator(mode="after")
+    def validate_page(self) -> UnresolvedPage:
+        if self.page.returned != len(self.items):
+            raise ValueError("unresolved page returned count must match its items")
+        if self.page.total is not None and self.page.total < self.page.returned:
+            raise ValueError("unresolved page total cannot be smaller than returned items")
+        ids = [item.unresolved_id for item in self.items]
+        if len(set(ids)) != len(ids):
+            raise ValueError("unresolved page item IDs must be unique")
+        if any(item.index_id != self.index_id for item in self.items):
+            raise ValueError("unresolved page items must use the response index_id")
+        ordered = sorted(self.items, key=lambda item: (item.path, item.start_line, item.unresolved_id))
+        if self.items != ordered:
+            raise ValueError("unresolved page items must use path,line,id order")
+        return self
 
 
 class OverviewSkeletonSection(ContractModel):
@@ -3339,6 +3448,10 @@ class McpSourceResponse(McpResultBase):
 
 class McpNeighborsResponse(McpResultBase):
     result: NeighborsIndexResponse | None = None
+
+
+class McpUnresolvedResponse(McpResultBase):
+    result: UnresolvedPage | None = None
 
 
 class McpOverviewResponse(McpResultBase):

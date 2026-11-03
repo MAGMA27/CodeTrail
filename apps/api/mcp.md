@@ -14,11 +14,17 @@ CodeTrail 工具成功和失败都通过原工具的响应模型返回，字段�
 
 GitHub 导入、GitHub 重试、远端刷新和项目索引刷新提交持久 job，并返回 `job_id` 与当前状态。轮询使用 `get_job_status`，显式取消使用 `cancel_job(job_id, project_id?)`；未绑定 Project 的初始导入可不传 project_id，已绑定任务必须传入归属项目。工具注册仍受现有 GitHub/索引写入 opt-in 开关约束。HTTP 与 MCP 复用同一个 WorkspaceService 和 SQLite job 状态。MCP 客户端断开不会取消已提交 job。
 
-`get_neighbors` 与 `run_get_neighbors` 独立返回构造上下文 `contextual_calls`：绑定实际返回的激活 calls 边，条件目标不增加普通 nodes/static_edges。记录可能带逃逸后改写未知标记，不能视为确定调用或已确认影响；查询与静态边共用时间、最多 200 条关系及输出预算。旧快照返回空列表，精确语义见 [索引说明](indexing.md) 与 [条件调用决策](../../docs/decisions/2026-10-07-python-contextual-instance-calls.md)。
+`get_neighbors(detail="full")` 与 `run_get_neighbors` 独立返回构造上下文 `contextual_calls`：绑定实际返回的激活 calls 边，条件目标不增加普通 nodes/static_edges。`get_neighbors` 的 summary 省略这些条件记录。记录可能带逃逸后改写未知标记，不能视为确定调用或已确认影响；查询与静态边共用时间、最多 200 条关系及输出预算。旧快照返回空列表，精确语义见 [索引说明](indexing.md) 与 [条件调用决策](../../docs/decisions/2026-10-07-python-contextual-instance-calls.md)。
+
+`get_neighbors` 默认 `detail="summary"`，邻接项包含 `{to, via, depth, edge_kind, orientation}`，orientation 为 root-relative `outgoing`/`incoming`，自环为 `self`；summary 不返回 `nodes` 或 `contextual_calls`。`unresolved_summary` 与 `possible_unresolved_callers` 提供计数和最多 3 条样例。若该 neighbor direction/edge filter 未查询 possible callers，其 summary total 为 null。完整旧形状通过 `detail="full"` 保留。summary 完整性提示保留已有查询/覆盖提示并附加 `list_unresolved` 的对应方向。`list_unresolved` 按固定快照分页读取 symbol 的出向、module 中所有 symbol 的出向，或指定 symbol 的可能入向 unresolved；其中 `possible_incoming` 必须提供 `symbol_id`。HTTP 的 `get_neighbors` 默认仍为 full，GET `/api/projects/{project_id}/indexes/{index_id}/unresolved` 与 MCP 使用相同服务、页序和游标。游标绑定项目、索引、scope 类型和过滤条件，必须原样续传；非法、过期或参数不匹配时返回 `invalid_input`。旧索引 unresolved coverage 为 null 时，完整性明确报告 coverage unknown；已知截断在每一页均可见。
+
+| MCP 工具 | 默认变化 | 迁移方式 |
+|---|---|---|
+| `get_neighbors` | 默认从完整邻接响应改为 summary；邻居带紧凑目标、关系类型和相对根方向，`nodes`/`contextual_calls` 隐去，unresolved 明细变为计数和样例 | 需要旧字段时传 `detail="full"`；需要 unresolved 明细时调用 `list_unresolved(symbol_id=..., direction="outgoing"|"possible_incoming")` |
 
 `python -m app.mcp_server` 启动 MCP SDK `2.2.0` 的本地 stdio 服务；stdout 只承载协议帧，日志写 stderr。服务复用 WorkspaceService，不直接访问 SQLite，不创建索引，不执行仓库代码。
 
-默认只读工具包括项目、索引、`check_index_freshness`、Session/消息、`get_overview`、`list_overview_items`、`get_module`、`get_journey_catalog`、`get_journey`、`list_module_symbols`、`get_neighbors`、`read_source`、功能历史/版本/图，以及 `list_session_runs`、`get_session_run`、`list_run_events`、`list_run_tool_results`、`get_run_report`、`get_run_impact`。旅程 catalog 只返回轻量摘要；选择一项后 `get_journey` 最多返回 8 个步骤和按需读取的同快照源码 evidence。TSX callbacks 和响应界面更新若规则不能确认，会保留断点，不推断运行时执行或数据流。新鲜度检查按当前本地源码内容 hash 做有界只读核对，不创建索引；模块列表只分页读取固定快照中指定 module path 的 class/function/test definitions；Run 读取和影响查询只返回持久化报告及其固定快照上的静态结果，不重新执行分析。`generate_project_features` 不注册为 MCP 工具；内置 HTTP 功能生成仍可按既有服务端模型配置运行。
+默认只读工具包括项目、索引、`check_index_freshness`、Session/消息、`get_overview`、`list_overview_items`、`get_module`、`get_journey_catalog`、`get_journey`、`list_module_symbols`、`get_neighbors`、`list_unresolved`、`read_source`、功能历史/版本/图，以及 `list_session_runs`、`get_session_run`、`list_run_events`、`list_run_tool_results`、`get_run_report`、`get_run_impact`。旅程 catalog 只返回轻量摘要；选择一项后 `get_journey` 最多返回 8 个步骤和按需读取的同快照源码 evidence。TSX callbacks 和响应界面更新若规则不能确认，会保留断点，不推断运行时执行或数据流。新鲜度检查按当前本地源码内容 hash 做有界只读核对，不创建索引；模块列表只分页读取固定快照中指定 module path 的 class/function/test definitions；Run 读取和影响查询只返回持久化报告及其固定快照上的静态结果，不重新执行分析。`generate_project_features` 不注册为 MCP 工具；内置 HTTP 功能生成仍可按既有服务端模型配置运行。
 
 `search_code` 与 `list_module_symbols` 默认 `detail="summary"`，返回不重复携带 index_id 的紧凑 SymbolRef；传 `detail="full"` 可读取原完整 Symbol 形状。搜索默认每页 10 条，按 `rank,symbol_id` 排序并返回可续传 cursor；模块定义页默认仍为 40 项，沿用同一 HTTP/MCP cursor 与输出预算。旧模块 cursor 仍可继续使用，新 cursor 不超过 40 个字符。该工具只描述 indexer 在固定 snapshot 捕获到的定义，不保证解析完整；HTTP 搜索和模块定义仍默认 `detail="full"`，搜索默认 40 条，以保持既有调用行为。详情见[模块定义分页决策](../../docs/decisions/2026-10-06-module-symbol-pagination.md)。
 

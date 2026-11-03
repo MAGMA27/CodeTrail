@@ -68,6 +68,7 @@ from .contracts import (
     McpJourneyCatalogResponse,
     McpJourneyResponse,
     McpNeighborsResponse,
+    McpUnresolvedResponse,
     McpModuleSymbolsResponse,
     McpOverviewResponse,
     McpOverviewItemsResponse,
@@ -131,6 +132,7 @@ from .contracts import (
     ToolRequest,
     ToolResult,
     UnresolvedReference,
+    UnresolvedPage,
     SCHEMA_VERSION,
 )
 
@@ -203,6 +205,7 @@ def build_schema_document() -> dict[str, Any]:
         "McpJourneyCatalogResponse": McpJourneyCatalogResponse.model_json_schema(),
         "McpJourneyResponse": McpJourneyResponse.model_json_schema(),
         "McpNeighborsResponse": McpNeighborsResponse.model_json_schema(),
+        "McpUnresolvedResponse": McpUnresolvedResponse.model_json_schema(),
         "McpModuleSymbolsResponse": McpModuleSymbolsResponse.model_json_schema(),
         "McpOverviewResponse": McpOverviewResponse.model_json_schema(),
         "McpOverviewItemsResponse": McpOverviewItemsResponse.model_json_schema(),
@@ -262,6 +265,7 @@ def build_schema_document() -> dict[str, Any]:
         "ToolResult": TypeAdapter(ToolResult).json_schema(),
         "TrashListResponse": TrashListResponse.model_json_schema(),
         "UnresolvedReference": UnresolvedReference.model_json_schema(),
+        "UnresolvedPage": UnresolvedPage.model_json_schema(),
     }
     return {
         "$schema": "https://json-schema.org/draft/2020-12/schema",

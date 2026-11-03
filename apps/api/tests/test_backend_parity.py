@@ -24,6 +24,7 @@ TOOL_HTTP_ROUTES: dict[str, tuple[str, str] | tuple[None, str] | tuple[tuple[str
     "list_module_symbols": ("GET", "/api/projects/{project_id}/indexes/{index_id}/modules/{module_id}/symbols"),
     "read_source": ("GET", "/api/projects/{project_id}/indexes/{index_id}/source"),
     "get_neighbors": ("GET", "/api/projects/{project_id}/indexes/{index_id}/neighbors"),
+    "list_unresolved": ("GET", "/api/projects/{project_id}/indexes/{index_id}/unresolved"),
     "get_overview": (("GET", "/api/projects/{project_id}/indexes/{index_id}/overview"), ("GET", "/api/projects/{project_id}/indexes/{index_id}/overview/skeleton")),
     "list_overview_items": (("GET", "/api/projects/{project_id}/indexes/{index_id}/overview/sections/{section}"),),
     "get_module": (("GET", "/api/projects/{project_id}/indexes/{index_id}/overview/modules/{module_id}"),),
@@ -79,7 +80,7 @@ MCP_ONLY_PARAMETERS: dict[tuple[str, str], str] = {
 # Bounds remain compared below, while this rule ties each adapter default to contracts.py.
 ADAPTER_DEFAULTS = {
     (tool, "detail"): ("HTTP_DEFAULT_DETAIL", "MCP_DEFAULT_DETAIL")
-    for tool in ("search_code", "list_module_symbols")
+    for tool in ("search_code", "list_module_symbols", "get_neighbors")
 } | {
     ("search_code", "limit"): ("DEFAULT_SEARCH_LIMIT", "MCP_DEFAULT_SEARCH_LIMIT"),
 }

@@ -22,6 +22,8 @@ from pydantic import TypeAdapter, ValidationError
 from .contracts import (
     CodeEdge,
     ContextualCall,
+    DEFAULT_UNRESOLVED_DIRECTION,
+    DEFAULT_UNRESOLVED_PAGE_LIMIT,
     Event,
     Evidence,
     FeatureGeneration,
@@ -5152,6 +5154,10 @@ class IndexStore:
         self,
         index_id: str,
         root: Symbol,
+        *,
+        offset: int = 0,
+        limit: int = NEIGHBOR_POSSIBLE_CALLER_SAMPLE_LIMIT,
+        reason: str | None = None,
     ) -> tuple[int, tuple[UnresolvedReference, ...]]:
         """Count unresolved calls that may target ``root``.
 
@@ -5174,6 +5180,9 @@ class IndexStore:
             f"r.index_id = ? AND r.reason NOT IN ({placeholders}) AND ({' OR '.join(clauses)})"
         )
         parameters = [*_OUTSIDE_TARGET_REASONS, *parameters]
+        if reason is not None:
+            where += " AND r.reason = ?"
+            parameters.append(reason)
         count = int(
             self._connection.execute(
                 f"SELECT COUNT(*) FROM unresolved_references r WHERE {where}",
@@ -5182,14 +5191,77 @@ class IndexStore:
         )
         if not count:
             return 0, ()
+        if not limit:
+            return count, ()
         sample_rows = self._connection.execute(
             f"SELECT r.unresolved_id FROM unresolved_references r WHERE {where} "
-            "ORDER BY r.path COLLATE BINARY, r.start_line, r.expression, r.unresolved_id LIMIT ?",
-            (index_id, *parameters, NEIGHBOR_POSSIBLE_CALLER_SAMPLE_LIMIT),
+            "ORDER BY r.path COLLATE BINARY, r.start_line, r.unresolved_id LIMIT ? OFFSET ?",
+            (index_id, *parameters, limit, offset),
         ).fetchall()
         return count, self._load_unresolved_by_ids(
             index_id, tuple(row["unresolved_id"] for row in sample_rows)
         )
+
+    def list_unresolved(
+        self,
+        index_id: str,
+        *,
+        symbol_id: str | None = None,
+        module_id: str | None = None,
+        direction: Literal["outgoing", "possible_incoming"] = DEFAULT_UNRESOLVED_DIRECTION,
+        reason: str | None = None,
+        offset: int = 0,
+        limit: int = DEFAULT_UNRESOLVED_PAGE_LIMIT,
+    ) -> tuple[int, tuple[UnresolvedReference, ...]]:
+        """Read a deterministic page of unresolved references for one scope."""
+
+        if (symbol_id is None) == (module_id is None):
+            raise StorageInputError("exactly one symbol_id or module_id is required")
+        if direction not in {"outgoing", "possible_incoming"}:
+            raise StorageInputError("unresolved direction is invalid")
+        if direction == "possible_incoming" and symbol_id is None:
+            raise StorageInputError("possible_incoming requires symbol_id")
+        if offset < 0 or limit < 1:
+            raise StorageInputError("unresolved page bounds are invalid")
+
+        if direction == "possible_incoming":
+            root = self._load_symbol(index_id, symbol_id or "")
+            return self._possible_unresolved_callers(
+                index_id, root, offset=offset, limit=limit, reason=reason
+            )
+        if symbol_id is not None:
+            self._load_symbol(index_id, symbol_id)
+
+        parameters: list[object] = [index_id]
+        source_clause: str
+        from_clause = "FROM unresolved_references r"
+        if symbol_id is not None:
+            source_clause = "r.source_symbol_id = ?"
+            parameters.append(symbol_id)
+        else:
+            module = self._load_symbol(index_id, module_id or "")
+            if module.kind not in {"module", "file"}:
+                raise StorageNotFoundError("requested module was not found in the project index")
+            from_clause += " JOIN symbols s ON s.index_id = r.index_id AND s.symbol_id = r.source_symbol_id"
+            source_clause = "s.path = ?"
+            parameters.append(module.path)
+        reason_clause = ""
+        if reason is not None:
+            reason_clause = " AND r.reason = ?"
+            parameters.append(reason)
+        where = f"r.index_id = ? AND {source_clause}{reason_clause}"
+        count = int(
+            self._connection.execute(
+                f"SELECT COUNT(*) {from_clause} WHERE {where}", tuple(parameters)
+            ).fetchone()[0]
+        )
+        rows = self._connection.execute(
+            f"SELECT r.unresolved_id, r.source_symbol_id, r.path, r.expression, r.reason, "
+            f"r.start_line, r.end_line {from_clause} WHERE {where} "
+            "ORDER BY r.path COLLATE BINARY, r.start_line, r.unresolved_id LIMIT ? OFFSET ?",
+            (*parameters, limit, offset),
+        ).fetchall()
+        return count, self._unresolved_from_rows(index_id, rows)
 
     def _load_unresolved_by_ids(
         self,
@@ -5199,14 +5271,14 @@ class IndexStore:
         if not unresolved_ids:
             return ()
         placeholders = ",".join("?" for _ in unresolved_ids)
+        rows = self._connection.execute(
+            "SELECT unresolved_id, source_symbol_id, path, expression, reason, start_line, end_line "
+            f"FROM unresolved_references WHERE index_id = ? AND unresolved_id IN ({placeholders})",
+            (index_id, *unresolved_ids),
+        ).fetchall()
+        rows_by_id = {row["unresolved_id"]: row for row in rows}
         return self._unresolved_from_rows(
-            index_id,
-            self._connection.execute(
-                "SELECT unresolved_id, source_symbol_id, path, expression, reason, start_line, end_line "
-                f"FROM unresolved_references WHERE index_id = ? AND unresolved_id IN ({placeholders}) "
-                "ORDER BY path COLLATE BINARY, start_line, expression, unresolved_id",
-                (index_id, *unresolved_ids),
-            ).fetchall(),
+            index_id, [rows_by_id[item] for item in unresolved_ids if item in rows_by_id]
         )
 
     def _load_unresolved(
@@ -5220,7 +5292,7 @@ class IndexStore:
         unresolved_rows = self._connection.execute(
             "SELECT unresolved_id, source_symbol_id, path, expression, reason, start_line, end_line "
             "FROM unresolved_references WHERE index_id = ? AND source_symbol_id IN ("
-            f"{placeholders}) ORDER BY path COLLATE BINARY, start_line, expression, unresolved_id",
+            f"{placeholders}) ORDER BY path COLLATE BINARY, start_line, unresolved_id",
             (index_id, *symbol_ids),
         ).fetchall()
         return self._unresolved_from_rows(index_id, unresolved_rows)

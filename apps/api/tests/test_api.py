@@ -1375,6 +1375,250 @@ def test_project_search_summary_full_paging_and_legacy_http_shape(tmp_path: Path
         assert exc.details == [{"field": "cursor", "problem": "invalid"}]
     else:
         raise AssertionError("invalid search cursor was accepted")
+
+
+def test_project_neighbors_summary_and_unresolved_pages_share_mcp_service(tmp_path: Path) -> None:
+    from app.mcp_server import create_mcp_server
+
+    application = create_app({"timeout-demo": copy_fixture(tmp_path)}, data_root=tmp_path / "data")
+    status, created = request(application, "POST", "/api/indexes", create_request())
+    assert status == 200
+    index_id = created["index"]["index_id"]
+    status, projects = request(application, "GET", "/api/projects")
+    assert status == 200
+    project_id = next(item["project_id"] for item in projects["projects"] if item["repository_id"] == "timeout-demo")
+    status, found = request(application, "GET", f"/api/indexes/{index_id}/search?query=dispatch&limit=40")
+    assert status == 200
+    dispatch_id = next(
+        item["symbol"]["symbol_id"] for item in found["matches"]
+        if item["symbol"]["qualified_name"] == "timeout_demo.dispatch.dispatch"
+    )
+    neighbors_path = f"/api/projects/{project_id}/indexes/{index_id}/neighbors"
+    query = f"symbol_id={dispatch_id}&direction=callees&depth=1&limit=40&edge_kinds=calls"
+    status, full = request(application, "GET", f"{neighbors_path}?{query}&detail=full")
+    assert status == 200
+    status, summary = request(application, "GET", f"{neighbors_path}?{query}&detail=summary")
+    assert status == 200
+    assert {item["symbol"]["symbol_id"] for item in full["neighbors"]} == {
+        item["to"]["id"] for item in summary["neighbors"]
+    }
+    assert summary["unresolved_summary"]["total"] == len(full["unresolved"])
+    assert summary["possible_unresolved_callers"]["total"] == full["completeness"]["possible_unresolved_caller_count"]
+    assert "nodes" not in summary
+    assert "list_unresolved" in summary["completeness"]["hint"]
+
+    status, start_search = request(application, "GET", f"/api/indexes/{index_id}/search?query=start&limit=40")
+    assert status == 200
+    start_id = next(
+        item["symbol"]["symbol_id"] for item in start_search["matches"]
+        if item["symbol"]["qualified_name"] == "timeout_demo.app.start"
+    )
+    both_query = f"symbol_id={start_id}&direction=both&depth=1&limit=40&edge_kinds=calls"
+    status, both_full = request(application, "GET", f"{neighbors_path}?{both_query}&detail=full")
+    assert status == 200
+    status, both_summary = request(application, "GET", f"{neighbors_path}?{both_query}&detail=summary")
+    assert status == 200
+    full_relations = {
+        (
+            item["symbol"]["symbol_id"], item["edge"]["kind"],
+            "outgoing" if item["edge"]["source_id"] == start_id else "incoming",
+        )
+        for item in both_full["neighbors"]
+    }
+    assert {
+        (item["to"]["id"], item["edge_kind"], item["orientation"])
+        for item in both_summary["neighbors"]
+    } == full_relations
+    assert {item["orientation"] for item in both_summary["neighbors"]} == {"incoming", "outgoing"}
+
+    unresolved_path = f"/api/projects/{project_id}/indexes/{index_id}/unresolved"
+    status, first = request(
+        application, "GET", f"{unresolved_path}?symbol_id={dispatch_id}&direction=outgoing&limit=1"
+    )
+    assert status == 200
+    paged = list(first["items"])
+    cursor = first["page"]["next_cursor"]
+    while cursor:
+        status, page = request(
+            application,
+            "GET",
+            f"{unresolved_path}?symbol_id={dispatch_id}&direction=outgoing&limit=1&cursor={cursor}",
+        )
+        assert status == 200
+        paged.extend(page["items"])
+        cursor = page["page"]["next_cursor"]
+    assert [item["unresolved_id"] for item in paged] == [
+        item["unresolved_id"] for item in full["unresolved"]
+    ]
+    status, incoming = request(
+        application, "GET", f"{unresolved_path}?symbol_id={dispatch_id}&direction=possible_incoming&limit=1"
+    )
+    assert status == 200
+    assert incoming["page"]["total"] == full["completeness"]["possible_unresolved_caller_count"] or (
+        incoming["page"]["total"] == 0 and full["completeness"]["possible_unresolved_caller_count"] is None
+    )
+    incoming_ids = [item["unresolved_id"] for item in incoming["items"]]
+    incoming_cursor = incoming["page"]["next_cursor"]
+    while incoming_cursor:
+        status, page = request(
+            application,
+            "GET",
+            f"{unresolved_path}?symbol_id={dispatch_id}&direction=possible_incoming&limit=1&cursor={incoming_cursor}",
+        )
+        assert status == 200
+        incoming_ids.extend(item["unresolved_id"] for item in page["items"])
+        incoming_cursor = page["page"]["next_cursor"]
+    assert len(incoming_ids) == incoming["page"]["total"]
+
+    status, invalid = request(application, "GET", f"{unresolved_path}?direction=outgoing")
+    assert status == 400 and invalid["code"] == "invalid_input"
+    status, invalid = request(
+        application,
+        "GET",
+        f"{unresolved_path}?symbol_id={dispatch_id}&module_id={dispatch_id}&direction=outgoing",
+    )
+    assert status == 400 and invalid["code"] == "invalid_input"
+    status, invalid = request(
+        application,
+        "GET",
+        f"{unresolved_path}?module_id={dispatch_id}&direction=possible_incoming",
+    )
+    assert status == 400 and invalid["code"] == "invalid_input"
+    status, invalid = request(
+        application, "GET", f"{unresolved_path}?symbol_id={dispatch_id}&direction=outgoing&cursor=invalid"
+    )
+    assert status == 400 and invalid["message"] == "invalid or expired cursor"
+    if first["page"]["next_cursor"]:
+        status, invalid = request(
+            application,
+            "GET",
+            f"{unresolved_path}?symbol_id={dispatch_id}&direction=possible_incoming&cursor={first['page']['next_cursor']}",
+        )
+        assert status == 400 and invalid["message"] == "invalid or expired cursor"
+
+    service = application.state.workspace_service
+    project = service._require_project_index(project_id, index_id)
+    with service.registry.store_for_repository(project.repository_id) as store:
+        module_id = store.connection.execute(
+            "SELECT symbol_id FROM symbols WHERE index_id = ? AND kind = 'module' "
+            "AND path = 'timeout_demo/dispatch.py'",
+            (index_id,),
+        ).fetchone()["symbol_id"]
+    module_page = service.list_unresolved(
+        project_id, index_id, module_id=module_id, limit=1
+    )
+    assert module_page.page.next_cursor
+    module_scope_cursor = service._encode_overview_cursor(
+        project_id, index_id, "un", 0, f"outgoing:module:{module_id}", None
+    )
+    status, invalid = request(
+        application,
+        "GET",
+        f"{unresolved_path}?symbol_id={module_id}&direction=outgoing&cursor={module_scope_cursor}",
+    )
+    assert status == 400 and invalid["message"] == "invalid or expired cursor"
+
+    original_get_index = service.index_service.get_index
+    for unresolved_coverage, expected_reason in (
+        (None, "index_unresolved_coverage_unknown"),
+        (True, "index_unresolved_truncated"),
+    ):
+        service.index_service.get_index = lambda item, coverage=unresolved_coverage: original_get_index(item).model_copy(
+            update={"unresolved_truncated": coverage}
+        )
+        coverage_page = service.list_unresolved(
+            project_id, index_id, symbol_id=dispatch_id, limit=1
+        )
+        assert expected_reason in coverage_page.completeness.reasons
+        assert coverage_page.completeness.status in {"truncated", "possibly_incomplete"}
+    service.index_service.get_index = original_get_index
+
+    server = create_mcp_server(application.state.workspace_service)
+
+    async def call_mcp(name: str, arguments: dict) -> dict:
+        response = await server.call_tool(name, arguments)
+        assert response.is_error is False
+        return response.structured_content
+
+    mcp_page = asyncio.run(call_mcp("list_unresolved", {
+        "project_id": project_id,
+        "index_id": index_id,
+        "symbol_id": dispatch_id,
+        "direction": "outgoing",
+        "limit": 1,
+    }))
+    assert mcp_page["result"] == first
+    if first["page"]["next_cursor"]:
+        cursor = first["page"]["next_cursor"]
+        status, http_page = request(
+            application,
+            "GET",
+            f"{unresolved_path}?symbol_id={dispatch_id}&direction=outgoing&limit=1&cursor={cursor}",
+        )
+        assert status == 200
+        mcp_page = asyncio.run(call_mcp("list_unresolved", {
+            "project_id": project_id,
+            "index_id": index_id,
+            "symbol_id": dispatch_id,
+            "direction": "outgoing",
+            "limit": 1,
+            "cursor": cursor,
+        }))
+        assert mcp_page["result"] == http_page
+    mcp_summary = asyncio.run(call_mcp("get_neighbors", {
+        "project_id": project_id,
+        "index_id": index_id,
+        "symbol_id": dispatch_id,
+        "direction": "callees",
+        "depth": 1,
+        "limit": 40,
+        "edge_kinds": ["calls"],
+    }))
+    assert mcp_summary["result"] == summary
+
+
+def test_neighbor_summary_marks_recursive_self_edge_and_keeps_completeness_hint(tmp_path: Path) -> None:
+    repository = tmp_path / "self-edge"
+    repository.mkdir()
+    (repository / "recursive.py").write_text(
+        "def recurse() -> None:\n"
+        "    recurse()\n"
+        "    dynamic_call()\n",
+        encoding="utf-8",
+    )
+    application = create_app({"self-edge": repository}, data_root=tmp_path / "data")
+    status, project = request(
+        application,
+        "POST",
+        "/api/projects",
+        {"name": "Self edge", "repository_id": "self-edge"},
+    )
+    assert status == 200
+    project_id = project["project_id"]
+    status, created = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/indexes",
+        {"revision": "self-edge-v1", "dirty": False},
+    )
+    assert status == 200
+    index_id = created["index"]["index_id"]
+    service = application.state.workspace_service
+    match = next(
+        item for item in service.search(project_id, index_id, "recurse", 40).matches
+        if item.symbol.qualified_name == "recursive.recurse"
+    )
+    full = service.neighbors(
+        project_id, index_id, match.symbol.symbol_id, "callees", 1, 40, ("calls",), detail="full"
+    )
+    summary = service.neighbors(
+        project_id, index_id, match.symbol.symbol_id, "callees", 1, 40, ("calls",), detail="summary"
+    )
+    assert full.completeness is not None and summary.completeness is not None
+    assert summary.completeness.hint is not None
+    assert full.completeness.hint is None or full.completeness.hint in summary.completeness.hint
+    assert len(summary.neighbors) == 1
+    assert summary.neighbors[0].orientation == "self"
 def test_index_capacity_is_bounded(tmp_path: Path) -> None:
     registry = RepositoryRegistry({"timeout-demo": copy_fixture(tmp_path)})
     service = IndexService(registry, max_concurrent_indexes=1)

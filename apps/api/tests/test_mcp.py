@@ -545,6 +545,7 @@ def test_constructor_attribute_calls_match_http_and_cold_stdio(tmp_path: Path) -
                     "depth": 1,
                     "limit": 40,
                     "edge_kinds": ["calls"],
+                    "detail": "full",
                 },
             )
             assert result.structured_content["ok"] is True
@@ -833,6 +834,7 @@ def test_mcp_local_import_is_opt_in_and_shares_http_state(tmp_path: Path) -> Non
                 "list_module_symbols",
                 "read_source",
                 "get_neighbors",
+                "list_unresolved",
                 "get_overview",
                 "list_overview_items",
                 "get_module",
@@ -896,6 +898,7 @@ def test_mcp_local_import_is_opt_in_and_shares_http_state(tmp_path: Path) -> Non
                 "list_module_symbols",
                 "read_source",
                 "get_neighbors",
+                "list_unresolved",
                 "get_overview",
                 "list_overview_items",
                 "get_module",
@@ -1262,6 +1265,7 @@ def test_mcp_reads_server_feature_generations_without_registering_model_generati
                 "list_module_symbols",
                 "read_source",
                 "get_neighbors",
+                "list_unresolved",
                 "get_overview",
                 "list_overview_items",
                 "get_module",
@@ -1497,6 +1501,7 @@ async def _exercise_stdio(
         "list_module_symbols",
         "read_source",
         "get_neighbors",
+        "list_unresolved",
         "get_overview",
         "list_overview_items",
         "get_module",
@@ -1589,6 +1594,55 @@ async def _exercise_stdio(
         })
         assert mcp_search_page.structured_content["result"] == search_page
 
+        project_record = application.state.workspace_service._require_project_index(project_id, index_id)
+        with application.state.workspace_service.registry.store_for_repository(project_record.repository_id) as store:
+            dispatch_module_id = store.connection.execute(
+                "SELECT symbol_id FROM symbols WHERE index_id = ? AND kind = 'module' "
+                "AND path = 'timeout_demo/dispatch.py'",
+                (index_id,),
+            ).fetchone()["symbol_id"]
+        unresolved_path = f"/api/projects/{project_id}/indexes/{index_id}/unresolved"
+        unresolved_first_status, unresolved_first = await _request(
+            application,
+            "GET",
+            f"{unresolved_path}?module_id={dispatch_module_id}&direction=outgoing&limit=1",
+        )
+        assert unresolved_first_status == 200 and unresolved_first["page"]["next_cursor"]
+        unresolved_cursor = unresolved_first["page"]["next_cursor"]
+        unresolved_page_status, unresolved_page = await _request(
+            application,
+            "GET",
+            f"{unresolved_path}?module_id={dispatch_module_id}&direction=outgoing&limit=1&cursor={unresolved_cursor}",
+        )
+        assert unresolved_page_status == 200
+        mcp_unresolved_page = await client.call_tool("list_unresolved", {
+            "project_id": project_id,
+            "index_id": index_id,
+            "module_id": dispatch_module_id,
+            "direction": "outgoing",
+            "limit": 1,
+            "cursor": unresolved_cursor,
+        })
+        assert mcp_unresolved_page.structured_content["result"] == unresolved_page
+
+        summary_http_status, summary_http_neighbors = await _request(
+            application,
+            "GET",
+            f"/api/projects/{project_id}/indexes/{index_id}/neighbors"
+            f"?symbol_id={symbol_id}&direction=callers&depth=1&limit=40&edge_kinds=calls&detail=summary",
+        )
+        assert summary_http_status == 200
+        summary_mcp_neighbors = await client.call_tool("get_neighbors", {
+            "project_id": project_id,
+            "index_id": index_id,
+            "symbol_id": symbol_id,
+            "direction": "callers",
+            "depth": 1,
+            "limit": 40,
+            "edge_kinds": ["calls"],
+        })
+        assert summary_mcp_neighbors.structured_content["result"] == summary_http_neighbors
+
         neighbors_result = await client.call_tool(
             "get_neighbors",
             {
@@ -1599,6 +1653,7 @@ async def _exercise_stdio(
                 "depth": 1,
                 "limit": 40,
                 "edge_kinds": ["calls"],
+                "detail": "full",
             },
         )
         assert neighbors_result.structured_content == {
