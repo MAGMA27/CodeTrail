@@ -4,13 +4,20 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
+
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
 from .config import ModelProviderConfig
-from .feature_generation import FeatureModelAdapter
-from .github import GitHubClient
-from .issue_analysis import IssueModelAdapter
+from .contracts import ApiErrorResponse
 from .service import IndexService, RepositoryRegistry, WorkspaceService
+from .storage import StorageError
+
+if TYPE_CHECKING:
+    from .feature_generation import FeatureModelAdapter
+    from .github import GitHubClient
+    from .issue_analysis import IssueModelAdapter
 
 
 def create_services(
@@ -38,6 +45,8 @@ def create_services(
     GitHub credentials/timeouts and TypeScript compiler) are read as the
     registry, GitHub client and index service are constructed.
     """
+
+    from .github import GitHubClient
 
     registry = (
         RepositoryRegistry.from_environment(
@@ -77,3 +86,15 @@ def create_services(
         run_model_adapter_factory=run_model_adapter_factory,
         run_max_concurrent_runs=run_max_concurrent_runs,
     )
+
+
+def register_storage_error_handler(application: FastAPI) -> None:
+    """Keep raw storage failures as safe API errors at the composition boundary."""
+
+    @application.exception_handler(StorageError)
+    async def handle_storage_error(_request: Request, _exc: StorageError) -> JSONResponse:
+        payload = ApiErrorResponse(
+            code="internal_error",
+            message="local index storage failed",
+        )
+        return JSONResponse(status_code=500, content=payload.model_dump(mode="json"))

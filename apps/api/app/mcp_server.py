@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sys
-from typing import Annotated, Literal, TypeVar
+from typing import Annotated, Any, Literal, TypeVar
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
 from mcp.server import MCPServer
-from pydantic import Field, ValidationError
+from mcp.server.mcpserver.exceptions import ToolError
+from mcp.types import CallToolResult, TextContent
+from pydantic import Field, TypeAdapter, ValidationError
 
+from . import contracts as shared
 from .contracts import (
     CandidateLink,
     CodeExplanation,
@@ -90,11 +94,87 @@ from .contracts import (
     SessionReference,
     SessionResponse,
 )
-from .overview import bound_overview_output
 from .service import IndexService, RepositoryRegistry, ServiceError, WorkspaceService
+from .errors import ERROR_CODES, safe_error_message, validation_error_details
 
 
 logger = logging.getLogger(__name__)
+
+
+class _CodeTrailMCPServer(MCPServer):
+    """Normalize CodeTrail tool failures and text output at the SDK boundary."""
+
+    async def call_tool(self, name: str, arguments: dict[str, Any], context: Any = None) -> Any:
+        try:
+            result = await super().call_tool(name, arguments, context)
+        except ToolError as exc:
+            cause = exc.__cause__
+            tool = self._tool_manager.get_tool(name)
+            response_model = tool.fn_metadata.output_model if tool is not None else None
+            if not isinstance(response_model, type) or not hasattr(response_model, "model_fields"):
+                raise
+            if isinstance(cause, ValidationError):
+                if any(item.get("type") == "extra_forbidden" for item in cause.errors()):
+                    raise
+                annotations = {
+                    name: field.annotation
+                    for name, field in tool.fn_metadata.arg_model.model_fields.items()
+                }
+                details = validation_error_details(cause, arg_annotations=annotations)
+                count = len({detail.field.split(".", 1)[0] for detail in details})
+                error = McpError(
+                    code="invalid_input",
+                    message=f"{count} tool argument{'s are' if count != 1 else ' is'} invalid",
+                    details=details or None,
+                )
+            else:
+                logger.exception("MCP tool %s failed unexpectedly", name, exc_info=exc)
+                error = McpError(code="internal_error", message="local MCP query failed", retryable=True)
+            payload: dict[str, object] = {"ok": False, "error": error}
+            for field_name, field in response_model.model_fields.items():
+                if field_name in payload:
+                    continue
+                if not field.is_required():
+                    continue
+                if field_name == "ok":
+                    continue
+                if field_name not in arguments:
+                    continue
+                candidate = arguments[field_name]
+                try:
+                    candidate = TypeAdapter(field.annotation).validate_python(candidate)
+                except ValidationError:
+                    # Keep the caller's value for traceability. Validation has
+                    # already failed, so constructing without revalidating lets
+                    # the MCP error explain the bad argument without inventing
+                    # a replacement identifier.
+                    pass
+                payload[field_name] = candidate
+            try:
+                failure = response_model.model_validate(payload)
+            except ValidationError:
+                failure = response_model.model_construct(**payload)
+            structured = failure.model_dump(mode="json", by_alias=True)
+            return CallToolResult(
+                content=[TextContent(type="text", text=_compact_json(structured))],
+                structured_content=structured,
+                is_error=True,
+            )
+        if isinstance(result, CallToolResult) and result.structured_content is not None:
+            structured = result.structured_content
+            failed = isinstance(structured, dict) and structured.get("ok") is False
+            return result.model_copy(
+                update={
+                    "content": [TextContent(type="text", text=_compact_json(structured))],
+                    "is_error": result.is_error or failed,
+                }
+            )
+        return result
+
+
+def _compact_json(value: object) -> str:
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
 
 _WORKBENCH_URL_ENV = "CODETRAIL_WORKBENCH_URL"
 _DEFAULT_WORKBENCH_URL = "http://localhost:3000"
@@ -105,31 +185,31 @@ _ImpactDirection = Literal["callers", "callees"]
 _ProjectId = Annotated[Identifier, Field(description="Stable CodeTrail project ID.")]
 _IndexId = Annotated[Identifier, Field(description="Immutable CodeTrail index ID.")]
 _ModuleId = Annotated[Identifier, Field(description="Module symbol ID from the selected immutable index.")]
-_Query = Annotated[str, Field(min_length=1, max_length=500, description="Symbol or source text query.")]
-_Path = Annotated[str, Field(min_length=1, max_length=500, description="Relative path in the indexed snapshot.")]
-_LocalPath = Annotated[str, Field(min_length=1, max_length=4_000, description="Absolute path visible to the local API service.")]
-_Line = Annotated[int, Field(ge=1, description="One-based source line.")]
-_Limit = Annotated[int, Field(ge=1, le=40, description="Maximum number of returned items.")]
-_Depth = Annotated[int, Field(ge=1, le=2, description="Static graph traversal depth.")]
-_ImpactId = Annotated[str | None, Field(min_length=1, max_length=200, description="Exact candidate or finding ID from the saved Run report.")]
-_DiscoveryLimit = Annotated[int, Field(ge=1, le=_MAX_DISCOVERY_ITEMS, description="Maximum discovery items.")]
-_OverviewDepth = Annotated[int, Field(ge=1, le=8, description="Maximum static overview path depth.")]
-_OverviewPaths = Annotated[int, Field(ge=1, le=40, description="Maximum returned overview paths.")]
-_OverviewModules = Annotated[int, Field(ge=1, le=200, description="Maximum returned overview modules.")]
-_OverviewGroups = Annotated[int, Field(ge=1, le=200, description="Maximum returned overview groups.")]
+_Query = Annotated[str, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_QUERY_LENGTH, description="Symbol or source text query.")]
+_Path = Annotated[str, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_PATH_LENGTH, description="Relative path in the indexed snapshot.")]
+_LocalPath = Annotated[str, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_LOCAL_PATH_LENGTH, description="Absolute path visible to the local API service.")]
+_Line = Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, description="One-based source line.")]
+_Limit = Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_PAGE_SIZE, description="Maximum number of returned items.")]
+_Depth = Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_GRAPH_DEPTH, description="Static graph traversal depth.")]
+_ImpactId = Annotated[str | None, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_IDENTIFIER_LENGTH, description="Exact candidate or finding ID from the saved Run report.")]
+_DiscoveryLimit = Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=_MAX_DISCOVERY_ITEMS, description="Maximum discovery items.")]
+_OverviewDepth = Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_OVERVIEW_DEPTH, description="Maximum static overview path depth.")]
+_OverviewPaths = Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_OVERVIEW_PATHS, description="Maximum returned overview paths.")]
+_OverviewModules = Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_OVERVIEW_MODULES, description="Maximum returned overview modules.")]
+_OverviewGroups = Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_OVERVIEW_GROUPS, description="Maximum returned overview groups.")]
 _OverviewModuleRelations = Annotated[
     int,
-    Field(ge=1, le=400, description="Maximum returned aggregated module relations."),
+    Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_OVERVIEW_RELATIONS, description="Maximum returned aggregated module relations."),
 ]
 _OverviewClassifications = Annotated[
     int,
-    Field(ge=1, le=200, description="Maximum returned architecture classifications."),
+    Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_OVERVIEW_CLASSIFICATIONS, description="Maximum returned architecture classifications."),
 ]
 _OverviewOutputBytes = Annotated[
     int,
     Field(
-        ge=16_000,
-        le=1_000_000,
+        ge=shared.MIN_OVERVIEW_OUTPUT_BYTES,
+        le=shared.MAX_OVERVIEW_OUTPUT_BYTES,
         description=(
             "Hard cap on the serialized response size. Whole items are dropped from the largest "
             "sections until the response fits; section_coverage reports total and returned counts. "
@@ -137,21 +217,21 @@ _OverviewOutputBytes = Annotated[
         ),
     ),
 ]
-_OVERVIEW_DEFAULT_OUTPUT_BYTES = 48_000
+_OVERVIEW_DEFAULT_OUTPUT_BYTES = shared.DEFAULT_OVERVIEW_OUTPUT_BYTES
 # Room for the reference coverage appended after bounding.
-_OVERVIEW_OUTPUT_MARGIN_BYTES = 512
-_FeatureHistoryCursor = Annotated[str | None, Field(max_length=500, description="Opaque history cursor from a previous page.")]
-_ModuleSymbolsCursor = Annotated[str | None, Field(max_length=500, description="Opaque cursor from a previous module-symbol page.")]
-_FeatureGraphNodes = Annotated[int, Field(ge=1, le=40, description="Maximum feature graph nodes.")]
-_FeatureGraphEdges = Annotated[int, Field(ge=1, le=120, description="Maximum feature graph edges.")]
-_SessionCursor = Annotated[str | None, Field(max_length=500, description="Opaque session cursor from a previous page.")]
-_SessionMessageLimit = Annotated[int, Field(ge=1, le=100, description="Maximum session messages.")]
-_SessionMessageCursor = Annotated[str | None, Field(max_length=500, description="Opaque message cursor from a previous page.")]
+_OVERVIEW_OUTPUT_MARGIN_BYTES = shared.OVERVIEW_OUTPUT_MARGIN_BYTES
+_FeatureHistoryCursor = Annotated[str | None, Field(max_length=shared.MAX_CURSOR_LENGTH, description="Opaque history cursor from a previous page.")]
+_ModuleSymbolsCursor = Annotated[str | None, Field(max_length=shared.MAX_CURSOR_LENGTH, description="Opaque cursor from a previous module-symbol page.")]
+_FeatureGraphNodes = Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_FEATURE_GRAPH_NODES, description="Maximum feature graph nodes.")]
+_FeatureGraphEdges = Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_FEATURE_GRAPH_EDGES, description="Maximum feature graph edges.")]
+_SessionCursor = Annotated[str | None, Field(max_length=shared.MAX_CURSOR_LENGTH, description="Opaque session cursor from a previous page.")]
+_SessionMessageLimit = Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_SESSION_MESSAGES, description="Maximum session messages.")]
+_SessionMessageCursor = Annotated[str | None, Field(max_length=shared.MAX_CURSOR_LENGTH, description="Opaque message cursor from a previous page.")]
 _SessionId = Annotated[Identifier, Field(description="Stable CodeTrail session ID.")]
-_RunCursor = Annotated[str | None, Field(max_length=500, description="Opaque Run history cursor from a previous page.")]
-_RunSequence = Annotated[int, Field(ge=0, description="Return events or results after this sequence.")]
-_RunEventLimit = Annotated[int, Field(ge=1, le=100, description="Maximum Run events.")]
-_RunToolLimit = Annotated[int, Field(ge=1, le=40, description="Maximum persisted tool results.")]
+_RunCursor = Annotated[str | None, Field(max_length=shared.MAX_CURSOR_LENGTH, description="Opaque Run history cursor from a previous page.")]
+_RunSequence = Annotated[int, Field(ge=shared.MIN_RUN_SEQUENCE, description="Return events or results after this sequence.")]
+_RunEventLimit = Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_RUN_EVENTS, description="Maximum Run events.")]
+_RunToolLimit = Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_RUN_TOOL_RESULTS, description="Maximum persisted tool results.")]
 _RunScenario = Literal[
     "success-timeout-missing",
     "insufficient-external-service",
@@ -186,7 +266,7 @@ def create_mcp_server(
         else "Discover CodeTrail projects and query one explicitly selected immutable index. "
         "All tools are read-only and never execute repository code."
     )
-    server = MCPServer(
+    server = _CodeTrailMCPServer(
         name="codetrail",
         title="CodeTrail workspace" if local_import_enabled or github_import_enabled or index_write_enabled or session_write_enabled or run_write_enabled or external_run_enabled else "CodeTrail read-only workspace",
         description=server_description,
@@ -244,7 +324,7 @@ def create_mcp_server(
     )
     def list_sessions(
         project_id: _ProjectId,
-        limit: _Limit = 40,
+        limit: _Limit = shared.MAX_PAGE_SIZE,
         cursor: _SessionCursor = None,
     ) -> McpSessionListResponse:
         try:
@@ -289,7 +369,7 @@ def create_mcp_server(
     def list_session_messages(
         project_id: _ProjectId,
         session_id: _SessionId,
-        limit: _SessionMessageLimit = 100,
+        limit: _SessionMessageLimit = shared.MAX_SESSION_MESSAGES,
         cursor: _SessionMessageCursor = None,
     ) -> McpSessionMessagesResponse:
         try:
@@ -389,7 +469,7 @@ def create_mcp_server(
         def refresh_index(
             project_id: _ProjectId,
             index_id: _IndexId,
-            revision: Annotated[str, Field(min_length=1, max_length=200)] = "working-tree",
+            revision: Annotated[str, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_IDENTIFIER_LENGTH)] = shared.DEFAULT_SOURCE_REVISION,
             dirty: bool = True,
         ) -> McpJobResponse:
             try:
@@ -417,7 +497,7 @@ def create_mcp_server(
         project_id: _ProjectId,
         index_id: _IndexId,
         query: _Query,
-        limit: _Limit = 40,
+        limit: _Limit = shared.MAX_PAGE_SIZE,
     ) -> McpSearchResponse:
         try:
             return McpSearchResponse(
@@ -443,7 +523,7 @@ def create_mcp_server(
         project_id: _ProjectId,
         index_id: _IndexId,
         module_id: _ModuleId,
-        limit: _Limit = 40,
+        limit: _Limit = shared.MAX_PAGE_SIZE,
         cursor: _ModuleSymbolsCursor = None,
     ) -> McpModuleSymbolsResponse:
         try:
@@ -523,8 +603,8 @@ def create_mcp_server(
         index_id: _IndexId,
         symbol_id: _IndexId,
         direction: Literal["callers", "callees", "both"],
-        depth: _Depth = 2,
-        limit: _Limit = 40,
+        depth: _Depth = shared.MAX_GRAPH_DEPTH,
+        limit: _Limit = shared.MAX_PAGE_SIZE,
         edge_kinds: list[_NeighborEdgeKind] | None = None,
     ) -> McpNeighborsResponse:
         try:
@@ -553,7 +633,7 @@ def create_mcp_server(
             "hookspec functions bound to a real HookspecMarker import. Classifications are independent from calls "
             "paths; unknown does not mean unused or unreachable, TypeScript export facts are not persisted, and "
             "the result and source evidence are bounded. The response is capped at max_output_bytes (default "
-            "48000): every section, including classifications and references, may be shortened. Check truncated, "
+            "36000): every section, including classifications and references, may be shortened. Check truncated, "
             "truncation_reason, overview.section_coverage, and reference_coverage (total vs returned per section) "
             "before treating a list as complete; classification_coverage.analysis_incomplete marks rule analysis that stopped early."
         ),
@@ -562,12 +642,12 @@ def create_mcp_server(
     def get_overview(
         project_id: _ProjectId,
         index_id: _IndexId,
-        max_depth: _OverviewDepth = 4,
-        max_paths: _OverviewPaths = 40,
-        max_modules: _OverviewModules = 100,
-        max_groups: _OverviewGroups = 80,
-        max_module_relations: _OverviewModuleRelations = 200,
-        max_classifications: _OverviewClassifications = 200,
+        max_depth: _OverviewDepth = shared.DEFAULT_OVERVIEW_DEPTH,
+        max_paths: _OverviewPaths = shared.MAX_OVERVIEW_PATHS,
+        max_modules: _OverviewModules = shared.DEFAULT_OVERVIEW_MODULES,
+        max_groups: _OverviewGroups = shared.DEFAULT_OVERVIEW_GROUPS,
+        max_module_relations: _OverviewModuleRelations = shared.DEFAULT_OVERVIEW_RELATIONS,
+        max_classifications: _OverviewClassifications = shared.DEFAULT_OVERVIEW_CLASSIFICATIONS,
         max_output_bytes: _OverviewOutputBytes = _OVERVIEW_DEFAULT_OUTPUT_BYTES,
     ) -> McpOverviewResponse:
         try:
@@ -581,7 +661,7 @@ def create_mcp_server(
                 max_module_relations=max_module_relations,
                 max_classifications=max_classifications,
             )
-            return _bounded_overview_response(result, citation_url, max_output_bytes)
+            return _bounded_overview_response(service, result, citation_url, max_output_bytes)
         except ServiceError as exc:
             return _failure(McpOverviewResponse, exc)
         except Exception:
@@ -640,7 +720,7 @@ def create_mcp_server(
     def list_feature_generations(
         project_id: _ProjectId,
         index_id: _IndexId | None = None,
-        limit: _Limit = 20,
+        limit: _Limit = shared.DEFAULT_FEATURE_HISTORY_PAGE_SIZE,
         cursor: _FeatureHistoryCursor = None,
     ) -> McpFeatureGenerationListResponse:
         try:
@@ -691,8 +771,8 @@ def create_mcp_server(
         project_id: _ProjectId,
         index_id: _IndexId,
         generation_id: _IndexId,
-        max_nodes: _FeatureGraphNodes = 40,
-        max_edges: _FeatureGraphEdges = 80,
+        max_nodes: _FeatureGraphNodes = shared.MAX_FEATURE_GRAPH_NODES,
+        max_edges: _FeatureGraphEdges = shared.DEFAULT_FEATURE_GRAPH_EDGES,
     ) -> McpFeatureGraphResponse:
         try:
             result: FeatureGraphResponse = service.get_feature_graph(
@@ -720,7 +800,7 @@ def create_mcp_server(
     def list_session_runs(
         project_id: _ProjectId,
         session_id: _SessionId,
-        limit: _Limit = 40,
+        limit: _Limit = shared.MAX_PAGE_SIZE,
         cursor: _RunCursor = None,
     ) -> McpRunListResponse:
         try:
@@ -765,8 +845,8 @@ def create_mcp_server(
         project_id: _ProjectId,
         session_id: _SessionId,
         run_id: _ProjectId,
-        after_sequence: _RunSequence = 0,
-        limit: _RunEventLimit = 100,
+        after_sequence: _RunSequence = shared.MIN_RUN_SEQUENCE,
+        limit: _RunEventLimit = shared.MAX_EVENT_PAGE_SIZE,
     ) -> McpRunEventsResponse:
         try:
             result: RunEventsResponse = service.list_run_events(
@@ -792,8 +872,8 @@ def create_mcp_server(
         project_id: _ProjectId,
         session_id: _SessionId,
         run_id: _ProjectId,
-        after_sequence: _RunSequence = 0,
-        limit: _RunToolLimit = 40,
+        after_sequence: _RunSequence = shared.MIN_RUN_SEQUENCE,
+        limit: _RunToolLimit = shared.MAX_RUN_TOOL_RESULTS,
     ) -> McpRunToolResultsResponse:
         try:
             result: RunToolResultsResponse = service.list_run_tool_results(
@@ -848,8 +928,8 @@ def create_mcp_server(
         candidate_id: _ImpactId = None,
         finding_id: _ImpactId = None,
         direction: _ImpactDirection = "callers",
-        depth: _Depth = 2,
-        limit: _Limit = 40,
+        depth: _Depth = shared.MAX_GRAPH_DEPTH,
+        limit: _Limit = shared.MAX_PAGE_SIZE,
     ) -> McpRunImpactResponse:
         try:
             result: RunImpactResponse = service.get_run_impact(
@@ -881,10 +961,10 @@ def create_mcp_server(
         )
         def create_session(
             project_id: _ProjectId,
-            topic: Annotated[str, Field(min_length=1, max_length=500, description="Issue or investigation topic.")],
+            topic: Annotated[str, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_QUERY_LENGTH, description="Issue or investigation topic.")],
             index_id: _IndexId | None = None,
-            feature_generation_id: Annotated[str | None, Field(max_length=200, description="Optional saved feature generation on the same snapshot.")] = None,
-            idempotency_key: Annotated[str | None, Field(min_length=1, max_length=200)] = None,
+            feature_generation_id: Annotated[str | None, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_IDENTIFIER_LENGTH, description="Optional saved feature generation on the same snapshot.")] = None,
+            idempotency_key: Annotated[str | None, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_IDENTIFIER_LENGTH)] = None,
         ) -> McpSessionResponse:
             try:
                 result: SessionResponse = service.create_session(
@@ -915,8 +995,8 @@ def create_mcp_server(
             project_id: _ProjectId,
             session_id: _SessionId,
             source: Literal["human", "agent"],
-            content: Annotated[str, Field(min_length=1, max_length=20_000, description="Untrusted visible message content.")],
-            idempotency_key: Annotated[str | None, Field(min_length=1, max_length=200)] = None,
+            content: Annotated[str, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_MESSAGE_LENGTH, description="Untrusted visible message content.")],
+            idempotency_key: Annotated[str | None, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_IDENTIFIER_LENGTH)] = None,
         ) -> McpSessionMessageResponse:
             try:
                 message = service.append_session_message(
@@ -955,28 +1035,28 @@ def create_mcp_server(
             project_id: _ProjectId,
             session_id: _SessionId,
             index_id: _IndexId,
-            issue_id: Annotated[str, Field(min_length=1, max_length=200)],
-            title: Annotated[str, Field(min_length=1, max_length=500)],
-            body: Annotated[str, Field(min_length=1, max_length=20_000)],
+            issue_id: Annotated[str, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_IDENTIFIER_LENGTH)],
+            title: Annotated[str, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_TITLE_LENGTH)],
+            body: Annotated[str, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_MESSAGE_LENGTH)],
             fixture_scenario: _RunScenario = "success-timeout-missing",
             mode: Literal["fixture", "real"] = "fixture",
             analysis_kind: Literal["issue", "understanding"] = "issue",
-            feature_generation_id: Annotated[str | None, Field(max_length=200)] = None,
-            message_end_sequence: Annotated[int | None, Field(ge=1)] = None,
-            model: Annotated[str | None, Field(min_length=1, max_length=200)] = None,
-            prompt_version: Annotated[str | None, Field(min_length=1, max_length=200)] = None,
-            idempotency_key: Annotated[str | None, Field(min_length=1, max_length=200)] = None,
-            max_tool_calls: Annotated[int, Field(ge=1, le=12)] = 8,
-            max_model_calls: Annotated[int, Field(ge=1, le=6)] = 4,
-            max_repair_calls: Annotated[int, Field(ge=0, le=2)] = 1,
-            max_seconds: Annotated[int, Field(ge=1, le=600)] = 600,
-            max_source_lines: Annotated[int, Field(ge=1, le=200)] = 200,
-            max_total_source_lines: Annotated[int, Field(ge=1, le=2_000)] = 800,
-            max_input_chars: Annotated[int, Field(ge=1, le=100_000)] = 60_000,
-            max_model_input_chars: Annotated[int, Field(ge=1, le=100_000)] = 80_000,
-            max_output_chars: Annotated[int, Field(ge=1, le=100_000)] = 50_000,
-            max_model_output_chars: Annotated[int, Field(ge=1, le=50_000)] = 20_000,
-            max_events: Annotated[int, Field(ge=2, le=200)] = 100,
+            feature_generation_id: Annotated[str | None, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_IDENTIFIER_LENGTH)] = None,
+            message_end_sequence: Annotated[int | None, Field(ge=shared.MIN_REQUEST_VALUE)] = None,
+            model: Annotated[str | None, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_IDENTIFIER_LENGTH)] = None,
+            prompt_version: Annotated[str | None, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_IDENTIFIER_LENGTH)] = None,
+            idempotency_key: Annotated[str | None, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_IDENTIFIER_LENGTH)] = None,
+            max_tool_calls: Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_RUN_TOOL_CALLS)] = shared.DEFAULT_RUN_TOOL_CALLS,
+            max_model_calls: Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_RUN_MODEL_CALLS)] = shared.DEFAULT_RUN_MODEL_CALLS,
+            max_repair_calls: Annotated[int, Field(ge=shared.MIN_RUN_SEQUENCE, le=shared.MAX_RUN_REPAIR_CALLS)] = shared.DEFAULT_RUN_REPAIR_CALLS,
+            max_seconds: Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_RUN_SECONDS)] = shared.DEFAULT_RUN_SECONDS,
+            max_source_lines: Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_RUN_SOURCE_LINES)] = shared.DEFAULT_RUN_SOURCE_LINES,
+            max_total_source_lines: Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_RUN_TOTAL_SOURCE_LINES)] = shared.DEFAULT_RUN_TOTAL_SOURCE_LINES,
+            max_input_chars: Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_RUN_INPUT_CHARS)] = shared.DEFAULT_RUN_INPUT_CHARS,
+            max_model_input_chars: Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_RUN_INPUT_CHARS)] = shared.DEFAULT_RUN_MODEL_INPUT_CHARS,
+            max_output_chars: Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_RUN_INPUT_CHARS)] = shared.DEFAULT_RUN_OUTPUT_CHARS,
+            max_model_output_chars: Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_RUN_OUTPUT_CHARS)] = shared.DEFAULT_RUN_MODEL_OUTPUT_CHARS,
+            max_events: Annotated[int, Field(ge=shared.MIN_RUN_EVENTS, le=shared.MAX_RUN_EVENT_BUDGET)] = shared.DEFAULT_RUN_EVENTS,
         ) -> McpRunStartResponse:
             try:
                 from .contracts import RunBudget
@@ -1035,7 +1115,7 @@ def create_mcp_server(
             project_id: _ProjectId,
             session_id: _SessionId,
             run_id: _ProjectId,
-            reason: Annotated[str, Field(min_length=1, max_length=1_000)] = "cancelled by MCP caller",
+            reason: Annotated[str, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_REASON_LENGTH)] = "cancelled by MCP caller",
         ) -> McpRunCancelResponse:
             try:
                 result = service.cancel_run(
@@ -1067,25 +1147,25 @@ def create_mcp_server(
             project_id: _ProjectId,
             session_id: _SessionId,
             index_id: _IndexId,
-            issue_id: Annotated[str, Field(min_length=1, max_length=200)],
-            title: Annotated[str, Field(min_length=1, max_length=500)],
-            body: Annotated[str, Field(min_length=1, max_length=20_000)],
-            stacktrace: Annotated[str | None, Field(max_length=20_000)] = None,
+            issue_id: Annotated[str, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_IDENTIFIER_LENGTH)],
+            title: Annotated[str, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_TITLE_LENGTH)],
+            body: Annotated[str, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_MESSAGE_LENGTH)],
+            stacktrace: Annotated[str | None, Field(max_length=shared.MAX_MESSAGE_LENGTH)] = None,
             mentioned_paths: list[_Path] | None = None,
-            feature_generation_id: Annotated[str | None, Field(max_length=200)] = None,
-            message_end_sequence: Annotated[int | None, Field(ge=1)] = None,
-            idempotency_key: Annotated[str | None, Field(min_length=1, max_length=200)] = None,
-            max_tool_calls: Annotated[int, Field(ge=1, le=12)] = 8,
-            max_model_calls: Annotated[int, Field(ge=1, le=6)] = 4,
-            max_repair_calls: Annotated[int, Field(ge=0, le=2)] = 1,
-            max_seconds: Annotated[int, Field(ge=1, le=600)] = 600,
-            max_source_lines: Annotated[int, Field(ge=1, le=200)] = 200,
-            max_total_source_lines: Annotated[int, Field(ge=1, le=2_000)] = 800,
-            max_input_chars: Annotated[int, Field(ge=1, le=100_000)] = 60_000,
-            max_model_input_chars: Annotated[int, Field(ge=1, le=100_000)] = 80_000,
-            max_output_chars: Annotated[int, Field(ge=1, le=100_000)] = 50_000,
-            max_model_output_chars: Annotated[int, Field(ge=1, le=50_000)] = 20_000,
-            max_events: Annotated[int, Field(ge=2, le=200)] = 100,
+            feature_generation_id: Annotated[str | None, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_IDENTIFIER_LENGTH)] = None,
+            message_end_sequence: Annotated[int | None, Field(ge=shared.MIN_REQUEST_VALUE)] = None,
+            idempotency_key: Annotated[str | None, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_IDENTIFIER_LENGTH)] = None,
+            max_tool_calls: Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_RUN_TOOL_CALLS)] = shared.DEFAULT_RUN_TOOL_CALLS,
+            max_model_calls: Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_RUN_MODEL_CALLS)] = shared.DEFAULT_RUN_MODEL_CALLS,
+            max_repair_calls: Annotated[int, Field(ge=shared.MIN_RUN_SEQUENCE, le=shared.MAX_RUN_REPAIR_CALLS)] = shared.DEFAULT_RUN_REPAIR_CALLS,
+            max_seconds: Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_RUN_SECONDS)] = shared.DEFAULT_RUN_SECONDS,
+            max_source_lines: Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_RUN_SOURCE_LINES)] = shared.DEFAULT_RUN_SOURCE_LINES,
+            max_total_source_lines: Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_RUN_TOTAL_SOURCE_LINES)] = shared.DEFAULT_RUN_TOTAL_SOURCE_LINES,
+            max_input_chars: Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_RUN_INPUT_CHARS)] = shared.DEFAULT_RUN_INPUT_CHARS,
+            max_model_input_chars: Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_RUN_INPUT_CHARS)] = shared.DEFAULT_RUN_MODEL_INPUT_CHARS,
+            max_output_chars: Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_RUN_INPUT_CHARS)] = shared.DEFAULT_RUN_OUTPUT_CHARS,
+            max_model_output_chars: Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_RUN_OUTPUT_CHARS)] = shared.DEFAULT_RUN_MODEL_OUTPUT_CHARS,
+            max_events: Annotated[int, Field(ge=shared.MIN_RUN_EVENTS, le=shared.MAX_RUN_EVENT_BUDGET)] = shared.DEFAULT_RUN_EVENTS,
             analysis_kind: Literal["issue", "understanding"] = "issue",
         ) -> McpRunStartResponse:
             try:
@@ -1149,7 +1229,7 @@ def create_mcp_server(
             index_id: _IndexId,
             request_id: _RequestId,
             query: _Query,
-            limit: _Limit = 40,
+            limit: _Limit = shared.MAX_PAGE_SIZE,
         ) -> McpExternalToolResponse:
             try:
                 result = service.execute_external_tool(
@@ -1219,8 +1299,8 @@ def create_mcp_server(
             request_id: _RequestId,
             symbol_id: _IndexId,
             direction: Literal["callers", "callees", "both"],
-            depth: _Depth = 2,
-            limit: _Limit = 40,
+            depth: _Depth = shared.MAX_GRAPH_DEPTH,
+            limit: _Limit = shared.MAX_PAGE_SIZE,
         ) -> McpExternalToolResponse:
             try:
                 result = service.execute_external_tool(
@@ -1261,8 +1341,8 @@ def create_mcp_server(
             run_id: _RunId,
             index_id: _IndexId,
             output: FeatureModelOutput,
-            idempotency_key: Annotated[str, Field(min_length=1, max_length=200)],
-            model: Annotated[str | None, Field(min_length=1, max_length=200)] = None,
+            idempotency_key: Annotated[str, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_IDENTIFIER_LENGTH)],
+            model: Annotated[str | None, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_IDENTIFIER_LENGTH)] = None,
         ) -> McpFeatureGenerationResponse:
             try:
                 result = service.submit_external_features(
@@ -1301,11 +1381,11 @@ def create_mcp_server(
             run_id: _RunId,
             index_id: _IndexId,
             outcome: Literal["candidate_found", "insufficient_evidence", "explanation"],
-            summary: Annotated[str, Field(min_length=1, max_length=5_000)],
+            summary: Annotated[str, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_SUMMARY_LENGTH)],
             findings: list[Finding] | None = None,
             candidate_links: list[CandidateLink] | None = None,
             evidence_ids: list[Identifier] | None = None,
-            limitations: list[Annotated[str, Field(min_length=1, max_length=1_000)]] | None = None,
+            limitations: list[Annotated[str, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_REASON_LENGTH)]] | None = None,
             explanation: CodeExplanation | None = None,
         ) -> McpExternalCompleteResponse:
             try:
@@ -1368,7 +1448,7 @@ def create_mcp_server(
             project_id: _ProjectId,
             session_id: _SessionId,
             run_id: _RunId,
-            reason: Annotated[str, Field(min_length=1, max_length=1_000)] = "cancelled by external Agent",
+            reason: Annotated[str, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_REASON_LENGTH)] = "cancelled by external Agent",
         ) -> McpRunCancelResponse:
             try:
                 result = service.cancel_external_run(
@@ -1395,11 +1475,11 @@ def create_mcp_server(
             structured_output=True,
         )
         def import_local_path(
-            name: Annotated[str, Field(min_length=1, max_length=200, description="Project display name.")],
+            name: Annotated[str, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_IDENTIFIER_LENGTH, description="Project display name.")],
             path: _LocalPath,
-            revision: Annotated[str, Field(min_length=1, max_length=200)] = "working-tree",
+            revision: Annotated[str, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_IDENTIFIER_LENGTH)] = shared.DEFAULT_SOURCE_REVISION,
             dirty: bool = True,
-            idempotency_key: Annotated[str | None, Field(min_length=1, max_length=200)] = None,
+            idempotency_key: Annotated[str | None, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_IDENTIFIER_LENGTH)] = None,
         ) -> McpImportResponse:
             try:
                 result = service.import_local(
@@ -1486,10 +1566,10 @@ def create_mcp_server(
             structured_output=True,
         )
         def import_github_repository(
-            name: Annotated[str, Field(min_length=1, max_length=200, description="Project display name.")],
-            url: Annotated[str, Field(min_length=1, max_length=4_000, description="Official GitHub HTTPS repository URL.")],
-            ref: Annotated[str | None, Field(min_length=1, max_length=200, description="Optional branch, tag, or commit ref.")] = None,
-            idempotency_key: Annotated[str | None, Field(min_length=1, max_length=200)] = None,
+            name: Annotated[str, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_IDENTIFIER_LENGTH, description="Project display name.")],
+            url: Annotated[str, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_LOCAL_PATH_LENGTH, description="Official GitHub HTTPS repository URL.")],
+            ref: Annotated[str | None, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_IDENTIFIER_LENGTH, description="Optional branch, tag, or commit ref.")] = None,
+            idempotency_key: Annotated[str | None, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_IDENTIFIER_LENGTH)] = None,
         ) -> McpJobResponse:
             try:
                 request = GitHubImportRequest(
@@ -1603,9 +1683,14 @@ def _project_indexes_response(result: ProjectIndexListResponse, limit: int) -> M
 
 
 def _mcp_error(exc: ServiceError) -> McpError:
-    code = exc.code if exc.code in {"not_found", "invalid_input", "conflict", "budget_exceeded", "download_timeout", "index_too_large", "index_source_rejected", "index_timeout", "index_cancelled", "internal_error", "forbidden"} else "internal_error"
-    message = exc.message if code == exc.code else "local MCP query failed"
-    return McpError(code=code, message=message, retryable=code in _RETRYABLE_CODES)
+    code = exc.code if exc.code in ERROR_CODES else "internal_error"
+    message = safe_error_message(exc.message) if code == exc.code else "local MCP query failed"
+    return McpError(
+        code=code,
+        message=message,
+        retryable=code in _RETRYABLE_CODES,
+        details=exc.details,
+    )
 
 
 def _mcp_import_response(result: LocalImportResponse) -> McpImportResponse:
@@ -1636,6 +1721,7 @@ def _mcp_github_import_response(result: GitHubImportResponse) -> McpImportRespon
 
 
 def _bounded_overview_response(
+    service: WorkspaceService,
     result: ProjectOverview,
     base_url: str,
     max_output_bytes: int,
@@ -1643,9 +1729,10 @@ def _bounded_overview_response(
     total_references = len(_mcp_overview_response(result, base_url).references)
 
     def measure(overview: ProjectOverview) -> int:
-        return len(_mcp_overview_response(overview, base_url).model_dump_json(indent=2).encode())
+        response = _mcp_overview_response(overview, base_url).model_dump(mode="json", by_alias=True)
+        return len(_compact_json(response).encode("utf-8"))
 
-    bounded = bound_overview_output(
+    bounded = service.bound_overview(
         result,
         measure,
         max(1, max_output_bytes - _OVERVIEW_OUTPUT_MARGIN_BYTES),

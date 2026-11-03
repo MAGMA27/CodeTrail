@@ -17,15 +17,77 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from pydantic_core import PydanticCustomError
 
 from .config import normalize_model_config_base_url, normalize_model_config_text
 
 
 SCHEMA_VERSION = "0.1.0"
+DEFAULT_SOURCE_REVISION = "working-tree"
+
+# Shared request limits used by HTTP, MCP, and request contract declarations.
+MIN_REQUEST_VALUE = 1
+MAX_QUERY_LENGTH = 500
+MAX_PATH_LENGTH = 500
+MAX_LOCAL_PATH_LENGTH = 4_000
+MAX_IDENTIFIER_LENGTH = 200
+MAX_CURSOR_LENGTH = 500
+MAX_PAGE_SIZE = 40
+MAX_EVENT_PAGE_SIZE = 100
+MAX_GRAPH_DEPTH = 2
+MAX_OVERVIEW_DEPTH = 8
+MAX_OVERVIEW_PATHS = 40
+MAX_OVERVIEW_MODULES = 200
+MAX_OVERVIEW_GROUPS = 200
+MAX_OVERVIEW_CLASSIFICATIONS = 200
+MAX_OVERVIEW_RELATIONS = 400
+MIN_OVERVIEW_OUTPUT_BYTES = 16_000
+MAX_OVERVIEW_OUTPUT_BYTES = 1_000_000
+DEFAULT_OVERVIEW_OUTPUT_BYTES = 36_000
+OVERVIEW_OUTPUT_MARGIN_BYTES = 512
+MIN_RUN_SEQUENCE = 0
+MAX_FEATURE_GRAPH_NODES = 40
+MAX_FEATURE_GRAPH_EDGES = 120
+MAX_SESSION_MESSAGES = 100
+MAX_RUN_EVENTS = 100
+MAX_RUN_TOOL_RESULTS = 40
+MAX_RUN_TOOL_CALLS = 12
+MAX_RUN_MODEL_CALLS = 6
+MAX_RUN_REPAIR_CALLS = 2
+MAX_RUN_SECONDS = 600
+MAX_RUN_SOURCE_LINES = 200
+MAX_RUN_TOTAL_SOURCE_LINES = 2_000
+MAX_RUN_INPUT_CHARS = 100_000
+MAX_RUN_OUTPUT_CHARS = 50_000
+MIN_RUN_EVENTS = 2
+MAX_RUN_EVENT_BUDGET = 200
+MAX_MESSAGE_LENGTH = 20_000
+MAX_TITLE_LENGTH = 500
+MAX_REASON_LENGTH = 1_000
+MAX_SUMMARY_LENGTH = 5_000
+DEFAULT_OVERVIEW_DEPTH = 4
+DEFAULT_OVERVIEW_MODULES = 100
+DEFAULT_FEATURE_HISTORY_PAGE_SIZE = 20
+DEFAULT_OVERVIEW_GROUPS = 80
+DEFAULT_OVERVIEW_RELATIONS = 200
+DEFAULT_OVERVIEW_CLASSIFICATIONS = 200
+DEFAULT_FEATURE_GRAPH_EDGES = 80
+DEFAULT_RUN_TOTAL_SOURCE_LINES = 800
+DEFAULT_RUN_INPUT_CHARS = 60_000
+DEFAULT_RUN_MODEL_INPUT_CHARS = 80_000
+DEFAULT_RUN_TOOL_CALLS = 8
+DEFAULT_RUN_MODEL_CALLS = 4
+DEFAULT_RUN_REPAIR_CALLS = 1
+DEFAULT_RUN_SECONDS = 600
+DEFAULT_RUN_SOURCE_LINES = 200
+DEFAULT_RUN_OUTPUT_CHARS = 50_000
+DEFAULT_RUN_MODEL_OUTPUT_CHARS = 20_000
+DEFAULT_RUN_EVENTS = 100
+
 SchemaVersion: TypeAlias = Literal["0.1.0"]
-Identifier: TypeAlias = Annotated[str, StringConstraints(min_length=1, max_length=200)]
+Identifier: TypeAlias = Annotated[str, StringConstraints(min_length=MIN_REQUEST_VALUE, max_length=MAX_IDENTIFIER_LENGTH)]
 Sha256: TypeAlias = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
-RelativePath: TypeAlias = Annotated[str, StringConstraints(min_length=1, max_length=500)]
+RelativePath: TypeAlias = Annotated[str, StringConstraints(min_length=MIN_REQUEST_VALUE, max_length=MAX_PATH_LENGTH)]
 
 
 class ContractModel(BaseModel):
@@ -78,9 +140,9 @@ class Issue(VersionedModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     issue_id: Identifier = Field(alias="id")
-    title: str = Field(min_length=1, max_length=500)
-    body: str = Field(min_length=1, max_length=20_000)
-    stacktrace: str | None = Field(default=None, max_length=20_000)
+    title: str = Field(min_length=MIN_REQUEST_VALUE, max_length=MAX_TITLE_LENGTH)
+    body: str = Field(min_length=MIN_REQUEST_VALUE, max_length=MAX_MESSAGE_LENGTH)
+    stacktrace: str | None = Field(default=None, max_length=MAX_MESSAGE_LENGTH)
     mentioned_paths: list[RelativePath] = Field(default_factory=list)
 
     @field_validator("mentioned_paths")
@@ -210,43 +272,43 @@ class IndexIssue(ContractModel):
 
 class CreateIndexRequest(VersionedModel):
     repository_id: Identifier
-    revision: str = Field(default="working-tree", min_length=1, max_length=200)
+    revision: str = Field(default=DEFAULT_SOURCE_REVISION, min_length=MIN_REQUEST_VALUE, max_length=MAX_IDENTIFIER_LENGTH)
     dirty: bool = True
 
 
 class CreateProjectRequest(VersionedModel):
-    name: str = Field(min_length=1, max_length=200)
+    name: str = Field(min_length=MIN_REQUEST_VALUE, max_length=MAX_IDENTIFIER_LENGTH)
     repository_id: Identifier
 
 
 class LocalImportRequest(VersionedModel):
     """A server-local source registration and bounded synchronous import request."""
 
-    name: str = Field(min_length=1, max_length=200)
-    path: str = Field(min_length=1, max_length=4_000)
-    revision: str = Field(default="working-tree", min_length=1, max_length=200)
+    name: str = Field(min_length=MIN_REQUEST_VALUE, max_length=MAX_IDENTIFIER_LENGTH)
+    path: str = Field(min_length=MIN_REQUEST_VALUE, max_length=MAX_LOCAL_PATH_LENGTH)
+    revision: str = Field(default=DEFAULT_SOURCE_REVISION, min_length=MIN_REQUEST_VALUE, max_length=MAX_IDENTIFIER_LENGTH)
     dirty: bool = True
-    idempotency_key: str | None = Field(default=None, min_length=1, max_length=200)
+    idempotency_key: str | None = Field(default=None, min_length=MIN_REQUEST_VALUE, max_length=MAX_IDENTIFIER_LENGTH)
 
 
 class GitHubImportRequest(VersionedModel):
     """A bounded import request for one public GitHub repository."""
 
-    name: str = Field(min_length=1, max_length=200)
-    url: str = Field(min_length=1, max_length=4_000)
-    ref: str | None = Field(default=None, min_length=1, max_length=200)
-    idempotency_key: str | None = Field(default=None, min_length=1, max_length=200)
+    name: str = Field(min_length=MIN_REQUEST_VALUE, max_length=MAX_IDENTIFIER_LENGTH)
+    url: str = Field(min_length=MIN_REQUEST_VALUE, max_length=MAX_LOCAL_PATH_LENGTH)
+    ref: str | None = Field(default=None, min_length=MIN_REQUEST_VALUE, max_length=MAX_IDENTIFIER_LENGTH)
+    idempotency_key: str | None = Field(default=None, min_length=MIN_REQUEST_VALUE, max_length=MAX_IDENTIFIER_LENGTH)
 
 
 class CreateProjectIndexRequest(VersionedModel):
-    revision: str = Field(default="working-tree", min_length=1, max_length=200)
+    revision: str = Field(default=DEFAULT_SOURCE_REVISION, min_length=MIN_REQUEST_VALUE, max_length=MAX_IDENTIFIER_LENGTH)
     dirty: bool = True
 
 
 class RefreshProjectIndexRequest(VersionedModel):
     """Options for an explicit project-local index refresh."""
 
-    revision: str = Field(default="working-tree", min_length=1, max_length=200)
+    revision: str = Field(default=DEFAULT_SOURCE_REVISION, min_length=MIN_REQUEST_VALUE, max_length=MAX_IDENTIFIER_LENGTH)
     dirty: bool = True
 
 
@@ -340,7 +402,7 @@ SessionMessageSource: TypeAlias = Literal["human", "agent"]
 class CreateSessionRequest(VersionedModel):
     """Create one investigation session fixed to a ready project snapshot."""
 
-    topic: str = Field(min_length=1, max_length=500)
+    topic: str = Field(min_length=MIN_REQUEST_VALUE, max_length=MAX_QUERY_LENGTH)
     index_id: Identifier | None = None
     feature_generation_id: Identifier | None = None
     idempotency_key: Identifier | None = None
@@ -350,7 +412,7 @@ class AppendSessionMessageRequest(VersionedModel):
     """Append one visible human or external-agent message to a session."""
 
     source: SessionMessageSource
-    content: str = Field(min_length=1, max_length=20_000)
+    content: str = Field(min_length=MIN_REQUEST_VALUE, max_length=MAX_MESSAGE_LENGTH)
     idempotency_key: Identifier | None = None
 
 
@@ -361,7 +423,7 @@ class Session(VersionedModel):
     project_id: Identifier
     index: IndexSnapshot
     feature_generation_id: Identifier | None = None
-    topic: str = Field(min_length=1, max_length=500)
+    topic: str = Field(min_length=MIN_REQUEST_VALUE, max_length=MAX_QUERY_LENGTH)
     created_at: datetime
     updated_at: datetime
     message_count: NonNegativeInt = 0
@@ -382,7 +444,7 @@ class SessionMessage(VersionedModel):
     session_id: Identifier
     sequence: PositiveInt
     source: SessionMessageSource
-    content: str = Field(min_length=1, max_length=20_000)
+    content: str = Field(min_length=MIN_REQUEST_VALUE, max_length=MAX_MESSAGE_LENGTH)
     created_at: datetime
 
 
@@ -742,17 +804,17 @@ class GraphSnapshot(ContractModel):
 class RunBudget(ContractModel):
     """Server-enforced limits and usage counters for one Run."""
 
-    max_tool_calls: PositiveInt = Field(default=8, le=12)
-    max_model_calls: PositiveInt = Field(default=4, le=6)
-    max_repair_calls: NonNegativeInt = Field(default=1, le=2)
-    max_seconds: PositiveInt = Field(default=600, le=600)
-    max_source_lines: PositiveInt = Field(default=200, le=200)
-    max_total_source_lines: PositiveInt = Field(default=800, le=2_000)
-    max_input_chars: PositiveInt = Field(default=60_000, le=100_000)
-    max_model_input_chars: PositiveInt = Field(default=80_000, le=100_000)
-    max_output_chars: PositiveInt = Field(default=50_000, le=100_000)
-    max_model_output_chars: PositiveInt = Field(default=20_000, le=50_000)
-    max_events: PositiveInt = Field(default=100, ge=2, le=200)
+    max_tool_calls: PositiveInt = Field(default=DEFAULT_RUN_TOOL_CALLS, le=MAX_RUN_TOOL_CALLS)
+    max_model_calls: PositiveInt = Field(default=DEFAULT_RUN_MODEL_CALLS, le=MAX_RUN_MODEL_CALLS)
+    max_repair_calls: NonNegativeInt = Field(default=DEFAULT_RUN_REPAIR_CALLS, le=MAX_RUN_REPAIR_CALLS)
+    max_seconds: PositiveInt = Field(default=DEFAULT_RUN_SECONDS, le=MAX_RUN_SECONDS)
+    max_source_lines: PositiveInt = Field(default=DEFAULT_RUN_SOURCE_LINES, le=MAX_RUN_SOURCE_LINES)
+    max_total_source_lines: PositiveInt = Field(default=DEFAULT_RUN_TOTAL_SOURCE_LINES, le=MAX_RUN_TOTAL_SOURCE_LINES)
+    max_input_chars: PositiveInt = Field(default=DEFAULT_RUN_INPUT_CHARS, le=MAX_RUN_INPUT_CHARS)
+    max_model_input_chars: PositiveInt = Field(default=DEFAULT_RUN_MODEL_INPUT_CHARS, le=MAX_RUN_INPUT_CHARS)
+    max_output_chars: PositiveInt = Field(default=DEFAULT_RUN_OUTPUT_CHARS, le=MAX_RUN_INPUT_CHARS)
+    max_model_output_chars: PositiveInt = Field(default=DEFAULT_RUN_MODEL_OUTPUT_CHARS, le=MAX_RUN_OUTPUT_CHARS)
+    max_events: PositiveInt = Field(default=DEFAULT_RUN_EVENTS, ge=MIN_RUN_EVENTS, le=MAX_RUN_EVENT_BUDGET)
     tool_calls_used: NonNegativeInt = 0
     model_calls_used: NonNegativeInt = 0
     repair_calls_used: NonNegativeInt = 0
@@ -855,8 +917,8 @@ class Run(VersionedModel):
     execution_source: RunExecutionSource = "internal"
     fixture_scenario: FixtureScenario | None = None
     model_provider: str | None = Field(default=None, max_length=100)
-    model: str | None = Field(default=None, max_length=200)
-    prompt_version: str | None = Field(default=None, max_length=200)
+    model: str | None = Field(default=None, max_length=MAX_IDENTIFIER_LENGTH)
+    prompt_version: str | None = Field(default=None, max_length=MAX_IDENTIFIER_LENGTH)
     execution_version: Identifier = "run-fixture-v1"
     status: RunStatus
     budget: RunBudget
@@ -1024,8 +1086,8 @@ class Report(VersionedModel):
 
 class SearchCodeParams(ContractModel):
     tool: Literal["search_code"] = "search_code"
-    query: str = Field(min_length=1, max_length=500)
-    limit: PositiveInt = Field(le=40)
+    query: str = Field(min_length=MIN_REQUEST_VALUE, max_length=MAX_QUERY_LENGTH)
+    limit: PositiveInt = Field(le=MAX_PAGE_SIZE)
 
 
 class ReadSourceParams(ContractModel):
@@ -1039,9 +1101,9 @@ class ReadSourceParams(ContractModel):
     @model_validator(mode="after")
     def validate_read_limit(self) -> ReadSourceParams:
         if self.end_line < self.start_line:
-            raise ValueError("end_line must be greater than or equal to start_line")
-        if self.end_line - self.start_line + 1 > 200:
-            raise ValueError("read_source cannot return more than 200 lines")
+            raise PydanticCustomError("start_after_end", "start_line must be less than or equal to end_line")
+        if self.end_line - self.start_line + 1 > MAX_RUN_SOURCE_LINES:
+            raise PydanticCustomError("range_too_long", f"read_source supports at most {MAX_RUN_SOURCE_LINES} lines", {"max": MAX_RUN_SOURCE_LINES})
         return self
 
 
@@ -1049,8 +1111,8 @@ class GetNeighborsParams(ContractModel):
     tool: Literal["get_neighbors"] = "get_neighbors"
     symbol_id: Identifier
     direction: Literal["callers", "callees", "both"]
-    depth: PositiveInt = Field(le=2)
-    limit: PositiveInt = Field(le=40)
+    depth: PositiveInt = Field(le=MAX_GRAPH_DEPTH)
+    limit: PositiveInt = Field(le=MAX_PAGE_SIZE)
 
 
 ToolParams: TypeAlias = Annotated[
@@ -2943,6 +3005,7 @@ ApiErrorCode: TypeAlias = Literal[
 class ApiErrorResponse(VersionedModel):
     code: ApiErrorCode
     message: str = Field(min_length=1, max_length=2_000)
+    details: list[ErrorDetail] | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class SaveModelConfigRequest(VersionedModel):
@@ -2981,19 +3044,21 @@ class ModelConfigSettingsResponse(VersionedModel):
     real_run_enabled: bool
 
 
-McpErrorCode: TypeAlias = Literal[
-    "not_found",
-    "invalid_input",
-    "conflict",
-    "budget_exceeded",
-    "download_timeout",
-    "index_too_large",
-    "index_source_rejected",
-    "index_timeout",
-    "index_cancelled",
-    "internal_error",
-    "forbidden",
-]
+McpErrorCode: TypeAlias = ApiErrorCode
+
+
+class ErrorDetail(ContractModel):
+    model_config = ConfigDict(extra="forbid", title="ErrorDetail")
+
+    field: str
+    problem: Literal[
+        "required", "not_allowed", "too_small", "too_large", "too_short", "too_long",
+        "wrong_type", "invalid", "beyond_end_of_file", "range_too_long", "start_after_end",
+    ]
+    allowed: list[object] | None = Field(default=None, exclude_if=lambda value: value is None)
+    min: int | float | None = Field(default=None, exclude_if=lambda value: value is None)
+    max: int | float | None = Field(default=None, exclude_if=lambda value: value is None)
+    got: str | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class McpError(VersionedModel):
@@ -3002,6 +3067,7 @@ class McpError(VersionedModel):
     code: McpErrorCode
     message: str = Field(min_length=1, max_length=2_000)
     retryable: bool = False
+    details: list[ErrorDetail] | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class McpResultBase(VersionedModel):
@@ -3863,8 +3929,8 @@ class CreateRunRequest(VersionedModel):
     fixture_scenario: FixtureScenario | None = None
     feature_generation_id: Identifier | None = None
     message_end_sequence: PositiveInt | None = None
-    model: str | None = Field(default=None, max_length=200)
-    prompt_version: str | None = Field(default=None, max_length=200)
+    model: str | None = Field(default=None, min_length=MIN_REQUEST_VALUE, max_length=MAX_IDENTIFIER_LENGTH)
+    prompt_version: str | None = Field(default=None, min_length=MIN_REQUEST_VALUE, max_length=MAX_IDENTIFIER_LENGTH)
     execution_version: Identifier = "run-fixture-v1"
     budget: RunBudget = Field(default_factory=RunBudget)
     idempotency_key: Identifier | None = None
@@ -4000,7 +4066,7 @@ class EvidenceResponse(VersionedModel):
 
 
 class CancelRunRequest(VersionedModel):
-    reason: str = Field(min_length=1, max_length=1_000)
+    reason: str = Field(min_length=MIN_REQUEST_VALUE, max_length=MAX_REASON_LENGTH)
 
 
 class CancelRunResponse(VersionedModel):

@@ -879,6 +879,12 @@ def test_read_evidence_uses_the_persisted_snapshot_after_worktree_changes(tmp_pa
             store.read_evidence(relation.snapshot.index.index_id, "../module.py", 1, 1)
         with pytest.raises(StorageInputError):
             store.read_evidence(relation.snapshot.index.index_id, "module.py", 1, 3)
+        with pytest.raises(StorageInputError, match="read_source supports at most 200 lines") as too_long:
+            store.read_evidence(relation.snapshot.index.index_id, "module.py", 1, 300)
+        assert too_long.value.detail == {"field": "end_line", "problem": "range_too_long", "max": 200}
+        with pytest.raises(StorageInputError, match="start_line must be less than or equal to end_line") as reversed_range:
+            store.read_evidence(relation.snapshot.index.index_id, "module.py", 2, 1)
+        assert reversed_range.value.detail == {"field": "start_line", "problem": "start_after_end"}
         with pytest.raises(StorageNotFoundError):
             store.read_evidence("missing-index", "module.py", 1, 1)
 

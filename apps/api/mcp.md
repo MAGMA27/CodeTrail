@@ -1,5 +1,15 @@
 # 本地 MCP 配置
 
+## HTTP 与 MCP 一致性检查
+
+HTTP and MCP adapters call the same `WorkspaceService`; `factory.py` owns their implementation wiring. CI runs `lint-imports` to prevent the adapters from importing storage, indexing, graph, execution, or job implementation modules directly. The parity test enumerates every registered MCP tool with its HTTP route (or an explained MCP-only workflow) and compares shared parameter constraints with OpenAPI. A separate AST check requires request limits/defaults and API error definitions to come from `contracts.py`.
+
+## 工具响应与错误
+
+CodeTrail 工具成功和失败都通过原工具的响应模型返回，字段形状保持一致。失败时 `ok=false` 并包含 `error`（`code`、短英文 `message`、`retryable`）；参数校验失败使用 `invalid_input`，可在可选 `details` 中按字段给出问题类型及适用的边界值。HTTP 与 MCP 共用该详情映射；`got` 只包含明确安全的标量、不超过 80 字符且可解析为数值的字符串或短 literal 值，必填缺失、请求体、敏感字段和值类型不适用时省略。`details` 缺省时不出现在旧错误响应中。
+
+所有 CodeTrail 工具失败都设置 MCP `isError=true`，包括业务错误和参数校验错误；失败仍提供符合该工具 `outputSchema` 的结构化响应。成功结果的 `isError=false`。每个工具的文本内容是紧凑 JSON，解析后与 `structuredContent` 完全相同。`get_overview.max_output_bytes` 按该紧凑文本的 UTF-8 字节数约束，并保留 512 字节的封装余量。
+
 ## 后台任务工具
 
 GitHub 导入、GitHub 重试、远端刷新和项目索引刷新提交持久 job，并返回 `job_id` 与当前状态。轮询使用 `get_job_status`，显式取消使用 `cancel_job(job_id, project_id?)`；未绑定 Project 的初始导入可不传 project_id，已绑定任务必须传入归属项目。工具注册仍受现有 GitHub/索引写入 opt-in 开关约束。HTTP 与 MCP 复用同一个 WorkspaceService 和 SQLite job 状态。MCP 客户端断开不会取消已提交 job。
@@ -12,7 +22,7 @@ GitHub 导入、GitHub 重试、远端刷新和项目索引刷新提交持久 jo
 
 `list_module_symbols(project_id,index_id,module_id,limit=40,cursor)` 与 HTTP 的 `/api/projects/{project_id}/indexes/{index_id}/modules/{module_id}/symbols` 使用相同参数、cursor 和 response page。页最多 40 项，HTTP/MCP 共用 40,000 字节序列化预算；跨页传回原 cursor，跨 Project/Index/Module 的 cursor 返回 `invalid_input`，module 不存在或 symbol 不是 module root 返回 `not_found`。该工具只描述 indexer 在固定 snapshot 捕获到的定义，不保证解析完整；详情见[模块定义分页决策](../../docs/decisions/2026-10-06-module-symbol-pagination.md)。
 
-HTTP 入口链路没有额外 MCP 工具：外部 Agent 从 `get_overview` 读取同一 `project_id/index_id` 的 HTTP association 与路由入口，再将入口的 handler symbol 传给 `get_neighbors(direction="callees", depth=2, limit=40, edge_kinds=["calls"])`，并可用 `read_source` 读取关联两端或返回静态边的同快照源码。`overview.paths` 默认 40 条是整个概览共享的上限，不是 handler 独立覆盖；因此要判断返回观察，必须直接查询 handler。MCP 和 HTTP 调用相同 WorkspaceService，保持相同节点、边、evidence 与截断字段。查询使用现有邻接默认预算：最多 200 条边、1 秒、64,000 输出字节；空邻接与 `unresolved`/索引覆盖字段均不代表静态执行链完整。`get_neighbors` 的工具描述写明静态分析的局限，结果的 `completeness` 在可能遗漏时给出 `possibly_incomplete`、原因和提示，`possible_unresolved_callers` 列出可能指向根符号的未解析调用样例（callers 方向不再附带根符号自己的出向 unresolved），每条 neighbor 带跳数 `depth`。MCP `get_overview` 另有 `max_classifications`（默认 200）和硬上限 `max_output_bytes`（默认 48,000，16,000–1,000,000）：超出时从最大的分区末尾整条删除（模块连带其分类，入口连带其路径/HTTP 关联），始终保留索引信息、notes、coverage、1 个组和 1 个入口；`overview.section_coverage` 与 `reference_coverage` 报告每个分区的 total/returned/truncated，`truncation_reason` 含 `max_output_bytes reached`。HTTP 概览不受该字节上限影响。
+HTTP 入口链路没有额外 MCP 工具：外部 Agent 从 `get_overview` 读取同一 `project_id/index_id` 的 HTTP association 与路由入口，再将入口的 handler symbol 传给 `get_neighbors(direction="callees", depth=2, limit=40, edge_kinds=["calls"])`，并可用 `read_source` 读取关联两端或返回静态边的同快照源码。`overview.paths` 默认 40 条是整个概览共享的上限，不是 handler 独立覆盖；因此要判断返回观察，必须直接查询 handler。MCP 和 HTTP 调用相同 WorkspaceService，保持相同节点、边、evidence 与截断字段。查询使用现有邻接默认预算：最多 200 条边、1 秒、64,000 输出字节；空邻接与 `unresolved`/索引覆盖字段均不代表静态执行链完整。`get_neighbors` 的工具描述写明静态分析的局限，结果的 `completeness` 在可能遗漏时给出 `possibly_incomplete`、原因和提示，`possible_unresolved_callers` 列出可能指向根符号的未解析调用样例（callers 方向不再附带根符号自己的出向 unresolved），每条 neighbor 带跳数 `depth`。MCP `get_overview` 另有 `max_classifications`（默认 200）和硬上限 `max_output_bytes`（默认 36,000，16,000–1,000,000）：超出时从最大的分区末尾整条删除（模块连带其分类，入口连带其路径/HTTP 关联），始终保留索引信息、notes、coverage、1 个组和 1 个入口；`overview.section_coverage` 与 `reference_coverage` 报告每个分区的 total/returned/truncated，`truncation_reason` 含 `max_output_bytes reached`。HTTP 概览不受该字节上限影响。
 
 设置 `CODETRAIL_MCP_INDEX_WRITE_ENABLED=1` 后，独立增加 `refresh_index`；它只允许对项目当前 latest 做有界复核，在完整安全扫描下对旧 metadata/源码/规则/配置变化执行显式当前复用、兼容历史快照复用或重建，失败保留旧 latest。GitHub 导入开关同时开启时，MCP 另注册 `refresh_github_source`；它只允许对当前 latest 的 GitHub 项目显式检查并通过受限官方归档更新，复用/重建和失败保留语义与 HTTP 相同。设置 `CODETRAIL_MCP_RUN_WRITE_ENABLED=1` 后，独立增加 `start_session_run` 和 `cancel_session_run`；`start_session_run.analysis_kind` 默认 `issue`，real 可以选择 `understanding` 并按冻结 Session 消息解释代码，fixture 只支持 `issue`。Real 还要求 `CODETRAIL_MCP_REAL_RUN_ENABLED=1`，HTTP 与 MCP 共用同一 Run/Pydantic 契约，不会因为 Run 写开关开放 `create_session` 或 `append_session_message`。Session 写入仍需 `CODETRAIL_MCP_SESSION_WRITE_ENABLED=1`。未设置时 MCP 保持只读工具，默认只读工具不会调用模型或 Run。
 

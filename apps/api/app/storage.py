@@ -149,6 +149,10 @@ class StorageNotFoundError(StorageError):
 class StorageInputError(StorageError):
     """A storage or query input violates the bounded local contract."""
 
+    def __init__(self, message: str, *, detail: dict[str, object] | None = None) -> None:
+        super().__init__(message)
+        self.detail = detail
+
 
 class StorageBudgetError(StorageError):
     """A requested bounded page cannot fit the shared serialized response budget."""
@@ -4697,7 +4701,18 @@ class IndexStore:
         try:
             params = ReadSourceParams(path=path, start_line=start_line, end_line=end_line)
         except ValidationError as exc:
-            raise StorageInputError(str(exc)) from exc
+            issue = exc.errors()[0]
+            problem = issue.get("type")
+            if problem == "start_after_end":
+                detail = {"field": "start_line", "problem": "start_after_end"}
+                message = "start_line must be less than or equal to end_line"
+            elif problem == "range_too_long":
+                detail = {"field": "end_line", "problem": "range_too_long", "max": 200}
+                message = "read_source supports at most 200 lines"
+            else:
+                detail = None
+                message = "source range is invalid"
+            raise StorageInputError(message, detail=detail) from exc
         self._require_index(index_id)
         row = self._connection.execute(
             "SELECT content_hash, source_text FROM snapshot_files WHERE index_id = ? AND path = ?",
@@ -4706,8 +4721,12 @@ class IndexStore:
         if row is None:
             raise StorageNotFoundError(f"source path {params.path!r} is not in index {index_id!r}")
         lines = _source_lines(row["source_text"])
-        if params.end_line > len(lines):
-            raise StorageInputError("source line range is outside the persisted snapshot")
+        for field, value in (("start_line", params.start_line), ("end_line", params.end_line)):
+            if value > len(lines):
+                raise StorageInputError(
+                    f"{field} is beyond the end of the file ({len(lines)} lines)",
+                    detail={"field": field, "problem": "beyond_end_of_file", "max": len(lines)},
+                )
         excerpt = "\n".join(lines[params.start_line - 1 : params.end_line])
         if not excerpt:
             raise StorageInputError("source excerpt is empty and cannot form Evidence")

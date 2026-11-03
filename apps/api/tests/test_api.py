@@ -25,12 +25,28 @@ from app.contracts import (
     SearchCodeSuccess,
     ToolRequest,
 )
-from app.main import _allowed_origins, create_app
+from app.main import _allowed_origins, _run_with_disconnect, create_app
 from app.service import IndexService, RepositoryRegistry, ServiceError
 
 
 ROOT = Path(__file__).resolve().parents[3]
 FIXTURE_ROOT = ROOT / "fixtures" / "repos" / "timeout-demo"
+
+
+def test_http_disconnect_cancels_indexing_operation() -> None:
+    started = Event()
+
+    class DisconnectingRequest:
+        async def is_disconnected(self) -> bool:
+            await asyncio.to_thread(started.wait, 1)
+            return True
+
+    def operation(*, cancel_event: Event) -> bool:
+        started.set()
+        cancel_event.wait(timeout=2)
+        return cancel_event.is_set()
+
+    assert asyncio.run(_run_with_disconnect(DisconnectingRequest(), operation)) is True
 
 
 async def _request(
@@ -414,6 +430,18 @@ def test_http_index_query_and_snapshot_evidence_flow(tmp_path: Path) -> None:
     assert status == 200
     assert "load_settings" in source["evidence"]["excerpt"]
     assert source["evidence"]["index_id"] == index_id
+    for start_line, end_line, message in (
+        (1, 300, "read_source supports at most 200 lines"),
+        (50, 10, "start_line must be less than or equal to end_line"),
+    ):
+        status, error = request(
+            application,
+            "GET",
+            f"/api/indexes/{index_id}/source?path=timeout_demo%2Fconfig.py&start_line={start_line}&end_line={end_line}",
+        )
+        assert status == 400
+        assert error["code"] == "invalid_input"
+        assert error["message"] == message
 
     status, projects = request(application, "GET", "/api/projects")
     assert status == 200
@@ -454,6 +482,58 @@ def test_http_index_query_and_snapshot_evidence_flow(tmp_path: Path) -> None:
         item["symbol"]["qualified_name"]
         not in {"timeout_demo.handlers.handle", "timeout_demo.other_handlers.handle"}
         for item in dispatch_graph["neighbors"]
+    )
+
+
+def test_http_errors_include_shared_details_only_when_available(tmp_path: Path) -> None:
+    repository = copy_fixture(tmp_path)
+    application = create_app({"timeout-demo": repository}, data_root=tmp_path / "data")
+    status, created = request(application, "POST", "/api/indexes", create_request())
+    assert status == 200
+    index_id = created["index"]["index_id"]
+    status, projects = request(application, "GET", "/api/projects")
+    assert status == 200
+    project_id = next(
+        project["project_id"]
+        for project in projects["projects"]
+        if project["repository_id"] == "timeout-demo"
+    )
+    source_url = (
+        f"/api/indexes/{index_id}/source?path=timeout_demo%2Fconfig.py"
+        "&start_line={start}&end_line={end}"
+    )
+    line_count = len((repository / "timeout_demo" / "config.py").read_text(encoding="utf-8").splitlines())
+
+    expected_details = {
+        (1, 300): [{"field": "end_line", "problem": "range_too_long", "max": 200}],
+        (50, 10): [{"field": "start_line", "problem": "start_after_end"}],
+        (line_count + 1, line_count + 1): [
+            {"field": "start_line", "problem": "beyond_end_of_file", "max": line_count}
+        ],
+    }
+    for (start, end), details in expected_details.items():
+        status, body = request(application, "GET", source_url.format(start=start, end=end))
+        assert status == 400
+        assert body["details"] == details
+
+    status, invalid = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/indexes/{index_id}/search?limit=1000",
+    )
+    assert status == 422
+    assert invalid["message"] == "request parameters are invalid"
+    assert {item["field"]: item["problem"] for item in invalid["details"]} == {
+        "query": "required",
+        "limit": "too_large",
+    }
+    assert "pydantic" not in json.dumps(invalid).lower()
+
+    status, no_details = request(application, "GET", "/api/projects/project-does-not-exist")
+    assert status == 404
+    assert "details" not in no_details
+    assert json.dumps(no_details, separators=(",", ":")) == (
+        '{"schema_version":"0.1.0","code":"not_found","message":"project was not found"}'
     )
 
 

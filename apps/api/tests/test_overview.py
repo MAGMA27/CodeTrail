@@ -1205,6 +1205,7 @@ def test_bound_overview_output_trims_whole_items_and_keeps_counts_consistent(tmp
             f"from .core import VALUE\n__all__ = ['api_{n}']\ndef api_{n}():\n    return VALUE\n",
             encoding="utf-8",
         )
+    (repository / "__main__.py").write_text("from pkg import api_0\napi_0()\n", encoding="utf-8")
     relation = extract_relations(
         extract_definitions(
             build_source_snapshot(repository, repository_id="bounded", revision="v1", dirty=False)
@@ -1216,7 +1217,7 @@ def test_bound_overview_output_trims_whole_items_and_keeps_counts_consistent(tmp
         overview = build_project_overview("project-bounded", relation, store.read_evidence)
 
     def measure(item: ProjectOverview) -> int:
-        return len(item.model_dump_json(indent=2).encode())
+        return len(item.model_dump_json().encode())
 
     full_size = measure(overview)
     full_sections = {item.section: item for item in overview.section_coverage}
@@ -1244,3 +1245,85 @@ def test_bound_overview_output_trims_whole_items_and_keeps_counts_consistent(tmp
     # Trimming keeps section order: the returned items are a prefix of the full lists.
     assert bounded.modules == overview.modules[: len(bounded.modules)]
     assert bounded.module_relations == overview.module_relations[: len(bounded.module_relations)]
+
+    # Exercise the MCP bug shape: many modules and groups share references to
+    # a long entry list, so dropping one entry cascades into dependent sections.
+    from app.contracts import OverviewClassificationCounts
+
+    entry_template = overview.entries[0]
+    synthetic_entries = [
+        entry_template.model_copy(update={
+            "entry_point_id": f"synthetic-entry-{n}", "evidence": None,
+            "evidence_error": "unavailable", "label": "entry",
+        })
+        for n in range(70)
+    ]
+    module_template = overview.modules[0]
+    synthetic_modules = []
+    for n in range(125):
+        module_id = f"m{n}"
+        symbol = module_template.symbol.model_copy(update={
+            "symbol_id": module_id, "path": "m.py", "qualified_name": module_id,
+        })
+        synthetic_modules.append(module_template.model_copy(update={
+            "module_id": module_id, "symbol": symbol,
+            "entry_point_ids": [], "entry_reachable": False,
+            "classification_counts": OverviewClassificationCounts(
+                application_entry=0, public_api=0, extension_point=0, unknown=0,
+            ),
+        }))
+    group_template = overview.groups[0]
+    synthetic_groups = [
+        group_template.model_copy(update={
+            "group_id": f"synthetic-group-{n}",
+            "module_ids": [module.module_id for module in synthetic_modules],
+            "entry_point_ids": [entry.entry_point_id for entry in synthetic_entries],
+        })
+        for n in range(40)
+    ]
+    synthetic_classifications = []
+    category_counts = OverviewClassificationCounts(**{
+        category: sum(item.category == category for item in synthetic_classifications)
+        for category in ("application_entry", "public_api", "extension_point", "unknown")
+    })
+    sections = []
+    for section in overview.section_coverage:
+        values = {
+            "entries": synthetic_entries,
+            "groups": synthetic_groups,
+            "modules": synthetic_modules,
+            "classifications": synthetic_classifications,
+        }.get(section.section)
+        if values is None:
+            sections.append(section)
+        else:
+            sections.append(section.model_copy(update={"total": len(values), "returned": len(values), "truncated": False}))
+    expanded = overview.model_copy(update={
+        "entries": synthetic_entries,
+        "groups": synthetic_groups,
+        "modules": synthetic_modules,
+        "classifications": synthetic_classifications,
+        "classification_coverage": overview.classification_coverage.model_copy(update={
+            "total": len(synthetic_classifications), "visible": len(synthetic_classifications),
+            "category_counts": category_counts, "visible_category_counts": category_counts, "truncated": False,
+        }),
+        "coverage": overview.coverage.model_copy(update={
+            "total_modules": len(synthetic_modules), "visible_modules": len(synthetic_modules),
+            "reachable_modules": sum(item.entry_reachable for item in synthetic_modules),
+            "unreachable_modules": sum(not item.entry_reachable for item in synthetic_modules),
+            "entry_point_count": len(synthetic_entries), "total_groups": len(synthetic_groups),
+            "visible_groups": len(synthetic_groups),
+        }),
+        "section_coverage": sections,
+    })
+    expanded_size = measure(expanded)
+    budget = 36_000
+    assert expanded_size > budget
+    compacted = bound_overview_output(expanded, measure, budget)
+    assert measure(compacted) <= budget
+    assert measure(compacted) >= budget * 0.7
+    assert len(compacted.modules) >= 20
+    assert len(compacted.entries) == next(item.returned for item in compacted.section_coverage if item.section == "entries")
+    assert len(compacted.groups) == next(item.returned for item in compacted.section_coverage if item.section == "groups")
+    kept_entry_ids = {item.entry_point_id for item in compacted.entries}
+    assert all(set(item.entry_point_ids) <= kept_entry_ids for item in compacted.modules)

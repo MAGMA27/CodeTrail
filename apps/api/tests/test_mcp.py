@@ -26,6 +26,7 @@ from app.contracts import (
     UnresolvedReference,
 )
 from app.main import create_app
+from app.mcp_server import create_mcp_server
 from app.service import ServiceError
 from app.storage import StorageInputError
 
@@ -41,6 +42,31 @@ RUN_READ_TOOLS = {
     "get_run_report",
     "get_run_impact",
 }
+
+
+def test_validation_failure_envelopes_never_invent_unknown_identifiers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CODETRAIL_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("CODETRAIL_REPOSITORIES", "{}")
+    server = create_mcp_server(workbench_url="http://localhost:3000")
+
+    async def exercise() -> None:
+        missing = await server.call_tool("list_indexes", {})
+        invalid = await server.call_tool("list_indexes", {"project_id": ""})
+        for result in (missing, invalid):
+            assert result.is_error is True
+            assert result.structured_content["ok"] is False
+            text = result.content[0].text.lower()
+            assert "unknown" not in text
+            assert "validation error for" not in text
+            assert "errors.pydantic.dev" not in text
+        assert "project_id" not in missing.structured_content
+        assert invalid.structured_content["project_id"] == ""
+        assert invalid.structured_content["error"]["details"][0]["got"] == ""
+
+    asyncio.run(exercise())
 
 
 async def _request(application, method: str, target: str, payload: dict | None = None) -> tuple[int, dict]:
@@ -343,6 +369,25 @@ def test_real_stdio_client_matches_http_and_returns_evidence_link(tmp_path: Path
         "?path=timeout_demo%2Fconfig.py&start_line=12&end_line=14",
     )
     assert status == 200
+    source_error_details: dict[tuple[int, int], tuple[str, list[dict]]] = {}
+    for start_line, end_line in ((3000, 3010), (1, 300), (50, 10)):
+        status, source_error = request(
+            application,
+            "GET",
+            f"/api/projects/{project_id}/indexes/{index_id}/source"
+            f"?path=timeout_demo%2Fconfig.py&start_line={start_line}&end_line={end_line}",
+        )
+        assert status == 400
+        source_error_details[(start_line, end_line)] = (
+            source_error["message"], source_error["details"],
+        )
+    status, http_invalid_neighbors = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/indexes/{index_id}/neighbors"
+        f"?symbol_id={symbol_id}&direction=up&depth=5",
+    )
+    assert status == 422
     status, http_overview = request(
         application,
         "GET",
@@ -386,6 +431,8 @@ def test_real_stdio_client_matches_http_and_returns_evidence_link(tmp_path: Path
             http_search=http_search,
             http_neighbors=http_neighbors,
             http_source=http_source,
+            source_error_details=source_error_details,
+            http_invalid_neighbors=http_invalid_neighbors,
             http_overview=http_overview,
             http_journey_catalog=http_journey_catalog,
             http_freshness=http_freshness,
@@ -500,6 +547,10 @@ def test_constructor_attribute_calls_match_http_and_cold_stdio(tmp_path: Path) -
             )
             assert result.structured_content["ok"] is True
             assert result.structured_content["result"] == http_neighbors
+            assert json.loads(result.content[0].text) == result.structured_content
+            assert result.content[0].text == json.dumps(
+                result.structured_content, ensure_ascii=False, separators=(",", ":")
+            )
 
     asyncio.run(compare_cold_stdio())
 
@@ -601,12 +652,109 @@ def test_real_stdio_client_scopes_two_projects_with_same_named_symbols(tmp_path:
                     "index_id": index_ids["repo-two"],
                 },
             )
+            assert cross_project.is_error is True
+            assert json.loads(cross_project.content[0].text) == cross_project.structured_content
             assert cross_project.structured_content["error"] == {
                 "schema_version": "0.1.0",
                 "code": "not_found",
                 "message": "index does not belong to the project",
                 "retryable": False,
             }
+
+            success_text = search_result.content[0].text
+            assert json.loads(success_text) == search_result.structured_content
+            assert success_text == json.dumps(search_result.structured_content, ensure_ascii=False, separators=(",", ":"))
+
+            invalid_calls = [
+                ("get_neighbors", {
+                    "project_id": project_ids["repo-one"], "index_id": index_ids["repo-one"],
+                    "symbol_id": "symbol-example", "direction": "up", "depth": 5, "limit": 40,
+                }, {"too_large", "not_allowed"}),
+                ("search_code", {
+                    "project_id": project_ids["repo-one"], "index_id": index_ids["repo-one"],
+                    "query": "", "limit": 4,
+                }, {"too_short"}),
+                ("get_neighbors", {
+                    "project_id": project_ids["repo-one"], "index_id": index_ids["repo-one"],
+                    "direction": "callers", "depth": 1, "limit": 40,
+                }, {"required"}),
+                ("search_code", {
+                    "project_id": project_ids["repo-one"], "index_id": index_ids["repo-one"],
+                    "query": "timeout", "limit": 1000,
+                }, {"too_large"}),
+            ]
+            for tool_name, arguments, expected_problems in invalid_calls:
+                invalid = await client.call_tool(tool_name, arguments)
+                assert invalid.is_error is True
+                assert invalid.structured_content["ok"] is False
+                assert json.loads(invalid.content[0].text) == invalid.structured_content
+                assert invalid.content[0].text == json.dumps(
+                    invalid.structured_content, ensure_ascii=False, separators=(",", ":")
+                )
+                assert invalid.structured_content["error"]["code"] == "invalid_input"
+                assert {detail["problem"] for detail in invalid.structured_content["error"]["details"]} == expected_problems
+                assert all(
+                    "pydantic" not in block.text.lower()
+                    and "validation error for" not in block.text.lower()
+                    and "errors.pydantic.dev" not in block.text
+                    for block in invalid.content
+                )
+                if tool_name == "get_neighbors" and "up" in str(arguments):
+                    details = invalid.structured_content["error"]["details"]
+                    depth_error = next(detail for detail in details if detail["field"] == "depth")
+                    direction_error = next(detail for detail in details if detail["field"] == "direction")
+                    assert (depth_error["max"], depth_error["got"]) == (2, "5")
+                    assert direction_error["allowed"] == ["callers", "callees", "both"]
+                if arguments.get("query") == "":
+                    assert invalid.structured_content["error"]["details"][0]["got"] == ""
+                if expected_problems == {"required"}:
+                    for detail in invalid.structured_content["error"]["details"]:
+                        assert "got" not in detail
+                if arguments.get("limit") == 1000:
+                    assert invalid.structured_content["error"]["details"][0]["max"] == 40
+                    assert invalid.structured_content["error"]["details"][0]["got"] == "1000"
+
+            range_cases = [
+                (3000, 3010, "beyond_end_of_file"),
+                (1, 300, "range_too_long"),
+                (50, 10, "start_after_end"),
+            ]
+            for start_line, end_line, expected_problem in range_cases:
+                invalid_range = await client.call_tool(
+                    "read_source",
+                    {
+                        "project_id": project_ids["repo-one"], "index_id": index_ids["repo-one"],
+                        "path": "timeout_demo/config.py", "start_line": start_line, "end_line": end_line,
+                    },
+                )
+                assert invalid_range.is_error is True
+                assert json.loads(invalid_range.content[0].text) == invalid_range.structured_content
+                assert invalid_range.structured_content["error"]["code"] == "invalid_input"
+                assert invalid_range.structured_content["error"]["details"][0]["problem"] == expected_problem
+                if expected_problem == "range_too_long":
+                    assert invalid_range.structured_content["error"]["message"] == "read_source supports at most 200 lines"
+                if expected_problem == "start_after_end":
+                    assert invalid_range.structured_content["error"]["message"] == "start_line must be less than or equal to end_line"
+                assert "validation error for" not in invalid_range.content[0].text.lower()
+                assert "errors.pydantic.dev" not in invalid_range.content[0].text
+                if expected_problem == "range_too_long":
+                    assert invalid_range.structured_content["error"]["details"] == [
+                        {"field": "end_line", "problem": "range_too_long", "max": 200}
+                    ]
+                    assert invalid_range.structured_content["error"]["details"][0]["max"] == 200
+                if expected_problem == "beyond_end_of_file":
+                    detail = invalid_range.structured_content["error"]["details"][0]
+                    assert detail == {
+                        "field": "start_line",
+                        "problem": "beyond_end_of_file",
+                        "max": 25,
+                    }
+                    assert detail["field"] == "start_line"
+                    assert detail["max"] == 25
+                if expected_problem == "start_after_end":
+                    assert invalid_range.structured_content["error"]["details"] == [
+                        {"field": "start_line", "problem": "start_after_end"}
+                    ]
 
             out_of_range = await client.call_tool(
                 "read_source",
@@ -1320,6 +1468,8 @@ async def _exercise_stdio(
     http_search: dict,
     http_neighbors: dict,
     http_source: dict,
+    source_error_details: dict[tuple[int, int], tuple[str, list[dict]]],
+    http_invalid_neighbors: dict,
     http_overview: dict,
     http_journey_catalog: dict,
     http_freshness: dict,
@@ -1449,13 +1599,48 @@ async def _exercise_stdio(
         assert "project_id=" in reference["url"]
         assert "content_hash=" in reference["url"]
 
+        for (start_line, end_line), (message, details) in source_error_details.items():
+            invalid_source = await client.call_tool(
+                "read_source",
+                {
+                    "project_id": project_id,
+                    "index_id": index_id,
+                    "path": "timeout_demo/config.py",
+                    "start_line": start_line,
+                    "end_line": end_line,
+                },
+            )
+            assert invalid_source.is_error is True
+            mcp_error = invalid_source.structured_content["error"]
+            assert mcp_error["details"] == details
+            assert mcp_error["message"] == message
+
+        invalid_neighbors = await client.call_tool(
+            "get_neighbors",
+            {
+                "project_id": project_id,
+                "index_id": index_id,
+                "symbol_id": symbol_id,
+                "direction": "up",
+                "depth": 5,
+            },
+        )
+        assert invalid_neighbors.is_error is True
+        assert invalid_neighbors.structured_content["error"]["code"] == http_invalid_neighbors["code"]
+        mcp_details = invalid_neighbors.structured_content["error"]["details"]
+        assert mcp_details == http_invalid_neighbors["details"]
+        http_direction = next(detail for detail in http_invalid_neighbors["details"] if detail["field"] == "direction")
+        mcp_direction = next(detail for detail in mcp_details if detail["field"] == "direction")
+        assert http_direction["allowed"] == ["callers", "callees", "both"]
+        assert mcp_direction["allowed"] == http_direction["allowed"]
+
         default_overview = await client.call_tool(
             "get_overview",
             {"project_id": project_id, "index_id": index_id},
         )
         assert default_overview.structured_content["ok"] is True
         # The default MCP response is hard-capped; the HTTP overview is not.
-        assert len(default_overview.content[0].text.encode()) <= 48_000
+        assert len(default_overview.content[0].text.encode()) <= 36_000
         assert default_overview.structured_content["overview"]["truncated"] is True
         assert "max_output_bytes reached" in default_overview.structured_content["overview"]["truncation_reason"]
 
