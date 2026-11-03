@@ -5,10 +5,11 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 import os
+import threading
 from collections.abc import AsyncIterator
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Callable, Literal
+from typing import TYPE_CHECKING, Callable, Literal
 
 from fastapi import FastAPI, Header, Query, Request
 from fastapi.concurrency import run_in_threadpool
@@ -73,14 +74,7 @@ from .contracts import (
 )
 from .errors import safe_error_message, validation_error_details
 from .config import ModelProviderConfig
-from .factory import (
-    FeatureModelAdapter,
-    GitHubClient,
-    IndexingControl,
-    IssueModelAdapter,
-    create_services,
-    register_storage_error_handler,
-)
+from .factory import create_services, register_storage_error_handler
 from .run_sse import (
     RunEventStreamConfig,
     RunEventStreamLease,
@@ -93,6 +87,11 @@ from .run_sse import (
     resolve_sse_cursor,
 )
 from .service import ServiceError, WorkspaceService, is_loopback_host
+
+if TYPE_CHECKING:
+    from .feature_generation import FeatureModelAdapter
+    from .github import GitHubClient
+    from .issue_analysis import IssueModelAdapter
 
 
 class HealthResponse(BaseModel):
@@ -118,18 +117,18 @@ _API_ERROR_RESPONSES = {
 async def _run_with_disconnect(request: Request, operation: Callable[..., object], *args: object) -> object:
     """Run blocking indexing work while propagating HTTP disconnects to its worker."""
 
-    control = IndexingControl()
-    task = asyncio.create_task(run_in_threadpool(operation, *args, control=control))
+    cancel_event = threading.Event()
+    task = asyncio.create_task(run_in_threadpool(operation, *args, cancel_event=cancel_event))
     try:
         while not task.done():
             if await request.is_disconnected():
-                control.cancel()
+                cancel_event.set()
                 break
             await asyncio.sleep(0.1)
         return await task
     finally:
         if not task.done():
-            control.cancel()
+            cancel_event.set()
 
 
 _GITHUB_REFRESH_ERROR_RESPONSES = {

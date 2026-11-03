@@ -32,6 +32,8 @@ dev = [
 
 [tool.importlinter]
 root_package = "app"
+# Guarded imports are limited to annotation-only dependency injection types in main.py and factory.py.
+exclude_type_checking_imports = true
 
 [[tool.importlinter.contracts]]
 name = "HTTP and MCP adapters use the workspace service"

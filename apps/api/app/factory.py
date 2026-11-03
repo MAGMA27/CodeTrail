@@ -4,30 +4,20 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from .config import ModelProviderConfig
 from .contracts import ApiErrorResponse
-from .feature_generation import FeatureModelAdapter
-from .github import GitHubClient
-from .issue_analysis import IssueModelAdapter
-from .indexing import IndexingControl
 from .service import IndexService, RepositoryRegistry, WorkspaceService
 from .storage import StorageError
 
-# These types are re-exported for the HTTP composition root. Keeping dependency
-# injection wiring here prevents adapters from depending on implementation modules.
-__all__ = [
-    "FeatureModelAdapter",
-    "GitHubClient",
-    "IndexingControl",
-    "IssueModelAdapter",
-    "create_services",
-    "register_storage_error_handler",
-]
+if TYPE_CHECKING:
+    from .feature_generation import FeatureModelAdapter
+    from .github import GitHubClient
+    from .issue_analysis import IssueModelAdapter
 
 
 def create_services(
@@ -55,6 +45,8 @@ def create_services(
     GitHub credentials/timeouts and TypeScript compiler) are read as the
     registry, GitHub client and index service are constructed.
     """
+
+    from .github import GitHubClient
 
     registry = (
         RepositoryRegistry.from_environment(

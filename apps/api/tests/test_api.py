@@ -25,12 +25,28 @@ from app.contracts import (
     SearchCodeSuccess,
     ToolRequest,
 )
-from app.main import _allowed_origins, create_app
+from app.main import _allowed_origins, _run_with_disconnect, create_app
 from app.service import IndexService, RepositoryRegistry, ServiceError
 
 
 ROOT = Path(__file__).resolve().parents[3]
 FIXTURE_ROOT = ROOT / "fixtures" / "repos" / "timeout-demo"
+
+
+def test_http_disconnect_cancels_indexing_operation() -> None:
+    started = Event()
+
+    class DisconnectingRequest:
+        async def is_disconnected(self) -> bool:
+            await asyncio.to_thread(started.wait, 1)
+            return True
+
+    def operation(*, cancel_event: Event) -> bool:
+        started.set()
+        cancel_event.wait(timeout=2)
+        return cancel_event.is_set()
+
+    assert asyncio.run(_run_with_disconnect(DisconnectingRequest(), operation)) is True
 
 
 async def _request(

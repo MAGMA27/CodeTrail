@@ -798,6 +798,19 @@ def _current_pid_namespace() -> str | None:
         return None
 
 
+def _indexing_control_for_cancel_event(
+    cancel_event: threading.Event | None,
+    control: IndexingControl | None,
+) -> IndexingControl | None:
+    """Adapt an application-level cancellation signal to indexing controls."""
+
+    if cancel_event is None:
+        return control
+    if control is not None:
+        raise ValueError("pass either cancel_event or control, not both")
+    return IndexingControl(cancelled=cancel_event)
+
+
 @dataclass(frozen=True)
 class _FreshnessEvaluation:
     """Freshness result plus the safe manifest captured for one update attempt."""
@@ -3377,7 +3390,9 @@ class WorkspaceService:
         *,
         on_build_stats: Callable[[IndexBuildStats], None] | None = None,
         control: IndexingControl | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> IndexResponse:
+        control = _indexing_control_for_cancel_event(cancel_event, control)
         with self._index_mutation_lock:
             project = self._find_project(project_id)
             operation = self._begin_project_update(project, project.latest_index_id)
@@ -4493,9 +4508,11 @@ class WorkspaceService:
         *,
         via_mcp: bool = False,
         control: IndexingControl | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> LocalImportResponse:
         """Register, index, and persist one server-local source directory."""
 
+        control = _indexing_control_for_cancel_event(cancel_event, control)
         if via_mcp and not self.registry.mcp_local_import_enabled:
             raise ServiceError("forbidden", 403, "local MCP import is disabled")
         source_path, normalized_path = self.registry.validate_import_source(request.path)
@@ -4867,7 +4884,9 @@ class WorkspaceService:
         *,
         via_mcp: bool = False,
         control: IndexingControl | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> LocalImportResponse:
+        control = _indexing_control_for_cancel_event(cancel_event, control)
         if via_mcp and not self.registry.mcp_local_import_enabled:
             raise ServiceError("forbidden", 403, "local MCP import is disabled")
         attempt = self.registry.management_store.load_attempt(attempt_id)
