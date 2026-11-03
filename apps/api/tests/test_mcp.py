@@ -422,6 +422,7 @@ def test_real_stdio_client_matches_http_and_returns_evidence_link(tmp_path: Path
     asyncio.run(
         _exercise_stdio(
             parameters,
+            application=application,
             project_id=project_id,
             index_id=index_id,
             symbol_id=symbol_id,
@@ -831,6 +832,8 @@ def test_mcp_local_import_is_opt_in_and_shares_http_state(tmp_path: Path) -> Non
                 "read_source",
                 "get_neighbors",
                 "get_overview",
+                "list_overview_items",
+                "get_module",
                 "get_journey_catalog",
                 "get_journey",
                 "list_feature_generations",
@@ -892,6 +895,8 @@ def test_mcp_local_import_is_opt_in_and_shares_http_state(tmp_path: Path) -> Non
                 "read_source",
                 "get_neighbors",
                 "get_overview",
+                "list_overview_items",
+                "get_module",
                 "get_journey_catalog",
                 "get_journey",
                 "get_import_status",
@@ -1256,6 +1261,8 @@ def test_mcp_reads_server_feature_generations_without_registering_model_generati
                 "read_source",
                 "get_neighbors",
                 "get_overview",
+                "list_overview_items",
+                "get_module",
                 "get_journey_catalog",
                 "get_journey",
                 "list_feature_generations",
@@ -1459,6 +1466,7 @@ def test_mcp_session_read_matches_http_and_writes_are_opt_in(tmp_path: Path) -> 
 async def _exercise_stdio(
     parameters: StdioServerParameters,
     *,
+    application,
     project_id: str,
     index_id: str,
     symbol_id: str,
@@ -1488,6 +1496,8 @@ async def _exercise_stdio(
         "read_source",
         "get_neighbors",
         "get_overview",
+        "list_overview_items",
+        "get_module",
         "get_journey_catalog",
         "get_journey",
         "list_feature_generations",
@@ -1639,14 +1649,16 @@ async def _exercise_stdio(
             {"project_id": project_id, "index_id": index_id},
         )
         assert default_overview.structured_content["ok"] is True
-        # The default MCP response is hard-capped; the HTTP overview is not.
-        assert len(default_overview.content[0].text.encode()) <= 36_000
-        assert default_overview.structured_content["overview"]["truncated"] is True
-        assert "max_output_bytes reached" in default_overview.structured_content["overview"]["truncation_reason"]
+        assert "skeleton" in default_overview.structured_content
+        assert "overview" not in default_overview.structured_content
+        skeleton = default_overview.structured_content["skeleton"]
+        assert skeleton["page"]["total"] > 0
+        assert skeleton["sections"]
+        assert any(item["section"] == "module_relations" and item["total"] > 0 for item in skeleton["sections"])
 
         overview_result = await client.call_tool(
             "get_overview",
-            {"project_id": project_id, "index_id": index_id, "max_output_bytes": 1_000_000},
+            {"project_id": project_id, "index_id": index_id, "detail": "full"},
         )
         assert overview_result.structured_content["ok"] is True
         assert overview_result.structured_content["overview"] == http_overview
@@ -1654,31 +1666,67 @@ async def _exercise_stdio(
         assert reference_coverage["section"] == "references"
         assert reference_coverage["truncated"] is False
         assert reference_coverage["returned"] == len(overview_result.structured_content["references"])
-        assert {item["section"] for item in http_overview["section_coverage"]} == {
-            "entries",
-            "groups",
-            "modules",
-            "classifications",
-            "module_relations",
-            "http_associations",
-            "paths",
-            "unresolved",
-        }
 
-        bounded_result = await client.call_tool(
-            "get_overview",
-            {"project_id": project_id, "index_id": index_id, "max_output_bytes": 16_000},
+        page_one_status, page_one = await _request(
+            application, "GET",
+            f"/api/projects/{project_id}/indexes/{index_id}/overview/sections/modules?limit=1",
         )
-        bounded = bounded_result.structured_content
-        assert bounded["ok"] is True
-        assert len(bounded_result.content[0].text.encode()) <= 16_000
-        assert bounded["overview"]["truncated"] is True
-        assert "max_output_bytes reached" in bounded["overview"]["truncation_reason"]
-        bounded_sections = {item["section"]: item for item in bounded["overview"]["section_coverage"]}
-        assert any(item["truncated"] for item in bounded_sections.values())
-        for name in ("modules", "classifications", "module_relations"):
-            assert bounded_sections[name]["returned"] == len(bounded["overview"][name])
-        assert bounded["reference_coverage"]["returned"] == len(bounded["references"])
+        assert page_one_status == 200 and page_one["page"]["next_cursor"]
+        cursor = page_one["page"]["next_cursor"]
+        page_two_status, page_two = await _request(
+            application, "GET",
+            f"/api/projects/{project_id}/indexes/{index_id}/overview/sections/modules?limit=1&cursor={cursor}",
+        )
+        assert page_two_status == 200
+        mcp_page_two = await client.call_tool("list_overview_items", {
+            "project_id": project_id, "index_id": index_id, "section": "modules", "limit": 1, "cursor": cursor,
+        })
+        assert mcp_page_two.structured_content["result"] == page_two
+
+        module_id = page_one["items"][0]["module_id"]
+        module_status, http_card = await _request(
+            application, "GET", f"/api/projects/{project_id}/indexes/{index_id}/overview/modules/{module_id}",
+        )
+        assert module_status == 200
+        mcp_card = await client.call_tool("get_module", {
+            "project_id": project_id, "index_id": index_id, "module_id": module_id,
+        })
+        assert mcp_card.structured_content["result"] == http_card
+
+        skeleton_status, http_skeleton = await _request(
+            application, "GET", f"/api/projects/{project_id}/indexes/{index_id}/overview/skeleton",
+        )
+        assert skeleton_status == 200
+        assert skeleton == http_skeleton
+
+        invalid_cursor_status, http_invalid_cursor = await _request(
+            application, "GET",
+            f"/api/projects/{project_id}/indexes/{index_id}/overview/sections/modules?cursor=invalid",
+        )
+        assert invalid_cursor_status == 400
+        invalid_cursor = await client.call_tool("list_overview_items", {
+            "project_id": project_id, "index_id": index_id, "section": "modules", "cursor": "invalid",
+        })
+        assert invalid_cursor.is_error is True
+        assert invalid_cursor.structured_content["error"]["code"] == "invalid_input"
+        assert invalid_cursor.structured_content["error"]["message"] == "invalid or expired cursor"
+        assert invalid_cursor.structured_content["error"]["details"] == http_invalid_cursor["details"]
+
+        http_category_status, http_category_error = await _request(
+            application,
+            "GET",
+            f"/api/projects/{project_id}/indexes/{index_id}/overview/sections/classifications?category=bogus",
+        )
+        assert http_category_status == 422
+        mcp_category = await client.call_tool("list_overview_items", {
+            "project_id": project_id, "index_id": index_id, "section": "classifications", "category": "bogus",
+        })
+        assert mcp_category.is_error is True
+        assert mcp_category.structured_content["error"]["code"] == http_category_error["code"]
+        assert mcp_category.structured_content["error"]["details"] == http_category_error["details"]
+        category_detail = next(item for item in http_category_error["details"] if item["field"] == "category")
+        assert category_detail["problem"] == "not_allowed"
+        assert category_detail["allowed"] == ["application_entry", "public_api", "extension_point", "unknown"]
         references = overview_result.structured_content["references"]
         assert references
         assert all(reference["project_id"] == project_id for reference in references)
@@ -2867,7 +2915,7 @@ def test_mcp_external_understanding_run_persists_ordered_explanation(tmp_path: P
 
             overview_result = await client.call_tool(
                 "get_overview",
-                {"project_id": project_id, "index_id": index_id, "max_paths": 40, "max_modules": 200},
+                {"project_id": project_id, "index_id": index_id, "detail": "full", "max_paths": 40, "max_modules": 200},
             )
             overview = overview_result.structured_content["overview"]
             entry = next(

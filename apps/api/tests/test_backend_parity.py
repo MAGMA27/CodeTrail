@@ -10,7 +10,7 @@ from app.mcp_server import create_mcp_server
 
 # None means that the MCP tool has an intentionally MCP-only workflow. Keep the
 # reason beside the entry so adding/removing tools cannot silently skip review.
-TOOL_HTTP_ROUTES: dict[str, tuple[str, str] | tuple[None, str]] = {
+TOOL_HTTP_ROUTES: dict[str, tuple[str, str] | tuple[None, str] | tuple[tuple[str, str], ...]] = {
     "list_projects": ("GET", "/api/projects"),
     "get_project": ("GET", "/api/projects/{project_id}"),
     "list_sessions": ("GET", "/api/projects/{project_id}/sessions"),
@@ -24,7 +24,9 @@ TOOL_HTTP_ROUTES: dict[str, tuple[str, str] | tuple[None, str]] = {
     "list_module_symbols": ("GET", "/api/projects/{project_id}/indexes/{index_id}/modules/{module_id}/symbols"),
     "read_source": ("GET", "/api/projects/{project_id}/indexes/{index_id}/source"),
     "get_neighbors": ("GET", "/api/projects/{project_id}/indexes/{index_id}/neighbors"),
-    "get_overview": ("GET", "/api/projects/{project_id}/indexes/{index_id}/overview"),
+    "get_overview": (("GET", "/api/projects/{project_id}/indexes/{index_id}/overview"), ("GET", "/api/projects/{project_id}/indexes/{index_id}/overview/skeleton")),
+    "list_overview_items": (("GET", "/api/projects/{project_id}/indexes/{index_id}/overview/sections/{section}"),),
+    "get_module": (("GET", "/api/projects/{project_id}/indexes/{index_id}/overview/modules/{module_id}"),),
     "get_journey_catalog": ("GET", "/api/projects/{project_id}/indexes/{index_id}/journeys"),
     "get_journey": ("GET", "/api/projects/{project_id}/indexes/{index_id}/journeys/{journey_id}"),
     "list_feature_generations": ("GET", "/api/projects/{project_id}/features"),
@@ -70,7 +72,7 @@ SCHEMA_DIFFERENCES: dict[tuple[str, str, str], str] = {
 MCP_ONLY_PARAMETERS: dict[tuple[str, str], str] = {
     ("list_projects", "limit"): "MCP applies bounded discovery truncation; HTTP returns the full project list.",
     ("list_indexes", "limit"): "MCP applies bounded discovery truncation; HTTP returns the full index list.",
-    ("get_overview", "max_output_bytes"): "MCP additionally bounds its serialized response size.",
+    ("get_overview", "detail"): "MCP selects the summary skeleton or full HTTP overview representation.",
 }
 
 COMPARABLE_SCHEMA_KEYS = (
@@ -182,13 +184,22 @@ def test_registered_mcp_tools_have_an_explicit_http_parity_entry(tmp_path, monke
     openapi = application.openapi()
     used_differences: set[tuple[str, str, str]] = set()
     used_mcp_only_parameters: set[tuple[str, str]] = set()
-    for tool_name, (method, route_or_reason) in TOOL_HTTP_ROUTES.items():
-        if method is None:
-            assert route_or_reason.strip(), f"{tool_name} needs a reason for having no HTTP twin"
+    for tool_name, route_mapping in TOOL_HTTP_ROUTES.items():
+        if len(route_mapping) == 2 and (isinstance(route_mapping[0], str) or route_mapping[0] is None):
+            routes = (route_mapping,)
+        else:
+            routes = route_mapping
+        if routes and routes[0][0] is None:
+            assert routes[0][1].strip(), f"{tool_name} needs a reason for having no HTTP twin"
             continue
-        operation = openapi["paths"].get(route_or_reason, {}).get(method.lower())
-        assert operation is not None, f"{tool_name} maps to missing OpenAPI operation {method} {route_or_reason}"
-        http_parameters = _http_parameters(openapi, operation)
+        operations = []
+        for method, route in routes:
+            operation = openapi["paths"].get(route, {}).get(method.lower())
+            assert operation is not None, f"{tool_name} maps to missing OpenAPI operation {method} {route}"
+            operations.append(operation)
+        http_parameters = {}
+        for operation in operations:
+            http_parameters.update(_http_parameters(openapi, operation))
         mcp_parameters = tools[tool_name].get("properties", {})
         for parameter in sorted(set(http_parameters) & set(mcp_parameters)):
             expected = _effective_constraints(openapi, http_parameters[parameter])

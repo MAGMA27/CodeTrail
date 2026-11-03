@@ -41,10 +41,13 @@ MAX_OVERVIEW_MODULES = 200
 MAX_OVERVIEW_GROUPS = 200
 MAX_OVERVIEW_CLASSIFICATIONS = 200
 MAX_OVERVIEW_RELATIONS = 400
-MIN_OVERVIEW_OUTPUT_BYTES = 16_000
-MAX_OVERVIEW_OUTPUT_BYTES = 1_000_000
-DEFAULT_OVERVIEW_OUTPUT_BYTES = 36_000
-OVERVIEW_OUTPUT_MARGIN_BYTES = 512
+DEFAULT_OVERVIEW_PAGE_LIMIT = 20
+MAX_OVERVIEW_PAGE_LIMIT = 100
+DEFAULT_SKELETON_MODULES = 80
+MAX_SKELETON_MODULES = MAX_OVERVIEW_MODULES
+DEFAULT_SKELETON_RELATIONS = 20
+DEFAULT_SKELETON_ENTRIES = 20
+MAX_OVERVIEW_CURSOR_LENGTH = 64
 MIN_RUN_SEQUENCE = 0
 MAX_FEATURE_GRAPH_NODES = 40
 MAX_FEATURE_GRAPH_EDGES = 120
@@ -2470,6 +2473,118 @@ class ProjectOverview(VersionedModel):
         return self
 
 
+class OverviewPage(ContractModel):
+    returned: NonNegativeInt
+    total: NonNegativeInt | None
+    next_cursor: str | None = Field(default=None, max_length=MAX_OVERVIEW_CURSOR_LENGTH)
+    order: str = Field(min_length=1, max_length=100)
+
+
+class OverviewCompleteness(ContractModel):
+    status: Literal["complete", "truncated", "possibly_incomplete"]
+    reasons: list[str] = Field(default_factory=list)
+    hint: str | None = None
+
+
+class OverviewSkeletonSection(ContractModel):
+    section: OverviewSection
+    total: NonNegativeInt | None
+    returned: NonNegativeInt
+    truncated: bool
+
+
+class OverviewEntrySummary(ContractModel):
+    entry_point_id: Identifier
+    name: str
+    kind: OverviewEntryKind
+    path: RelativePath
+    line: PositiveInt
+
+
+class OverviewGroupSummary(ContractModel):
+    group_id: Identifier
+    group_kind: OverviewGroupKind
+    label: str
+    module_count: NonNegativeInt
+
+
+class OverviewModuleSummary(ContractModel):
+    module_id: Identifier
+    path: RelativePath
+    name: str
+    symbol_count: NonNegativeInt | None = None
+    entry_reachable: bool
+    classification_counts: OverviewClassificationCounts
+    in_relations: NonNegativeInt
+    out_relations: NonNegativeInt
+
+
+class OverviewModuleRelationSummary(ContractModel):
+    relation_id: Identifier
+    source_module_id: Identifier
+    target_module_id: Identifier
+    source_path: RelativePath
+    target_path: RelativePath
+    relation_kinds: list[OverviewModuleRelationKind]
+    edge_count: PositiveInt
+
+
+class OverviewSkeleton(VersionedModel):
+    project_id: Identifier
+    index: IndexSnapshot
+    rules_version: Identifier
+    entry_status: OverviewEntryStatus
+    sections: list[OverviewSkeletonSection]
+    classification_counts: OverviewClassificationCounts
+    entries: list[OverviewEntrySummary]
+    groups: list[OverviewGroupSummary]
+    modules: list[OverviewModuleSummary]
+    module_relations: list[OverviewModuleRelationSummary]
+    page: OverviewPage
+    completeness: OverviewCompleteness
+
+
+OverviewItem: TypeAlias = (
+    OverviewEntryPoint
+    | OverviewGroup
+    | OverviewModule
+    | OverviewClassification
+    | OverviewModuleRelation
+    | OverviewPath
+    | OverviewHttpAssociation
+    | UnresolvedReference
+    | Evidence
+)
+
+
+class OverviewItemsPage(VersionedModel):
+    project_id: Identifier
+    index_id: Identifier
+    section: OverviewSection
+    items: list[OverviewItem] = Field(default_factory=list)
+    page: OverviewPage
+    completeness: OverviewCompleteness
+
+
+class OverviewModuleClassification(ContractModel):
+    classification_id: Identifier
+    category: OverviewClassificationKind
+    label: str
+    symbol_id: Identifier | None
+    symbol_name: str
+
+
+class OverviewModuleCard(VersionedModel):
+    module: OverviewModule
+    incoming: list[OverviewModuleRelationSummary]
+    outgoing: list[OverviewModuleRelationSummary]
+    classifications: list[OverviewModuleClassification]
+    incoming_total: NonNegativeInt
+    outgoing_total: NonNegativeInt
+    classification_total: NonNegativeInt
+    completeness: OverviewCompleteness
+
+
 FeatureGenerationMode: TypeAlias = Literal["fixture", "real"]
 FeatureSourceScope: TypeAlias = Literal["entry_reachable", "visible_modules"]
 FeatureGenerationSource: TypeAlias = Literal["server", "external"]
@@ -3185,17 +3300,23 @@ class McpNeighborsResponse(McpResultBase):
 
 
 class McpOverviewResponse(McpResultBase):
-    """Read-only MCP response for one deterministic project overview."""
+    """Read-only MCP response with exactly one selected overview representation."""
 
-    overview: ProjectOverview | None = None
-    references: list[EvidenceReference] = Field(default_factory=list)
-    reference_coverage: OverviewSectionCoverage | None = None
+    skeleton: OverviewSkeleton | None = Field(default=None, exclude_if=lambda value: value is None)
+    overview: ProjectOverview | None = Field(default=None, exclude_if=lambda value: value is None)
+    references: list[EvidenceReference] | None = Field(default=None, exclude_if=lambda value: value is None)
+    reference_coverage: OverviewSectionCoverage | None = Field(default=None, exclude_if=lambda value: value is None)
+    expand: dict[str, object] | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @model_validator(mode="after")
     def validate_overview_result(self) -> McpOverviewResponse:
         if self.ok:
+            if (self.overview is None) == (self.skeleton is None):
+                raise ValueError("successful overview results require exactly one overview representation")
             if self.overview is None:
-                raise ValueError("successful overview results require an overview")
+                if self.references is not None or self.reference_coverage is not None:
+                    raise ValueError("skeleton overview results cannot include references")
+                return self
             evidence_ids = {
                 entry.evidence.evidence_id
                 for entry in self.overview.entries
@@ -3208,16 +3329,36 @@ class McpOverviewResponse(McpResultBase):
             )
             if self.overview.responsibility_evidence is not None:
                 evidence_ids.add(self.overview.responsibility_evidence.evidence_id)
-            for reference in self.references:
+            for reference in self.references or []:
                 if reference.index_id != self.overview.index.index_id or reference.evidence_id not in evidence_ids:
                     raise ValueError("overview references must match returned evidence")
             if self.reference_coverage is not None and (
                 self.reference_coverage.section != "references"
-                or self.reference_coverage.returned != len(self.references)
+                or self.reference_coverage.returned != len(self.references or [])
             ):
                 raise ValueError("overview reference coverage must match returned references")
-        elif self.overview is not None or self.references:
+        elif self.overview is not None or self.skeleton is not None or self.references or self.expand is not None:
             raise ValueError("failed overview results cannot include overview data")
+        return self
+
+
+class McpOverviewItemsResponse(McpResultBase):
+    result: OverviewItemsPage | None = Field(default=None, exclude_if=lambda value: value is None)
+
+    @model_validator(mode="after")
+    def validate_items_result(self) -> McpOverviewItemsResponse:
+        if self.ok != (self.result is not None):
+            raise ValueError("overview item result must match the success state")
+        return self
+
+
+class McpOverviewModuleResponse(McpResultBase):
+    result: OverviewModuleCard | None = Field(default=None, exclude_if=lambda value: value is None)
+
+    @model_validator(mode="after")
+    def validate_module_result(self) -> McpOverviewModuleResponse:
+        if self.ok != (self.result is not None):
+            raise ValueError("overview module result must match the success state")
         return self
 
 

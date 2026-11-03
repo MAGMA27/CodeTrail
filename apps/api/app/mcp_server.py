@@ -49,6 +49,8 @@ from .contracts import (
     McpNeighborsResponse,
     McpModuleSymbolsResponse,
     McpOverviewResponse,
+    McpOverviewItemsResponse,
+    McpOverviewModuleResponse,
     McpProjectIndexesResponse,
     McpProjectListResponse,
     McpProjectResponse,
@@ -73,6 +75,10 @@ from .contracts import (
     LocalImportResponse,
     ProjectIndexListResponse,
     OverviewSectionCoverage,
+    OverviewSection,
+    OverviewClassificationKind,
+    OverviewItemsPage,
+    OverviewModuleCard,
     ProjectOverview,
     ProjectJourney,
     ProjectJourneyCatalog,
@@ -201,25 +207,24 @@ _OverviewModuleRelations = Annotated[
     int,
     Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_OVERVIEW_RELATIONS, description="Maximum returned aggregated module relations."),
 ]
+_SkeletonModuleLimit = Annotated[
+    int,
+    Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_SKELETON_MODULES, description="Maximum modules in the summary skeleton."),
+]
+_SkeletonRelationLimit = Annotated[
+    int,
+    Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_OVERVIEW_RELATIONS, description="Maximum relations in the summary skeleton."),
+]
+_OverviewPageLimit = Annotated[
+    int,
+    Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_OVERVIEW_PAGE_LIMIT, description="Maximum items in one overview section page."),
+]
+_OverviewCursor = Annotated[str | None, Field(max_length=shared.MAX_OVERVIEW_CURSOR_LENGTH, description="Opaque cursor from a previous page; round-trip it unchanged. Invalid or expired cursor values are rejected.")]
+_OverviewModuleFilter = Annotated[str | None, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_IDENTIFIER_LENGTH)]
 _OverviewClassifications = Annotated[
     int,
     Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_OVERVIEW_CLASSIFICATIONS, description="Maximum returned architecture classifications."),
 ]
-_OverviewOutputBytes = Annotated[
-    int,
-    Field(
-        ge=shared.MIN_OVERVIEW_OUTPUT_BYTES,
-        le=shared.MAX_OVERVIEW_OUTPUT_BYTES,
-        description=(
-            "Hard cap on the serialized response size. Whole items are dropped from the largest "
-            "sections until the response fits; section_coverage reports total and returned counts. "
-            "Index metadata, notes, coverage, one group, and one entry are always kept."
-        ),
-    ),
-]
-_OVERVIEW_DEFAULT_OUTPUT_BYTES = shared.DEFAULT_OVERVIEW_OUTPUT_BYTES
-# Room for the reference coverage appended after bounding.
-_OVERVIEW_OUTPUT_MARGIN_BYTES = shared.OVERVIEW_OUTPUT_MARGIN_BYTES
 _FeatureHistoryCursor = Annotated[str | None, Field(max_length=shared.MAX_CURSOR_LENGTH, description="Opaque history cursor from a previous page.")]
 _ModuleSymbolsCursor = Annotated[str | None, Field(max_length=shared.MAX_CURSOR_LENGTH, description="Opaque cursor from a previous module-symbol page.")]
 _FeatureGraphNodes = Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_FEATURE_GRAPH_NODES, description="Maximum feature graph nodes.")]
@@ -270,7 +275,7 @@ def create_mcp_server(
         name="codetrail",
         title="CodeTrail workspace" if local_import_enabled or github_import_enabled or index_write_enabled or session_write_enabled or run_write_enabled or external_run_enabled else "CodeTrail read-only workspace",
         description=server_description,
-        version="0.1.0",
+        version="0.2.0",
         log_level="WARNING",
     )
 
@@ -632,25 +637,44 @@ def create_mcp_server(
             "FastAPI routes with literal declared paths, public API names in static __all__, and top-level pluggy "
             "hookspec functions bound to a real HookspecMarker import. Classifications are independent from calls "
             "paths; unknown does not mean unused or unreachable, TypeScript export facts are not persisted, and "
-            "the result and source evidence are bounded. The response is capped at max_output_bytes (default "
-            "36000): every section, including classifications and references, may be shortened. Check truncated, "
-            "truncation_reason, overview.section_coverage, and reference_coverage (total vs returned per section) "
-            "before treating a list as complete; classification_coverage.analysis_incomplete marks rule analysis that stopped early."
+            "the result and source evidence are bounded. Default detail='summary' returns a compact skeleton; "
+            "use detail='full' to return the complete ProjectOverview with evidence references and coverage. "
+            "Expand a summary with get_module and list_overview_items; round-trip cursors unchanged. "
+            "classification_coverage.analysis_incomplete marks rule analysis that stopped early."
         ),
         structured_output=True,
     )
     def get_overview(
         project_id: _ProjectId,
         index_id: _IndexId,
-        max_depth: _OverviewDepth = shared.DEFAULT_OVERVIEW_DEPTH,
-        max_paths: _OverviewPaths = shared.MAX_OVERVIEW_PATHS,
-        max_modules: _OverviewModules = shared.DEFAULT_OVERVIEW_MODULES,
-        max_groups: _OverviewGroups = shared.DEFAULT_OVERVIEW_GROUPS,
-        max_module_relations: _OverviewModuleRelations = shared.DEFAULT_OVERVIEW_RELATIONS,
-        max_classifications: _OverviewClassifications = shared.DEFAULT_OVERVIEW_CLASSIFICATIONS,
-        max_output_bytes: _OverviewOutputBytes = _OVERVIEW_DEFAULT_OUTPUT_BYTES,
+        detail: Literal["summary", "full"] = "summary",
+        module_limit: Annotated[_SkeletonModuleLimit, Field(description="Used only in summary mode; ignored in full mode.")] = shared.DEFAULT_SKELETON_MODULES,
+        relation_limit: Annotated[_SkeletonRelationLimit, Field(description="Used only in summary mode; ignored in full mode.")] = shared.DEFAULT_SKELETON_RELATIONS,
+        cursor: Annotated[_OverviewCursor, Field(description="Used only in summary mode; ignored in full mode.")] = None,
+        max_depth: Annotated[_OverviewDepth, Field(description="Used only in full mode; ignored in summary mode.")] = shared.DEFAULT_OVERVIEW_DEPTH,
+        max_paths: Annotated[_OverviewPaths, Field(description="Used only in full mode; ignored in summary mode.")] = shared.MAX_OVERVIEW_PATHS,
+        max_modules: Annotated[_OverviewModules, Field(description="Used only in full mode; ignored in summary mode.")] = shared.DEFAULT_OVERVIEW_MODULES,
+        max_groups: Annotated[_OverviewGroups, Field(description="Used only in full mode; ignored in summary mode.")] = shared.DEFAULT_OVERVIEW_GROUPS,
+        max_module_relations: Annotated[_OverviewModuleRelations, Field(description="Used only in full mode; ignored in summary mode.")] = shared.DEFAULT_OVERVIEW_RELATIONS,
+        max_classifications: Annotated[_OverviewClassifications, Field(description="Used only in full mode; ignored in summary mode.")] = shared.DEFAULT_OVERVIEW_CLASSIFICATIONS,
     ) -> McpOverviewResponse:
         try:
+            if detail == "summary":
+                result = service.get_overview_skeleton(
+                    project_id,
+                    index_id,
+                    module_limit=module_limit,
+                    relation_limit=relation_limit,
+                    cursor=cursor,
+                )
+                return McpOverviewResponse(
+                    ok=True,
+                    skeleton=result,
+                    expand={
+                        "get_module": "get_module(module_id)",
+                        "list_overview_items": "list_overview_items(section=..., cursor=...)",
+                    },
+                )
             result = service.get_overview(
                 project_id,
                 index_id,
@@ -661,11 +685,51 @@ def create_mcp_server(
                 max_module_relations=max_module_relations,
                 max_classifications=max_classifications,
             )
-            return _bounded_overview_response(service, result, citation_url, max_output_bytes)
+            return _mcp_overview_response(result, citation_url)
         except ServiceError as exc:
             return _failure(McpOverviewResponse, exc)
         except Exception:
             return _unexpected_failure("get_overview", McpOverviewResponse)
+
+    @server.tool(
+        name="list_overview_items",
+        title="List overview section items",
+        description="Read one page from an overview section. Round-trip cursor unchanged; invalid or expired cursor is rejected.",
+        structured_output=True,
+    )
+    def list_overview_items(
+        project_id: _ProjectId,
+        index_id: _IndexId,
+        section: OverviewSection,
+        cursor: _OverviewCursor = None,
+        limit: _OverviewPageLimit = shared.DEFAULT_OVERVIEW_PAGE_LIMIT,
+        module_id: _OverviewModuleFilter = None,
+        category: OverviewClassificationKind | None = None,
+    ) -> McpOverviewItemsResponse:
+        try:
+            result = service.list_overview_items(
+                project_id, index_id, section, cursor=cursor, limit=limit, module_id=module_id, category=category,
+            )
+            return McpOverviewItemsResponse(ok=True, result=result)
+        except ServiceError as exc:
+            return _failure(McpOverviewItemsResponse, exc)
+        except Exception:
+            return _unexpected_failure("list_overview_items", McpOverviewItemsResponse)
+
+    @server.tool(
+        name="get_module",
+        title="Get overview module details",
+        description="Read one module card from the selected index, including bounded relations and classifications.",
+        structured_output=True,
+    )
+    def get_module(project_id: _ProjectId, index_id: _IndexId, module_id: _ModuleId) -> McpOverviewModuleResponse:
+        try:
+            result = service.get_overview_module(project_id, index_id, module_id)
+            return McpOverviewModuleResponse(ok=True, result=result)
+        except ServiceError as exc:
+            return _failure(McpOverviewModuleResponse, exc)
+        except Exception:
+            return _unexpected_failure("get_module", McpOverviewModuleResponse)
 
     @server.tool(
         name="get_journey_catalog",
@@ -1720,38 +1784,6 @@ def _mcp_github_import_response(result: GitHubImportResponse) -> McpImportRespon
     )
 
 
-def _bounded_overview_response(
-    service: WorkspaceService,
-    result: ProjectOverview,
-    base_url: str,
-    max_output_bytes: int,
-) -> McpOverviewResponse:
-    total_references = len(_mcp_overview_response(result, base_url).references)
-
-    def measure(overview: ProjectOverview) -> int:
-        response = _mcp_overview_response(overview, base_url).model_dump(mode="json", by_alias=True)
-        return len(_compact_json(response).encode("utf-8"))
-
-    bounded = service.bound_overview(
-        result,
-        measure,
-        max(1, max_output_bytes - _OVERVIEW_OUTPUT_MARGIN_BYTES),
-    )
-    response = _mcp_overview_response(bounded, base_url)
-    returned_references = len(response.references)
-    return McpOverviewResponse(
-        ok=True,
-        overview=bounded,
-        references=response.references,
-        reference_coverage=OverviewSectionCoverage(
-            section="references",
-            total=total_references,
-            returned=returned_references,
-            truncated=returned_references < total_references,
-        ),
-    )
-
-
 def _mcp_overview_response(result: ProjectOverview, base_url: str) -> McpOverviewResponse:
     references: list[EvidenceReference] = []
     seen_evidence_ids: set[str] = set()
@@ -1787,7 +1819,14 @@ def _mcp_overview_response(result: ProjectOverview, base_url: str) -> McpOvervie
                 ),
             )
         )
-    return McpOverviewResponse(ok=True, overview=result, references=references)
+    return McpOverviewResponse(
+        ok=True,
+        overview=result,
+        references=references,
+        reference_coverage=OverviewSectionCoverage(
+            section="references", total=len(references), returned=len(references), truncated=False,
+        ),
+    )
 
 
 def _mcp_journey_response(result: ProjectJourney, base_url: str) -> McpJourneyResponse:

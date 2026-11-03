@@ -52,6 +52,11 @@ from .contracts import (
     ProjectIndexListResponse,
     ProjectListResponse,
     ProjectOverview,
+    OverviewItemsPage,
+    OverviewModuleCard,
+    OverviewSection,
+    OverviewSkeleton,
+    OverviewClassificationKind,
     ProjectJourney,
     ProjectJourneyCatalog,
     RefreshProjectIndexRequest,
@@ -808,6 +813,64 @@ def create_app(
             max_module_relations=max_module_relations,
             max_classifications=max_classifications,
         )
+
+    @application.get(
+        "/api/projects/{project_id}/indexes/{index_id}/overview/skeleton",
+        response_model=OverviewSkeleton,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def get_project_overview_skeleton(
+        project_id: Identifier,
+        index_id: Identifier,
+        module_limit: int = Query(default=shared.DEFAULT_SKELETON_MODULES, ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_SKELETON_MODULES),
+        relation_limit: int = Query(default=shared.DEFAULT_SKELETON_RELATIONS, ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_OVERVIEW_RELATIONS),
+        cursor: str | None = Query(default=None, max_length=shared.MAX_OVERVIEW_CURSOR_LENGTH),
+    ) -> OverviewSkeleton:
+        return await run_in_threadpool(
+            workspace_service.get_overview_skeleton,
+            project_id,
+            index_id,
+            module_limit=module_limit,
+            relation_limit=relation_limit,
+            cursor=cursor,
+        )
+
+    @application.get(
+        "/api/projects/{project_id}/indexes/{index_id}/overview/sections/{section}",
+        response_model=OverviewItemsPage,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def list_project_overview_items(
+        project_id: Identifier,
+        index_id: Identifier,
+        section: OverviewSection,
+        cursor: str | None = Query(default=None, max_length=shared.MAX_OVERVIEW_CURSOR_LENGTH),
+        limit: int = Query(default=shared.DEFAULT_OVERVIEW_PAGE_LIMIT, ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_OVERVIEW_PAGE_LIMIT),
+        module_id: str | None = Query(default=None, min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_IDENTIFIER_LENGTH),
+        category: OverviewClassificationKind | None = Query(default=None),
+    ) -> OverviewItemsPage:
+        return await run_in_threadpool(
+            workspace_service.list_overview_items,
+            project_id,
+            index_id,
+            section,
+            cursor=cursor,
+            limit=limit,
+            module_id=module_id,
+            category=category,
+        )
+
+    @application.get(
+        "/api/projects/{project_id}/indexes/{index_id}/overview/modules/{module_id}",
+        response_model=OverviewModuleCard,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def get_project_overview_module(
+        project_id: Identifier,
+        index_id: Identifier,
+        module_id: Identifier,
+    ) -> OverviewModuleCard:
+        return await run_in_threadpool(workspace_service.get_overview_module, project_id, index_id, module_id)
 
     @application.get(
         "/api/projects/{project_id}/indexes/{index_id}/journeys",
