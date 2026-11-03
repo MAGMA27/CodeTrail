@@ -72,6 +72,35 @@ from .contracts import (
     NeighborsIndexResponse,
     ModuleSymbolsPageResponse,
     ProjectOverview,
+    OverviewClassification,
+    OverviewClassificationCounts,
+    OverviewCompleteness,
+    OverviewGroup,
+    OverviewItemsPage,
+    OverviewModule,
+    OverviewModuleCard,
+    OverviewModuleClassification,
+    OverviewModuleRelation,
+    OverviewModuleRelationSummary,
+    OverviewModuleSummary,
+    OverviewClassificationKind,
+    OverviewPage,
+    OverviewSection,
+    OverviewSkeleton,
+    OverviewSkeletonSection,
+    OverviewEntrySummary,
+    OverviewGroupSummary,
+    DEFAULT_OVERVIEW_DEPTH,
+    DEFAULT_OVERVIEW_PAGE_LIMIT,
+    DEFAULT_SKELETON_MODULES,
+    DEFAULT_SKELETON_RELATIONS,
+    DEFAULT_SKELETON_ENTRIES,
+    MAX_OVERVIEW_CLASSIFICATIONS,
+    MAX_OVERVIEW_CURSOR_LENGTH,
+    MAX_OVERVIEW_GROUPS,
+    MAX_OVERVIEW_MODULES,
+    MAX_OVERVIEW_PATHS,
+    MAX_OVERVIEW_RELATIONS,
     Project,
     ProjectIndexListResponse,
     ProjectListResponse,
@@ -158,7 +187,7 @@ from .relations import (
     relation_budgets_from_environment,
     relation_coverage_limitations,
 )
-from .overview import RULES_VERSION, bound_overview_output, build_project_overview
+from .overview import RULES_VERSION, build_project_overview
 from .journeys import build_journey_catalog, build_project_journey
 from .feature_generation import (
     FeatureGenerationEngine,
@@ -1605,6 +1634,18 @@ class IndexService:
             ) from exc
         except StorageError as exc:
             raise ServiceError("internal_error", 500, "local index storage failed") from exc
+
+
+def _overview_module_sort_key(item: OverviewModule) -> tuple[str, str]:
+    return item.symbol.path, item.module_id
+
+
+def _overview_relation_sort_key(item: OverviewModuleRelation) -> tuple[int, str]:
+    return -item.edge_count, item.relation_id
+
+
+def _overview_classification_sort_key(item: OverviewClassification) -> tuple[str, str]:
+    return item.category, item.classification_id
 
 
 class WorkspaceService:
@@ -3992,15 +4033,428 @@ class WorkspaceService:
         except StorageError as exc:
             raise ServiceError("internal_error", 500, "local index storage failed") from exc
 
-    def bound_overview(
-        self,
-        overview: ProjectOverview,
-        measure: Callable[[ProjectOverview], int],
-        max_output_bytes: int,
-    ) -> ProjectOverview:
-        """Apply the shared overview output bound for adapter-specific serialization."""
+    def _overview_catalog(self, project_id: str, index_id: str) -> ProjectOverview:
+        """Return the largest shared overview cached for this immutable index."""
 
-        return bound_overview_output(overview, measure, max_output_bytes)
+        return self.get_overview(
+            project_id,
+            index_id,
+            max_depth=DEFAULT_OVERVIEW_DEPTH,
+            max_paths=MAX_OVERVIEW_PATHS,
+            max_modules=MAX_OVERVIEW_MODULES,
+            max_groups=MAX_OVERVIEW_GROUPS,
+            max_module_relations=MAX_OVERVIEW_RELATIONS,
+            max_classifications=MAX_OVERVIEW_CLASSIFICATIONS,
+        )
+
+    @staticmethod
+    def _overview_section_total(overview: ProjectOverview, section: str) -> int | None:
+        coverage = next((item for item in overview.section_coverage if item.section == section), None)
+        if coverage is not None:
+            return coverage.total
+        if section == "classifications":
+            return overview.classification_coverage.total
+        if section == "references":
+            entry_total = WorkspaceService._overview_section_total(overview, "entries")
+            if entry_total is None or entry_total > len(overview.entries):
+                return None
+            if overview.classification_coverage.visible < overview.classification_coverage.total:
+                return None
+            return len(WorkspaceService._overview_reference_items(overview))
+        return None
+
+    @staticmethod
+    def _overview_reference_items(overview: ProjectOverview) -> list[Evidence]:
+        candidates = [entry.evidence for entry in overview.entries]
+        candidates.append(overview.responsibility_evidence)
+        candidates.extend(evidence for item in overview.classifications for evidence in item.evidence)
+        unique = {item.evidence_id: item for item in candidates if item is not None}
+        return [unique[key] for key in sorted(unique)]
+
+    @staticmethod
+    def _overview_relation_summary(relation: OverviewModuleRelation) -> OverviewModuleRelationSummary:
+        return OverviewModuleRelationSummary(
+            relation_id=relation.relation_id,
+            source_path=relation.source_module.path,
+            target_path=relation.target_module.path,
+            relation_kinds=list(relation.relation_kinds),
+            edge_count=relation.edge_count,
+        )
+
+    @staticmethod
+    def _overview_completeness(overview: ProjectOverview) -> OverviewCompleteness:
+        reasons: list[str] = []
+
+        def add(reason: str) -> None:
+            if reason not in reasons:
+                reasons.append(reason)
+
+        if overview.truncated:
+            add("overview_truncated")
+        if any(section.truncated for section in overview.section_coverage):
+            add("catalog_cap_reached")
+        if overview.unresolved:
+            add("unresolved_present")
+        if overview.classification_coverage.analysis_incomplete:
+            add("classification_analysis_incomplete")
+        if overview.entry_status == "partial":
+            add("entry_analysis_partial")
+        if overview.responsibility_status in {"partial", "invalid"}:
+            add(f"responsibility_{overview.responsibility_status}")
+        if overview.http_association_coverage.analysis_status == "incomplete":
+            add("http_association_analysis_incomplete")
+        status = "possibly_incomplete" if reasons else "complete"
+        return OverviewCompleteness(status=status, reasons=reasons)
+
+    @classmethod
+    def _skeleton_completeness(
+        cls, overview: ProjectOverview, has_next_page: bool, catalog_limited: bool
+    ) -> OverviewCompleteness:
+        base = cls._overview_completeness(overview)
+        reasons = list(base.reasons)
+        if catalog_limited and "catalog_cap_reached" not in reasons:
+            reasons.append("catalog_cap_reached")
+        if has_next_page and "more_items" not in reasons:
+            reasons.append("more_items")
+        status = (
+            "truncated" if has_next_page else
+            "possibly_incomplete" if catalog_limited or base.status == "possibly_incomplete" else
+            "complete"
+        )
+        return base.model_copy(update={
+            "status": status,
+            "reasons": reasons,
+            "hint": "Fetch the next page using page.next_cursor." if has_next_page else None,
+        })
+
+    @classmethod
+    def _page_completeness(
+        cls, overview: ProjectOverview, has_next_page: bool, catalog_limited: bool
+    ) -> OverviewCompleteness:
+        base = cls._overview_completeness(overview)
+        reasons = list(base.reasons)
+        if catalog_limited and "catalog_cap_reached" not in reasons:
+            reasons.append("catalog_cap_reached")
+        if has_next_page and "more_items" not in reasons:
+            reasons.append("more_items")
+        return base.model_copy(update={
+            "status": "truncated" if has_next_page else (
+                "possibly_incomplete" if catalog_limited or base.status == "possibly_incomplete" else "complete"
+            ),
+            "reasons": reasons,
+            "hint": "Fetch the next page using page.next_cursor." if has_next_page else None,
+        })
+
+    @staticmethod
+    def _overview_cursor_fingerprint(
+        project_id: str, index_id: str, section: str, module_id: str | None, category: str | None
+    ) -> str:
+        payload = "\0".join((project_id, index_id, section, module_id or "", category or ""))
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:8]
+
+    @classmethod
+    def _encode_overview_cursor(
+        cls, project_id: str, index_id: str, section: str, offset: int,
+        module_id: str | None, category: str | None,
+    ) -> str:
+        cursor = (
+            f"c1.{section}.{offset}."
+            f"{cls._overview_cursor_fingerprint(project_id, index_id, section, module_id, category)}"
+        )
+        return cursor[:MAX_OVERVIEW_CURSOR_LENGTH]
+
+    @classmethod
+    def _decode_overview_cursor(
+        cls, cursor: str, project_id: str, index_id: str, section: str,
+        module_id: str | None, category: str | None, total: int | None,
+    ) -> int:
+        parts = cursor.split(".")
+        try:
+            if len(cursor) > MAX_OVERVIEW_CURSOR_LENGTH or len(parts) != 4 or parts[0] != "c1":
+                raise ValueError
+            cursor_section, raw_offset, fingerprint = parts[1:]
+            offset = int(raw_offset)
+            expected = cls._overview_cursor_fingerprint(project_id, index_id, section, module_id, category)
+            if (
+                cursor_section != section
+                or offset < 0
+                or str(offset) != raw_offset
+                or fingerprint != expected
+                or (total is not None and offset > total)
+            ):
+                raise ValueError
+            return offset
+        except (ValueError, TypeError):
+            raise ServiceError(
+                "invalid_input",
+                400,
+                "invalid or expired cursor",
+                details=[{"field": "cursor", "problem": "invalid"}],
+            ) from None
+
+    def get_overview_skeleton(
+        self,
+        project_id: str,
+        index_id: str,
+        *,
+        module_limit: int = DEFAULT_SKELETON_MODULES,
+        relation_limit: int = DEFAULT_SKELETON_RELATIONS,
+        cursor: str | None = None,
+    ) -> OverviewSkeleton:
+        overview = self._overview_catalog(project_id, index_id)
+        modules = sorted(overview.modules, key=_overview_module_sort_key)
+        total = self._overview_section_total(overview, "modules")
+        available_total = len(modules)
+        offset = self._decode_overview_cursor(cursor, project_id, index_id, "modules", None, None, available_total) if cursor else 0
+        module_page = modules[offset : offset + module_limit]
+        next_offset = offset + len(module_page)
+        next_cursor = (
+            self._encode_overview_cursor(project_id, index_id, "modules", next_offset, None, None)
+            if next_offset < len(modules) else None
+        )
+        incoming: dict[str, int] = {}
+        outgoing: dict[str, int] = {}
+        for relation in overview.module_relations:
+            outgoing[relation.source_module_id] = outgoing.get(relation.source_module_id, 0) + 1
+            incoming[relation.target_module_id] = incoming.get(relation.target_module_id, 0) + 1
+        summaries = [
+            OverviewModuleSummary(
+                module_id=module.module_id,
+                path=module.symbol.path,
+                entry_reachable=module.entry_reachable,
+                classification_counts={
+                    category: count
+                    for category, count in module.classification_counts.model_dump().items()
+                    if count > 0
+                },
+                in_relations=incoming.get(module.module_id, 0),
+                out_relations=outgoing.get(module.module_id, 0),
+            )
+            for module in module_page
+        ]
+        relations = sorted(overview.module_relations, key=_overview_relation_sort_key)[:relation_limit]
+        section_returns = {
+            "entries": min(len(overview.entries), DEFAULT_SKELETON_ENTRIES),
+            "groups": len(overview.groups),
+            "modules": len(module_page),
+            "classifications": 0,
+            "module_relations": len(relations),
+            "http_associations": 0,
+            "paths": 0,
+            "unresolved": 0,
+        }
+        sections = []
+        for section, returned in section_returns.items():
+            section_total = self._overview_section_total(overview, section)
+            sections.append(OverviewSkeletonSection(
+                section=section,
+                total=section_total,
+                returned=returned,
+                truncated=section_total is None or returned < section_total,
+            ))
+        catalog_items = {
+            "entries": len(overview.entries),
+            "groups": len(overview.groups),
+            "modules": len(overview.modules),
+            "classifications": len(overview.classifications),
+            "module_relations": len(overview.module_relations),
+            "http_associations": len(overview.http_associations),
+            "paths": len(overview.paths),
+            "unresolved": len(overview.unresolved),
+        }
+        catalog_limited = any(
+            item.total is None or item.total > catalog_items[item.section]
+            for item in sections
+        )
+        return OverviewSkeleton(
+            project_id=overview.project_id,
+            index=overview.index,
+            rules_version=overview.rules_version,
+            entry_status=overview.entry_status,
+            sections=sections,
+            classification_counts=overview.classification_coverage.category_counts,
+            entries=[OverviewEntrySummary(
+                entry_point_id=item.entry_point_id,
+                name=item.handler_symbol.qualified_name if item.handler_symbol else item.label,
+                kind=item.kind,
+                path=item.path,
+                line=item.start_line,
+            ) for item in overview.entries[:DEFAULT_SKELETON_ENTRIES]],
+            groups=[OverviewGroupSummary(
+                group_id=item.group_id, group_kind=item.group_kind,
+                label=item.label, module_count=len(item.module_ids),
+            ) for item in overview.groups],
+            modules=summaries,
+            module_relations=[self._overview_relation_summary(item) for item in relations],
+            page=OverviewPage(returned=len(module_page), total=total, next_cursor=next_cursor, order="path"),
+            completeness=self._skeleton_completeness(overview, next_cursor is not None, catalog_limited),
+        )
+
+    def list_overview_items(
+        self,
+        project_id: str,
+        index_id: str,
+        section: OverviewSection,
+        *,
+        cursor: str | None = None,
+        limit: int = DEFAULT_OVERVIEW_PAGE_LIMIT,
+        module_id: str | None = None,
+        category: OverviewClassificationKind | None = None,
+        detail: Literal["summary", "full"] = "summary",
+    ) -> OverviewItemsPage:
+        module_sections = {"modules", "classifications", "module_relations", "groups"}
+        if module_id is not None and section not in module_sections:
+            raise ServiceError("invalid_input", 400, "module_id is not valid for this overview section",
+                               details=[{"field": "module_id", "problem": "invalid"}])
+        if category is not None and section != "classifications":
+            raise ServiceError("invalid_input", 400, "category is only valid for classifications",
+                               details=[{"field": "category", "problem": "invalid"}])
+        if category is not None and category not in {"application_entry", "public_api", "extension_point", "unknown"}:
+            raise ServiceError(
+                "invalid_input", 400, "category is not allowed",
+                details=[{
+                    "field": "category",
+                    "problem": "not_allowed",
+                    "allowed": ["application_entry", "public_api", "extension_point", "unknown"],
+                }],
+            )
+        overview = self._overview_catalog(project_id, index_id)
+        items_by_section: dict[str, list[object]] = {
+            "entries": list(overview.entries),
+            "groups": list(overview.groups),
+            "modules": list(overview.modules),
+            "classifications": list(overview.classifications),
+            "module_relations": list(overview.module_relations),
+            "http_associations": list(overview.http_associations),
+            "paths": list(overview.paths),
+            "unresolved": list(overview.unresolved),
+            "references": self._overview_reference_items(overview),
+        }
+        items = items_by_section[section]
+        if module_id is not None:
+            if section == "modules":
+                items = [item for item in items if isinstance(item, OverviewModule) and item.module_id == module_id]
+            elif section == "classifications":
+                items = [item for item in items if isinstance(item, OverviewClassification) and item.module_id == module_id]
+            elif section == "module_relations":
+                items = [item for item in items if isinstance(item, OverviewModuleRelation)
+                         and module_id in {item.source_module_id, item.target_module_id}]
+            else:
+                items = [item for item in items if isinstance(item, OverviewGroup) and module_id in item.module_ids]
+        if category is not None:
+            items = [item for item in items if isinstance(item, OverviewClassification) and item.category == category]
+        id_fields = {
+            "entries": "entry_point_id", "groups": "group_id", "modules": "module_id",
+            "classifications": "classification_id", "module_relations": "relation_id",
+            "http_associations": "association_id", "paths": "path_id", "unresolved": "unresolved_id",
+            "references": "evidence_id",
+        }
+        if section == "modules":
+            module_items = [item for item in items if isinstance(item, OverviewModule)]
+            items = sorted(module_items, key=_overview_module_sort_key)
+            order = "path"
+        elif section == "module_relations":
+            relation_items = [item for item in items if isinstance(item, OverviewModuleRelation)]
+            items = sorted(relation_items, key=_overview_relation_sort_key)
+            order = "edge_count_desc,relation_id"
+        elif section == "classifications":
+            classification_items = [item for item in items if isinstance(item, OverviewClassification)]
+            items = sorted(classification_items, key=_overview_classification_sort_key)
+            order = "category,classification_id"
+        else:
+            id_field = id_fields[section]
+            items.sort(key=lambda item: getattr(item, id_field))
+            order = id_field
+        available_total = len(items)
+        base_total = self._overview_section_total(overview, section)
+        unfiltered_complete = base_total is not None and base_total == len(items_by_section[section])
+        total = available_total if (module_id is not None or category is not None) and unfiltered_complete else (
+            base_total if module_id is None and category is None else (available_total if unfiltered_complete else None)
+        )
+        offset = self._decode_overview_cursor(cursor, project_id, index_id, section, module_id, category, available_total) if cursor else 0
+        page_items = items[offset : offset + limit]
+        next_offset = offset + len(page_items)
+        if detail == "summary":
+            if section == "modules":
+                page_items = [OverviewModuleSummary(
+                    module_id=item.module_id,
+                    path=item.symbol.path,
+                    entry_reachable=item.entry_reachable,
+                    classification_counts={
+                        category: count
+                        for category, count in item.classification_counts.model_dump().items()
+                        if count > 0
+                    },
+                    in_relations=sum(1 for relation in overview.module_relations if relation.target_module_id == item.module_id),
+                    out_relations=sum(1 for relation in overview.module_relations if relation.source_module_id == item.module_id),
+                ) for item in page_items if isinstance(item, OverviewModule)]
+            elif section == "module_relations":
+                page_items = [self._overview_relation_summary(item) for item in page_items if isinstance(item, OverviewModuleRelation)]
+            elif section == "classifications":
+                page_items = [OverviewModuleClassification(
+                    classification_id=item.classification_id,
+                    category=item.category,
+                    label=item.label,
+                    symbol_id=item.symbol_id,
+                    symbol_name=item.symbol_name,
+                ) for item in page_items if isinstance(item, OverviewClassification)]
+        next_cursor = (
+            self._encode_overview_cursor(project_id, index_id, section, next_offset, module_id, category)
+            if next_offset < available_total else None
+        )
+        catalog_incomplete = base_total is None or (base_total is not None and base_total > len(items_by_section[section]))
+        return OverviewItemsPage(
+            project_id=project_id,
+            index_id=index_id,
+            section=section,
+            items=page_items,
+            page=OverviewPage(returned=len(page_items), total=total, next_cursor=next_cursor, order=order),
+            completeness=self._page_completeness(overview, next_cursor is not None, catalog_incomplete),
+        )
+
+    def get_overview_module(self, project_id: str, index_id: str, module_id: str) -> OverviewModuleCard:
+        overview = self._overview_catalog(project_id, index_id)
+        module = next((item for item in overview.modules if item.module_id == module_id), None)
+        if module is None:
+            raise ServiceError("not_found", 404, "overview module was not found")
+        incoming = sorted(
+            (item for item in overview.module_relations if item.target_module_id == module_id),
+            key=_overview_relation_sort_key,
+        )
+        outgoing = sorted(
+            (item for item in overview.module_relations if item.source_module_id == module_id),
+            key=_overview_relation_sort_key,
+        )
+        classifications = [item for item in overview.classifications if item.module_id == module_id]
+        section = self._overview_section_total(overview, "module_relations")
+        catalog_limited = (
+            section is None
+            or section > len(overview.module_relations)
+            or len(classifications) < module.classification_counts.total()
+        )
+        card_limited = catalog_limited or len(incoming) > 10 or len(outgoing) > 10
+        completeness = self._page_completeness(overview, False, catalog_limited)
+        if card_limited and not catalog_limited:
+            completeness = completeness.model_copy(update={
+                "status": "possibly_incomplete",
+                "reasons": [*completeness.reasons, "module_card_limit_reached"],
+            })
+        return OverviewModuleCard(
+            module=module,
+            incoming=[self._overview_relation_summary(item) for item in incoming[:10]],
+            outgoing=[self._overview_relation_summary(item) for item in outgoing[:10]],
+            classifications=[OverviewModuleClassification(
+                classification_id=item.classification_id,
+                category=item.category,
+                label=item.label,
+                symbol_id=item.symbol_id,
+                symbol_name=item.symbol_name,
+            ) for item in classifications],
+            incoming_total=len(incoming),
+            outgoing_total=len(outgoing),
+            classification_total=module.classification_counts.total(),
+            completeness=completeness,
+        )
 
     def get_journey_catalog(self, project_id: str, index_id: str) -> ProjectJourneyCatalog:
         """Read lightweight UI action journey summaries from one fixed source snapshot."""

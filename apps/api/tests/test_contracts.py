@@ -25,6 +25,7 @@ from app.contracts import (
     McpSourceResponse,
     McpError,
     ModuleSymbolsPageResponse,
+    OverviewCompleteness,
     Neighbor,
     NeighborsIndexResponse,
     ReadSourceParams,
@@ -185,6 +186,17 @@ def test_contextual_call_contract_binds_returned_activation_edge() -> None:
     )
     with pytest.raises(ValidationError, match="conflicting symbol metadata"):
         GetNeighborsSuccess.model_validate(conflicting_payload)
+
+
+def test_overview_completeness_uses_fixed_reason_codes() -> None:
+    assert OverviewCompleteness(status="possibly_incomplete", reasons=["overview_truncated"]).reasons == [
+        "overview_truncated"
+    ]
+    with pytest.raises(ValidationError):
+        OverviewCompleteness(
+            status="possibly_incomplete",
+            reasons=["classification_source_evidence_is_unavailable_in_the_persisted_snapshot"],
+        )
 
 
 def test_insufficient_bundle_does_not_claim_a_root_cause() -> None:
