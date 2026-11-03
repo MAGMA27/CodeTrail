@@ -3959,13 +3959,25 @@ class WorkspaceService:
                         definition_lines = store.search_definition_lines(
                             index_id, [symbol.symbol_id for symbol in summary_symbols]
                         )
-                except (StorageInputError, StorageNotFoundError, StorageError) as exc:
-                    raise ServiceError("internal_error", 500, "local index storage failed") from exc
+                except (StorageInputError, StorageNotFoundError, StorageError):
+                    # Snippets are optional display context. A failure to read them must
+                    # not turn an otherwise valid search page into an internal error.
+                    definition_lines = {}
+
+            def summary_snippet(symbol_id: str) -> str | None:
+                raw_line = definition_lines.get(symbol_id)
+                if not isinstance(raw_line, str):
+                    return None
+                line = raw_line.strip()
+                if not line or "\n" in line or "\r" in line:
+                    return None
+                return line[:SEARCH_SNIPPET_MAX_LENGTH]
+
             response_matches = [SearchSummaryMatch(
                 rank=item.match.rank,
                 symbol=self._symbol_ref(item.symbol),
                 matched_terms=item.match.matched_terms,
-                snippet=(definition_lines.get(item.symbol.symbol_id, "")[:SEARCH_SNIPPET_MAX_LENGTH].strip() or None),
+                snippet=summary_snippet(item.symbol.symbol_id),
             ) for item in matches]
         else:
             response_matches = [SearchMatch(

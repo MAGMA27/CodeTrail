@@ -30,6 +30,7 @@ from app.contracts import (
     NeighborsIndexResponse,
     ReadSourceParams,
     ReadSourceSuccess,
+    SearchSummaryMatch,
     Project,
     SourceLocation,
     SourceIndexResponse,
@@ -309,6 +310,37 @@ def test_schema_artifact_includes_module_symbol_paging_contracts() -> None:
     models = build_schema_document()["models"]
 
     assert {"ModuleSymbolsPageResponse", "McpModuleSymbolsResponse"} <= models.keys()
+
+
+def test_search_summary_snippets_accept_language_neutral_single_lines() -> None:
+    symbol = SymbolRef(
+        id="symbol-overview",
+        name="frontend.overview",
+        kind="function",
+        at="frontend/overview.tsx:1-1",
+    )
+    match = SearchSummaryMatch(
+        rank=1,
+        symbol=symbol,
+        matched_terms=["overview"],
+        snippet="export function overview()",
+    )
+    assert match.snippet == "export function overview()"
+
+    without_snippet = SearchSummaryMatch(
+        rank=1,
+        symbol=symbol,
+        matched_terms=["overview"],
+    )
+    assert "snippet" not in without_snippet.model_dump(exclude_none=True)
+
+    with pytest.raises(ValidationError, match="single line"):
+        SearchSummaryMatch(
+            rank=1,
+            symbol=symbol,
+            matched_terms=["overview"],
+            snippet="export function\noverview()",
+        )
 
 
 def test_module_symbol_page_contract_keeps_definitions_inside_the_module_snapshot() -> None:

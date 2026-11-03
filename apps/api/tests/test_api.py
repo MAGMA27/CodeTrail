@@ -1395,6 +1395,59 @@ def test_project_search_summary_full_paging_and_legacy_http_shape(tmp_path: Path
         raise AssertionError("invalid search cursor was accepted")
 
 
+def test_project_search_summary_supports_typescript_and_missing_snippets(tmp_path: Path, monkeypatch) -> None:
+    repository = copy_fixture(tmp_path)
+    (repository / "overview.tsx").write_text(
+        'export function overview() { return "overview"; }\n',
+        encoding="utf-8",
+    )
+    application = create_app({"timeout-demo": repository}, data_root=tmp_path / "data")
+    status, created = request(application, "POST", "/api/indexes", create_request())
+    assert status == 200
+    index_id = created["index"]["index_id"]
+    status, projects = request(application, "GET", "/api/projects")
+    assert status == 200
+    project_id = next(
+        item["project_id"] for item in projects["projects"]
+        if item["repository_id"] == "timeout-demo"
+    )
+    service = application.state.workspace_service
+
+    summary = service.search(project_id, index_id, "overview", 10, detail="summary")
+    ts_match = next(item for item in summary.matches if item.symbol.name.endswith(".overview"))
+    assert ts_match.symbol.kind == "function"
+    assert ts_match.snippet == "export function overview() { return \"overview\"; }"
+
+    monkeypatch.setattr("app.storage.IndexStore.search_definition_lines", lambda *_args: {})
+    without_snippets = service.search(project_id, index_id, "overview", 10, detail="summary")
+    ts_match_without_snippet = next(
+        item for item in without_snippets.matches if item.symbol.name.endswith(".overview")
+    )
+    assert ts_match_without_snippet.snippet is None
+
+    monkeypatch.setattr(
+        "app.storage.IndexStore.search_definition_lines",
+        lambda *_args: {ts_match.symbol.id: "export function\noverview()"},
+    )
+    with_unusual_snippet = service.search(project_id, index_id, "overview", 10, detail="summary")
+    unusual_match = next(
+        item for item in with_unusual_snippet.matches if item.symbol.name.endswith(".overview")
+    )
+    assert unusual_match.snippet is None
+
+    from app.storage import StorageError
+
+    def fail_definition_read(*_args):
+        raise StorageError("definition read failed")
+
+    monkeypatch.setattr("app.storage.IndexStore.search_definition_lines", fail_definition_read)
+    with_read_failure = service.search(project_id, index_id, "overview", 10, detail="summary")
+    failed_read_match = next(
+        item for item in with_read_failure.matches if item.symbol.name.endswith(".overview")
+    )
+    assert failed_read_match.snippet is None
+
+
 def test_project_neighbors_summary_and_unresolved_pages_share_mcp_service(tmp_path: Path) -> None:
     from app.mcp_server import create_mcp_server
 

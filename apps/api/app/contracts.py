@@ -1256,15 +1256,19 @@ class SearchSummaryMatch(ContractModel):
     rank: PositiveInt
     symbol: SymbolRef
     matched_terms: list[str] = Field(min_length=1)
-    snippet: str | None = Field(default=None, max_length=SEARCH_SNIPPET_MAX_LENGTH, exclude_if=lambda value: value is None)
+    snippet: str | None = Field(
+        default=None,
+        min_length=MIN_REQUEST_VALUE,
+        max_length=SEARCH_SNIPPET_MAX_LENGTH,
+        exclude_if=lambda value: value is None,
+    )
 
-    @model_validator(mode="after")
-    def validate_definition_snippet(self) -> SearchSummaryMatch:
-        if self.symbol.kind in {"class", "function"} and (
-            not self.snippet or not self.snippet.startswith(("def ", "class ", "async def "))
-        ):
-            raise ValueError("function and class summary matches require a definition-line snippet")
-        return self
+    @field_validator("snippet")
+    @classmethod
+    def validate_snippet_line(cls, snippet: str | None) -> str | None:
+        if snippet is not None and ("\n" in snippet or "\r" in snippet):
+            raise ValueError("search summary snippets must be a single line")
+        return snippet
 
 
 class Neighbor(ContractModel):
