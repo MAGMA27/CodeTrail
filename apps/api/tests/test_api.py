@@ -1348,9 +1348,14 @@ def test_project_search_summary_full_paging_and_legacy_http_shape(tmp_path: Path
     assert [item.symbol.id for item in summary.matches] == [full.matches[0].symbol.symbol_id]
     assert summary.matches[0].symbol.id == full.matches[0].symbol.symbol_id
     assert summary.matches[0].symbol.name == full.matches[0].symbol.qualified_name
+    for item in summary.matches:
+        if item.symbol.kind in {"class", "function"}:
+            assert item.snippet
+            assert item.snippet.startswith(("def ", "class ", "async def "))
     status, http_summary = request(application, "GET", f"{route}?query=timeout&limit=1&detail=summary")
     assert status == 200 and http_summary["matches"]
     assert http_summary["matches"][0]["symbol"]["id"] == summary.matches[0].symbol.id
+    assert all("snippet" not in item or item["snippet"] is not None for item in http_summary["matches"])
     pages = list(summary.matches)
     cursor = summary.page.next_cursor
     while cursor:
@@ -1451,10 +1456,22 @@ def test_project_neighbors_summary_and_unresolved_pages_share_mcp_service(tmp_pa
     assert all(hasattr(item, "to") for item in service_summary.neighbors)
 
     unresolved_path = f"/api/projects/{project_id}/indexes/{index_id}/unresolved"
+    status, root_unresolved = request(
+        application,
+        "GET",
+        f"{unresolved_path}?symbol_id={dispatch_id}&direction=outgoing",
+    )
+    assert status == 200
+    assert sum(summary["unresolved_summary"]["by_source"].values()) == summary["unresolved_summary"]["total"]
+    assert summary["unresolved_summary"]["by_source"].get(dispatch_id, 0) == root_unresolved["page"]["total"]
     status, first = request(
         application, "GET", f"{unresolved_path}?symbol_id={dispatch_id}&direction=outgoing&limit=1"
     )
     assert status == 200 and first["items"]
+    assert first["detail"] == "summary"
+    assert set(first["items"][0]) == {
+        "id", "at", "expression", "reason", "source_symbol_id", "possible_target_count"
+    }
     service_first = service.list_unresolved(
         project_id, index_id, symbol_id=dispatch_id, direction="outgoing", limit=1
     )
@@ -1470,7 +1487,7 @@ def test_project_neighbors_summary_and_unresolved_pages_share_mcp_service(tmp_pa
         assert status == 200
         paged.extend(page["items"])
         cursor = page["page"]["next_cursor"]
-    assert [item["unresolved_id"] for item in paged] == [
+    assert [item["id"] for item in paged] == [
         item["unresolved_id"] for item in full["unresolved"]
     ]
     status, incoming = request(
@@ -1480,7 +1497,7 @@ def test_project_neighbors_summary_and_unresolved_pages_share_mcp_service(tmp_pa
     assert incoming["page"]["total"] == full["completeness"]["possible_unresolved_caller_count"] or (
         incoming["page"]["total"] == 0 and full["completeness"]["possible_unresolved_caller_count"] is None
     )
-    incoming_ids = [item["unresolved_id"] for item in incoming["items"]]
+    incoming_ids = [item["id"] for item in incoming["items"]]
     incoming_cursor = incoming["page"]["next_cursor"]
     while incoming_cursor:
         status, page = request(
@@ -1489,7 +1506,7 @@ def test_project_neighbors_summary_and_unresolved_pages_share_mcp_service(tmp_pa
             f"{unresolved_path}?symbol_id={dispatch_id}&direction=possible_incoming&limit=1&cursor={incoming_cursor}",
         )
         assert status == 200
-        incoming_ids.extend(item["unresolved_id"] for item in page["items"])
+        incoming_ids.extend(item["id"] for item in page["items"])
         incoming_cursor = page["page"]["next_cursor"]
     assert len(incoming_ids) == incoming["page"]["total"]
 
@@ -1588,6 +1605,13 @@ def test_project_neighbors_summary_and_unresolved_pages_share_mcp_service(tmp_pa
             "cursor": cursor,
         }))
         assert mcp_page["result"] == http_page
+        status, full_http_page = request(
+            application,
+            "GET",
+            f"{unresolved_path}?symbol_id={dispatch_id}&direction=outgoing&limit=1&cursor={cursor}&detail=full",
+        )
+        assert status == 200 and full_http_page["detail"] == "full"
+        assert full_http_page["page"] == http_page["page"]
     mcp_summary = asyncio.run(call_mcp("get_neighbors", {
         "project_id": project_id,
         "index_id": index_id,
@@ -1598,6 +1622,67 @@ def test_project_neighbors_summary_and_unresolved_pages_share_mcp_service(tmp_pa
         "edge_kinds": ["calls"],
     }))
     assert mcp_summary["result"] == summary
+
+
+def test_neighbor_summary_expands_non_root_unresolved_sources(tmp_path: Path) -> None:
+    from app.mcp_server import create_mcp_server
+
+    repository = tmp_path / "nested-unresolved"
+    repository.mkdir()
+    (repository / "flow.py").write_text(
+        "def root() -> None:\n"
+        "    middle()\n"
+        "def middle() -> None:\n"
+        "    unresolved_call()\n"
+        "    unresolved_call_two()\n",
+        encoding="utf-8",
+    )
+    application = create_app({"nested-unresolved": repository}, data_root=tmp_path / "data")
+    status, created_project = request(
+        application, "POST", "/api/projects", {"name": "Nested unresolved", "repository_id": "nested-unresolved"}
+    )
+    assert status == 200
+    project_id = created_project["project_id"]
+    status, created_index = request(
+        application, "POST", f"/api/projects/{project_id}/indexes", {"revision": "nested-v1", "dirty": False}
+    )
+    assert status == 200
+    index_id = created_index["index"]["index_id"]
+    service = application.state.workspace_service
+    root = next(
+        item.symbol for item in service.search(project_id, index_id, "root", 10).matches
+        if item.symbol.qualified_name == "flow.root"
+    )
+    full = service.neighbors(project_id, index_id, root.symbol_id, "both", 2, 40, ("calls",), detail="full")
+    summary = service.neighbors(project_id, index_id, root.symbol_id, "both", 2, 40, ("calls",), detail="summary")
+    assert not full.truncated
+    assert full.unresolved and summary.unresolved_summary is not None
+    by_source = summary.unresolved_summary.by_source
+    assert len(by_source) == 1
+    assert next(iter(by_source)) != root.symbol_id
+    assert sum(by_source.values()) == summary.unresolved_summary.total == len(full.unresolved)
+    assert "for each source in unresolved_summary.by_source" in (summary.completeness.hint or "")
+    for source_id, expected_count in by_source.items():
+        page = service.list_unresolved(project_id, index_id, symbol_id=source_id, direction="outgoing")
+        assert page.page.total == expected_count
+    root_page = service.list_unresolved(project_id, index_id, symbol_id=root.symbol_id, direction="outgoing")
+    assert root_page.page.total == by_source.get(root.symbol_id, 0)
+
+    first = service.list_unresolved(project_id, index_id, symbol_id=next(iter(by_source)), limit=1)
+    assert first.detail == "summary" and first.page.next_cursor
+    full_page = service.list_unresolved(
+        project_id, index_id, symbol_id=next(iter(by_source)), limit=1,
+        cursor=first.page.next_cursor, detail="full",
+    )
+    summary_page = service.list_unresolved(
+        project_id, index_id, symbol_id=next(iter(by_source)), limit=1,
+        cursor=first.page.next_cursor, detail="summary",
+    )
+    assert full_page.detail == "full"
+    assert full_page.page == summary_page.page
+
+    response = service.search(project_id, index_id, "root", 10, detail="summary")
+    assert response.matches[0].snippet.startswith("def root")
 
 
 def test_neighbor_summary_marks_recursive_self_edge_and_keeps_completeness_hint(tmp_path: Path) -> None:

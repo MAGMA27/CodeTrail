@@ -654,6 +654,8 @@ def create_mcp_server(
             "Page unresolved references for one symbol or module in the selected project/index. "
             "direction='outgoing' lists calls made by that scope; 'possible_incoming' requires symbol_id and "
             "lists unresolved calls that may name that symbol. Filter by the open reason string when needed. "
+            "Summary items contain id, location, expression, reason, source symbol ID, and possible-target count; "
+            "pass detail='full' for complete unresolved references. The cursor is valid across detail levels. "
             "Round-trip page.next_cursor unchanged."
         ),
         structured_output=True,
@@ -667,11 +669,12 @@ def create_mcp_server(
         reason: _UnresolvedReason = None,
         cursor: _UnresolvedCursor = None,
         limit: _UnresolvedPageLimit = shared.DEFAULT_UNRESOLVED_PAGE_LIMIT,
+        detail: _Detail = shared.DEFAULT_UNRESOLVED_PAGE_DETAIL,
     ) -> McpUnresolvedResponse:
         try:
             result = service.list_unresolved(
                 project_id, index_id, symbol_id=symbol_id, module_id=module_id,
-                direction=direction, reason=reason, cursor=cursor, limit=limit,
+                direction=direction, reason=reason, cursor=cursor, limit=limit, detail=detail,
             )
             return McpUnresolvedResponse(ok=True, result=result)
         except ServiceError as exc:

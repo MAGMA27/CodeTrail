@@ -4305,6 +4305,34 @@ class IndexStore:
 
         return self.search_symbols_bounded(index_id, query, limit=limit).matches
 
+    def search_definition_lines(self, index_id: str, symbol_ids: list[str]) -> dict[str, str]:
+        """Read definition lines for one bounded result page in batched file queries."""
+
+        self._require_index(index_id)
+        if not symbol_ids:
+            return {}
+        placeholders = ", ".join("?" for _ in symbol_ids)
+        symbols = self._connection.execute(
+            "SELECT symbol_id, path, start_line FROM symbols "
+            f"WHERE index_id = ? AND symbol_id IN ({placeholders}) AND kind IN ('class', 'function')",
+            (index_id, *symbol_ids),
+        ).fetchall()
+        paths = list(dict.fromkeys(row["path"] for row in symbols))
+        if not paths:
+            return {}
+        path_placeholders = ", ".join("?" for _ in paths)
+        sources = self._connection.execute(
+            "SELECT path, source_text FROM snapshot_files "
+            f"WHERE index_id = ? AND path IN ({path_placeholders})",
+            (index_id, *paths),
+        ).fetchall()
+        lines_by_path = {row["path"]: row["source_text"].splitlines() for row in sources}
+        return {
+            row["symbol_id"]: lines_by_path[row["path"]][int(row["start_line"]) - 1].strip()
+            for row in symbols
+            if int(row["start_line"]) <= len(lines_by_path.get(row["path"], []))
+        }
+
     def list_module_symbols(
         self,
         project_id: str,

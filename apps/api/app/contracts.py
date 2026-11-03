@@ -56,6 +56,7 @@ DEFAULT_OVERVIEW_PAGE_DETAIL = "summary"
 DEFAULT_UNRESOLVED_PAGE_LIMIT = 20
 MAX_UNRESOLVED_PAGE_LIMIT = MAX_PAGE_SIZE
 DEFAULT_UNRESOLVED_DIRECTION = "outgoing"
+DEFAULT_UNRESOLVED_PAGE_DETAIL = "summary"
 UNRESOLVED_SUMMARY_SAMPLE_LIMIT = 3
 POSSIBLE_CALLER_SUMMARY_SAMPLE_LIMIT = 3
 SEARCH_MAX_SCAN = 200
@@ -1255,7 +1256,15 @@ class SearchSummaryMatch(ContractModel):
     rank: PositiveInt
     symbol: SymbolRef
     matched_terms: list[str] = Field(min_length=1)
-    snippet: str | None = Field(default=None, max_length=SEARCH_SNIPPET_MAX_LENGTH)
+    snippet: str | None = Field(default=None, max_length=SEARCH_SNIPPET_MAX_LENGTH, exclude_if=lambda value: value is None)
+
+    @model_validator(mode="after")
+    def validate_definition_snippet(self) -> SearchSummaryMatch:
+        if self.symbol.kind in {"class", "function"} and (
+            not self.snippet or not self.snippet.startswith(("def ", "class ", "async def "))
+        ):
+            raise ValueError("function and class summary matches require a definition-line snippet")
+        return self
 
 
 class Neighbor(ContractModel):
@@ -1286,6 +1295,7 @@ class UnresolvedSummaryItem(ContractModel):
 class UnresolvedSummary(ContractModel):
     total: NonNegativeInt
     by_reason: dict[str, NonNegativeInt]
+    by_source: dict[str, NonNegativeInt]
     sample: list[UnresolvedSummaryItem] = Field(max_length=UNRESOLVED_SUMMARY_SAMPLE_LIMIT)
 
 
@@ -2620,11 +2630,21 @@ class UnresolvedCompleteness(ContractModel):
     hint: str | None = None
 
 
+class UnresolvedPageSummaryItem(ContractModel):
+    id: Identifier
+    at: str = Field(min_length=MIN_REQUEST_VALUE, max_length=MAX_PATH_LENGTH + 24)
+    expression: str = Field(min_length=MIN_REQUEST_VALUE, max_length=MAX_REASON_LENGTH)
+    reason: str = Field(min_length=MIN_REQUEST_VALUE, max_length=MAX_REASON_LENGTH)
+    source_symbol_id: Identifier
+    possible_target_count: NonNegativeInt
+
+
 class UnresolvedPage(VersionedModel):
     project_id: Identifier
     index_id: Identifier
     scope: UnresolvedScope
-    items: list[UnresolvedReference] = Field(max_length=MAX_UNRESOLVED_PAGE_LIMIT)
+    detail: Literal["summary", "full"] = DEFAULT_UNRESOLVED_PAGE_DETAIL
+    items: list[UnresolvedPageSummaryItem | UnresolvedReference] = Field(max_length=MAX_UNRESOLVED_PAGE_LIMIT)
     page: OverviewPage
     completeness: UnresolvedCompleteness
 
@@ -2634,12 +2654,23 @@ class UnresolvedPage(VersionedModel):
             raise ValueError("unresolved page returned count must match its items")
         if self.page.total is not None and self.page.total < self.page.returned:
             raise ValueError("unresolved page total cannot be smaller than returned items")
-        ids = [item.unresolved_id for item in self.items]
+        ids = [item.id if isinstance(item, UnresolvedPageSummaryItem) else item.unresolved_id for item in self.items]
         if len(set(ids)) != len(ids):
             raise ValueError("unresolved page item IDs must be unique")
-        if any(item.index_id != self.index_id for item in self.items):
+        if self.detail == "full" and any(
+            not isinstance(item, UnresolvedReference) or item.index_id != self.index_id for item in self.items
+        ):
             raise ValueError("unresolved page items must use the response index_id")
-        ordered = sorted(self.items, key=lambda item: (item.path, item.start_line, item.unresolved_id))
+        if self.detail == "summary" and any(not isinstance(item, UnresolvedPageSummaryItem) for item in self.items):
+            raise ValueError("summary unresolved pages must use compact items")
+        ordered = sorted(
+            self.items,
+            key=lambda item: (
+                (item.at.rsplit(":", 1)[0], int(item.at.rsplit(":", 1)[1]), item.id)
+                if isinstance(item, UnresolvedPageSummaryItem)
+                else (item.path, item.start_line, item.unresolved_id)
+            ),
+        )
         if self.items != ordered:
             raise ValueError("unresolved page items must use path,line,id order")
         return self

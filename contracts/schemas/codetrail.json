@@ -26969,6 +26969,14 @@
               "title": "By Reason",
               "type": "object"
             },
+            "by_source": {
+              "additionalProperties": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "title": "By Source",
+              "type": "object"
+            },
             "sample": {
               "items": {
                 "$ref": "#/$defs/UnresolvedSummaryItem"
@@ -26986,6 +26994,7 @@
           "required": [
             "total",
             "by_reason",
+            "by_source",
             "sample"
           ],
           "title": "UnresolvedSummary",
@@ -42254,6 +42263,15 @@
             "completeness": {
               "$ref": "#/$defs/UnresolvedCompleteness"
             },
+            "detail": {
+              "default": "summary",
+              "enum": [
+                "summary",
+                "full"
+              ],
+              "title": "Detail",
+              "type": "string"
+            },
             "index_id": {
               "maxLength": 200,
               "minLength": 1,
@@ -42262,7 +42280,14 @@
             },
             "items": {
               "items": {
-                "$ref": "#/$defs/UnresolvedReference"
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/UnresolvedPageSummaryItem"
+                  },
+                  {
+                    "$ref": "#/$defs/UnresolvedReference"
+                  }
+                ]
               },
               "maxItems": 40,
               "title": "Items",
@@ -42296,6 +42321,56 @@
             "completeness"
           ],
           "title": "UnresolvedPage",
+          "type": "object"
+        },
+        "UnresolvedPageSummaryItem": {
+          "additionalProperties": false,
+          "properties": {
+            "at": {
+              "maxLength": 524,
+              "minLength": 1,
+              "title": "At",
+              "type": "string"
+            },
+            "expression": {
+              "maxLength": 1000,
+              "minLength": 1,
+              "title": "Expression",
+              "type": "string"
+            },
+            "id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Id",
+              "type": "string"
+            },
+            "possible_target_count": {
+              "minimum": 0,
+              "title": "Possible Target Count",
+              "type": "integer"
+            },
+            "reason": {
+              "maxLength": 1000,
+              "minLength": 1,
+              "title": "Reason",
+              "type": "string"
+            },
+            "source_symbol_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Source Symbol Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "at",
+            "expression",
+            "reason",
+            "source_symbol_id",
+            "possible_target_count"
+          ],
+          "title": "UnresolvedPageSummaryItem",
           "type": "object"
         },
         "UnresolvedReference": {
@@ -58021,6 +58096,56 @@
           "title": "UnresolvedCompleteness",
           "type": "object"
         },
+        "UnresolvedPageSummaryItem": {
+          "additionalProperties": false,
+          "properties": {
+            "at": {
+              "maxLength": 524,
+              "minLength": 1,
+              "title": "At",
+              "type": "string"
+            },
+            "expression": {
+              "maxLength": 1000,
+              "minLength": 1,
+              "title": "Expression",
+              "type": "string"
+            },
+            "id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Id",
+              "type": "string"
+            },
+            "possible_target_count": {
+              "minimum": 0,
+              "title": "Possible Target Count",
+              "type": "integer"
+            },
+            "reason": {
+              "maxLength": 1000,
+              "minLength": 1,
+              "title": "Reason",
+              "type": "string"
+            },
+            "source_symbol_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Source Symbol Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "at",
+            "expression",
+            "reason",
+            "source_symbol_id",
+            "possible_target_count"
+          ],
+          "title": "UnresolvedPageSummaryItem",
+          "type": "object"
+        },
         "UnresolvedReference": {
           "additionalProperties": false,
           "properties": {
@@ -58158,6 +58283,15 @@
         "completeness": {
           "$ref": "#/$defs/UnresolvedCompleteness"
         },
+        "detail": {
+          "default": "summary",
+          "enum": [
+            "summary",
+            "full"
+          ],
+          "title": "Detail",
+          "type": "string"
+        },
         "index_id": {
           "maxLength": 200,
           "minLength": 1,
@@ -58166,7 +58300,14 @@
         },
         "items": {
           "items": {
-            "$ref": "#/$defs/UnresolvedReference"
+            "anyOf": [
+              {
+                "$ref": "#/$defs/UnresolvedPageSummaryItem"
+              },
+              {
+                "$ref": "#/$defs/UnresolvedReference"
+              }
+            ]
           },
           "maxItems": 40,
           "title": "Items",

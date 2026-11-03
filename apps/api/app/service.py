@@ -74,10 +74,12 @@ from .contracts import (
     PossibleUnresolvedCallersSummary,
     UnresolvedCompleteness,
     UnresolvedPage,
+    UnresolvedPageSummaryItem,
     UnresolvedScope,
     UnresolvedSummary,
     UnresolvedSummaryItem,
     DEFAULT_UNRESOLVED_PAGE_LIMIT,
+    DEFAULT_UNRESOLVED_PAGE_DETAIL,
     DEFAULT_UNRESOLVED_DIRECTION,
     MAX_UNRESOLVED_PAGE_LIMIT,
     UNRESOLVED_SUMMARY_SAMPLE_LIMIT,
@@ -3949,11 +3951,21 @@ class WorkspaceService:
         matches = result.matches[offset:offset + limit]
         next_offset = offset + len(matches)
         if detail == "summary":
+            definition_lines: dict[str, str] = {}
+            summary_symbols = [item.symbol for item in matches if item.symbol.kind in {"class", "function"}]
+            if summary_symbols:
+                try:
+                    with self.registry.store_for_repository(project.repository_id) as store:
+                        definition_lines = store.search_definition_lines(
+                            index_id, [symbol.symbol_id for symbol in summary_symbols]
+                        )
+                except (StorageInputError, StorageNotFoundError, StorageError) as exc:
+                    raise ServiceError("internal_error", 500, "local index storage failed") from exc
             response_matches = [SearchSummaryMatch(
                 rank=item.match.rank,
                 symbol=self._symbol_ref(item.symbol),
                 matched_terms=item.match.matched_terms,
-                snippet=(item.definition_line[:SEARCH_SNIPPET_MAX_LENGTH] if item.definition_line else None),
+                snippet=(definition_lines.get(item.symbol.symbol_id, "")[:SEARCH_SNIPPET_MAX_LENGTH].strip() or None),
             ) for item in matches]
         else:
             response_matches = [SearchMatch(
@@ -4058,8 +4070,11 @@ class WorkspaceService:
 
         unresolved = result.unresolved or []
         reasons: dict[str, int] = {}
+        sources: dict[str, int] = {}
         for item in unresolved:
             reasons[item.reason] = reasons.get(item.reason, 0) + 1
+            sources[item.source_symbol_id] = sources.get(item.source_symbol_id, 0) + 1
+        sources = dict(sorted(sources.items(), key=lambda item: (-item[1], item[0])))
         callers = result.possible_unresolved_callers
         callers_queried = direction != "callees" and (edge_kinds is None or "calls" in edge_kinds)
         caller_count: int | None = (
@@ -4071,13 +4086,24 @@ class WorkspaceService:
         completeness = result.completeness
         if completeness is not None:
             hints: list[str] = [completeness.hint] if completeness.hint else []
-            if direction != "callers":
-                hints.append(f"list_unresolved(symbol_id='{symbol_id}', direction='outgoing')")
-            if direction != "callees":
-                hints.append(f"list_unresolved(symbol_id='{symbol_id}', direction='possible_incoming')")
             if hints:
+                prefix = " ".join(part.strip().rstrip(".;") + "." for part in hints if part.strip())
+                if direction != "callers" and sources:
+                    top_sources = ", ".join(
+                        f"list_unresolved(symbol_id='{source_id}', direction='outgoing')"
+                        for source_id in list(sources)[:UNRESOLVED_SUMMARY_SAMPLE_LIMIT]
+                    )
+                    expansion = (
+                        f"Expand with: {top_sources}, and call it for each source in unresolved_summary.by_source."
+                    )
+                else:
+                    expansion = ""
+                if direction != "callees":
+                    incoming = f"Also check list_unresolved(symbol_id='{symbol_id}', direction='possible_incoming')."
+                    expansion = f"{expansion} {incoming}".strip()
+                hint = f"{prefix} {expansion}".strip()
                 completeness = completeness.model_copy(
-                    update={"hint": "; ".join(dict.fromkeys(hints))[:MAX_REASON_LENGTH]}
+                    update={"hint": hint[:MAX_REASON_LENGTH]}
                 )
         summary_callers = callers if isinstance(callers, PossibleUnresolvedCallersSummary) else PossibleUnresolvedCallersSummary(
             total=caller_count,
@@ -4104,6 +4130,7 @@ class WorkspaceService:
             "unresolved_summary": UnresolvedSummary(
                 total=len(unresolved),
                 by_reason=reasons,
+                by_source=sources,
                 sample=[summarize(item) for item in unresolved[:UNRESOLVED_SUMMARY_SAMPLE_LIMIT]],
             ),
             "possible_unresolved_callers": summary_callers,
@@ -4121,6 +4148,7 @@ class WorkspaceService:
         reason: str | None = None,
         cursor: str | None = None,
         limit: int = DEFAULT_UNRESOLVED_PAGE_LIMIT,
+        detail: Literal["summary", "full"] = DEFAULT_UNRESOLVED_PAGE_DETAIL,
     ) -> UnresolvedPage:
         project = self._require_project_index(project_id, index_id)
         if (symbol_id is None) == (module_id is None):
@@ -4194,13 +4222,25 @@ class WorkspaceService:
                 )
             else:
                 status, hint = "complete", None
+            response_items = list(items) if detail == "full" else [
+                UnresolvedPageSummaryItem(
+                    id=item.unresolved_id,
+                    at=f"{item.path}:{item.start_line}",
+                    expression=item.expression,
+                    reason=item.reason,
+                    source_symbol_id=item.source_symbol_id,
+                    possible_target_count=len(item.possible_target_ids),
+                )
+                for item in items
+            ]
             return UnresolvedPage(
                 project_id=project_id,
                 index_id=index_id,
                 scope=UnresolvedScope(
                     symbol_id=symbol_id, module_id=module_id, direction=direction, reason=reason,
                 ),
-                items=list(items),
+                detail=detail,
+                items=response_items,
                 page=OverviewPage(
                     returned=len(items), total=total, next_cursor=next_cursor, order="path,line,id",
                 ),

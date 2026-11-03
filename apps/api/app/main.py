@@ -1027,6 +1027,7 @@ def create_app(
         reason: str | None = Query(default=None, min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_REASON_LENGTH),
         cursor: str | None = Query(default=None, max_length=shared.MAX_OVERVIEW_CURSOR_LENGTH),
         limit: int = Query(default=shared.DEFAULT_UNRESOLVED_PAGE_LIMIT, ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_UNRESOLVED_PAGE_LIMIT),
+        detail: Literal["summary", "full"] = Query(default=shared.DEFAULT_UNRESOLVED_PAGE_DETAIL),
     ) -> UnresolvedPage:
         return await run_in_threadpool(
             workspace_service.list_unresolved,
@@ -1038,6 +1039,7 @@ def create_app(
             reason=reason,
             cursor=cursor,
             limit=limit,
+            detail=detail,
         )
 
     @application.get(
