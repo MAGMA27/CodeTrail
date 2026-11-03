@@ -694,7 +694,11 @@ def create_mcp_server(
     @server.tool(
         name="list_overview_items",
         title="List overview section items",
-        description="Read one page from an overview section. Round-trip cursor unchanged; invalid or expired cursor is rejected.",
+        description=(
+            "Read one page from an overview section. detail='summary' omits module symbols and classification evidence; "
+            "detail='full' returns current full items. Cursors work across detail levels; round-trip unchanged. "
+            "Invalid or expired cursors are rejected."
+        ),
         structured_output=True,
     )
     def list_overview_items(
@@ -705,10 +709,12 @@ def create_mcp_server(
         limit: _OverviewPageLimit = shared.DEFAULT_OVERVIEW_PAGE_LIMIT,
         module_id: _OverviewModuleFilter = None,
         category: OverviewClassificationKind | None = None,
+        detail: Literal["summary", "full"] = "summary",
     ) -> McpOverviewItemsResponse:
         try:
             result = service.list_overview_items(
-                project_id, index_id, section, cursor=cursor, limit=limit, module_id=module_id, category=category,
+                project_id, index_id, section, cursor=cursor, limit=limit, module_id=module_id,
+                category=category, detail=detail,
             )
             return McpOverviewItemsResponse(ok=True, result=result)
         except ServiceError as exc:

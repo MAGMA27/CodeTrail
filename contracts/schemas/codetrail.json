@@ -27219,6 +27219,18 @@
             },
             "reasons": {
               "items": {
+                "enum": [
+                  "more_items",
+                  "catalog_cap_reached",
+                  "overview_truncated",
+                  "unresolved_present",
+                  "classification_analysis_incomplete",
+                  "entry_analysis_partial",
+                  "responsibility_partial",
+                  "responsibility_invalid",
+                  "http_association_analysis_incomplete",
+                  "module_card_limit_reached"
+                ],
                 "type": "string"
               },
               "title": "Reasons",
@@ -27603,10 +27615,19 @@
                     "$ref": "#/$defs/OverviewGroup"
                   },
                   {
+                    "$ref": "#/$defs/OverviewModuleSummary"
+                  },
+                  {
                     "$ref": "#/$defs/OverviewModule"
                   },
                   {
+                    "$ref": "#/$defs/OverviewModuleClassification"
+                  },
+                  {
                     "$ref": "#/$defs/OverviewClassification"
+                  },
+                  {
+                    "$ref": "#/$defs/OverviewModuleRelationSummary"
                   },
                   {
                     "$ref": "#/$defs/OverviewModuleRelation"
@@ -27714,6 +27735,57 @@
           "title": "OverviewModule",
           "type": "object"
         },
+        "OverviewModuleClassification": {
+          "additionalProperties": false,
+          "properties": {
+            "category": {
+              "enum": [
+                "application_entry",
+                "public_api",
+                "extension_point",
+                "unknown"
+              ],
+              "title": "Category",
+              "type": "string"
+            },
+            "classification_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Classification Id",
+              "type": "string"
+            },
+            "label": {
+              "title": "Label",
+              "type": "string"
+            },
+            "symbol_id": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Symbol Id"
+            },
+            "symbol_name": {
+              "title": "Symbol Name",
+              "type": "string"
+            }
+          },
+          "required": [
+            "classification_id",
+            "category",
+            "label",
+            "symbol_id",
+            "symbol_name"
+          ],
+          "title": "OverviewModuleClassification",
+          "type": "object"
+        },
         "OverviewModuleRelation": {
           "additionalProperties": false,
           "description": "Aggregated immutable module dependency with representative source edges.",
@@ -27788,6 +27860,110 @@
             "edges"
           ],
           "title": "OverviewModuleRelation",
+          "type": "object"
+        },
+        "OverviewModuleRelationSummary": {
+          "additionalProperties": false,
+          "properties": {
+            "edge_count": {
+              "exclusiveMinimum": 0,
+              "title": "Edge Count",
+              "type": "integer"
+            },
+            "relation_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Relation Id",
+              "type": "string"
+            },
+            "relation_kinds": {
+              "items": {
+                "enum": [
+                  "imports",
+                  "calls"
+                ],
+                "type": "string"
+              },
+              "title": "Relation Kinds",
+              "type": "array"
+            },
+            "source_path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Source Path",
+              "type": "string"
+            },
+            "target_path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Target Path",
+              "type": "string"
+            }
+          },
+          "required": [
+            "relation_id",
+            "source_path",
+            "target_path",
+            "relation_kinds",
+            "edge_count"
+          ],
+          "title": "OverviewModuleRelationSummary",
+          "type": "object"
+        },
+        "OverviewModuleSummary": {
+          "additionalProperties": false,
+          "properties": {
+            "classification_counts": {
+              "additionalProperties": {
+                "exclusiveMinimum": 0,
+                "type": "integer"
+              },
+              "propertyNames": {
+                "enum": [
+                  "application_entry",
+                  "public_api",
+                  "extension_point",
+                  "unknown"
+                ]
+              },
+              "title": "Classification Counts",
+              "type": "object"
+            },
+            "entry_reachable": {
+              "title": "Entry Reachable",
+              "type": "boolean"
+            },
+            "in_relations": {
+              "minimum": 0,
+              "title": "In Relations",
+              "type": "integer"
+            },
+            "module_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Module Id",
+              "type": "string"
+            },
+            "out_relations": {
+              "minimum": 0,
+              "title": "Out Relations",
+              "type": "integer"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            }
+          },
+          "required": [
+            "module_id",
+            "path",
+            "entry_reachable",
+            "in_relations",
+            "out_relations"
+          ],
+          "title": "OverviewModuleSummary",
           "type": "object"
         },
         "OverviewPage": {
@@ -28294,6 +28470,18 @@
             },
             "reasons": {
               "items": {
+                "enum": [
+                  "more_items",
+                  "catalog_cap_reached",
+                  "overview_truncated",
+                  "unresolved_present",
+                  "classification_analysis_incomplete",
+                  "entry_analysis_partial",
+                  "responsibility_partial",
+                  "responsibility_invalid",
+                  "http_association_analysis_incomplete",
+                  "module_card_limit_reached"
+                ],
                 "type": "string"
               },
               "title": "Reasons",
@@ -28501,22 +28689,10 @@
               "title": "Relation Kinds",
               "type": "array"
             },
-            "source_module_id": {
-              "maxLength": 200,
-              "minLength": 1,
-              "title": "Source Module Id",
-              "type": "string"
-            },
             "source_path": {
               "maxLength": 500,
               "minLength": 1,
               "title": "Source Path",
-              "type": "string"
-            },
-            "target_module_id": {
-              "maxLength": 200,
-              "minLength": 1,
-              "title": "Target Module Id",
               "type": "string"
             },
             "target_path": {
@@ -28528,8 +28704,6 @@
           },
           "required": [
             "relation_id",
-            "source_module_id",
-            "target_module_id",
             "source_path",
             "target_path",
             "relation_kinds",
@@ -29279,6 +29453,18 @@
             },
             "reasons": {
               "items": {
+                "enum": [
+                  "more_items",
+                  "catalog_cap_reached",
+                  "overview_truncated",
+                  "unresolved_present",
+                  "classification_analysis_incomplete",
+                  "entry_analysis_partial",
+                  "responsibility_partial",
+                  "responsibility_invalid",
+                  "http_association_analysis_incomplete",
+                  "module_card_limit_reached"
+                ],
                 "type": "string"
               },
               "title": "Reasons",
@@ -30005,22 +30191,10 @@
               "title": "Relation Kinds",
               "type": "array"
             },
-            "source_module_id": {
-              "maxLength": 200,
-              "minLength": 1,
-              "title": "Source Module Id",
-              "type": "string"
-            },
             "source_path": {
               "maxLength": 500,
               "minLength": 1,
               "title": "Source Path",
-              "type": "string"
-            },
-            "target_module_id": {
-              "maxLength": 200,
-              "minLength": 1,
-              "title": "Target Module Id",
               "type": "string"
             },
             "target_path": {
@@ -30032,8 +30206,6 @@
           },
           "required": [
             "relation_id",
-            "source_module_id",
-            "target_module_id",
             "source_path",
             "target_path",
             "relation_kinds",
@@ -30046,7 +30218,20 @@
           "additionalProperties": false,
           "properties": {
             "classification_counts": {
-              "$ref": "#/$defs/OverviewClassificationCounts"
+              "additionalProperties": {
+                "exclusiveMinimum": 0,
+                "type": "integer"
+              },
+              "propertyNames": {
+                "enum": [
+                  "application_entry",
+                  "public_api",
+                  "extension_point",
+                  "unknown"
+                ]
+              },
+              "title": "Classification Counts",
+              "type": "object"
             },
             "entry_reachable": {
               "title": "Entry Reachable",
@@ -30063,10 +30248,6 @@
               "title": "Module Id",
               "type": "string"
             },
-            "name": {
-              "title": "Name",
-              "type": "string"
-            },
             "out_relations": {
               "minimum": 0,
               "title": "Out Relations",
@@ -30077,27 +30258,12 @@
               "minLength": 1,
               "title": "Path",
               "type": "string"
-            },
-            "symbol_count": {
-              "anyOf": [
-                {
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Symbol Count"
             }
           },
           "required": [
             "module_id",
             "path",
-            "name",
             "entry_reachable",
-            "classification_counts",
             "in_relations",
             "out_relations"
           ],

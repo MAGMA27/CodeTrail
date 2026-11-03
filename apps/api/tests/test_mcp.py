@@ -1682,6 +1682,16 @@ async def _exercise_stdio(
             "project_id": project_id, "index_id": index_id, "section": "modules", "limit": 1, "cursor": cursor,
         })
         assert mcp_page_two.structured_content["result"] == page_two
+        http_full_page_status, http_full_page = await _request(
+            application, "GET",
+            f"/api/projects/{project_id}/indexes/{index_id}/overview/sections/modules?limit=1&detail=full&cursor={cursor}",
+        )
+        assert http_full_page_status == 200
+        mcp_full_page = await client.call_tool("list_overview_items", {
+            "project_id": project_id, "index_id": index_id, "section": "modules", "limit": 1,
+            "detail": "full", "cursor": cursor,
+        })
+        assert mcp_full_page.structured_content["result"] == http_full_page
 
         module_id = page_one["items"][0]["module_id"]
         module_status, http_card = await _request(

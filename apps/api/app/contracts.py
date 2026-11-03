@@ -1806,6 +1806,18 @@ OverviewModuleRelationKind: TypeAlias = Literal["imports", "calls"]
 OverviewClassificationKind: TypeAlias = Literal[
     "application_entry", "public_api", "extension_point", "unknown"
 ]
+OverviewIncompleteReason: TypeAlias = Literal[
+    "more_items",
+    "catalog_cap_reached",
+    "overview_truncated",
+    "unresolved_present",
+    "classification_analysis_incomplete",
+    "entry_analysis_partial",
+    "responsibility_partial",
+    "responsibility_invalid",
+    "http_association_analysis_incomplete",
+    "module_card_limit_reached",
+]
 
 
 class OverviewClassificationCounts(ContractModel):
@@ -2482,7 +2494,7 @@ class OverviewPage(ContractModel):
 
 class OverviewCompleteness(ContractModel):
     status: Literal["complete", "truncated", "possibly_incomplete"]
-    reasons: list[str] = Field(default_factory=list)
+    reasons: list[OverviewIncompleteReason] = Field(default_factory=list)
     hint: str | None = None
 
 
@@ -2511,22 +2523,26 @@ class OverviewGroupSummary(ContractModel):
 class OverviewModuleSummary(ContractModel):
     module_id: Identifier
     path: RelativePath
-    name: str
-    symbol_count: NonNegativeInt | None = None
     entry_reachable: bool
-    classification_counts: OverviewClassificationCounts
+    classification_counts: dict[OverviewClassificationKind, PositiveInt] = Field(default_factory=dict)
     in_relations: NonNegativeInt
     out_relations: NonNegativeInt
 
 
 class OverviewModuleRelationSummary(ContractModel):
     relation_id: Identifier
-    source_module_id: Identifier
-    target_module_id: Identifier
     source_path: RelativePath
     target_path: RelativePath
     relation_kinds: list[OverviewModuleRelationKind]
     edge_count: PositiveInt
+
+
+class OverviewModuleClassification(ContractModel):
+    classification_id: Identifier
+    category: OverviewClassificationKind
+    label: str
+    symbol_id: Identifier | None
+    symbol_name: str
 
 
 class OverviewSkeleton(VersionedModel):
@@ -2547,8 +2563,11 @@ class OverviewSkeleton(VersionedModel):
 OverviewItem: TypeAlias = (
     OverviewEntryPoint
     | OverviewGroup
+    | OverviewModuleSummary
     | OverviewModule
+    | OverviewModuleClassification
     | OverviewClassification
+    | OverviewModuleRelationSummary
     | OverviewModuleRelation
     | OverviewPath
     | OverviewHttpAssociation
@@ -2564,14 +2583,6 @@ class OverviewItemsPage(VersionedModel):
     items: list[OverviewItem] = Field(default_factory=list)
     page: OverviewPage
     completeness: OverviewCompleteness
-
-
-class OverviewModuleClassification(ContractModel):
-    classification_id: Identifier
-    category: OverviewClassificationKind
-    label: str
-    symbol_id: Identifier | None
-    symbol_name: str
 
 
 class OverviewModuleCard(VersionedModel):

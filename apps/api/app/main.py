@@ -848,6 +848,7 @@ def create_app(
         limit: int = Query(default=shared.DEFAULT_OVERVIEW_PAGE_LIMIT, ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_OVERVIEW_PAGE_LIMIT),
         module_id: str | None = Query(default=None, min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_IDENTIFIER_LENGTH),
         category: OverviewClassificationKind | None = Query(default=None),
+        detail: Literal["summary", "full"] = Query(default="summary"),
     ) -> OverviewItemsPage:
         return await run_in_threadpool(
             workspace_service.list_overview_items,
@@ -858,6 +859,7 @@ def create_app(
             limit=limit,
             module_id=module_id,
             category=category,
+            detail=detail,
         )
 
     @application.get(

@@ -4075,8 +4075,6 @@ class WorkspaceService:
     def _overview_relation_summary(relation: OverviewModuleRelation) -> OverviewModuleRelationSummary:
         return OverviewModuleRelationSummary(
             relation_id=relation.relation_id,
-            source_module_id=relation.source_module_id,
-            target_module_id=relation.target_module_id,
             source_path=relation.source_module.path,
             target_path=relation.target_module.path,
             relation_kinds=list(relation.relation_kinds),
@@ -4088,20 +4086,17 @@ class WorkspaceService:
         reasons: list[str] = []
 
         def add(reason: str) -> None:
-            value = "_".join(part for part in "".join(char.lower() if char.isalnum() else " " for char in reason).split())
-            if value and value not in reasons:
-                reasons.append(value[:100])
+            if reason not in reasons:
+                reasons.append(reason)
 
         if overview.truncated:
             add("overview_truncated")
-            if overview.truncation_reason:
-                for reason in overview.truncation_reason.split("; "):
-                    add(reason)
+        if any(section.truncated for section in overview.section_coverage):
+            add("catalog_cap_reached")
         if overview.unresolved:
             add("unresolved_present")
         if overview.classification_coverage.analysis_incomplete:
-            for reason in overview.classification_coverage.incomplete_reasons:
-                add(reason)
+            add("classification_analysis_incomplete")
         if overview.entry_status == "partial":
             add("entry_analysis_partial")
         if overview.responsibility_status in {"partial", "invalid"}:
@@ -4119,6 +4114,8 @@ class WorkspaceService:
         reasons = list(base.reasons)
         if catalog_limited and "catalog_cap_reached" not in reasons:
             reasons.append("catalog_cap_reached")
+        if has_next_page and "more_items" not in reasons:
+            reasons.append("more_items")
         status = (
             "truncated" if has_next_page else
             "possibly_incomplete" if catalog_limited or base.status == "possibly_incomplete" else
@@ -4138,6 +4135,8 @@ class WorkspaceService:
         reasons = list(base.reasons)
         if catalog_limited and "catalog_cap_reached" not in reasons:
             reasons.append("catalog_cap_reached")
+        if has_next_page and "more_items" not in reasons:
+            reasons.append("more_items")
         return base.model_copy(update={
             "status": "truncated" if has_next_page else (
                 "possibly_incomplete" if catalog_limited or base.status == "possibly_incomplete" else "complete"
@@ -4222,9 +4221,12 @@ class WorkspaceService:
             OverviewModuleSummary(
                 module_id=module.module_id,
                 path=module.symbol.path,
-                name=module.symbol.qualified_name,
                 entry_reachable=module.entry_reachable,
-                classification_counts=module.classification_counts,
+                classification_counts={
+                    category: count
+                    for category, count in module.classification_counts.model_dump().items()
+                    if count > 0
+                },
                 in_relations=incoming.get(module.module_id, 0),
                 out_relations=outgoing.get(module.module_id, 0),
             )
@@ -4298,6 +4300,7 @@ class WorkspaceService:
         limit: int = DEFAULT_OVERVIEW_PAGE_LIMIT,
         module_id: str | None = None,
         category: OverviewClassificationKind | None = None,
+        detail: Literal["summary", "full"] = "summary",
     ) -> OverviewItemsPage:
         module_sections = {"modules", "classifications", "module_relations", "groups"}
         if module_id is not None and section not in module_sections:
@@ -4371,6 +4374,30 @@ class WorkspaceService:
         offset = self._decode_overview_cursor(cursor, project_id, index_id, section, module_id, category, available_total) if cursor else 0
         page_items = items[offset : offset + limit]
         next_offset = offset + len(page_items)
+        if detail == "summary":
+            if section == "modules":
+                page_items = [OverviewModuleSummary(
+                    module_id=item.module_id,
+                    path=item.symbol.path,
+                    entry_reachable=item.entry_reachable,
+                    classification_counts={
+                        category: count
+                        for category, count in item.classification_counts.model_dump().items()
+                        if count > 0
+                    },
+                    in_relations=sum(1 for relation in overview.module_relations if relation.target_module_id == item.module_id),
+                    out_relations=sum(1 for relation in overview.module_relations if relation.source_module_id == item.module_id),
+                ) for item in page_items if isinstance(item, OverviewModule)]
+            elif section == "module_relations":
+                page_items = [self._overview_relation_summary(item) for item in page_items if isinstance(item, OverviewModuleRelation)]
+            elif section == "classifications":
+                page_items = [OverviewModuleClassification(
+                    classification_id=item.classification_id,
+                    category=item.category,
+                    label=item.label,
+                    symbol_id=item.symbol_id,
+                    symbol_name=item.symbol_name,
+                ) for item in page_items if isinstance(item, OverviewClassification)]
         next_cursor = (
             self._encode_overview_cursor(project_id, index_id, section, next_offset, module_id, category)
             if next_offset < available_total else None

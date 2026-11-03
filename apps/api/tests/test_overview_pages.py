@@ -79,6 +79,21 @@ def _create_index(tmp_path: Path):
     return application, project["project_id"], created["index"]["index_id"]
 
 
+async def _create_index_async(tmp_path: Path):
+    repository = tmp_path / "timeout-demo"
+    shutil.copytree(FIXTURE_ROOT, repository, ignore=shutil.ignore_patterns("__pycache__", ".codetrail"))
+    application = create_app({"timeout-demo": repository})
+    status, project = await _post(application, "/api/projects", {"name": "Overview pages", "repository_id": "timeout-demo"})
+    assert status == 200
+    status, created = await _post(
+        application,
+        f"/api/projects/{project['project_id']}/indexes",
+        {"revision": "overview-pages-v1", "dirty": False},
+    )
+    assert status == 200
+    return application, project["project_id"], created["index"]["index_id"]
+
+
 async def _post(application, target: str, payload: dict) -> tuple[int, dict]:
     parsed = urlsplit(target)
     body = json.dumps(payload).encode("utf-8")
@@ -123,18 +138,19 @@ def _catalog(service, project_id: str, index_id: str):
     )
 
 
-def _page_all(application, project_id: str, index_id: str, section: str, query: str = "") -> list[dict]:
+async def _page_all(application, project_id: str, index_id: str, section: str, query: str = "", detail: str = "summary") -> list[dict]:
     items: list[dict] = []
     cursor = None
     while True:
-        params = ["limit=2"]
+        params = ["limit=2", f"detail={detail}"]
         if query:
             params.append(query)
         if cursor:
             params.append(f"cursor={cursor}")
         suffix = "?" + "&".join(params)
-        status, page = request(
+        status, page = await _request(
             application,
+            "GET",
             f"/api/projects/{project_id}/indexes/{index_id}/overview/sections/{section}{suffix}",
         )
         assert status == 200, page
@@ -169,14 +185,23 @@ def test_skeleton_uses_catalog_counts_sorts_modules_and_pages(tmp_path: Path) ->
     assert [item["path"] for item in skeleton["modules"]] == sorted(
         item.symbol.path for item in catalog.modules
     )[:1]
+    assert all(set(item) == {
+        "module_id", "path", "entry_reachable", "classification_counts", "in_relations", "out_relations"
+    } for item in skeleton["modules"])
+    assert all("source_module_id" not in item and "target_module_id" not in item for item in skeleton["module_relations"])
     if catalog.coverage.total_modules > 1:
         assert skeleton["page"]["next_cursor"]
         assert skeleton["completeness"]["status"] == "truncated"
         assert skeleton["completeness"]["hint"]
+        assert "more_items" in skeleton["completeness"]["reasons"]
 
 
 def test_section_pages_cover_catalog_without_duplicates_or_gaps(tmp_path: Path) -> None:
-    application, project_id, index_id = _create_index(tmp_path)
+    asyncio.run(_test_section_pages_cover_catalog_without_duplicates_or_gaps(tmp_path))
+
+
+async def _test_section_pages_cover_catalog_without_duplicates_or_gaps(tmp_path: Path) -> None:
+    application, project_id, index_id = await _create_index_async(tmp_path)
     catalog = _catalog(application.state.workspace_service, project_id, index_id)
     expected = {
         "modules": [item.model_dump(mode="json") for item in sorted(catalog.modules, key=lambda item: (item.symbol.path, item.module_id))],
@@ -184,11 +209,57 @@ def test_section_pages_cover_catalog_without_duplicates_or_gaps(tmp_path: Path) 
         "module_relations": [item.model_dump(mode="json") for item in sorted(catalog.module_relations, key=lambda item: (-item.edge_count, item.relation_id))],
     }
     for section, catalog_items in expected.items():
-        actual = _page_all(application, project_id, index_id, section)
-        assert actual == catalog_items
+        full_actual = await _page_all(application, project_id, index_id, section, detail="full")
+        assert full_actual == catalog_items
+        actual = await _page_all(application, project_id, index_id, section)
+        id_field = {"modules": "module_id", "classifications": "classification_id", "module_relations": "relation_id"}[section]
+        assert [item[id_field] for item in actual] == [item[id_field] for item in catalog_items]
         assert len(actual) == len({
-            item["module_id"] if section == "modules" else item["classification_id"] if section == "classifications" else item["relation_id"] for item in actual
+            item[id_field] for item in actual
         })
+        if section == "classifications":
+            assert all("evidence" not in item for item in actual)
+
+
+def test_compact_skeleton_module_summaries_stay_small_and_cursor_crosses_detail(tmp_path: Path) -> None:
+    asyncio.run(_test_compact_skeleton_module_summaries_stay_small_and_cursor_crosses_detail(tmp_path))
+
+
+async def _test_compact_skeleton_module_summaries_stay_small_and_cursor_crosses_detail(tmp_path: Path) -> None:
+    application, project_id, index_id = await _create_index_async(tmp_path)
+    status, skeleton = await _request(
+        application, "GET", f"/api/projects/{project_id}/indexes/{index_id}/overview/skeleton?module_limit=100",
+    )
+    assert status == 200
+    assert skeleton["modules"]
+    serialized_modules = [json.dumps(item, separators=(",", ":"), ensure_ascii=False).encode("utf-8") for item in skeleton["modules"]]
+    assert max(map(len, serialized_modules)) < 200
+
+    status, summary_page = await _request(
+        application, "GET", f"/api/projects/{project_id}/indexes/{index_id}/overview/sections/modules?limit=1",
+    )
+    assert status == 200 and summary_page["page"]["next_cursor"]
+    cursor = summary_page["page"]["next_cursor"]
+    status, full_page = await _request(
+        application, "GET",
+        f"/api/projects/{project_id}/indexes/{index_id}/overview/sections/modules?limit=1&detail=full&cursor={cursor}",
+    )
+    assert status == 200
+    assert full_page["items"][0]["module_id"] != summary_page["items"][0]["module_id"]
+    assert "symbol" in full_page["items"][0]
+
+    status, full_page_one = await _request(
+        application, "GET",
+        f"/api/projects/{project_id}/indexes/{index_id}/overview/sections/modules?limit=1&detail=full",
+    )
+    assert status == 200 and full_page_one["page"]["next_cursor"]
+    full_cursor = full_page_one["page"]["next_cursor"]
+    status, summary_page_two = await _request(
+        application, "GET",
+        f"/api/projects/{project_id}/indexes/{index_id}/overview/sections/modules?limit=1&cursor={full_cursor}",
+    )
+    assert status == 200
+    assert summary_page_two["items"][0]["module_id"] != full_page_one["items"][0]["module_id"]
 
 
 def test_cursor_errors_are_structured_and_filter_bound(tmp_path: Path) -> None:
