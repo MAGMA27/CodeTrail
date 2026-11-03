@@ -1,5 +1,9 @@
 # 本地 MCP 配置
 
+## HTTP 与 MCP 一致性检查
+
+HTTP and MCP adapters call the same `WorkspaceService`; `factory.py` owns their implementation wiring. CI runs `lint-imports` to prevent the adapters from importing storage, indexing, graph, execution, or job implementation modules directly. The parity test enumerates every registered MCP tool with its HTTP route (or an explained MCP-only workflow) and compares shared parameter constraints with OpenAPI. A separate AST check requires request limits/defaults and API error definitions to come from `contracts.py`.
+
 ## 工具响应与错误
 
 CodeTrail 工具成功和失败都通过原工具的响应模型返回，字段形状保持一致。失败时 `ok=false` 并包含 `error`（`code`、短英文 `message`、`retryable`）；参数校验失败使用 `invalid_input`，可在可选 `details` 中按字段给出问题类型及适用的边界值。HTTP 与 MCP 共用该详情映射；`got` 只包含明确安全的标量、不超过 80 字符且可解析为数值的字符串或短 literal 值，必填缺失、请求体、敏感字段和值类型不适用时省略。`details` 缺省时不出现在旧错误响应中。

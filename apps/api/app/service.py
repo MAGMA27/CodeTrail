@@ -158,7 +158,7 @@ from .relations import (
     relation_budgets_from_environment,
     relation_coverage_limitations,
 )
-from .overview import RULES_VERSION, build_project_overview
+from .overview import RULES_VERSION, bound_overview_output, build_project_overview
 from .journeys import build_journey_catalog, build_project_journey
 from .feature_generation import (
     FeatureGenerationEngine,
@@ -3976,6 +3976,16 @@ class WorkspaceService:
             raise ServiceError("invalid_input", 400, "overview parameters are invalid") from exc
         except StorageError as exc:
             raise ServiceError("internal_error", 500, "local index storage failed") from exc
+
+    def bound_overview(
+        self,
+        overview: ProjectOverview,
+        measure: Callable[[ProjectOverview], int],
+        max_output_bytes: int,
+    ) -> ProjectOverview:
+        """Apply the shared overview output bound for adapter-specific serialization."""
+
+        return bound_overview_output(overview, measure, max_output_bytes)
 
     def get_journey_catalog(self, project_id: str, index_id: str) -> ProjectJourneyCatalog:
         """Read lightweight UI action journey summaries from one fixed source snapshot."""

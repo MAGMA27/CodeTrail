@@ -6,11 +6,28 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Callable
 
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+
 from .config import ModelProviderConfig
+from .contracts import ApiErrorResponse
 from .feature_generation import FeatureModelAdapter
 from .github import GitHubClient
 from .issue_analysis import IssueModelAdapter
+from .indexing import IndexingControl
 from .service import IndexService, RepositoryRegistry, WorkspaceService
+from .storage import StorageError
+
+# These types are re-exported for the HTTP composition root. Keeping dependency
+# injection wiring here prevents adapters from depending on implementation modules.
+__all__ = [
+    "FeatureModelAdapter",
+    "GitHubClient",
+    "IndexingControl",
+    "IssueModelAdapter",
+    "create_services",
+    "register_storage_error_handler",
+]
 
 
 def create_services(
@@ -77,3 +94,15 @@ def create_services(
         run_model_adapter_factory=run_model_adapter_factory,
         run_max_concurrent_runs=run_max_concurrent_runs,
     )
+
+
+def register_storage_error_handler(application: FastAPI) -> None:
+    """Keep raw storage failures as safe API errors at the composition boundary."""
+
+    @application.exception_handler(StorageError)
+    async def handle_storage_error(_request: Request, _exc: StorageError) -> JSONResponse:
+        payload = ApiErrorResponse(
+            code="internal_error",
+            message="local index storage failed",
+        )
+        return JSONResponse(status_code=500, content=payload.model_dump(mode="json"))

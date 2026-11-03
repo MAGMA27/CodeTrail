@@ -1626,9 +1626,9 @@ async def _exercise_stdio(
             },
         )
         assert invalid_neighbors.is_error is True
+        assert invalid_neighbors.structured_content["error"]["code"] == http_invalid_neighbors["code"]
         mcp_details = invalid_neighbors.structured_content["error"]["details"]
         assert mcp_details == http_invalid_neighbors["details"]
-        assert invalid_neighbors.structured_content["error"]["message"] == http_invalid_neighbors["message"]
         http_direction = next(detail for detail in http_invalid_neighbors["details"] if detail["field"] == "direction")
         mcp_direction = next(detail for detail in mcp_details if detail["field"] == "direction")
         assert http_direction["allowed"] == ["callers", "callees", "both"]

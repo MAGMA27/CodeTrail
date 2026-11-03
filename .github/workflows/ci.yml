@@ -37,6 +37,9 @@ jobs:
 
       - run: uv sync --project apps/api --locked
 
+      - name: API import boundaries
+        run: uv run --directory apps/api lint-imports
+
       - name: API pytest
         run: uv run --directory apps/api pytest -q -rs
         env:

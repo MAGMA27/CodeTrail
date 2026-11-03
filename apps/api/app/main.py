@@ -17,6 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
+from . import contracts as shared
 from .contracts import (
     ApiErrorResponse,
     CreateIndexRequest,
@@ -41,6 +42,7 @@ from .contracts import (
     JobStatusResponse,
     ImpactDirection,
     IndexResponse,
+    Identifier,
     IndexRefreshResponse,
     LocalImportRequest,
     LocalImportResponse,
@@ -70,12 +72,15 @@ from .contracts import (
     TrashListResponse,
 )
 from .errors import safe_error_message, validation_error_details
-from .github import GitHubClient
-from .indexing import IndexingControl
 from .config import ModelProviderConfig
-from .factory import create_services
-from .feature_generation import FeatureModelAdapter
-from .issue_analysis import IssueModelAdapter
+from .factory import (
+    FeatureModelAdapter,
+    GitHubClient,
+    IndexingControl,
+    IssueModelAdapter,
+    create_services,
+    register_storage_error_handler,
+)
 from .run_sse import (
     RunEventStreamConfig,
     RunEventStreamLease,
@@ -88,7 +93,6 @@ from .run_sse import (
     resolve_sse_cursor,
 )
 from .service import ServiceError, WorkspaceService, is_loopback_host
-from .storage import StorageError
 
 
 class HealthResponse(BaseModel):
@@ -208,9 +212,7 @@ def create_app(
     async def handle_service_error(_request: Request, exc: ServiceError) -> JSONResponse:
         return _error_response(exc.status_code, exc.code, safe_error_message(exc.message), exc.details)
 
-    @application.exception_handler(StorageError)
-    async def handle_storage_error(_request: Request, _exc: StorageError) -> JSONResponse:
-        return _error_response(500, "internal_error", "local index storage failed")
+    register_storage_error_handler(application)
 
     @application.exception_handler(RequestValidationError)
     async def handle_validation_error(_request: Request, exc: RequestValidationError) -> JSONResponse:
@@ -269,20 +271,20 @@ def create_app(
         )
 
     @application.get("/api/jobs/{job_id}", response_model=JobStatusResponse, responses=_API_ERROR_RESPONSES)
-    async def get_job(job_id: str, project_id: str | None = Query(default=None, max_length=200)) -> JobStatusResponse:
+    async def get_job(job_id: Identifier, project_id: str | None = Query(default=None, min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_IDENTIFIER_LENGTH)) -> JobStatusResponse:
         return await run_in_threadpool(workspace_service.get_job, job_id, project_id=project_id)
 
     @application.post("/api/jobs/{job_id}/cancel", response_model=JobStatusResponse, responses=_API_ERROR_RESPONSES)
-    async def cancel_unbound_job(http_request: Request, job_id: str) -> JobStatusResponse:
+    async def cancel_unbound_job(http_request: Request, job_id: Identifier) -> JobStatusResponse:
         _require_local_write(http_request)
         return await run_in_threadpool(workspace_service.cancel_job, job_id)
 
     @application.get("/api/projects/{project_id}/jobs/{job_id}", response_model=JobStatusResponse, responses=_API_ERROR_RESPONSES)
-    async def get_project_job(project_id: str, job_id: str) -> JobStatusResponse:
+    async def get_project_job(project_id: Identifier, job_id: Identifier) -> JobStatusResponse:
         return await run_in_threadpool(workspace_service.get_job, job_id, project_id=project_id)
 
     @application.post("/api/projects/{project_id}/jobs/{job_id}/cancel", response_model=JobStatusResponse, responses=_API_ERROR_RESPONSES)
-    async def cancel_job(http_request: Request, project_id: str, job_id: str) -> JobStatusResponse:
+    async def cancel_job(http_request: Request, project_id: Identifier, job_id: Identifier) -> JobStatusResponse:
         _require_local_write(http_request)
         return await run_in_threadpool(workspace_service.cancel_job, job_id, project_id=project_id)
 
@@ -291,7 +293,7 @@ def create_app(
         response_model=ImportAttemptResponse,
         responses=_API_ERROR_RESPONSES,
     )
-    async def get_import_status(attempt_id: str) -> ImportAttemptResponse:
+    async def get_import_status(attempt_id: Identifier) -> ImportAttemptResponse:
         return await run_in_threadpool(workspace_service.get_import_status, attempt_id)
 
     @application.post(
@@ -299,7 +301,7 @@ def create_app(
         response_model=LocalImportResponse,
         responses=_API_ERROR_RESPONSES,
     )
-    async def retry_import(http_request: Request, attempt_id: str) -> LocalImportResponse:
+    async def retry_import(http_request: Request, attempt_id: Identifier) -> LocalImportResponse:
         _require_local_write(http_request)
         return await _run_with_disconnect(http_request, workspace_service.retry_import, attempt_id)
 
@@ -308,7 +310,7 @@ def create_app(
         response_model=JobStatusResponse,
         responses=_API_ERROR_RESPONSES,
     )
-    async def retry_github_import(http_request: Request, attempt_id: str) -> JobStatusResponse:
+    async def retry_github_import(http_request: Request, attempt_id: Identifier) -> JobStatusResponse:
         _require_local_write(http_request)
         attempt = await run_in_threadpool(workspace_service.registry.management_store.load_attempt, attempt_id)
         return await run_in_threadpool(workspace_service.submit_job, "github_retry", attempt.project_id, {"attempt_id": attempt_id},
@@ -319,7 +321,7 @@ def create_app(
         response_model=JobStatusResponse,
         responses=_API_ERROR_RESPONSES,
     )
-    async def retry_import_cleanup(http_request: Request, attempt_id: str) -> JobStatusResponse:
+    async def retry_import_cleanup(http_request: Request, attempt_id: Identifier) -> JobStatusResponse:
         _require_local_write(http_request)
         attempt = await run_in_threadpool(workspace_service.registry.management_store.load_attempt, attempt_id)
         return await run_in_threadpool(workspace_service.submit_job, "github_cleanup", attempt.project_id, {"attempt_id": attempt_id},
@@ -354,7 +356,7 @@ def create_app(
         response_model=Project,
         responses=_API_ERROR_RESPONSES,
     )
-    async def move_project_to_trash(project_id: str) -> Project:
+    async def move_project_to_trash(project_id: Identifier) -> Project:
         return await run_in_threadpool(workspace_service.move_project_to_trash, project_id)
 
     @application.post(
@@ -362,7 +364,7 @@ def create_app(
         response_model=Project,
         responses=_API_ERROR_RESPONSES,
     )
-    async def restore_project(project_id: str) -> Project:
+    async def restore_project(project_id: Identifier) -> Project:
         return await run_in_threadpool(workspace_service.restore_project, project_id)
 
     @application.post(
@@ -370,7 +372,7 @@ def create_app(
         response_model=SessionResponse,
         responses=_API_ERROR_RESPONSES,
     )
-    async def create_session(project_id: str, request: CreateSessionRequest) -> SessionResponse:
+    async def create_session(project_id: Identifier, request: CreateSessionRequest) -> SessionResponse:
         return await run_in_threadpool(workspace_service.create_session, project_id, request)
 
     @application.get(
@@ -379,9 +381,9 @@ def create_app(
         responses=_API_ERROR_RESPONSES,
     )
     async def list_sessions(
-        project_id: str,
-        limit: int = Query(default=40, ge=1, le=40),
-        cursor: str | None = Query(default=None, max_length=500),
+        project_id: Identifier,
+        limit: int = Query(default=shared.MAX_PAGE_SIZE, ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_PAGE_SIZE),
+        cursor: str | None = Query(default=None, max_length=shared.MAX_CURSOR_LENGTH),
     ) -> SessionListResponse:
         return await run_in_threadpool(
             workspace_service.list_sessions,
@@ -395,7 +397,7 @@ def create_app(
         response_model=SessionResponse,
         responses=_API_ERROR_RESPONSES,
     )
-    async def move_session_to_trash(project_id: str, session_id: str) -> SessionResponse:
+    async def move_session_to_trash(project_id: Identifier, session_id: Identifier) -> SessionResponse:
         return await run_in_threadpool(workspace_service.move_session_to_trash, project_id, session_id)
 
     @application.post(
@@ -403,7 +405,7 @@ def create_app(
         response_model=SessionResponse,
         responses=_API_ERROR_RESPONSES,
     )
-    async def restore_session(project_id: str, session_id: str) -> SessionResponse:
+    async def restore_session(project_id: Identifier, session_id: Identifier) -> SessionResponse:
         return await run_in_threadpool(workspace_service.restore_session, project_id, session_id)
 
     @application.get(
@@ -411,7 +413,7 @@ def create_app(
         response_model=SessionResponse,
         responses=_API_ERROR_RESPONSES,
     )
-    async def get_session(project_id: str, session_id: str) -> SessionResponse:
+    async def get_session(project_id: Identifier, session_id: Identifier) -> SessionResponse:
         return await run_in_threadpool(workspace_service.get_session, project_id, session_id)
 
     @application.get(
@@ -420,10 +422,10 @@ def create_app(
         responses=_API_ERROR_RESPONSES,
     )
     async def list_session_messages(
-        project_id: str,
-        session_id: str,
-        limit: int = Query(default=100, ge=1, le=100),
-        cursor: str | None = Query(default=None, max_length=500),
+        project_id: Identifier,
+        session_id: Identifier,
+        limit: int = Query(default=shared.MAX_EVENT_PAGE_SIZE, ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_EVENT_PAGE_SIZE),
+        cursor: str | None = Query(default=None, max_length=shared.MAX_CURSOR_LENGTH),
     ) -> SessionMessagesResponse:
         return await run_in_threadpool(
             workspace_service.list_session_messages,
@@ -439,8 +441,8 @@ def create_app(
         responses=_API_ERROR_RESPONSES,
     )
     async def append_session_message(
-        project_id: str,
-        session_id: str,
+        project_id: Identifier,
+        session_id: Identifier,
         request: AppendSessionMessageRequest,
     ) -> SessionMessageResponse:
         message = await run_in_threadpool(
@@ -457,8 +459,8 @@ def create_app(
         responses=_API_ERROR_RESPONSES,
     )
     async def create_run(
-        project_id: str,
-        session_id: str,
+        project_id: Identifier,
+        session_id: Identifier,
         request: CreateRunRequest,
     ) -> CreateRunResponse:
         return await run_in_threadpool(workspace_service.create_run, project_id, session_id, request)
@@ -469,10 +471,10 @@ def create_app(
         responses=_API_ERROR_RESPONSES,
     )
     async def list_runs(
-        project_id: str,
-        session_id: str,
-        limit: int = Query(default=40, ge=1, le=40),
-        cursor: str | None = Query(default=None, max_length=500),
+        project_id: Identifier,
+        session_id: Identifier,
+        limit: int = Query(default=shared.MAX_PAGE_SIZE, ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_PAGE_SIZE),
+        cursor: str | None = Query(default=None, max_length=shared.MAX_CURSOR_LENGTH),
     ) -> RunListResponse:
         return await run_in_threadpool(
             workspace_service.list_runs,
@@ -487,7 +489,7 @@ def create_app(
         response_model=RunStatusResponse,
         responses=_API_ERROR_RESPONSES,
     )
-    async def get_run(project_id: str, session_id: str, run_id: str) -> RunStatusResponse:
+    async def get_run(project_id: Identifier, session_id: Identifier, run_id: Identifier) -> RunStatusResponse:
         return await run_in_threadpool(workspace_service.get_run, project_id, session_id, run_id)
 
     @application.get(
@@ -496,11 +498,11 @@ def create_app(
         responses=_API_ERROR_RESPONSES,
     )
     async def list_run_events(
-        project_id: str,
-        session_id: str,
-        run_id: str,
-        after_sequence: int = Query(default=0, ge=0),
-        limit: int = Query(default=100, ge=1, le=100),
+        project_id: Identifier,
+        session_id: Identifier,
+        run_id: Identifier,
+        after_sequence: int = Query(default=shared.MIN_RUN_SEQUENCE, ge=shared.MIN_RUN_SEQUENCE),
+        limit: int = Query(default=shared.MAX_EVENT_PAGE_SIZE, ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_EVENT_PAGE_SIZE),
     ) -> RunEventsResponse:
         return await run_in_threadpool(
             workspace_service.list_run_events,
@@ -516,11 +518,11 @@ def create_app(
         responses=_API_ERROR_RESPONSES,
     )
     async def stream_run_events(
-        project_id: str,
-        session_id: str,
-        run_id: str,
-        after_sequence: int | None = Query(default=None, ge=0),
-        last_event_id: str | None = Header(default=None, alias="Last-Event-ID", max_length=500),
+        project_id: Identifier,
+        session_id: Identifier,
+        run_id: Identifier,
+        after_sequence: int | None = Query(default=None, ge=shared.MIN_RUN_SEQUENCE),
+        last_event_id: str | None = Header(default=None, alias="Last-Event-ID", max_length=shared.MAX_CURSOR_LENGTH),
     ) -> StreamingResponse:
         try:
             cursor = resolve_sse_cursor(
@@ -627,11 +629,11 @@ def create_app(
         responses=_API_ERROR_RESPONSES,
     )
     async def list_run_tool_results(
-        project_id: str,
-        session_id: str,
-        run_id: str,
-        after_sequence: int = Query(default=0, ge=0),
-        limit: int = Query(default=40, ge=1, le=40),
+        project_id: Identifier,
+        session_id: Identifier,
+        run_id: Identifier,
+        after_sequence: int = Query(default=shared.MIN_RUN_SEQUENCE, ge=shared.MIN_RUN_SEQUENCE),
+        limit: int = Query(default=shared.MAX_PAGE_SIZE, ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_PAGE_SIZE),
     ) -> RunToolResultsResponse:
         return await run_in_threadpool(
             workspace_service.list_run_tool_results,
@@ -647,7 +649,7 @@ def create_app(
         response_model=ReportResponse,
         responses=_API_ERROR_RESPONSES,
     )
-    async def get_run_report(project_id: str, session_id: str, run_id: str) -> ReportResponse:
+    async def get_run_report(project_id: Identifier, session_id: Identifier, run_id: Identifier) -> ReportResponse:
         return await run_in_threadpool(workspace_service.get_run_report, project_id, session_id, run_id)
 
     @application.get(
@@ -656,14 +658,14 @@ def create_app(
         responses=_API_ERROR_RESPONSES,
     )
     async def get_run_impact(
-        project_id: str,
-        session_id: str,
-        run_id: str,
-        candidate_id: str | None = Query(default=None, max_length=200),
-        finding_id: str | None = Query(default=None, max_length=200),
+        project_id: Identifier,
+        session_id: Identifier,
+        run_id: Identifier,
+        candidate_id: str | None = Query(default=None, min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_IDENTIFIER_LENGTH),
+        finding_id: str | None = Query(default=None, min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_IDENTIFIER_LENGTH),
         direction: ImpactDirection = Query(default="callers"),
-        depth: int = Query(default=2, ge=1, le=2),
-        limit: int = Query(default=40, ge=1, le=40),
+        depth: int = Query(default=shared.MAX_GRAPH_DEPTH, ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_GRAPH_DEPTH),
+        limit: int = Query(default=shared.MAX_PAGE_SIZE, ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_PAGE_SIZE),
     ) -> RunImpactResponse:
         return await run_in_threadpool(
             workspace_service.get_run_impact,
@@ -683,9 +685,9 @@ def create_app(
         responses=_API_ERROR_RESPONSES,
     )
     async def cancel_run(
-        project_id: str,
-        session_id: str,
-        run_id: str,
+        project_id: Identifier,
+        session_id: Identifier,
+        run_id: Identifier,
         request: CancelRunRequest,
     ) -> CancelRunResponse:
         return await run_in_threadpool(
@@ -701,7 +703,7 @@ def create_app(
         response_model=ProjectIndexListResponse,
         responses=_API_ERROR_RESPONSES,
     )
-    async def list_project_indexes(project_id: str) -> ProjectIndexListResponse:
+    async def list_project_indexes(project_id: Identifier) -> ProjectIndexListResponse:
         return await run_in_threadpool(workspace_service.list_project_indexes, project_id)
 
     @application.post(
@@ -711,7 +713,7 @@ def create_app(
     )
     async def create_project_index(
         http_request: Request,
-        project_id: str,
+        project_id: Identifier,
         request: CreateProjectIndexRequest,
     ) -> IndexResponse:
         return await _run_with_disconnect(http_request, workspace_service.create_project_index, project_id, request)
@@ -721,7 +723,7 @@ def create_app(
         response_model=IndexFreshness,
         responses=_API_ERROR_RESPONSES,
     )
-    async def check_project_index_freshness(project_id: str, index_id: str) -> IndexFreshness:
+    async def check_project_index_freshness(project_id: Identifier, index_id: Identifier) -> IndexFreshness:
         return await run_in_threadpool(workspace_service.check_index_freshness, project_id, index_id)
 
     @application.post(
@@ -731,8 +733,8 @@ def create_app(
     )
     async def refresh_project_index(
         http_request: Request,
-        project_id: str,
-        index_id: str,
+        project_id: Identifier,
+        index_id: Identifier,
         request: RefreshProjectIndexRequest,
     ) -> JobStatusResponse:
         _require_local_write(http_request)
@@ -747,8 +749,8 @@ def create_app(
     )
     async def refresh_github_source(
         http_request: Request,
-        project_id: str,
-        index_id: str,
+        project_id: Identifier,
+        index_id: Identifier,
     ) -> JobStatusResponse:
         _require_local_write(http_request)
         return await run_in_threadpool(workspace_service.submit_job, "github_refresh", project_id, {"index_id": index_id},
@@ -759,7 +761,7 @@ def create_app(
         response_model=IndexResponse,
         responses=_API_ERROR_RESPONSES,
     )
-    async def get_project_index(project_id: str, index_id: str) -> IndexResponse:
+    async def get_project_index(project_id: Identifier, index_id: Identifier) -> IndexResponse:
         return await run_in_threadpool(workspace_service.get_project_index, project_id, index_id)
 
     @application.get(
@@ -768,10 +770,10 @@ def create_app(
         responses=_API_ERROR_RESPONSES,
     )
     async def list_project_features(
-        project_id: str,
-        index_id: str | None = Query(default=None, max_length=200),
-        limit: int = Query(default=20, ge=1, le=40),
-        cursor: str | None = Query(default=None, max_length=500),
+        project_id: Identifier,
+        index_id: str | None = Query(default=None, min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_IDENTIFIER_LENGTH),
+        limit: int = Query(default=shared.DEFAULT_FEATURE_HISTORY_PAGE_SIZE, ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_PAGE_SIZE),
+        cursor: str | None = Query(default=None, max_length=shared.MAX_CURSOR_LENGTH),
     ) -> FeatureGenerationListResponse:
         return await run_in_threadpool(
             workspace_service.list_feature_generations,
@@ -787,14 +789,14 @@ def create_app(
         responses=_API_ERROR_RESPONSES,
     )
     async def get_project_overview(
-        project_id: str,
-        index_id: str,
-        max_depth: int = Query(default=4, ge=1, le=8),
-        max_paths: int = Query(default=40, ge=1, le=40),
-        max_modules: int = Query(default=100, ge=1, le=200),
-        max_groups: int = Query(default=80, ge=1, le=200),
-        max_module_relations: int = Query(default=200, ge=1, le=400),
-        max_classifications: int = Query(default=200, ge=1, le=200),
+        project_id: Identifier,
+        index_id: Identifier,
+        max_depth: int = Query(default=shared.DEFAULT_OVERVIEW_DEPTH, ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_OVERVIEW_DEPTH),
+        max_paths: int = Query(default=shared.MAX_OVERVIEW_PATHS, ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_OVERVIEW_PATHS),
+        max_modules: int = Query(default=shared.DEFAULT_OVERVIEW_MODULES, ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_OVERVIEW_MODULES),
+        max_groups: int = Query(default=shared.DEFAULT_OVERVIEW_GROUPS, ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_OVERVIEW_GROUPS),
+        max_module_relations: int = Query(default=shared.DEFAULT_OVERVIEW_RELATIONS, ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_OVERVIEW_RELATIONS),
+        max_classifications: int = Query(default=shared.DEFAULT_OVERVIEW_CLASSIFICATIONS, ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_OVERVIEW_CLASSIFICATIONS),
     ) -> ProjectOverview:
         return await run_in_threadpool(
             workspace_service.get_overview,
@@ -813,7 +815,7 @@ def create_app(
         response_model=ProjectJourneyCatalog,
         responses=_API_ERROR_RESPONSES,
     )
-    async def get_project_journey_catalog(project_id: str, index_id: str) -> ProjectJourneyCatalog:
+    async def get_project_journey_catalog(project_id: Identifier, index_id: Identifier) -> ProjectJourneyCatalog:
         return await run_in_threadpool(workspace_service.get_journey_catalog, project_id, index_id)
 
     @application.get(
@@ -821,7 +823,7 @@ def create_app(
         response_model=ProjectJourney,
         responses=_API_ERROR_RESPONSES,
     )
-    async def get_project_journey(project_id: str, index_id: str, journey_id: str) -> ProjectJourney:
+    async def get_project_journey(project_id: Identifier, index_id: Identifier, journey_id: Identifier) -> ProjectJourney:
         return await run_in_threadpool(workspace_service.get_journey, project_id, index_id, journey_id)
 
     @application.post(
@@ -830,8 +832,8 @@ def create_app(
         responses=_API_ERROR_RESPONSES,
     )
     async def generate_project_features(
-        project_id: str,
-        index_id: str,
+        project_id: Identifier,
+        index_id: Identifier,
         request: FeatureGenerationRequest,
     ) -> FeatureGenerationResponse:
         return await run_in_threadpool(
@@ -847,11 +849,11 @@ def create_app(
         responses=_API_ERROR_RESPONSES,
     )
     async def get_project_feature_graph(
-        project_id: str,
-        index_id: str,
-        generation_id: str,
-        max_nodes: int = Query(default=40, ge=1, le=40),
-        max_edges: int = Query(default=80, ge=1, le=120),
+        project_id: Identifier,
+        index_id: Identifier,
+        generation_id: Identifier,
+        max_nodes: int = Query(default=shared.MAX_FEATURE_GRAPH_NODES, ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_FEATURE_GRAPH_NODES),
+        max_edges: int = Query(default=shared.DEFAULT_FEATURE_GRAPH_EDGES, ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_FEATURE_GRAPH_EDGES),
     ) -> FeatureGraphResponse:
         return await run_in_threadpool(
             workspace_service.get_feature_graph,
@@ -868,9 +870,9 @@ def create_app(
         responses=_API_ERROR_RESPONSES,
     )
     async def get_project_features(
-        project_id: str,
-        index_id: str,
-        generation_id: str,
+        project_id: Identifier,
+        index_id: Identifier,
+        generation_id: Identifier,
     ) -> FeatureGenerationResponse:
         return await run_in_threadpool(
             workspace_service.get_feature_generation,
@@ -885,10 +887,10 @@ def create_app(
         responses=_API_ERROR_RESPONSES,
     )
     async def search_project_index(
-        project_id: str,
-        index_id: str,
-        query: str = Query(min_length=1, max_length=500),
-        limit: int = Query(default=40, ge=1, le=40),
+        project_id: Identifier,
+        index_id: Identifier,
+        query: str = Query(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_QUERY_LENGTH),
+        limit: int = Query(default=shared.MAX_PAGE_SIZE, ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_PAGE_SIZE),
     ) -> SearchIndexResponse:
         return await run_in_threadpool(workspace_service.search, project_id, index_id, query, limit)
 
@@ -898,11 +900,11 @@ def create_app(
         responses=_API_ERROR_RESPONSES,
     )
     async def list_project_module_symbols(
-        project_id: str,
-        index_id: str,
-        module_id: str,
-        limit: int = Query(default=40, ge=1, le=40),
-        cursor: str | None = Query(default=None, max_length=500),
+        project_id: Identifier,
+        index_id: Identifier,
+        module_id: Identifier,
+        limit: int = Query(default=shared.MAX_PAGE_SIZE, ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_PAGE_SIZE),
+        cursor: str | None = Query(default=None, max_length=shared.MAX_CURSOR_LENGTH),
     ) -> ModuleSymbolsPageResponse:
         return await run_in_threadpool(
             workspace_service.list_module_symbols,
@@ -919,12 +921,12 @@ def create_app(
         responses=_API_ERROR_RESPONSES,
     )
     async def get_project_neighbors(
-        project_id: str,
-        index_id: str,
-        symbol_id: str,
+        project_id: Identifier,
+        index_id: Identifier,
+        symbol_id: Identifier,
         direction: Literal["callers", "callees", "both"],
-        depth: int = Query(default=2, ge=1, le=2),
-        limit: int = Query(default=40, ge=1, le=40),
+        depth: int = Query(default=shared.MAX_GRAPH_DEPTH, ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_GRAPH_DEPTH),
+        limit: int = Query(default=shared.MAX_PAGE_SIZE, ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_PAGE_SIZE),
         edge_kinds: list[EdgeKind] | None = Query(default=None),
     ) -> NeighborsIndexResponse:
         return await run_in_threadpool(
@@ -944,11 +946,11 @@ def create_app(
         responses=_API_ERROR_RESPONSES,
     )
     async def read_project_source(
-        project_id: str,
-        index_id: str,
-        path: str = Query(min_length=1, max_length=500),
-        start_line: int = Query(ge=1),
-        end_line: int = Query(ge=1),
+        project_id: Identifier,
+        index_id: Identifier,
+        path: str = Query(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_PATH_LENGTH),
+        start_line: int = Query(ge=shared.MIN_REQUEST_VALUE),
+        end_line: int = Query(ge=shared.MIN_REQUEST_VALUE),
     ) -> SourceIndexResponse:
         return await run_in_threadpool(
             workspace_service.read_source,
@@ -964,7 +966,7 @@ def create_app(
         response_model=Project,
         responses=_API_ERROR_RESPONSES,
     )
-    async def get_project(project_id: str) -> Project:
+    async def get_project(project_id: Identifier) -> Project:
         return await run_in_threadpool(workspace_service.get_project, project_id)
 
     @application.post(
@@ -980,7 +982,7 @@ def create_app(
         response_model=IndexResponse,
         responses=_API_ERROR_RESPONSES,
     )
-    async def get_index(index_id: str) -> IndexResponse:
+    async def get_index(index_id: Identifier) -> IndexResponse:
         return await run_in_threadpool(index_service.get_index, index_id)
 
     @application.get(
@@ -989,9 +991,9 @@ def create_app(
         responses=_API_ERROR_RESPONSES,
     )
     async def search_index(
-        index_id: str,
-        query: str = Query(min_length=1, max_length=500),
-        limit: int = Query(default=40, ge=1, le=40),
+        index_id: Identifier,
+        query: str = Query(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_QUERY_LENGTH),
+        limit: int = Query(default=shared.MAX_PAGE_SIZE, ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_PAGE_SIZE),
     ) -> SearchIndexResponse:
         return await run_in_threadpool(index_service.search, index_id, query, limit)
 
@@ -1001,11 +1003,11 @@ def create_app(
         responses=_API_ERROR_RESPONSES,
     )
     async def get_neighbors(
-        index_id: str,
-        symbol_id: str,
+        index_id: Identifier,
+        symbol_id: Identifier,
         direction: Literal["callers", "callees", "both"],
-        depth: int = Query(default=2, ge=1, le=2),
-        limit: int = Query(default=40, ge=1, le=40),
+        depth: int = Query(default=shared.MAX_GRAPH_DEPTH, ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_GRAPH_DEPTH),
+        limit: int = Query(default=shared.MAX_PAGE_SIZE, ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_PAGE_SIZE),
         edge_kinds: list[EdgeKind] | None = Query(default=None),
     ) -> NeighborsIndexResponse:
         return await run_in_threadpool(
@@ -1024,10 +1026,10 @@ def create_app(
         responses=_API_ERROR_RESPONSES,
     )
     async def read_source(
-        index_id: str,
-        path: str = Query(min_length=1, max_length=500),
-        start_line: int = Query(ge=1),
-        end_line: int = Query(ge=1),
+        index_id: Identifier,
+        path: str = Query(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_PATH_LENGTH),
+        start_line: int = Query(ge=shared.MIN_REQUEST_VALUE),
+        end_line: int = Query(ge=shared.MIN_REQUEST_VALUE),
     ) -> SourceIndexResponse:
         return await run_in_threadpool(
             index_service.read_source,
