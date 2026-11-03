@@ -101,6 +101,7 @@ from .contracts import (
     MAX_OVERVIEW_MODULES,
     MAX_OVERVIEW_PATHS,
     MAX_OVERVIEW_RELATIONS,
+    MAX_PAGE_SIZE,
     Project,
     ProjectIndexListResponse,
     ProjectListResponse,
@@ -137,6 +138,12 @@ from .contracts import (
     SearchCodeFailure,
     SearchCodeSuccess,
     SearchIndexResponse,
+    HTTP_DEFAULT_DETAIL,
+    SearchMatch,
+    SearchSummaryMatch,
+    SymbolRef,
+    SEARCH_MAX_SCAN,
+    SEARCH_SNIPPET_MAX_LENGTH,
     Symbol,
     SaveModelConfigRequest,
     Session,
@@ -3905,9 +3912,63 @@ class WorkspaceService:
         self._require_project_index(project_id, index_id)
         return self.index_service.get_index(index_id)
 
-    def search(self, project_id: str, index_id: str, query: str, limit: int) -> SearchIndexResponse:
-        self._require_project_index(project_id, index_id)
-        return self.index_service.search(index_id, query, limit)
+    def search(
+        self, project_id: str, index_id: str, query: str, limit: int,
+        *, detail: Literal["summary", "full"] = HTTP_DEFAULT_DETAIL, cursor: str | None = None,
+    ) -> SearchIndexResponse:
+        project = self._require_project_index(project_id, index_id)
+        if not 1 <= limit <= MAX_PAGE_SIZE:
+            raise ServiceError("invalid_input", 400, "search limit is outside the allowed range")
+        scan_limit = SEARCH_MAX_SCAN if detail == "summary" or cursor is not None else limit
+        try:
+            with self.registry.store_for_repository(project.repository_id) as store:
+                result = store.search_symbols_bounded(
+                    index_id, query, limit=scan_limit, allow_extended_limit=scan_limit > MAX_PAGE_SIZE,
+                )
+        except StorageInputError as exc:
+            raise ServiceError("invalid_input", 400, "search parameters are invalid") from exc
+        except StorageNotFoundError as exc:
+            raise ServiceError("not_found", 404, "requested index was not found") from exc
+        except StorageError as exc:
+            raise ServiceError("internal_error", 500, "local index storage failed") from exc
+        available = len(result.matches)
+        offset = self._decode_overview_cursor(cursor, project_id, index_id, "search", None, None, available) if cursor else 0
+        matches = result.matches[offset:offset + limit]
+        next_offset = offset + len(matches)
+        if detail == "summary":
+            response_matches = [SearchSummaryMatch(
+                rank=item.match.rank,
+                symbol=self._symbol_ref(item.symbol),
+                matched_terms=item.match.matched_terms,
+                snippet=(item.definition_line[:SEARCH_SNIPPET_MAX_LENGTH] if item.definition_line else None),
+            ) for item in matches]
+        else:
+            response_matches = [SearchMatch(
+                rank=item.match.rank,
+                symbol=item.match.symbol,
+                matched_terms=item.match.matched_terms,
+            ) for item in matches]
+        return SearchIndexResponse(
+            index_id=index_id,
+            matches=response_matches,
+            truncated=result.truncated,
+            truncation_reason=result.truncation_reason,
+            page=OverviewPage(
+                returned=len(matches), total=None if result.truncated else available,
+                next_cursor=(self._encode_overview_cursor(project_id, index_id, "search", next_offset, None, None)
+                             if next_offset < available else None),
+                order="rank,symbol_id",
+            ) if cursor is not None or detail == "summary" else None,
+        )
+
+    @staticmethod
+    def _symbol_ref(symbol: Symbol) -> SymbolRef:
+        return SymbolRef(
+            id=symbol.symbol_id,
+            name=symbol.qualified_name,
+            kind=symbol.kind,
+            at=f"{symbol.path}:{symbol.start_line}-{symbol.end_line}",
+        )
 
     def list_module_symbols(
         self,
@@ -3916,6 +3977,7 @@ class WorkspaceService:
         module_id: str,
         limit: int,
         cursor: str | None,
+        *, detail: Literal["summary", "full"] = HTTP_DEFAULT_DETAIL,
     ) -> ModuleSymbolsPageResponse:
         """Page fixed-snapshot definitions only after project/index ownership checks."""
 
@@ -3933,7 +3995,7 @@ class WorkspaceService:
                 project_id=project_id,
                 index_id=index_id,
                 module=page.module,
-                symbols=list(page.symbols),
+                symbols=(list(page.symbols) if detail == "full" else [self._symbol_ref(symbol) for symbol in page.symbols]),
                 next_cursor=page.next_cursor,
                 has_more=page.has_more,
             )
@@ -3942,6 +4004,11 @@ class WorkspaceService:
         except StorageNotFoundError as exc:
             raise ServiceError("not_found", 404, "requested module was not found in the project index") from exc
         except StorageInputError as exc:
+            if cursor is not None:
+                raise ServiceError(
+                    "invalid_input", 400, "invalid or expired cursor",
+                    details=[{"field": "cursor", "problem": "invalid"}],
+                ) from exc
             raise ServiceError("invalid_input", 400, "module symbol page parameters are invalid") from exc
         except StorageBudgetError as exc:
             raise ServiceError("budget_exceeded", 429, "module symbol page exceeds its output budget") from exc

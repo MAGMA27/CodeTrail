@@ -848,7 +848,7 @@ def create_app(
         limit: int = Query(default=shared.DEFAULT_OVERVIEW_PAGE_LIMIT, ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_OVERVIEW_PAGE_LIMIT),
         module_id: str | None = Query(default=None, min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_IDENTIFIER_LENGTH),
         category: OverviewClassificationKind | None = Query(default=None),
-        detail: Literal["summary", "full"] = Query(default="summary"),
+        detail: Literal["summary", "full"] = Query(default=shared.DEFAULT_OVERVIEW_PAGE_DETAIL),
     ) -> OverviewItemsPage:
         return await run_in_threadpool(
             workspace_service.list_overview_items,
@@ -954,9 +954,13 @@ def create_app(
         project_id: Identifier,
         index_id: Identifier,
         query: str = Query(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_QUERY_LENGTH),
-        limit: int = Query(default=shared.MAX_PAGE_SIZE, ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_PAGE_SIZE),
+        limit: int = Query(default=shared.DEFAULT_SEARCH_LIMIT, ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_PAGE_SIZE),
+        detail: Literal["summary", "full"] = Query(default=shared.HTTP_DEFAULT_DETAIL),
+        cursor: str | None = Query(default=None, max_length=shared.MAX_OVERVIEW_CURSOR_LENGTH),
     ) -> SearchIndexResponse:
-        return await run_in_threadpool(workspace_service.search, project_id, index_id, query, limit)
+        return await run_in_threadpool(
+            workspace_service.search, project_id, index_id, query, limit, detail=detail, cursor=cursor,
+        )
 
     @application.get(
         "/api/projects/{project_id}/indexes/{index_id}/modules/{module_id}/symbols",
@@ -969,6 +973,7 @@ def create_app(
         module_id: Identifier,
         limit: int = Query(default=shared.MAX_PAGE_SIZE, ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_PAGE_SIZE),
         cursor: str | None = Query(default=None, max_length=shared.MAX_CURSOR_LENGTH),
+        detail: Literal["summary", "full"] = Query(default=shared.HTTP_DEFAULT_DETAIL),
     ) -> ModuleSymbolsPageResponse:
         return await run_in_threadpool(
             workspace_service.list_module_symbols,
@@ -977,6 +982,7 @@ def create_app(
             module_id,
             limit,
             cursor,
+            detail=detail,
         )
 
     @application.get(

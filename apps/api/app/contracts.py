@@ -48,6 +48,13 @@ MAX_SKELETON_MODULES = MAX_OVERVIEW_MODULES
 DEFAULT_SKELETON_RELATIONS = 20
 DEFAULT_SKELETON_ENTRIES = 20
 MAX_OVERVIEW_CURSOR_LENGTH = 64
+DEFAULT_SEARCH_LIMIT = MAX_PAGE_SIZE
+MCP_DEFAULT_SEARCH_LIMIT = 10
+HTTP_DEFAULT_DETAIL = "full"
+MCP_DEFAULT_DETAIL = "summary"
+DEFAULT_OVERVIEW_PAGE_DETAIL = "summary"
+SEARCH_MAX_SCAN = 200
+SEARCH_SNIPPET_MAX_LENGTH = 120
 MIN_RUN_SEQUENCE = 0
 MAX_FEATURE_GRAPH_NODES = 40
 MAX_FEATURE_GRAPH_EDGES = 120
@@ -1230,6 +1237,22 @@ class SearchMatch(ContractModel):
     matched_terms: list[str] = Field(min_length=1)
 
 
+class SymbolRef(ContractModel):
+    """Compact stable reference to a symbol in the response index snapshot."""
+
+    id: Identifier
+    name: str = Field(min_length=MIN_REQUEST_VALUE, max_length=MAX_IDENTIFIER_LENGTH)
+    kind: SymbolKind
+    at: str = Field(min_length=MIN_REQUEST_VALUE, max_length=MAX_PATH_LENGTH + 24)
+
+
+class SearchSummaryMatch(ContractModel):
+    rank: PositiveInt
+    symbol: SymbolRef
+    matched_terms: list[str] = Field(min_length=1)
+    snippet: str | None = Field(default=None, max_length=SEARCH_SNIPPET_MAX_LENGTH)
+
+
 class Neighbor(ContractModel):
     symbol: Symbol
     edge: CodeEdge
@@ -1452,7 +1475,8 @@ class GetNeighborsFailure(ToolResultBase):
 
 class SearchIndexResponse(VersionedModel):
     index_id: Identifier
-    matches: list[SearchMatch] = Field(default_factory=list)
+    matches: list[SearchMatch | SearchSummaryMatch] = Field(default_factory=list)
+    page: OverviewPage | None = Field(default=None, exclude_if=lambda value: value is None)
     truncated: bool = False
     truncation_reason: str | None = Field(default=None, max_length=1_000)
 
@@ -1475,7 +1499,7 @@ class ModuleSymbolsPageResponse(VersionedModel):
     project_id: Identifier
     index_id: Identifier
     module: Symbol
-    symbols: list[Symbol] = Field(default_factory=list, max_length=40)
+    symbols: list[Symbol | SymbolRef] = Field(default_factory=list, max_length=40)
     next_cursor: str | None = Field(default=None, max_length=500)
     has_more: bool = False
 
@@ -1487,13 +1511,17 @@ class ModuleSymbolsPageResponse(VersionedModel):
         if len(symbol_ids) != len(self.symbols):
             raise ValueError("module symbols page must contain unique symbols")
         if any(
-            symbol.index_id != self.index_id
-            or symbol.path != self.module.path
-            or symbol.kind not in {"class", "function", "test"}
+            (symbol.index_id != self.index_id or symbol.path != self.module.path)
+            if isinstance(symbol, Symbol)
+            else (not symbol.at.startswith(f"{self.module.path}:") or symbol.kind not in {"class", "function", "test"})
             for symbol in self.symbols
         ):
             raise ValueError("module symbols page crossed its index or module scope")
-        order_keys = [(symbol.start_line, symbol.symbol_id) for symbol in self.symbols]
+        order_keys = [
+            (symbol.start_line, symbol.symbol_id) if isinstance(symbol, Symbol)
+            else (int(symbol.at.rsplit(":", 1)[1].split("-", 1)[0]), symbol.id)
+            for symbol in self.symbols
+        ]
         if order_keys != sorted(order_keys):
             raise ValueError("module symbol pages must use stable source order")
         if self.has_more and (not self.next_cursor or not self.symbols):

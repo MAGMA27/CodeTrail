@@ -294,6 +294,7 @@ def test_module_symbol_http_pages_match_cold_stdio_mcp(tmp_path: Path) -> None:
                         "module_id": module.symbol_id,
                         "limit": 25,
                         "cursor": page_cursor,
+                        "detail": "full",
                     },
                 )
                 assert result.structured_content["ok"] is True
@@ -642,6 +643,7 @@ def test_real_stdio_client_scopes_two_projects_with_same_named_symbols(tmp_path:
                         "index_id": index_ids[repository_id],
                         "query": "DEFAULT_TIMEOUT",
                         "limit": 4,
+                        "detail": "full",
                     },
                 )
                 assert search_result.structured_content["result"] == http_searches[repository_id]
@@ -1559,7 +1561,7 @@ async def _exercise_stdio(
 
         search_result = await client.call_tool(
             "search_code",
-            {"project_id": project_id, "index_id": index_id, "query": "load_settings", "limit": 4},
+            {"project_id": project_id, "index_id": index_id, "query": "load_settings", "limit": 4, "detail": "full"},
         )
         assert search_result.structured_content == {
             "schema_version": "0.1.0",
@@ -1567,6 +1569,25 @@ async def _exercise_stdio(
             "error": None,
             "result": http_search,
         }
+
+        search_first_status, search_first = await _request(
+            application,
+            "GET",
+            f"/api/projects/{project_id}/indexes/{index_id}/search?query=handle&limit=1&detail=summary",
+        )
+        assert search_first_status == 200 and search_first["page"]["next_cursor"]
+        search_cursor = search_first["page"]["next_cursor"]
+        search_page_status, search_page = await _request(
+            application,
+            "GET",
+            f"/api/projects/{project_id}/indexes/{index_id}/search?query=handle&limit=1&detail=summary&cursor={search_cursor}",
+        )
+        assert search_page_status == 200
+        mcp_search_page = await client.call_tool("search_code", {
+            "project_id": project_id, "index_id": index_id, "query": "handle", "limit": 1,
+            "detail": "summary", "cursor": search_cursor,
+        })
+        assert mcp_search_page.structured_content["result"] == search_page
 
         neighbors_result = await client.call_tool(
             "get_neighbors",

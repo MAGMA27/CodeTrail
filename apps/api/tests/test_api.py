@@ -1325,6 +1325,56 @@ def test_tool_adapter_returns_contract_results_and_safe_failures(tmp_path: Path)
     }.isdisjoint({"timeout_demo.handlers.handle", "timeout_demo.other_handlers.handle"})
 
 
+def test_project_search_summary_full_paging_and_legacy_http_shape(tmp_path: Path) -> None:
+    application = create_app({"timeout-demo": copy_fixture(tmp_path)}, data_root=tmp_path / "data")
+    status, created = request(application, "POST", "/api/indexes", create_request())
+    assert status == 200
+    index_id = created["index"]["index_id"]
+    status, projects = request(application, "GET", "/api/projects")
+    assert status == 200
+    project_id = next(item["project_id"] for item in projects["projects"] if item["repository_id"] == "timeout-demo")
+    route = f"/api/projects/{project_id}/indexes/{index_id}/search"
+
+    status, legacy = request(application, "GET", f"/api/indexes/{index_id}/search?query=timeout&limit=40")
+    assert status == 200
+    status, default_response = request(application, "GET", f"{route}?query=timeout")
+    assert status == 200
+    assert default_response == legacy
+
+    service = application.state.workspace_service
+    full = service.search(project_id, index_id, "timeout", 40, detail="full")
+    summary = service.search(project_id, index_id, "timeout", 1, detail="summary")
+    assert [item.symbol.id for item in summary.matches] == [full.matches[0].symbol.symbol_id]
+    assert summary.matches[0].symbol.id == full.matches[0].symbol.symbol_id
+    assert summary.matches[0].symbol.name == full.matches[0].symbol.qualified_name
+    pages = list(summary.matches)
+    cursor = summary.page.next_cursor
+    while cursor:
+        page = service.search(project_id, index_id, "timeout", 1, detail="summary", cursor=cursor)
+        pages.extend(page.matches)
+        cursor = page.page.next_cursor
+    assert [item.symbol.id for item in pages] == [item.symbol.symbol_id for item in full.matches]
+
+    project = service._require_project_index(project_id, index_id)
+    with service.registry.store_for_repository(project.repository_id) as store:
+        module_id = store.connection.execute(
+            "SELECT symbol_id FROM symbols WHERE index_id = ? AND kind = 'module' ORDER BY path LIMIT 1",
+            (index_id,),
+        ).fetchone()["symbol_id"]
+    full_symbols = service.list_module_symbols(project_id, index_id, module_id, 1, None, detail="full")
+    summary_symbols = service.list_module_symbols(project_id, index_id, module_id, 1, None, detail="summary")
+    assert [item.symbol_id for item in full_symbols.symbols] == [item.id for item in summary_symbols.symbols]
+    assert all(item.at.startswith(f"{full_symbols.module.path}:") for item in summary_symbols.symbols)
+
+    from app.service import ServiceError
+
+    try:
+        service.search(project_id, index_id, "timeout", 1, detail="summary", cursor="invalid")
+    except ServiceError as exc:
+        assert exc.message == "invalid or expired cursor"
+        assert exc.details == [{"field": "cursor", "problem": "invalid"}]
+    else:
+        raise AssertionError("invalid search cursor was accepted")
 def test_index_capacity_is_bounded(tmp_path: Path) -> None:
     registry = RepositoryRegistry({"timeout-demo": copy_fixture(tmp_path)})
     service = IndexService(registry, max_concurrent_indexes=1)

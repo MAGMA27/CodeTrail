@@ -30,6 +30,8 @@ from .contracts import (
     ImpactPath,
     IndexSnapshot,
     ModuleSymbolsPageResponse,
+    MAX_CURSOR_LENGTH,
+    MAX_PAGE_SIZE,
     NEIGHBOR_POSSIBLE_CALLER_SAMPLE_LIMIT,
     Neighbor,
     NeighborCompleteness,
@@ -164,6 +166,7 @@ class SymbolSearchResult:
 
     match: SearchMatch
     snippet: str
+    definition_line: str | None = None
 
     @property
     def symbol(self) -> Symbol:
@@ -4328,6 +4331,14 @@ class IndexStore:
             index_id=index_id,
             module_id=module_id,
         )
+        if position is not None and position[0] == 0:
+            anchor = self._connection.execute(
+                "SELECT start_line FROM symbols WHERE index_id = ? AND symbol_id = ? AND path = ?",
+                (index_id, position[1], module.path),
+            ).fetchone()
+            if anchor is None:
+                raise StorageInputError("module symbol cursor does not match the requested scope")
+            position = (int(anchor["start_line"]), position[1])
         where = "index_id = ? AND path = ? AND kind IN ('class', 'function', 'test')"
         parameters: tuple[object, ...] = (index_id, module.path)
         if position is not None:
@@ -4397,6 +4408,7 @@ class IndexStore:
         query: str,
         *,
         limit: int = 40,
+        allow_extended_limit: bool = False,
     ) -> SearchQueryResult:
         """Search names first, then scoped body matches within fixed budgets.
 
@@ -4410,7 +4422,12 @@ class IndexStore:
 
         self._require_index(index_id)
         try:
-            params = SearchCodeParams(query=query, limit=limit)
+            # The shared workspace service may scan one bounded 200-result window
+            # before paging; Run tools still request at most the public 40-item limit.
+            params = SearchCodeParams(
+                query=query,
+                limit=min(limit, MAX_PAGE_SIZE) if allow_extended_limit else limit,
+            )
         except ValidationError as exc:
             raise StorageInputError(str(exc)) from exc
         tokens = _search_tokens(params.query)
@@ -4679,6 +4696,7 @@ class IndexStore:
                         matched_terms=list(tokens),
                     ),
                     snippet=_snippet(source_text, tokens, candidate.symbol.qualified_name),
+                    definition_line=(source_text.splitlines()[0] if source_text.splitlines() else None),
                 )
             )
         if budget.reason is not None:
@@ -5836,6 +5854,15 @@ def _encode_module_symbols_cursor(
     index_id: str,
     module_id: str,
 ) -> str:
+    symbol_hash = symbol.symbol_id.removeprefix("sym-")
+    if not re.fullmatch(r"[0-9a-f]{32}", symbol_hash):
+        compact_id = ""
+    else:
+        compact_id = _base36_encode(int(symbol_hash, 16))
+    scope = _module_symbols_scope_fingerprint(project_id, index_id, module_id)[:10]
+    compact = f"m1.{compact_id}.{scope}" if compact_id else ""
+    if compact and len(compact) <= 40:
+        return compact
     payload = json.dumps(
         {
             "version": 1,
@@ -5847,7 +5874,7 @@ def _encode_module_symbols_cursor(
         separators=(",", ":"),
     ).encode("utf-8")
     cursor = base64.urlsafe_b64encode(payload).decode("ascii")
-    if len(cursor) > 500:
+    if len(cursor) > MAX_CURSOR_LENGTH:
         raise StorageInputError("module symbol cursor exceeds the allowed length")
     return cursor
 
@@ -5861,7 +5888,20 @@ def _decode_module_symbols_cursor(
 ) -> tuple[int, str] | None:
     if cursor is None:
         return None
-    if not cursor or len(cursor) > 500:
+    if cursor.startswith("m1."):
+        try:
+            version, compact_id, scope = cursor.split(".")
+            symbol_id = f"sym-{_base36_decode(compact_id):032x}"
+        except (ValueError, TypeError):
+            raise StorageInputError("module symbol cursor is invalid") from None
+        if (
+            version != "m1"
+            or len(cursor) > 40
+            or scope != _module_symbols_scope_fingerprint(project_id, index_id, module_id)[:10]
+        ):
+            raise StorageInputError("module symbol cursor does not match the requested scope")
+        return 0, symbol_id
+    if not cursor or len(cursor) > MAX_CURSOR_LENGTH:
         raise StorageInputError("module symbol cursor is invalid")
     try:
         encoded = cursor.encode("ascii")
@@ -5893,6 +5933,23 @@ def _decode_module_symbols_cursor(
     ):
         raise StorageInputError("module symbol cursor does not match the requested scope")
     return start_line, symbol_id
+
+
+def _base36_encode(value: int) -> str:
+    alphabet = "0123456789abcdefghijklmnopqrstuvwxyz"
+    if value == 0:
+        return "0"
+    output = ""
+    while value:
+        value, remainder = divmod(value, 36)
+        output = alphabet[remainder] + output
+    return output
+
+
+def _base36_decode(value: str) -> int:
+    if not value or any(char not in "0123456789abcdefghijklmnopqrstuvwxyz" for char in value):
+        raise ValueError("invalid base36 value")
+    return int(value, 36)
 
 
 def _encode_feature_generation_cursor(

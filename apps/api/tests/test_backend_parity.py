@@ -75,6 +75,15 @@ MCP_ONLY_PARAMETERS: dict[tuple[str, str], str] = {
     ("get_overview", "detail"): "MCP selects the summary skeleton or full HTTP overview representation.",
 }
 
+# These defaults intentionally serve the legacy HTTP shape and compact MCP shape.
+# Bounds remain compared below, while this rule ties each adapter default to contracts.py.
+ADAPTER_DEFAULTS = {
+    (tool, "detail"): ("HTTP_DEFAULT_DETAIL", "MCP_DEFAULT_DETAIL")
+    for tool in ("search_code", "list_module_symbols")
+} | {
+    ("search_code", "limit"): ("DEFAULT_SEARCH_LIMIT", "MCP_DEFAULT_SEARCH_LIMIT"),
+}
+
 COMPARABLE_SCHEMA_KEYS = (
     "default", "minimum", "maximum", "minLength", "maxLength", "enum",
     "items.minimum", "items.maximum", "items.minLength", "items.maxLength", "items.enum",
@@ -205,6 +214,14 @@ def test_registered_mcp_tools_have_an_explicit_http_parity_entry(tmp_path, monke
             expected = _effective_constraints(openapi, http_parameters[parameter])
             actual = _effective_constraints(openapi, mcp_parameters[parameter])
             for key in COMPARABLE_SCHEMA_KEYS:
+                adapter_default = ADAPTER_DEFAULTS.get((tool_name, parameter)) if key == "default" else None
+                if adapter_default is not None:
+                    from app import contracts
+                    http_default = getattr(contracts, adapter_default[0])
+                    mcp_default = getattr(contracts, adapter_default[1])
+                    assert expected.get(key) == http_default
+                    assert actual.get(key) == mcp_default
+                    continue
                 if key not in expected and key not in actual:
                     continue
                 if expected.get(key) != actual.get(key):

@@ -192,6 +192,9 @@ _ProjectId = Annotated[Identifier, Field(description="Stable CodeTrail project I
 _IndexId = Annotated[Identifier, Field(description="Immutable CodeTrail index ID.")]
 _ModuleId = Annotated[Identifier, Field(description="Module symbol ID from the selected immutable index.")]
 _Query = Annotated[str, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_QUERY_LENGTH, description="Symbol or source text query.")]
+_SearchLimit = Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_PAGE_SIZE, description="Maximum number of returned search items.")]
+_SearchCursor = Annotated[str | None, Field(max_length=shared.MAX_OVERVIEW_CURSOR_LENGTH, description="Opaque search cursor from a previous page; round-trip it unchanged.")]
+_Detail = Literal["summary", "full"]
 _Path = Annotated[str, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_PATH_LENGTH, description="Relative path in the indexed snapshot.")]
 _LocalPath = Annotated[str, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_LOCAL_PATH_LENGTH, description="Absolute path visible to the local API service.")]
 _Line = Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, description="One-based source line.")]
@@ -494,7 +497,8 @@ def create_mcp_server(
         description=(
             "Search symbols and captured source text in one explicitly selected project/index pair. "
             "Exact qualified and leaf symbol names rank before partial names and symbol-scoped body matches; "
-            "results are capped at 40 and report truncation."
+            "Summary results use compact symbol references by default; pass detail='full' for the legacy symbol objects. "
+            "Pages are ordered by rank,symbol_id and use a cursor from the previous response."
         ),
         structured_output=True,
     )
@@ -502,12 +506,14 @@ def create_mcp_server(
         project_id: _ProjectId,
         index_id: _IndexId,
         query: _Query,
-        limit: _Limit = shared.MAX_PAGE_SIZE,
+        limit: _SearchLimit = shared.MCP_DEFAULT_SEARCH_LIMIT,
+        detail: _Detail = shared.MCP_DEFAULT_DETAIL,
+        cursor: _SearchCursor = None,
     ) -> McpSearchResponse:
         try:
             return McpSearchResponse(
                 ok=True,
-                result=service.search(project_id, index_id, query, limit),
+                result=service.search(project_id, index_id, query, limit, detail=detail, cursor=cursor),
             )
         except ServiceError as exc:
             return _failure(McpSearchResponse, exc)
@@ -520,7 +526,7 @@ def create_mcp_server(
         description=(
             "List indexed class, function, and test definitions from one module path in the selected immutable project/index. "
             "This reports definitions captured by the index and does not imply complete parsing. Pages are bounded to 40 items "
-            "and share the API output budget; pass the returned cursor unchanged to continue."
+            "and share the API output budget; summary returns compact symbol references, while detail='full' returns legacy symbols."
         ),
         structured_output=True,
     )
@@ -530,11 +536,12 @@ def create_mcp_server(
         module_id: _ModuleId,
         limit: _Limit = shared.MAX_PAGE_SIZE,
         cursor: _ModuleSymbolsCursor = None,
+        detail: _Detail = shared.MCP_DEFAULT_DETAIL,
     ) -> McpModuleSymbolsResponse:
         try:
             return McpModuleSymbolsResponse(
                 ok=True,
-                result=service.list_module_symbols(project_id, index_id, module_id, limit, cursor),
+                result=service.list_module_symbols(project_id, index_id, module_id, limit, cursor, detail=detail),
             )
         except ServiceError as exc:
             return _failure(McpModuleSymbolsResponse, exc)
@@ -647,7 +654,7 @@ def create_mcp_server(
     def get_overview(
         project_id: _ProjectId,
         index_id: _IndexId,
-        detail: Literal["summary", "full"] = "summary",
+        detail: Literal["summary", "full"] = shared.MCP_DEFAULT_DETAIL,
         module_limit: Annotated[_SkeletonModuleLimit, Field(description="Used only in summary mode; non-default values are rejected in full mode.")] = shared.DEFAULT_SKELETON_MODULES,
         relation_limit: Annotated[_SkeletonRelationLimit, Field(description="Used only in summary mode; non-default values are rejected in full mode.")] = shared.DEFAULT_SKELETON_RELATIONS,
         cursor: Annotated[_OverviewCursor, Field(description="Used only in summary mode; non-null values are rejected in full mode.")] = None,
@@ -752,7 +759,7 @@ def create_mcp_server(
         limit: _OverviewPageLimit = shared.DEFAULT_OVERVIEW_PAGE_LIMIT,
         module_id: _OverviewModuleFilter = None,
         category: OverviewClassificationKind | None = None,
-        detail: Literal["summary", "full"] = "summary",
+        detail: Literal["summary", "full"] = shared.DEFAULT_OVERVIEW_PAGE_DETAIL,
     ) -> McpOverviewItemsResponse:
         try:
             result = service.list_overview_items(

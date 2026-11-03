@@ -25940,7 +25940,14 @@
             },
             "symbols": {
               "items": {
-                "$ref": "#/$defs/Symbol"
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/Symbol"
+                  },
+                  {
+                    "$ref": "#/$defs/SymbolRef"
+                  }
+                ]
               },
               "maxItems": 40,
               "title": "Symbols",
@@ -26014,6 +26021,49 @@
             "kind"
           ],
           "title": "Symbol",
+          "type": "object"
+        },
+        "SymbolRef": {
+          "additionalProperties": false,
+          "description": "Compact stable reference to a symbol in the response index snapshot.",
+          "properties": {
+            "at": {
+              "maxLength": 524,
+              "minLength": 1,
+              "title": "At",
+              "type": "string"
+            },
+            "id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Id",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "module",
+                "file",
+                "class",
+                "function",
+                "test"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "name": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "kind",
+            "at"
+          ],
+          "title": "SymbolRef",
           "type": "object"
         }
       },
@@ -39516,6 +39566,54 @@
           "title": "McpError",
           "type": "object"
         },
+        "OverviewPage": {
+          "additionalProperties": false,
+          "properties": {
+            "next_cursor": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Next Cursor"
+            },
+            "order": {
+              "maxLength": 100,
+              "minLength": 1,
+              "title": "Order",
+              "type": "string"
+            },
+            "returned": {
+              "minimum": 0,
+              "title": "Returned",
+              "type": "integer"
+            },
+            "total": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Total"
+            }
+          },
+          "required": [
+            "returned",
+            "total",
+            "order"
+          ],
+          "title": "OverviewPage",
+          "type": "object"
+        },
         "SearchIndexResponse": {
           "additionalProperties": false,
           "properties": {
@@ -39527,10 +39625,28 @@
             },
             "matches": {
               "items": {
-                "$ref": "#/$defs/SearchMatch"
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/SearchMatch"
+                  },
+                  {
+                    "$ref": "#/$defs/SearchSummaryMatch"
+                  }
+                ]
               },
               "title": "Matches",
               "type": "array"
+            },
+            "page": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/OverviewPage"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             },
             "schema_version": {
               "const": "0.1.0",
@@ -39589,6 +39705,47 @@
             "matched_terms"
           ],
           "title": "SearchMatch",
+          "type": "object"
+        },
+        "SearchSummaryMatch": {
+          "additionalProperties": false,
+          "properties": {
+            "matched_terms": {
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "title": "Matched Terms",
+              "type": "array"
+            },
+            "rank": {
+              "exclusiveMinimum": 0,
+              "title": "Rank",
+              "type": "integer"
+            },
+            "snippet": {
+              "anyOf": [
+                {
+                  "maxLength": 120,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Snippet"
+            },
+            "symbol": {
+              "$ref": "#/$defs/SymbolRef"
+            }
+          },
+          "required": [
+            "rank",
+            "symbol",
+            "matched_terms"
+          ],
+          "title": "SearchSummaryMatch",
           "type": "object"
         },
         "Symbol": {
@@ -39650,6 +39807,49 @@
             "kind"
           ],
           "title": "Symbol",
+          "type": "object"
+        },
+        "SymbolRef": {
+          "additionalProperties": false,
+          "description": "Compact stable reference to a symbol in the response index snapshot.",
+          "properties": {
+            "at": {
+              "maxLength": 524,
+              "minLength": 1,
+              "title": "At",
+              "type": "string"
+            },
+            "id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Id",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "module",
+                "file",
+                "class",
+                "function",
+                "test"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "name": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "kind",
+            "at"
+          ],
+          "title": "SymbolRef",
           "type": "object"
         }
       },
@@ -41858,6 +42058,49 @@
           ],
           "title": "Symbol",
           "type": "object"
+        },
+        "SymbolRef": {
+          "additionalProperties": false,
+          "description": "Compact stable reference to a symbol in the response index snapshot.",
+          "properties": {
+            "at": {
+              "maxLength": 524,
+              "minLength": 1,
+              "title": "At",
+              "type": "string"
+            },
+            "id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Id",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "module",
+                "file",
+                "class",
+                "function",
+                "test"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "name": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "kind",
+            "at"
+          ],
+          "title": "SymbolRef",
+          "type": "object"
         }
       },
       "additionalProperties": false,
@@ -41904,7 +42147,14 @@
         },
         "symbols": {
           "items": {
-            "$ref": "#/$defs/Symbol"
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Symbol"
+              },
+              {
+                "$ref": "#/$defs/SymbolRef"
+              }
+            ]
           },
           "maxItems": 40,
           "title": "Symbols",
