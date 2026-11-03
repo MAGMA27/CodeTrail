@@ -1525,7 +1525,11 @@ class IndexService:
                 contextual_calls=list(result.contextual_calls),
                 unresolved=list(result.unresolved),
                 possible_unresolved_callers=list(result.possible_unresolved_callers),
-                completeness=result.completeness,
+                completeness=(
+                    _with_query_truncation(result.completeness, result.truncation_reason)
+                    if result.completeness is not None and result.truncated
+                    else result.completeness
+                ),
                 truncated=result.truncated,
                 truncation_reason=result.truncation_reason,
                 index_truncated=result.index_truncated,
@@ -1586,7 +1590,7 @@ class IndexService:
                         truncation_reason = unresolved_reason
                     truncated = True
                 completeness = result.completeness
-                if completeness is not None and truncated and "query_truncated" not in completeness.reasons:
+                if completeness is not None and truncated:
                     completeness = _with_query_truncation(completeness, truncation_reason)
                 return GetNeighborsSuccess(
                     request_id=request.request_id,
@@ -6271,6 +6275,8 @@ def _with_query_truncation(
     completeness: NeighborCompleteness,
     truncation_reason: str | None,
 ) -> NeighborCompleteness:
+    if "query_truncated" in completeness.reasons:
+        return completeness
     hint = f"{completeness.hint or ''} This result stopped at a budget ({truncation_reason}).".strip()
     return NeighborCompleteness.model_validate(
         {

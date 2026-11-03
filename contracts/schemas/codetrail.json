@@ -27930,10 +27930,12 @@
               "type": "object"
             },
             "entry_reachable": {
+              "default": false,
               "title": "Entry Reachable",
               "type": "boolean"
             },
             "in_relations": {
+              "default": 0,
               "minimum": 0,
               "title": "In Relations",
               "type": "integer"
@@ -27945,6 +27947,7 @@
               "type": "string"
             },
             "out_relations": {
+              "default": 0,
               "minimum": 0,
               "title": "Out Relations",
               "type": "integer"
@@ -27958,10 +27961,7 @@
           },
           "required": [
             "module_id",
-            "path",
-            "entry_reachable",
-            "in_relations",
-            "out_relations"
+            "path"
           ],
           "title": "OverviewModuleSummary",
           "type": "object"
@@ -30234,10 +30234,12 @@
               "type": "object"
             },
             "entry_reachable": {
+              "default": false,
               "title": "Entry Reachable",
               "type": "boolean"
             },
             "in_relations": {
+              "default": 0,
               "minimum": 0,
               "title": "In Relations",
               "type": "integer"
@@ -30249,6 +30251,7 @@
               "type": "string"
             },
             "out_relations": {
+              "default": 0,
               "minimum": 0,
               "title": "Out Relations",
               "type": "integer"
@@ -30262,10 +30265,7 @@
           },
           "required": [
             "module_id",
-            "path",
-            "entry_reachable",
-            "in_relations",
-            "out_relations"
+            "path"
           ],
           "title": "OverviewModuleSummary",
           "type": "object"

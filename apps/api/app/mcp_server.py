@@ -648,16 +648,59 @@ def create_mcp_server(
         project_id: _ProjectId,
         index_id: _IndexId,
         detail: Literal["summary", "full"] = "summary",
-        module_limit: Annotated[_SkeletonModuleLimit, Field(description="Used only in summary mode; ignored in full mode.")] = shared.DEFAULT_SKELETON_MODULES,
-        relation_limit: Annotated[_SkeletonRelationLimit, Field(description="Used only in summary mode; ignored in full mode.")] = shared.DEFAULT_SKELETON_RELATIONS,
-        cursor: Annotated[_OverviewCursor, Field(description="Used only in summary mode; ignored in full mode.")] = None,
-        max_depth: Annotated[_OverviewDepth, Field(description="Used only in full mode; ignored in summary mode.")] = shared.DEFAULT_OVERVIEW_DEPTH,
-        max_paths: Annotated[_OverviewPaths, Field(description="Used only in full mode; ignored in summary mode.")] = shared.MAX_OVERVIEW_PATHS,
-        max_modules: Annotated[_OverviewModules, Field(description="Used only in full mode; ignored in summary mode.")] = shared.DEFAULT_OVERVIEW_MODULES,
-        max_groups: Annotated[_OverviewGroups, Field(description="Used only in full mode; ignored in summary mode.")] = shared.DEFAULT_OVERVIEW_GROUPS,
-        max_module_relations: Annotated[_OverviewModuleRelations, Field(description="Used only in full mode; ignored in summary mode.")] = shared.DEFAULT_OVERVIEW_RELATIONS,
-        max_classifications: Annotated[_OverviewClassifications, Field(description="Used only in full mode; ignored in summary mode.")] = shared.DEFAULT_OVERVIEW_CLASSIFICATIONS,
+        module_limit: Annotated[_SkeletonModuleLimit, Field(description="Used only in summary mode; non-default values are rejected in full mode.")] = shared.DEFAULT_SKELETON_MODULES,
+        relation_limit: Annotated[_SkeletonRelationLimit, Field(description="Used only in summary mode; non-default values are rejected in full mode.")] = shared.DEFAULT_SKELETON_RELATIONS,
+        cursor: Annotated[_OverviewCursor, Field(description="Used only in summary mode; non-null values are rejected in full mode.")] = None,
+        max_depth: Annotated[_OverviewDepth, Field(description="Used only in full mode; non-default values are rejected in summary mode.")] = shared.DEFAULT_OVERVIEW_DEPTH,
+        max_paths: Annotated[_OverviewPaths, Field(description="Used only in full mode; non-default values are rejected in summary mode.")] = shared.MAX_OVERVIEW_PATHS,
+        max_modules: Annotated[_OverviewModules, Field(description="Used only in full mode; non-default values are rejected in summary mode.")] = shared.DEFAULT_OVERVIEW_MODULES,
+        max_groups: Annotated[_OverviewGroups, Field(description="Used only in full mode; non-default values are rejected in summary mode.")] = shared.DEFAULT_OVERVIEW_GROUPS,
+        max_module_relations: Annotated[_OverviewModuleRelations, Field(description="Used only in full mode; non-default values are rejected in summary mode.")] = shared.DEFAULT_OVERVIEW_RELATIONS,
+        max_classifications: Annotated[_OverviewClassifications, Field(description="Used only in full mode; non-default values are rejected in summary mode.")] = shared.DEFAULT_OVERVIEW_CLASSIFICATIONS,
     ) -> McpOverviewResponse:
+        invalid_parameters: list[dict[str, object]] = []
+        mode_defaults = (
+            (
+                "summary",
+                (
+                    ("max_depth", max_depth, shared.DEFAULT_OVERVIEW_DEPTH),
+                    ("max_paths", max_paths, shared.MAX_OVERVIEW_PATHS),
+                    ("max_modules", max_modules, shared.DEFAULT_OVERVIEW_MODULES),
+                    ("max_groups", max_groups, shared.DEFAULT_OVERVIEW_GROUPS),
+                    ("max_module_relations", max_module_relations, shared.DEFAULT_OVERVIEW_RELATIONS),
+                    ("max_classifications", max_classifications, shared.DEFAULT_OVERVIEW_CLASSIFICATIONS),
+                ),
+            ),
+            (
+                "full",
+                (
+                    ("module_limit", module_limit, shared.DEFAULT_SKELETON_MODULES),
+                    ("relation_limit", relation_limit, shared.DEFAULT_SKELETON_RELATIONS),
+                    ("cursor", cursor, None),
+                ),
+            ),
+        )
+        disallowed_mode = "summary" if detail == "summary" else "full"
+        for mode, parameters in mode_defaults:
+            if mode != disallowed_mode:
+                continue
+            for field_name, value, default in parameters:
+                if value != default:
+                    invalid_parameters.append({
+                        "field": field_name,
+                        "problem": "not_allowed",
+                        "got": str(value),
+                    })
+        if invalid_parameters:
+            return _failure(
+                McpOverviewResponse,
+                ServiceError(
+                    "invalid_input",
+                    400,
+                    f"parameter is not valid for detail='{detail}'",
+                    details=invalid_parameters,
+                ),
+            )
         try:
             if detail == "summary":
                 result = service.get_overview_skeleton(

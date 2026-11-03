@@ -1656,6 +1656,42 @@ async def _exercise_stdio(
         assert skeleton["sections"]
         assert any(item["section"] == "module_relations" and item["total"] > 0 for item in skeleton["sections"])
 
+        invalid_summary_options = await client.call_tool("get_overview", {
+            "project_id": project_id,
+            "index_id": index_id,
+            "detail": "summary",
+            "max_paths": 3,
+            "max_modules": 20,
+        })
+        assert invalid_summary_options.is_error is True
+        assert invalid_summary_options.structured_content["error"]["code"] == "invalid_input"
+        assert invalid_summary_options.structured_content["error"]["message"] == "parameter is not valid for detail='summary'"
+        assert [item["field"] for item in invalid_summary_options.structured_content["error"]["details"]] == [
+            "max_paths", "max_modules",
+        ]
+        assert all(
+            item["problem"] == "not_allowed"
+            for item in invalid_summary_options.structured_content["error"]["details"]
+        )
+
+        invalid_full_options = await client.call_tool("get_overview", {
+            "project_id": project_id,
+            "index_id": index_id,
+            "detail": "full",
+            "module_limit": 1,
+            "relation_limit": 1,
+            "cursor": "c1.mo.0.deadbeef",
+        })
+        assert invalid_full_options.is_error is True
+        assert invalid_full_options.structured_content["error"]["code"] == "invalid_input"
+        assert [item["field"] for item in invalid_full_options.structured_content["error"]["details"]] == [
+            "module_limit", "relation_limit", "cursor",
+        ]
+        assert all(
+            item["problem"] == "not_allowed"
+            for item in invalid_full_options.structured_content["error"]["details"]
+        )
+
         overview_result = await client.call_tool(
             "get_overview",
             {"project_id": project_id, "index_id": index_id, "detail": "full"},

@@ -185,9 +185,34 @@ def test_skeleton_uses_catalog_counts_sorts_modules_and_pages(tmp_path: Path) ->
     assert [item["path"] for item in skeleton["modules"]] == sorted(
         item.symbol.path for item in catalog.modules
     )[:1]
-    assert all(set(item) == {
-        "module_id", "path", "entry_reachable", "classification_counts", "in_relations", "out_relations"
-    } for item in skeleton["modules"])
+    for item in skeleton["modules"]:
+        module = next(candidate for candidate in catalog.modules if candidate.module_id == item["module_id"])
+        expected_classifications = {
+            category: count
+            for category, count in module.classification_counts.model_dump().items()
+            if count > 0
+        }
+        expected_in_relations = sum(
+            relation.target_module_id == module.module_id for relation in catalog.module_relations
+        )
+        expected_out_relations = sum(
+            relation.source_module_id == module.module_id for relation in catalog.module_relations
+        )
+        assert item["path"] == module.symbol.path
+        assert item.get("entry_reachable", False) is module.entry_reachable
+        assert item.get("classification_counts", {}) == expected_classifications
+        assert item.get("in_relations", 0) == expected_in_relations
+        assert item.get("out_relations", 0) == expected_out_relations
+        expected_fields = {"module_id", "path"}
+        if module.entry_reachable:
+            expected_fields.add("entry_reachable")
+        if expected_classifications:
+            expected_fields.add("classification_counts")
+        if expected_in_relations > 0:
+            expected_fields.add("in_relations")
+        if expected_out_relations > 0:
+            expected_fields.add("out_relations")
+        assert set(item) == expected_fields
     assert all("source_module_id" not in item and "target_module_id" not in item for item in skeleton["module_relations"])
     if catalog.coverage.total_modules > 1:
         assert skeleton["page"]["next_cursor"]
@@ -232,8 +257,9 @@ async def _test_compact_skeleton_module_summaries_stay_small_and_cursor_crosses_
     )
     assert status == 200
     assert skeleton["modules"]
+    assert len(json.dumps(skeleton, separators=(",", ":"), ensure_ascii=False).encode("utf-8")) <= 15 * 1024
     serialized_modules = [json.dumps(item, separators=(",", ":"), ensure_ascii=False).encode("utf-8") for item in skeleton["modules"]]
-    assert max(map(len, serialized_modules)) < 200
+    assert max(map(len, serialized_modules)) <= 182
 
     status, summary_page = await _request(
         application, "GET", f"/api/projects/{project_id}/indexes/{index_id}/overview/sections/modules?limit=1",

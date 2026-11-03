@@ -2523,10 +2523,13 @@ class OverviewGroupSummary(ContractModel):
 class OverviewModuleSummary(ContractModel):
     module_id: Identifier
     path: RelativePath
-    entry_reachable: bool
-    classification_counts: dict[OverviewClassificationKind, PositiveInt] = Field(default_factory=dict)
-    in_relations: NonNegativeInt
-    out_relations: NonNegativeInt
+    entry_reachable: bool = Field(default=False, exclude_if=lambda value: not value)
+    classification_counts: dict[OverviewClassificationKind, PositiveInt] = Field(
+        default_factory=dict,
+        exclude_if=lambda value: not value,
+    )
+    in_relations: NonNegativeInt = Field(default=0, exclude_if=lambda value: value == 0)
+    out_relations: NonNegativeInt = Field(default=0, exclude_if=lambda value: value == 0)
 
 
 class OverviewModuleRelationSummary(ContractModel):
