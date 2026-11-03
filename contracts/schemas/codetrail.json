@@ -18769,7 +18769,7 @@
     },
     "McpError": {
       "$defs": {
-        "McpErrorDetail": {
+        "ErrorDetail": {
           "additionalProperties": false,
           "properties": {
             "allowed": {
@@ -18881,7 +18881,7 @@
           "anyOf": [
             {
               "items": {
-                "$ref": "#/$defs/McpErrorDetail"
+                "$ref": "#/$defs/ErrorDetail"
               },
               "type": "array"
             },
@@ -18919,6 +18919,93 @@
     },
     "McpFeatureGenerationListResponse": {
       "$defs": {
+        "ErrorDetail": {
+          "additionalProperties": false,
+          "properties": {
+            "allowed": {
+              "anyOf": [
+                {
+                  "items": {},
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Allowed"
+            },
+            "field": {
+              "title": "Field",
+              "type": "string"
+            },
+            "got": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Got"
+            },
+            "max": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Max"
+            },
+            "min": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Min"
+            },
+            "problem": {
+              "enum": [
+                "required",
+                "not_allowed",
+                "too_small",
+                "too_large",
+                "too_short",
+                "too_long",
+                "wrong_type",
+                "invalid",
+                "beyond_end_of_file",
+                "range_too_long",
+                "start_after_end"
+              ],
+              "title": "Problem",
+              "type": "string"
+            }
+          },
+          "required": [
+            "field",
+            "problem"
+          ],
+          "title": "ErrorDetail",
+          "type": "object"
+        },
         "FeatureGenerationError": {
           "additionalProperties": false,
           "properties": {
@@ -19405,7 +19492,7 @@
               "anyOf": [
                 {
                   "items": {
-                    "$ref": "#/$defs/McpErrorDetail"
+                    "$ref": "#/$defs/ErrorDetail"
                   },
                   "type": "array"
                 },
@@ -19440,8 +19527,53 @@
           ],
           "title": "McpError",
           "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Read-only MCP envelope for project or index feature history.",
+      "properties": {
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/McpError"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
-        "McpErrorDetail": {
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "result": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FeatureGenerationListResponse"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "schema_version": {
+          "const": "0.1.0",
+          "default": "0.1.0",
+          "title": "Schema Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ok"
+      ],
+      "title": "McpFeatureGenerationListResponse",
+      "type": "object"
+    },
+    "McpFeatureGenerationResponse": {
+      "$defs": {
+        "ErrorDetail": {
           "additionalProperties": false,
           "properties": {
             "allowed": {
@@ -19527,52 +19659,7 @@
           ],
           "title": "ErrorDetail",
           "type": "object"
-        }
-      },
-      "additionalProperties": false,
-      "description": "Read-only MCP envelope for project or index feature history.",
-      "properties": {
-        "error": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/McpError"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
         },
-        "ok": {
-          "title": "Ok",
-          "type": "boolean"
-        },
-        "result": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/FeatureGenerationListResponse"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "schema_version": {
-          "const": "0.1.0",
-          "default": "0.1.0",
-          "title": "Schema Version",
-          "type": "string"
-        }
-      },
-      "required": [
-        "ok"
-      ],
-      "title": "McpFeatureGenerationListResponse",
-      "type": "object"
-    },
-    "McpFeatureGenerationResponse": {
-      "$defs": {
         "Evidence": {
           "additionalProperties": false,
           "properties": {
@@ -20430,7 +20517,7 @@
               "anyOf": [
                 {
                   "items": {
-                    "$ref": "#/$defs/McpErrorDetail"
+                    "$ref": "#/$defs/ErrorDetail"
                   },
                   "type": "array"
                 },
@@ -20465,8 +20552,60 @@
           ],
           "title": "McpError",
           "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Structured MCP response for a saved or externally submitted feature generation.",
+      "properties": {
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/McpError"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
-        "McpErrorDetail": {
+        "generation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FeatureGeneration"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "references": {
+          "items": {
+            "$ref": "#/$defs/EvidenceReference"
+          },
+          "title": "References",
+          "type": "array"
+        },
+        "schema_version": {
+          "const": "0.1.0",
+          "default": "0.1.0",
+          "title": "Schema Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ok"
+      ],
+      "title": "McpFeatureGenerationResponse",
+      "type": "object"
+    },
+    "McpFeatureGraphResponse": {
+      "$defs": {
+        "ErrorDetail": {
           "additionalProperties": false,
           "properties": {
             "allowed": {
@@ -20552,59 +20691,7 @@
           ],
           "title": "ErrorDetail",
           "type": "object"
-        }
-      },
-      "additionalProperties": false,
-      "description": "Structured MCP response for a saved or externally submitted feature generation.",
-      "properties": {
-        "error": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/McpError"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
         },
-        "generation": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/FeatureGeneration"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "ok": {
-          "title": "Ok",
-          "type": "boolean"
-        },
-        "references": {
-          "items": {
-            "$ref": "#/$defs/EvidenceReference"
-          },
-          "title": "References",
-          "type": "array"
-        },
-        "schema_version": {
-          "const": "0.1.0",
-          "default": "0.1.0",
-          "title": "Schema Version",
-          "type": "string"
-        }
-      },
-      "required": [
-        "ok"
-      ],
-      "title": "McpFeatureGenerationResponse",
-      "type": "object"
-    },
-    "McpFeatureGraphResponse": {
-      "$defs": {
         "Evidence": {
           "additionalProperties": false,
           "properties": {
@@ -21086,7 +21173,7 @@
               "anyOf": [
                 {
                   "items": {
-                    "$ref": "#/$defs/McpErrorDetail"
+                    "$ref": "#/$defs/ErrorDetail"
                   },
                   "type": "array"
                 },
@@ -21120,93 +21207,6 @@
             "message"
           ],
           "title": "McpError",
-          "type": "object"
-        },
-        "McpErrorDetail": {
-          "additionalProperties": false,
-          "properties": {
-            "allowed": {
-              "anyOf": [
-                {
-                  "items": {},
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Allowed"
-            },
-            "field": {
-              "title": "Field",
-              "type": "string"
-            },
-            "got": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Got"
-            },
-            "max": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Max"
-            },
-            "min": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Min"
-            },
-            "problem": {
-              "enum": [
-                "required",
-                "not_allowed",
-                "too_small",
-                "too_large",
-                "too_short",
-                "too_long",
-                "wrong_type",
-                "invalid",
-                "beyond_end_of_file",
-                "range_too_long",
-                "start_after_end"
-              ],
-              "title": "Problem",
-              "type": "string"
-            }
-          },
-          "required": [
-            "field",
-            "problem"
-          ],
-          "title": "ErrorDetail",
           "type": "object"
         },
         "Symbol": {
@@ -21322,6 +21322,93 @@
     },
     "McpImportResponse": {
       "$defs": {
+        "ErrorDetail": {
+          "additionalProperties": false,
+          "properties": {
+            "allowed": {
+              "anyOf": [
+                {
+                  "items": {},
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Allowed"
+            },
+            "field": {
+              "title": "Field",
+              "type": "string"
+            },
+            "got": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Got"
+            },
+            "max": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Max"
+            },
+            "min": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Min"
+            },
+            "problem": {
+              "enum": [
+                "required",
+                "not_allowed",
+                "too_small",
+                "too_large",
+                "too_short",
+                "too_long",
+                "wrong_type",
+                "invalid",
+                "beyond_end_of_file",
+                "range_too_long",
+                "start_after_end"
+              ],
+              "title": "Problem",
+              "type": "string"
+            }
+          },
+          "required": [
+            "field",
+            "problem"
+          ],
+          "title": "ErrorDetail",
+          "type": "object"
+        },
         "ImportAttempt": {
           "additionalProperties": false,
           "description": "Persisted lifecycle state for one bounded source import attempt.",
@@ -21776,7 +21863,7 @@
               "anyOf": [
                 {
                   "items": {
-                    "$ref": "#/$defs/McpErrorDetail"
+                    "$ref": "#/$defs/ErrorDetail"
                   },
                   "type": "array"
                 },
@@ -21810,93 +21897,6 @@
             "message"
           ],
           "title": "McpError",
-          "type": "object"
-        },
-        "McpErrorDetail": {
-          "additionalProperties": false,
-          "properties": {
-            "allowed": {
-              "anyOf": [
-                {
-                  "items": {},
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Allowed"
-            },
-            "field": {
-              "title": "Field",
-              "type": "string"
-            },
-            "got": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Got"
-            },
-            "max": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Max"
-            },
-            "min": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Min"
-            },
-            "problem": {
-              "enum": [
-                "required",
-                "not_allowed",
-                "too_small",
-                "too_large",
-                "too_short",
-                "too_long",
-                "wrong_type",
-                "invalid",
-                "beyond_end_of_file",
-                "range_too_long",
-                "start_after_end"
-              ],
-              "title": "Problem",
-              "type": "string"
-            }
-          },
-          "required": [
-            "field",
-            "problem"
-          ],
-          "title": "ErrorDetail",
           "type": "object"
         },
         "Project": {
@@ -22154,6 +22154,93 @@
     },
     "McpImportStatusResponse": {
       "$defs": {
+        "ErrorDetail": {
+          "additionalProperties": false,
+          "properties": {
+            "allowed": {
+              "anyOf": [
+                {
+                  "items": {},
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Allowed"
+            },
+            "field": {
+              "title": "Field",
+              "type": "string"
+            },
+            "got": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Got"
+            },
+            "max": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Max"
+            },
+            "min": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Min"
+            },
+            "problem": {
+              "enum": [
+                "required",
+                "not_allowed",
+                "too_small",
+                "too_large",
+                "too_short",
+                "too_long",
+                "wrong_type",
+                "invalid",
+                "beyond_end_of_file",
+                "range_too_long",
+                "start_after_end"
+              ],
+              "title": "Problem",
+              "type": "string"
+            }
+          },
+          "required": [
+            "field",
+            "problem"
+          ],
+          "title": "ErrorDetail",
+          "type": "object"
+        },
         "ImportAttempt": {
           "additionalProperties": false,
           "description": "Persisted lifecycle state for one bounded source import attempt.",
@@ -22608,7 +22695,7 @@
               "anyOf": [
                 {
                   "items": {
-                    "$ref": "#/$defs/McpErrorDetail"
+                    "$ref": "#/$defs/ErrorDetail"
                   },
                   "type": "array"
                 },
@@ -22642,93 +22729,6 @@
             "message"
           ],
           "title": "McpError",
-          "type": "object"
-        },
-        "McpErrorDetail": {
-          "additionalProperties": false,
-          "properties": {
-            "allowed": {
-              "anyOf": [
-                {
-                  "items": {},
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Allowed"
-            },
-            "field": {
-              "title": "Field",
-              "type": "string"
-            },
-            "got": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Got"
-            },
-            "max": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Max"
-            },
-            "min": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Min"
-            },
-            "problem": {
-              "enum": [
-                "required",
-                "not_allowed",
-                "too_small",
-                "too_large",
-                "too_short",
-                "too_long",
-                "wrong_type",
-                "invalid",
-                "beyond_end_of_file",
-                "range_too_long",
-                "start_after_end"
-              ],
-              "title": "Problem",
-              "type": "string"
-            }
-          },
-          "required": [
-            "field",
-            "problem"
-          ],
-          "title": "ErrorDetail",
           "type": "object"
         },
         "Project": {
@@ -22890,6 +22890,93 @@
     },
     "McpIndexFreshnessResponse": {
       "$defs": {
+        "ErrorDetail": {
+          "additionalProperties": false,
+          "properties": {
+            "allowed": {
+              "anyOf": [
+                {
+                  "items": {},
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Allowed"
+            },
+            "field": {
+              "title": "Field",
+              "type": "string"
+            },
+            "got": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Got"
+            },
+            "max": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Max"
+            },
+            "min": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Min"
+            },
+            "problem": {
+              "enum": [
+                "required",
+                "not_allowed",
+                "too_small",
+                "too_large",
+                "too_short",
+                "too_long",
+                "wrong_type",
+                "invalid",
+                "beyond_end_of_file",
+                "range_too_long",
+                "start_after_end"
+              ],
+              "title": "Problem",
+              "type": "string"
+            }
+          },
+          "required": [
+            "field",
+            "problem"
+          ],
+          "title": "ErrorDetail",
+          "type": "object"
+        },
         "IndexFreshness": {
           "additionalProperties": false,
           "description": "Bounded observation of one project's current source versus an index.",
@@ -23153,7 +23240,7 @@
               "anyOf": [
                 {
                   "items": {
-                    "$ref": "#/$defs/McpErrorDetail"
+                    "$ref": "#/$defs/ErrorDetail"
                   },
                   "type": "array"
                 },
@@ -23188,8 +23275,52 @@
           ],
           "title": "McpError",
           "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/McpError"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
-        "McpErrorDetail": {
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "result": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IndexFreshness"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "schema_version": {
+          "const": "0.1.0",
+          "default": "0.1.0",
+          "title": "Schema Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ok"
+      ],
+      "title": "McpIndexFreshnessResponse",
+      "type": "object"
+    },
+    "McpIndexRefreshResponse": {
+      "$defs": {
+        "ErrorDetail": {
           "additionalProperties": false,
           "properties": {
             "allowed": {
@@ -23275,51 +23406,7 @@
           ],
           "title": "ErrorDetail",
           "type": "object"
-        }
-      },
-      "additionalProperties": false,
-      "properties": {
-        "error": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/McpError"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
         },
-        "ok": {
-          "title": "Ok",
-          "type": "boolean"
-        },
-        "result": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/IndexFreshness"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "schema_version": {
-          "const": "0.1.0",
-          "default": "0.1.0",
-          "title": "Schema Version",
-          "type": "string"
-        }
-      },
-      "required": [
-        "ok"
-      ],
-      "title": "McpIndexFreshnessResponse",
-      "type": "object"
-    },
-    "McpIndexRefreshResponse": {
-      "$defs": {
         "IndexFreshness": {
           "additionalProperties": false,
           "description": "Bounded observation of one project's current source versus an index.",
@@ -23838,7 +23925,7 @@
               "anyOf": [
                 {
                   "items": {
-                    "$ref": "#/$defs/McpErrorDetail"
+                    "$ref": "#/$defs/ErrorDetail"
                   },
                   "type": "array"
                 },
@@ -23873,8 +23960,52 @@
           ],
           "title": "McpError",
           "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/McpError"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
-        "McpErrorDetail": {
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "result": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IndexRefreshResponse"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "schema_version": {
+          "const": "0.1.0",
+          "default": "0.1.0",
+          "title": "Schema Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ok"
+      ],
+      "title": "McpIndexRefreshResponse",
+      "type": "object"
+    },
+    "McpIndexResponse": {
+      "$defs": {
+        "ErrorDetail": {
           "additionalProperties": false,
           "properties": {
             "allowed": {
@@ -23960,51 +24091,7 @@
           ],
           "title": "ErrorDetail",
           "type": "object"
-        }
-      },
-      "additionalProperties": false,
-      "properties": {
-        "error": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/McpError"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
         },
-        "ok": {
-          "title": "Ok",
-          "type": "boolean"
-        },
-        "result": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/IndexRefreshResponse"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "schema_version": {
-          "const": "0.1.0",
-          "default": "0.1.0",
-          "title": "Schema Version",
-          "type": "string"
-        }
-      },
-      "required": [
-        "ok"
-      ],
-      "title": "McpIndexRefreshResponse",
-      "type": "object"
-    },
-    "McpIndexResponse": {
-      "$defs": {
         "IndexIssue": {
           "additionalProperties": false,
           "properties": {
@@ -24237,7 +24324,7 @@
               "anyOf": [
                 {
                   "items": {
-                    "$ref": "#/$defs/McpErrorDetail"
+                    "$ref": "#/$defs/ErrorDetail"
                   },
                   "type": "array"
                 },
@@ -24272,8 +24359,52 @@
           ],
           "title": "McpError",
           "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/McpError"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
-        "McpErrorDetail": {
+        "index": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IndexResponse"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "schema_version": {
+          "const": "0.1.0",
+          "default": "0.1.0",
+          "title": "Schema Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ok"
+      ],
+      "title": "McpIndexResponse",
+      "type": "object"
+    },
+    "McpJourneyCatalogResponse": {
+      "$defs": {
+        "ErrorDetail": {
           "additionalProperties": false,
           "properties": {
             "allowed": {
@@ -24359,51 +24490,7 @@
           ],
           "title": "ErrorDetail",
           "type": "object"
-        }
-      },
-      "additionalProperties": false,
-      "properties": {
-        "error": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/McpError"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
         },
-        "index": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/IndexResponse"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
-        "ok": {
-          "title": "Ok",
-          "type": "boolean"
-        },
-        "schema_version": {
-          "const": "0.1.0",
-          "default": "0.1.0",
-          "title": "Schema Version",
-          "type": "string"
-        }
-      },
-      "required": [
-        "ok"
-      ],
-      "title": "McpIndexResponse",
-      "type": "object"
-    },
-    "McpJourneyCatalogResponse": {
-      "$defs": {
         "IndexSnapshot": {
           "additionalProperties": false,
           "properties": {
@@ -24708,7 +24795,7 @@
               "anyOf": [
                 {
                   "items": {
-                    "$ref": "#/$defs/McpErrorDetail"
+                    "$ref": "#/$defs/ErrorDetail"
                   },
                   "type": "array"
                 },
@@ -24742,93 +24829,6 @@
             "message"
           ],
           "title": "McpError",
-          "type": "object"
-        },
-        "McpErrorDetail": {
-          "additionalProperties": false,
-          "properties": {
-            "allowed": {
-              "anyOf": [
-                {
-                  "items": {},
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Allowed"
-            },
-            "field": {
-              "title": "Field",
-              "type": "string"
-            },
-            "got": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Got"
-            },
-            "max": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Max"
-            },
-            "min": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Min"
-            },
-            "problem": {
-              "enum": [
-                "required",
-                "not_allowed",
-                "too_small",
-                "too_large",
-                "too_short",
-                "too_long",
-                "wrong_type",
-                "invalid",
-                "beyond_end_of_file",
-                "range_too_long",
-                "start_after_end"
-              ],
-              "title": "Problem",
-              "type": "string"
-            }
-          },
-          "required": [
-            "field",
-            "problem"
-          ],
-          "title": "ErrorDetail",
           "type": "object"
         },
         "ProjectJourneyCatalog": {
@@ -24922,6 +24922,93 @@
     },
     "McpJourneyResponse": {
       "$defs": {
+        "ErrorDetail": {
+          "additionalProperties": false,
+          "properties": {
+            "allowed": {
+              "anyOf": [
+                {
+                  "items": {},
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Allowed"
+            },
+            "field": {
+              "title": "Field",
+              "type": "string"
+            },
+            "got": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Got"
+            },
+            "max": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Max"
+            },
+            "min": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Min"
+            },
+            "problem": {
+              "enum": [
+                "required",
+                "not_allowed",
+                "too_small",
+                "too_large",
+                "too_short",
+                "too_long",
+                "wrong_type",
+                "invalid",
+                "beyond_end_of_file",
+                "range_too_long",
+                "start_after_end"
+              ],
+              "title": "Problem",
+              "type": "string"
+            }
+          },
+          "required": [
+            "field",
+            "problem"
+          ],
+          "title": "ErrorDetail",
+          "type": "object"
+        },
         "Evidence": {
           "additionalProperties": false,
           "properties": {
@@ -25442,7 +25529,7 @@
               "anyOf": [
                 {
                   "items": {
-                    "$ref": "#/$defs/McpErrorDetail"
+                    "$ref": "#/$defs/ErrorDetail"
                   },
                   "type": "array"
                 },
@@ -25476,93 +25563,6 @@
             "message"
           ],
           "title": "McpError",
-          "type": "object"
-        },
-        "McpErrorDetail": {
-          "additionalProperties": false,
-          "properties": {
-            "allowed": {
-              "anyOf": [
-                {
-                  "items": {},
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Allowed"
-            },
-            "field": {
-              "title": "Field",
-              "type": "string"
-            },
-            "got": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Got"
-            },
-            "max": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Max"
-            },
-            "min": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Min"
-            },
-            "problem": {
-              "enum": [
-                "required",
-                "not_allowed",
-                "too_small",
-                "too_large",
-                "too_short",
-                "too_long",
-                "wrong_type",
-                "invalid",
-                "beyond_end_of_file",
-                "range_too_long",
-                "start_after_end"
-              ],
-              "title": "Problem",
-              "type": "string"
-            }
-          },
-          "required": [
-            "field",
-            "problem"
-          ],
-          "title": "ErrorDetail",
           "type": "object"
         },
         "ProjectJourney": {
@@ -25745,68 +25745,7 @@
     },
     "McpModuleSymbolsResponse": {
       "$defs": {
-        "McpError": {
-          "additionalProperties": false,
-          "description": "Domain failure returned inside a read-only MCP tool result.",
-          "properties": {
-            "code": {
-              "enum": [
-                "not_found",
-                "invalid_input",
-                "conflict",
-                "budget_exceeded",
-                "download_timeout",
-                "index_too_large",
-                "index_source_rejected",
-                "index_timeout",
-                "index_cancelled",
-                "internal_error",
-                "forbidden"
-              ],
-              "title": "Code",
-              "type": "string"
-            },
-            "details": {
-              "anyOf": [
-                {
-                  "items": {
-                    "$ref": "#/$defs/McpErrorDetail"
-                  },
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Details"
-            },
-            "message": {
-              "maxLength": 2000,
-              "minLength": 1,
-              "title": "Message",
-              "type": "string"
-            },
-            "retryable": {
-              "default": false,
-              "title": "Retryable",
-              "type": "boolean"
-            },
-            "schema_version": {
-              "const": "0.1.0",
-              "default": "0.1.0",
-              "title": "Schema Version",
-              "type": "string"
-            }
-          },
-          "required": [
-            "code",
-            "message"
-          ],
-          "title": "McpError",
-          "type": "object"
-        },
-        "McpErrorDetail": {
+        "ErrorDetail": {
           "additionalProperties": false,
           "properties": {
             "allowed": {
@@ -25891,6 +25830,67 @@
             "problem"
           ],
           "title": "ErrorDetail",
+          "type": "object"
+        },
+        "McpError": {
+          "additionalProperties": false,
+          "description": "Domain failure returned inside a read-only MCP tool result.",
+          "properties": {
+            "code": {
+              "enum": [
+                "not_found",
+                "invalid_input",
+                "conflict",
+                "budget_exceeded",
+                "download_timeout",
+                "index_too_large",
+                "index_source_rejected",
+                "index_timeout",
+                "index_cancelled",
+                "internal_error",
+                "forbidden"
+              ],
+              "title": "Code",
+              "type": "string"
+            },
+            "details": {
+              "anyOf": [
+                {
+                  "items": {
+                    "$ref": "#/$defs/ErrorDetail"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Details"
+            },
+            "message": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "title": "Message",
+              "type": "string"
+            },
+            "retryable": {
+              "default": false,
+              "title": "Retryable",
+              "type": "boolean"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "title": "McpError",
           "type": "object"
         },
         "ModuleSymbolsPageResponse": {
@@ -26190,68 +26190,7 @@
           "title": "ContextualCall",
           "type": "object"
         },
-        "McpError": {
-          "additionalProperties": false,
-          "description": "Domain failure returned inside a read-only MCP tool result.",
-          "properties": {
-            "code": {
-              "enum": [
-                "not_found",
-                "invalid_input",
-                "conflict",
-                "budget_exceeded",
-                "download_timeout",
-                "index_too_large",
-                "index_source_rejected",
-                "index_timeout",
-                "index_cancelled",
-                "internal_error",
-                "forbidden"
-              ],
-              "title": "Code",
-              "type": "string"
-            },
-            "details": {
-              "anyOf": [
-                {
-                  "items": {
-                    "$ref": "#/$defs/McpErrorDetail"
-                  },
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Details"
-            },
-            "message": {
-              "maxLength": 2000,
-              "minLength": 1,
-              "title": "Message",
-              "type": "string"
-            },
-            "retryable": {
-              "default": false,
-              "title": "Retryable",
-              "type": "boolean"
-            },
-            "schema_version": {
-              "const": "0.1.0",
-              "default": "0.1.0",
-              "title": "Schema Version",
-              "type": "string"
-            }
-          },
-          "required": [
-            "code",
-            "message"
-          ],
-          "title": "McpError",
-          "type": "object"
-        },
-        "McpErrorDetail": {
+        "ErrorDetail": {
           "additionalProperties": false,
           "properties": {
             "allowed": {
@@ -26336,6 +26275,67 @@
             "problem"
           ],
           "title": "ErrorDetail",
+          "type": "object"
+        },
+        "McpError": {
+          "additionalProperties": false,
+          "description": "Domain failure returned inside a read-only MCP tool result.",
+          "properties": {
+            "code": {
+              "enum": [
+                "not_found",
+                "invalid_input",
+                "conflict",
+                "budget_exceeded",
+                "download_timeout",
+                "index_too_large",
+                "index_source_rejected",
+                "index_timeout",
+                "index_cancelled",
+                "internal_error",
+                "forbidden"
+              ],
+              "title": "Code",
+              "type": "string"
+            },
+            "details": {
+              "anyOf": [
+                {
+                  "items": {
+                    "$ref": "#/$defs/ErrorDetail"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Details"
+            },
+            "message": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "title": "Message",
+              "type": "string"
+            },
+            "retryable": {
+              "default": false,
+              "title": "Retryable",
+              "type": "boolean"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "title": "McpError",
           "type": "object"
         },
         "Neighbor": {
@@ -26844,6 +26844,93 @@
           "title": "CodeEdge",
           "type": "object"
         },
+        "ErrorDetail": {
+          "additionalProperties": false,
+          "properties": {
+            "allowed": {
+              "anyOf": [
+                {
+                  "items": {},
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Allowed"
+            },
+            "field": {
+              "title": "Field",
+              "type": "string"
+            },
+            "got": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Got"
+            },
+            "max": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Max"
+            },
+            "min": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Min"
+            },
+            "problem": {
+              "enum": [
+                "required",
+                "not_allowed",
+                "too_small",
+                "too_large",
+                "too_short",
+                "too_long",
+                "wrong_type",
+                "invalid",
+                "beyond_end_of_file",
+                "range_too_long",
+                "start_after_end"
+              ],
+              "title": "Problem",
+              "type": "string"
+            }
+          },
+          "required": [
+            "field",
+            "problem"
+          ],
+          "title": "ErrorDetail",
+          "type": "object"
+        },
         "Evidence": {
           "additionalProperties": false,
           "properties": {
@@ -27087,7 +27174,7 @@
               "anyOf": [
                 {
                   "items": {
-                    "$ref": "#/$defs/McpErrorDetail"
+                    "$ref": "#/$defs/ErrorDetail"
                   },
                   "type": "array"
                 },
@@ -27121,93 +27208,6 @@
             "message"
           ],
           "title": "McpError",
-          "type": "object"
-        },
-        "McpErrorDetail": {
-          "additionalProperties": false,
-          "properties": {
-            "allowed": {
-              "anyOf": [
-                {
-                  "items": {},
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Allowed"
-            },
-            "field": {
-              "title": "Field",
-              "type": "string"
-            },
-            "got": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Got"
-            },
-            "max": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Max"
-            },
-            "min": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Min"
-            },
-            "problem": {
-              "enum": [
-                "required",
-                "not_allowed",
-                "too_small",
-                "too_large",
-                "too_short",
-                "too_long",
-                "wrong_type",
-                "invalid",
-                "beyond_end_of_file",
-                "range_too_long",
-                "start_after_end"
-              ],
-              "title": "Problem",
-              "type": "string"
-            }
-          },
-          "required": [
-            "field",
-            "problem"
-          ],
-          "title": "ErrorDetail",
           "type": "object"
         },
         "OverviewClassification": {
@@ -28494,6 +28494,93 @@
     },
     "McpProjectIndexesResponse": {
       "$defs": {
+        "ErrorDetail": {
+          "additionalProperties": false,
+          "properties": {
+            "allowed": {
+              "anyOf": [
+                {
+                  "items": {},
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Allowed"
+            },
+            "field": {
+              "title": "Field",
+              "type": "string"
+            },
+            "got": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Got"
+            },
+            "max": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Max"
+            },
+            "min": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Min"
+            },
+            "problem": {
+              "enum": [
+                "required",
+                "not_allowed",
+                "too_small",
+                "too_large",
+                "too_short",
+                "too_long",
+                "wrong_type",
+                "invalid",
+                "beyond_end_of_file",
+                "range_too_long",
+                "start_after_end"
+              ],
+              "title": "Problem",
+              "type": "string"
+            }
+          },
+          "required": [
+            "field",
+            "problem"
+          ],
+          "title": "ErrorDetail",
+          "type": "object"
+        },
         "IndexSnapshot": {
           "additionalProperties": false,
           "properties": {
@@ -28603,7 +28690,7 @@
               "anyOf": [
                 {
                   "items": {
-                    "$ref": "#/$defs/McpErrorDetail"
+                    "$ref": "#/$defs/ErrorDetail"
                   },
                   "type": "array"
                 },
@@ -28637,93 +28724,6 @@
             "message"
           ],
           "title": "McpError",
-          "type": "object"
-        },
-        "McpErrorDetail": {
-          "additionalProperties": false,
-          "properties": {
-            "allowed": {
-              "anyOf": [
-                {
-                  "items": {},
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Allowed"
-            },
-            "field": {
-              "title": "Field",
-              "type": "string"
-            },
-            "got": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Got"
-            },
-            "max": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Max"
-            },
-            "min": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Min"
-            },
-            "problem": {
-              "enum": [
-                "required",
-                "not_allowed",
-                "too_small",
-                "too_large",
-                "too_short",
-                "too_long",
-                "wrong_type",
-                "invalid",
-                "beyond_end_of_file",
-                "range_too_long",
-                "start_after_end"
-              ],
-              "title": "Problem",
-              "type": "string"
-            }
-          },
-          "required": [
-            "field",
-            "problem"
-          ],
-          "title": "ErrorDetail",
           "type": "object"
         }
       },
@@ -28819,68 +28819,7 @@
     },
     "McpProjectListResponse": {
       "$defs": {
-        "McpError": {
-          "additionalProperties": false,
-          "description": "Domain failure returned inside a read-only MCP tool result.",
-          "properties": {
-            "code": {
-              "enum": [
-                "not_found",
-                "invalid_input",
-                "conflict",
-                "budget_exceeded",
-                "download_timeout",
-                "index_too_large",
-                "index_source_rejected",
-                "index_timeout",
-                "index_cancelled",
-                "internal_error",
-                "forbidden"
-              ],
-              "title": "Code",
-              "type": "string"
-            },
-            "details": {
-              "anyOf": [
-                {
-                  "items": {
-                    "$ref": "#/$defs/McpErrorDetail"
-                  },
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Details"
-            },
-            "message": {
-              "maxLength": 2000,
-              "minLength": 1,
-              "title": "Message",
-              "type": "string"
-            },
-            "retryable": {
-              "default": false,
-              "title": "Retryable",
-              "type": "boolean"
-            },
-            "schema_version": {
-              "const": "0.1.0",
-              "default": "0.1.0",
-              "title": "Schema Version",
-              "type": "string"
-            }
-          },
-          "required": [
-            "code",
-            "message"
-          ],
-          "title": "McpError",
-          "type": "object"
-        },
-        "McpErrorDetail": {
+        "ErrorDetail": {
           "additionalProperties": false,
           "properties": {
             "allowed": {
@@ -28965,6 +28904,67 @@
             "problem"
           ],
           "title": "ErrorDetail",
+          "type": "object"
+        },
+        "McpError": {
+          "additionalProperties": false,
+          "description": "Domain failure returned inside a read-only MCP tool result.",
+          "properties": {
+            "code": {
+              "enum": [
+                "not_found",
+                "invalid_input",
+                "conflict",
+                "budget_exceeded",
+                "download_timeout",
+                "index_too_large",
+                "index_source_rejected",
+                "index_timeout",
+                "index_cancelled",
+                "internal_error",
+                "forbidden"
+              ],
+              "title": "Code",
+              "type": "string"
+            },
+            "details": {
+              "anyOf": [
+                {
+                  "items": {
+                    "$ref": "#/$defs/ErrorDetail"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Details"
+            },
+            "message": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "title": "Message",
+              "type": "string"
+            },
+            "retryable": {
+              "default": false,
+              "title": "Retryable",
+              "type": "boolean"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "title": "McpError",
           "type": "object"
         },
         "Project": {
@@ -29104,68 +29104,7 @@
     },
     "McpProjectResponse": {
       "$defs": {
-        "McpError": {
-          "additionalProperties": false,
-          "description": "Domain failure returned inside a read-only MCP tool result.",
-          "properties": {
-            "code": {
-              "enum": [
-                "not_found",
-                "invalid_input",
-                "conflict",
-                "budget_exceeded",
-                "download_timeout",
-                "index_too_large",
-                "index_source_rejected",
-                "index_timeout",
-                "index_cancelled",
-                "internal_error",
-                "forbidden"
-              ],
-              "title": "Code",
-              "type": "string"
-            },
-            "details": {
-              "anyOf": [
-                {
-                  "items": {
-                    "$ref": "#/$defs/McpErrorDetail"
-                  },
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Details"
-            },
-            "message": {
-              "maxLength": 2000,
-              "minLength": 1,
-              "title": "Message",
-              "type": "string"
-            },
-            "retryable": {
-              "default": false,
-              "title": "Retryable",
-              "type": "boolean"
-            },
-            "schema_version": {
-              "const": "0.1.0",
-              "default": "0.1.0",
-              "title": "Schema Version",
-              "type": "string"
-            }
-          },
-          "required": [
-            "code",
-            "message"
-          ],
-          "title": "McpError",
-          "type": "object"
-        },
-        "McpErrorDetail": {
+        "ErrorDetail": {
           "additionalProperties": false,
           "properties": {
             "allowed": {
@@ -29250,6 +29189,67 @@
             "problem"
           ],
           "title": "ErrorDetail",
+          "type": "object"
+        },
+        "McpError": {
+          "additionalProperties": false,
+          "description": "Domain failure returned inside a read-only MCP tool result.",
+          "properties": {
+            "code": {
+              "enum": [
+                "not_found",
+                "invalid_input",
+                "conflict",
+                "budget_exceeded",
+                "download_timeout",
+                "index_too_large",
+                "index_source_rejected",
+                "index_timeout",
+                "index_cancelled",
+                "internal_error",
+                "forbidden"
+              ],
+              "title": "Code",
+              "type": "string"
+            },
+            "details": {
+              "anyOf": [
+                {
+                  "items": {
+                    "$ref": "#/$defs/ErrorDetail"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Details"
+            },
+            "message": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "title": "Message",
+              "type": "string"
+            },
+            "retryable": {
+              "default": false,
+              "title": "Retryable",
+              "type": "boolean"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "title": "McpError",
           "type": "object"
         },
         "Project": {
@@ -29444,68 +29444,7 @@
           "title": "CancelRunResponse",
           "type": "object"
         },
-        "McpError": {
-          "additionalProperties": false,
-          "description": "Domain failure returned inside a read-only MCP tool result.",
-          "properties": {
-            "code": {
-              "enum": [
-                "not_found",
-                "invalid_input",
-                "conflict",
-                "budget_exceeded",
-                "download_timeout",
-                "index_too_large",
-                "index_source_rejected",
-                "index_timeout",
-                "index_cancelled",
-                "internal_error",
-                "forbidden"
-              ],
-              "title": "Code",
-              "type": "string"
-            },
-            "details": {
-              "anyOf": [
-                {
-                  "items": {
-                    "$ref": "#/$defs/McpErrorDetail"
-                  },
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Details"
-            },
-            "message": {
-              "maxLength": 2000,
-              "minLength": 1,
-              "title": "Message",
-              "type": "string"
-            },
-            "retryable": {
-              "default": false,
-              "title": "Retryable",
-              "type": "boolean"
-            },
-            "schema_version": {
-              "const": "0.1.0",
-              "default": "0.1.0",
-              "title": "Schema Version",
-              "type": "string"
-            }
-          },
-          "required": [
-            "code",
-            "message"
-          ],
-          "title": "McpError",
-          "type": "object"
-        },
-        "McpErrorDetail": {
+        "ErrorDetail": {
           "additionalProperties": false,
           "properties": {
             "allowed": {
@@ -29590,6 +29529,67 @@
             "problem"
           ],
           "title": "ErrorDetail",
+          "type": "object"
+        },
+        "McpError": {
+          "additionalProperties": false,
+          "description": "Domain failure returned inside a read-only MCP tool result.",
+          "properties": {
+            "code": {
+              "enum": [
+                "not_found",
+                "invalid_input",
+                "conflict",
+                "budget_exceeded",
+                "download_timeout",
+                "index_too_large",
+                "index_source_rejected",
+                "index_timeout",
+                "index_cancelled",
+                "internal_error",
+                "forbidden"
+              ],
+              "title": "Code",
+              "type": "string"
+            },
+            "details": {
+              "anyOf": [
+                {
+                  "items": {
+                    "$ref": "#/$defs/ErrorDetail"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Details"
+            },
+            "message": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "title": "Message",
+              "type": "string"
+            },
+            "retryable": {
+              "default": false,
+              "title": "Retryable",
+              "type": "boolean"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "title": "McpError",
           "type": "object"
         }
       },
@@ -29829,6 +29829,93 @@
             "field_name"
           ],
           "title": "ContextualCall",
+          "type": "object"
+        },
+        "ErrorDetail": {
+          "additionalProperties": false,
+          "properties": {
+            "allowed": {
+              "anyOf": [
+                {
+                  "items": {},
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Allowed"
+            },
+            "field": {
+              "title": "Field",
+              "type": "string"
+            },
+            "got": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Got"
+            },
+            "max": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Max"
+            },
+            "min": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Min"
+            },
+            "problem": {
+              "enum": [
+                "required",
+                "not_allowed",
+                "too_small",
+                "too_large",
+                "too_short",
+                "too_long",
+                "wrong_type",
+                "invalid",
+                "beyond_end_of_file",
+                "range_too_long",
+                "start_after_end"
+              ],
+              "title": "Problem",
+              "type": "string"
+            }
+          },
+          "required": [
+            "field",
+            "problem"
+          ],
+          "title": "ErrorDetail",
           "type": "object"
         },
         "Evidence": {
@@ -30405,7 +30492,7 @@
               "anyOf": [
                 {
                   "items": {
-                    "$ref": "#/$defs/McpErrorDetail"
+                    "$ref": "#/$defs/ErrorDetail"
                   },
                   "type": "array"
                 },
@@ -30439,93 +30526,6 @@
             "message"
           ],
           "title": "McpError",
-          "type": "object"
-        },
-        "McpErrorDetail": {
-          "additionalProperties": false,
-          "properties": {
-            "allowed": {
-              "anyOf": [
-                {
-                  "items": {},
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Allowed"
-            },
-            "field": {
-              "title": "Field",
-              "type": "string"
-            },
-            "got": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Got"
-            },
-            "max": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Max"
-            },
-            "min": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Min"
-            },
-            "problem": {
-              "enum": [
-                "required",
-                "not_allowed",
-                "too_small",
-                "too_large",
-                "too_short",
-                "too_long",
-                "wrong_type",
-                "invalid",
-                "beyond_end_of_file",
-                "range_too_long",
-                "start_after_end"
-              ],
-              "title": "Problem",
-              "type": "string"
-            }
-          },
-          "required": [
-            "field",
-            "problem"
-          ],
-          "title": "ErrorDetail",
           "type": "object"
         },
         "Neighbor": {
@@ -32257,6 +32257,93 @@
           "title": "CodeEdge",
           "type": "object"
         },
+        "ErrorDetail": {
+          "additionalProperties": false,
+          "properties": {
+            "allowed": {
+              "anyOf": [
+                {
+                  "items": {},
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Allowed"
+            },
+            "field": {
+              "title": "Field",
+              "type": "string"
+            },
+            "got": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Got"
+            },
+            "max": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Max"
+            },
+            "min": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Min"
+            },
+            "problem": {
+              "enum": [
+                "required",
+                "not_allowed",
+                "too_small",
+                "too_large",
+                "too_short",
+                "too_long",
+                "wrong_type",
+                "invalid",
+                "beyond_end_of_file",
+                "range_too_long",
+                "start_after_end"
+              ],
+              "title": "Problem",
+              "type": "string"
+            }
+          },
+          "required": [
+            "field",
+            "problem"
+          ],
+          "title": "ErrorDetail",
+          "type": "object"
+        },
         "ImpactLayer": {
           "additionalProperties": false,
           "description": "One read-only slice of a bounded Issue impact query.\n\nMembership comes from the saved report symbol, a shortest static ``calls``\npath, or an unresolved reference. None of these slices is confirmed impact.",
@@ -32393,7 +32480,7 @@
               "anyOf": [
                 {
                   "items": {
-                    "$ref": "#/$defs/McpErrorDetail"
+                    "$ref": "#/$defs/ErrorDetail"
                   },
                   "type": "array"
                 },
@@ -32427,93 +32514,6 @@
             "message"
           ],
           "title": "McpError",
-          "type": "object"
-        },
-        "McpErrorDetail": {
-          "additionalProperties": false,
-          "properties": {
-            "allowed": {
-              "anyOf": [
-                {
-                  "items": {},
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Allowed"
-            },
-            "field": {
-              "title": "Field",
-              "type": "string"
-            },
-            "got": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Got"
-            },
-            "max": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Max"
-            },
-            "min": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Min"
-            },
-            "problem": {
-              "enum": [
-                "required",
-                "not_allowed",
-                "too_small",
-                "too_large",
-                "too_short",
-                "too_long",
-                "wrong_type",
-                "invalid",
-                "beyond_end_of_file",
-                "range_too_long",
-                "start_after_end"
-              ],
-              "title": "Problem",
-              "type": "string"
-            }
-          },
-          "required": [
-            "field",
-            "problem"
-          ],
-          "title": "ErrorDetail",
           "type": "object"
         },
         "RunImpactResponse": {
@@ -32966,126 +32966,7 @@
     },
     "McpRunListResponse": {
       "$defs": {
-        "Issue": {
-          "additionalProperties": false,
-          "properties": {
-            "body": {
-              "maxLength": 20000,
-              "minLength": 1,
-              "title": "Body",
-              "type": "string"
-            },
-            "id": {
-              "maxLength": 200,
-              "minLength": 1,
-              "title": "Id",
-              "type": "string"
-            },
-            "mentioned_paths": {
-              "items": {
-                "maxLength": 500,
-                "minLength": 1,
-                "type": "string"
-              },
-              "title": "Mentioned Paths",
-              "type": "array"
-            },
-            "schema_version": {
-              "const": "0.1.0",
-              "default": "0.1.0",
-              "title": "Schema Version",
-              "type": "string"
-            },
-            "stacktrace": {
-              "anyOf": [
-                {
-                  "maxLength": 20000,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Stacktrace"
-            },
-            "title": {
-              "maxLength": 500,
-              "minLength": 1,
-              "title": "Title",
-              "type": "string"
-            }
-          },
-          "required": [
-            "id",
-            "title",
-            "body"
-          ],
-          "title": "Issue",
-          "type": "object"
-        },
-        "McpError": {
-          "additionalProperties": false,
-          "description": "Domain failure returned inside a read-only MCP tool result.",
-          "properties": {
-            "code": {
-              "enum": [
-                "not_found",
-                "invalid_input",
-                "conflict",
-                "budget_exceeded",
-                "download_timeout",
-                "index_too_large",
-                "index_source_rejected",
-                "index_timeout",
-                "index_cancelled",
-                "internal_error",
-                "forbidden"
-              ],
-              "title": "Code",
-              "type": "string"
-            },
-            "details": {
-              "anyOf": [
-                {
-                  "items": {
-                    "$ref": "#/$defs/McpErrorDetail"
-                  },
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Details"
-            },
-            "message": {
-              "maxLength": 2000,
-              "minLength": 1,
-              "title": "Message",
-              "type": "string"
-            },
-            "retryable": {
-              "default": false,
-              "title": "Retryable",
-              "type": "boolean"
-            },
-            "schema_version": {
-              "const": "0.1.0",
-              "default": "0.1.0",
-              "title": "Schema Version",
-              "type": "string"
-            }
-          },
-          "required": [
-            "code",
-            "message"
-          ],
-          "title": "McpError",
-          "type": "object"
-        },
-        "McpErrorDetail": {
+        "ErrorDetail": {
           "additionalProperties": false,
           "properties": {
             "allowed": {
@@ -33170,6 +33051,125 @@
             "problem"
           ],
           "title": "ErrorDetail",
+          "type": "object"
+        },
+        "Issue": {
+          "additionalProperties": false,
+          "properties": {
+            "body": {
+              "maxLength": 20000,
+              "minLength": 1,
+              "title": "Body",
+              "type": "string"
+            },
+            "id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Id",
+              "type": "string"
+            },
+            "mentioned_paths": {
+              "items": {
+                "maxLength": 500,
+                "minLength": 1,
+                "type": "string"
+              },
+              "title": "Mentioned Paths",
+              "type": "array"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            },
+            "stacktrace": {
+              "anyOf": [
+                {
+                  "maxLength": 20000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Stacktrace"
+            },
+            "title": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Title",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "title",
+            "body"
+          ],
+          "title": "Issue",
+          "type": "object"
+        },
+        "McpError": {
+          "additionalProperties": false,
+          "description": "Domain failure returned inside a read-only MCP tool result.",
+          "properties": {
+            "code": {
+              "enum": [
+                "not_found",
+                "invalid_input",
+                "conflict",
+                "budget_exceeded",
+                "download_timeout",
+                "index_too_large",
+                "index_source_rejected",
+                "index_timeout",
+                "index_cancelled",
+                "internal_error",
+                "forbidden"
+              ],
+              "title": "Code",
+              "type": "string"
+            },
+            "details": {
+              "anyOf": [
+                {
+                  "items": {
+                    "$ref": "#/$defs/ErrorDetail"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Details"
+            },
+            "message": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "title": "Message",
+              "type": "string"
+            },
+            "retryable": {
+              "default": false,
+              "title": "Retryable",
+              "type": "boolean"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "title": "McpError",
           "type": "object"
         },
         "Run": {
@@ -33824,6 +33824,93 @@
           "title": "CodeExplanation",
           "type": "object"
         },
+        "ErrorDetail": {
+          "additionalProperties": false,
+          "properties": {
+            "allowed": {
+              "anyOf": [
+                {
+                  "items": {},
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Allowed"
+            },
+            "field": {
+              "title": "Field",
+              "type": "string"
+            },
+            "got": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Got"
+            },
+            "max": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Max"
+            },
+            "min": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Min"
+            },
+            "problem": {
+              "enum": [
+                "required",
+                "not_allowed",
+                "too_small",
+                "too_large",
+                "too_short",
+                "too_long",
+                "wrong_type",
+                "invalid",
+                "beyond_end_of_file",
+                "range_too_long",
+                "start_after_end"
+              ],
+              "title": "Problem",
+              "type": "string"
+            }
+          },
+          "required": [
+            "field",
+            "problem"
+          ],
+          "title": "ErrorDetail",
+          "type": "object"
+        },
         "Evidence": {
           "additionalProperties": false,
           "properties": {
@@ -34088,7 +34175,7 @@
               "anyOf": [
                 {
                   "items": {
-                    "$ref": "#/$defs/McpErrorDetail"
+                    "$ref": "#/$defs/ErrorDetail"
                   },
                   "type": "array"
                 },
@@ -34122,93 +34209,6 @@
             "message"
           ],
           "title": "McpError",
-          "type": "object"
-        },
-        "McpErrorDetail": {
-          "additionalProperties": false,
-          "properties": {
-            "allowed": {
-              "anyOf": [
-                {
-                  "items": {},
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Allowed"
-            },
-            "field": {
-              "title": "Field",
-              "type": "string"
-            },
-            "got": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Got"
-            },
-            "max": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Max"
-            },
-            "min": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Min"
-            },
-            "problem": {
-              "enum": [
-                "required",
-                "not_allowed",
-                "too_small",
-                "too_large",
-                "too_short",
-                "too_long",
-                "wrong_type",
-                "invalid",
-                "beyond_end_of_file",
-                "range_too_long",
-                "start_after_end"
-              ],
-              "title": "Problem",
-              "type": "string"
-            }
-          },
-          "required": [
-            "field",
-            "problem"
-          ],
-          "title": "ErrorDetail",
           "type": "object"
         },
         "Report": {
@@ -34553,126 +34553,7 @@
     },
     "McpRunResponse": {
       "$defs": {
-        "Issue": {
-          "additionalProperties": false,
-          "properties": {
-            "body": {
-              "maxLength": 20000,
-              "minLength": 1,
-              "title": "Body",
-              "type": "string"
-            },
-            "id": {
-              "maxLength": 200,
-              "minLength": 1,
-              "title": "Id",
-              "type": "string"
-            },
-            "mentioned_paths": {
-              "items": {
-                "maxLength": 500,
-                "minLength": 1,
-                "type": "string"
-              },
-              "title": "Mentioned Paths",
-              "type": "array"
-            },
-            "schema_version": {
-              "const": "0.1.0",
-              "default": "0.1.0",
-              "title": "Schema Version",
-              "type": "string"
-            },
-            "stacktrace": {
-              "anyOf": [
-                {
-                  "maxLength": 20000,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Stacktrace"
-            },
-            "title": {
-              "maxLength": 500,
-              "minLength": 1,
-              "title": "Title",
-              "type": "string"
-            }
-          },
-          "required": [
-            "id",
-            "title",
-            "body"
-          ],
-          "title": "Issue",
-          "type": "object"
-        },
-        "McpError": {
-          "additionalProperties": false,
-          "description": "Domain failure returned inside a read-only MCP tool result.",
-          "properties": {
-            "code": {
-              "enum": [
-                "not_found",
-                "invalid_input",
-                "conflict",
-                "budget_exceeded",
-                "download_timeout",
-                "index_too_large",
-                "index_source_rejected",
-                "index_timeout",
-                "index_cancelled",
-                "internal_error",
-                "forbidden"
-              ],
-              "title": "Code",
-              "type": "string"
-            },
-            "details": {
-              "anyOf": [
-                {
-                  "items": {
-                    "$ref": "#/$defs/McpErrorDetail"
-                  },
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Details"
-            },
-            "message": {
-              "maxLength": 2000,
-              "minLength": 1,
-              "title": "Message",
-              "type": "string"
-            },
-            "retryable": {
-              "default": false,
-              "title": "Retryable",
-              "type": "boolean"
-            },
-            "schema_version": {
-              "const": "0.1.0",
-              "default": "0.1.0",
-              "title": "Schema Version",
-              "type": "string"
-            }
-          },
-          "required": [
-            "code",
-            "message"
-          ],
-          "title": "McpError",
-          "type": "object"
-        },
-        "McpErrorDetail": {
+        "ErrorDetail": {
           "additionalProperties": false,
           "properties": {
             "allowed": {
@@ -34757,6 +34638,125 @@
             "problem"
           ],
           "title": "ErrorDetail",
+          "type": "object"
+        },
+        "Issue": {
+          "additionalProperties": false,
+          "properties": {
+            "body": {
+              "maxLength": 20000,
+              "minLength": 1,
+              "title": "Body",
+              "type": "string"
+            },
+            "id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Id",
+              "type": "string"
+            },
+            "mentioned_paths": {
+              "items": {
+                "maxLength": 500,
+                "minLength": 1,
+                "type": "string"
+              },
+              "title": "Mentioned Paths",
+              "type": "array"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            },
+            "stacktrace": {
+              "anyOf": [
+                {
+                  "maxLength": 20000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Stacktrace"
+            },
+            "title": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Title",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "title",
+            "body"
+          ],
+          "title": "Issue",
+          "type": "object"
+        },
+        "McpError": {
+          "additionalProperties": false,
+          "description": "Domain failure returned inside a read-only MCP tool result.",
+          "properties": {
+            "code": {
+              "enum": [
+                "not_found",
+                "invalid_input",
+                "conflict",
+                "budget_exceeded",
+                "download_timeout",
+                "index_too_large",
+                "index_source_rejected",
+                "index_timeout",
+                "index_cancelled",
+                "internal_error",
+                "forbidden"
+              ],
+              "title": "Code",
+              "type": "string"
+            },
+            "details": {
+              "anyOf": [
+                {
+                  "items": {
+                    "$ref": "#/$defs/ErrorDetail"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Details"
+            },
+            "message": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "title": "Message",
+              "type": "string"
+            },
+            "retryable": {
+              "default": false,
+              "title": "Retryable",
+              "type": "boolean"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "title": "McpError",
           "type": "object"
         },
         "Run": {
@@ -35418,68 +35418,7 @@
           "title": "CreateRunResponse",
           "type": "object"
         },
-        "McpError": {
-          "additionalProperties": false,
-          "description": "Domain failure returned inside a read-only MCP tool result.",
-          "properties": {
-            "code": {
-              "enum": [
-                "not_found",
-                "invalid_input",
-                "conflict",
-                "budget_exceeded",
-                "download_timeout",
-                "index_too_large",
-                "index_source_rejected",
-                "index_timeout",
-                "index_cancelled",
-                "internal_error",
-                "forbidden"
-              ],
-              "title": "Code",
-              "type": "string"
-            },
-            "details": {
-              "anyOf": [
-                {
-                  "items": {
-                    "$ref": "#/$defs/McpErrorDetail"
-                  },
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Details"
-            },
-            "message": {
-              "maxLength": 2000,
-              "minLength": 1,
-              "title": "Message",
-              "type": "string"
-            },
-            "retryable": {
-              "default": false,
-              "title": "Retryable",
-              "type": "boolean"
-            },
-            "schema_version": {
-              "const": "0.1.0",
-              "default": "0.1.0",
-              "title": "Schema Version",
-              "type": "string"
-            }
-          },
-          "required": [
-            "code",
-            "message"
-          ],
-          "title": "McpError",
-          "type": "object"
-        },
-        "McpErrorDetail": {
+        "ErrorDetail": {
           "additionalProperties": false,
           "properties": {
             "allowed": {
@@ -35564,6 +35503,67 @@
             "problem"
           ],
           "title": "ErrorDetail",
+          "type": "object"
+        },
+        "McpError": {
+          "additionalProperties": false,
+          "description": "Domain failure returned inside a read-only MCP tool result.",
+          "properties": {
+            "code": {
+              "enum": [
+                "not_found",
+                "invalid_input",
+                "conflict",
+                "budget_exceeded",
+                "download_timeout",
+                "index_too_large",
+                "index_source_rejected",
+                "index_timeout",
+                "index_cancelled",
+                "internal_error",
+                "forbidden"
+              ],
+              "title": "Code",
+              "type": "string"
+            },
+            "details": {
+              "anyOf": [
+                {
+                  "items": {
+                    "$ref": "#/$defs/ErrorDetail"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Details"
+            },
+            "message": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "title": "Message",
+              "type": "string"
+            },
+            "retryable": {
+              "default": false,
+              "title": "Retryable",
+              "type": "boolean"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "title": "McpError",
           "type": "object"
         }
       },
@@ -35741,6 +35741,93 @@
             "field_name"
           ],
           "title": "ContextualCall",
+          "type": "object"
+        },
+        "ErrorDetail": {
+          "additionalProperties": false,
+          "properties": {
+            "allowed": {
+              "anyOf": [
+                {
+                  "items": {},
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Allowed"
+            },
+            "field": {
+              "title": "Field",
+              "type": "string"
+            },
+            "got": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Got"
+            },
+            "max": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Max"
+            },
+            "min": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Min"
+            },
+            "problem": {
+              "enum": [
+                "required",
+                "not_allowed",
+                "too_small",
+                "too_large",
+                "too_short",
+                "too_long",
+                "wrong_type",
+                "invalid",
+                "beyond_end_of_file",
+                "range_too_long",
+                "start_after_end"
+              ],
+              "title": "Problem",
+              "type": "string"
+            }
+          },
+          "required": [
+            "field",
+            "problem"
+          ],
+          "title": "ErrorDetail",
           "type": "object"
         },
         "Evidence": {
@@ -36056,7 +36143,7 @@
               "anyOf": [
                 {
                   "items": {
-                    "$ref": "#/$defs/McpErrorDetail"
+                    "$ref": "#/$defs/ErrorDetail"
                   },
                   "type": "array"
                 },
@@ -36090,93 +36177,6 @@
             "message"
           ],
           "title": "McpError",
-          "type": "object"
-        },
-        "McpErrorDetail": {
-          "additionalProperties": false,
-          "properties": {
-            "allowed": {
-              "anyOf": [
-                {
-                  "items": {},
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Allowed"
-            },
-            "field": {
-              "title": "Field",
-              "type": "string"
-            },
-            "got": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Got"
-            },
-            "max": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Max"
-            },
-            "min": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Min"
-            },
-            "problem": {
-              "enum": [
-                "required",
-                "not_allowed",
-                "too_small",
-                "too_large",
-                "too_short",
-                "too_long",
-                "wrong_type",
-                "invalid",
-                "beyond_end_of_file",
-                "range_too_long",
-                "start_after_end"
-              ],
-              "title": "Problem",
-              "type": "string"
-            }
-          },
-          "required": [
-            "field",
-            "problem"
-          ],
-          "title": "ErrorDetail",
           "type": "object"
         },
         "Neighbor": {
@@ -36874,68 +36874,7 @@
     },
     "McpSearchResponse": {
       "$defs": {
-        "McpError": {
-          "additionalProperties": false,
-          "description": "Domain failure returned inside a read-only MCP tool result.",
-          "properties": {
-            "code": {
-              "enum": [
-                "not_found",
-                "invalid_input",
-                "conflict",
-                "budget_exceeded",
-                "download_timeout",
-                "index_too_large",
-                "index_source_rejected",
-                "index_timeout",
-                "index_cancelled",
-                "internal_error",
-                "forbidden"
-              ],
-              "title": "Code",
-              "type": "string"
-            },
-            "details": {
-              "anyOf": [
-                {
-                  "items": {
-                    "$ref": "#/$defs/McpErrorDetail"
-                  },
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Details"
-            },
-            "message": {
-              "maxLength": 2000,
-              "minLength": 1,
-              "title": "Message",
-              "type": "string"
-            },
-            "retryable": {
-              "default": false,
-              "title": "Retryable",
-              "type": "boolean"
-            },
-            "schema_version": {
-              "const": "0.1.0",
-              "default": "0.1.0",
-              "title": "Schema Version",
-              "type": "string"
-            }
-          },
-          "required": [
-            "code",
-            "message"
-          ],
-          "title": "McpError",
-          "type": "object"
-        },
-        "McpErrorDetail": {
+        "ErrorDetail": {
           "additionalProperties": false,
           "properties": {
             "allowed": {
@@ -37020,6 +36959,67 @@
             "problem"
           ],
           "title": "ErrorDetail",
+          "type": "object"
+        },
+        "McpError": {
+          "additionalProperties": false,
+          "description": "Domain failure returned inside a read-only MCP tool result.",
+          "properties": {
+            "code": {
+              "enum": [
+                "not_found",
+                "invalid_input",
+                "conflict",
+                "budget_exceeded",
+                "download_timeout",
+                "index_too_large",
+                "index_source_rejected",
+                "index_timeout",
+                "index_cancelled",
+                "internal_error",
+                "forbidden"
+              ],
+              "title": "Code",
+              "type": "string"
+            },
+            "details": {
+              "anyOf": [
+                {
+                  "items": {
+                    "$ref": "#/$defs/ErrorDetail"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Details"
+            },
+            "message": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "title": "Message",
+              "type": "string"
+            },
+            "retryable": {
+              "default": false,
+              "title": "Retryable",
+              "type": "boolean"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "title": "McpError",
           "type": "object"
         },
         "SearchIndexResponse": {
@@ -37202,6 +37202,93 @@
     },
     "McpSessionListResponse": {
       "$defs": {
+        "ErrorDetail": {
+          "additionalProperties": false,
+          "properties": {
+            "allowed": {
+              "anyOf": [
+                {
+                  "items": {},
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Allowed"
+            },
+            "field": {
+              "title": "Field",
+              "type": "string"
+            },
+            "got": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Got"
+            },
+            "max": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Max"
+            },
+            "min": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Min"
+            },
+            "problem": {
+              "enum": [
+                "required",
+                "not_allowed",
+                "too_small",
+                "too_large",
+                "too_short",
+                "too_long",
+                "wrong_type",
+                "invalid",
+                "beyond_end_of_file",
+                "range_too_long",
+                "start_after_end"
+              ],
+              "title": "Problem",
+              "type": "string"
+            }
+          },
+          "required": [
+            "field",
+            "problem"
+          ],
+          "title": "ErrorDetail",
+          "type": "object"
+        },
         "IndexSnapshot": {
           "additionalProperties": false,
           "properties": {
@@ -37311,7 +37398,7 @@
               "anyOf": [
                 {
                   "items": {
-                    "$ref": "#/$defs/McpErrorDetail"
+                    "$ref": "#/$defs/ErrorDetail"
                   },
                   "type": "array"
                 },
@@ -37345,93 +37432,6 @@
             "message"
           ],
           "title": "McpError",
-          "type": "object"
-        },
-        "McpErrorDetail": {
-          "additionalProperties": false,
-          "properties": {
-            "allowed": {
-              "anyOf": [
-                {
-                  "items": {},
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Allowed"
-            },
-            "field": {
-              "title": "Field",
-              "type": "string"
-            },
-            "got": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Got"
-            },
-            "max": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Max"
-            },
-            "min": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Min"
-            },
-            "problem": {
-              "enum": [
-                "required",
-                "not_allowed",
-                "too_small",
-                "too_large",
-                "too_short",
-                "too_long",
-                "wrong_type",
-                "invalid",
-                "beyond_end_of_file",
-                "range_too_long",
-                "start_after_end"
-              ],
-              "title": "Problem",
-              "type": "string"
-            }
-          },
-          "required": [
-            "field",
-            "problem"
-          ],
-          "title": "ErrorDetail",
           "type": "object"
         },
         "Session": {
@@ -37646,68 +37646,7 @@
     },
     "McpSessionMessageResponse": {
       "$defs": {
-        "McpError": {
-          "additionalProperties": false,
-          "description": "Domain failure returned inside a read-only MCP tool result.",
-          "properties": {
-            "code": {
-              "enum": [
-                "not_found",
-                "invalid_input",
-                "conflict",
-                "budget_exceeded",
-                "download_timeout",
-                "index_too_large",
-                "index_source_rejected",
-                "index_timeout",
-                "index_cancelled",
-                "internal_error",
-                "forbidden"
-              ],
-              "title": "Code",
-              "type": "string"
-            },
-            "details": {
-              "anyOf": [
-                {
-                  "items": {
-                    "$ref": "#/$defs/McpErrorDetail"
-                  },
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Details"
-            },
-            "message": {
-              "maxLength": 2000,
-              "minLength": 1,
-              "title": "Message",
-              "type": "string"
-            },
-            "retryable": {
-              "default": false,
-              "title": "Retryable",
-              "type": "boolean"
-            },
-            "schema_version": {
-              "const": "0.1.0",
-              "default": "0.1.0",
-              "title": "Schema Version",
-              "type": "string"
-            }
-          },
-          "required": [
-            "code",
-            "message"
-          ],
-          "title": "McpError",
-          "type": "object"
-        },
-        "McpErrorDetail": {
+        "ErrorDetail": {
           "additionalProperties": false,
           "properties": {
             "allowed": {
@@ -37792,6 +37731,67 @@
             "problem"
           ],
           "title": "ErrorDetail",
+          "type": "object"
+        },
+        "McpError": {
+          "additionalProperties": false,
+          "description": "Domain failure returned inside a read-only MCP tool result.",
+          "properties": {
+            "code": {
+              "enum": [
+                "not_found",
+                "invalid_input",
+                "conflict",
+                "budget_exceeded",
+                "download_timeout",
+                "index_too_large",
+                "index_source_rejected",
+                "index_timeout",
+                "index_cancelled",
+                "internal_error",
+                "forbidden"
+              ],
+              "title": "Code",
+              "type": "string"
+            },
+            "details": {
+              "anyOf": [
+                {
+                  "items": {
+                    "$ref": "#/$defs/ErrorDetail"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Details"
+            },
+            "message": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "title": "Message",
+              "type": "string"
+            },
+            "retryable": {
+              "default": false,
+              "title": "Retryable",
+              "type": "boolean"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "title": "McpError",
           "type": "object"
         },
         "SessionMessage": {
@@ -37945,68 +37945,7 @@
     },
     "McpSessionMessagesResponse": {
       "$defs": {
-        "McpError": {
-          "additionalProperties": false,
-          "description": "Domain failure returned inside a read-only MCP tool result.",
-          "properties": {
-            "code": {
-              "enum": [
-                "not_found",
-                "invalid_input",
-                "conflict",
-                "budget_exceeded",
-                "download_timeout",
-                "index_too_large",
-                "index_source_rejected",
-                "index_timeout",
-                "index_cancelled",
-                "internal_error",
-                "forbidden"
-              ],
-              "title": "Code",
-              "type": "string"
-            },
-            "details": {
-              "anyOf": [
-                {
-                  "items": {
-                    "$ref": "#/$defs/McpErrorDetail"
-                  },
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Details"
-            },
-            "message": {
-              "maxLength": 2000,
-              "minLength": 1,
-              "title": "Message",
-              "type": "string"
-            },
-            "retryable": {
-              "default": false,
-              "title": "Retryable",
-              "type": "boolean"
-            },
-            "schema_version": {
-              "const": "0.1.0",
-              "default": "0.1.0",
-              "title": "Schema Version",
-              "type": "string"
-            }
-          },
-          "required": [
-            "code",
-            "message"
-          ],
-          "title": "McpError",
-          "type": "object"
-        },
-        "McpErrorDetail": {
+        "ErrorDetail": {
           "additionalProperties": false,
           "properties": {
             "allowed": {
@@ -38091,6 +38030,67 @@
             "problem"
           ],
           "title": "ErrorDetail",
+          "type": "object"
+        },
+        "McpError": {
+          "additionalProperties": false,
+          "description": "Domain failure returned inside a read-only MCP tool result.",
+          "properties": {
+            "code": {
+              "enum": [
+                "not_found",
+                "invalid_input",
+                "conflict",
+                "budget_exceeded",
+                "download_timeout",
+                "index_too_large",
+                "index_source_rejected",
+                "index_timeout",
+                "index_cancelled",
+                "internal_error",
+                "forbidden"
+              ],
+              "title": "Code",
+              "type": "string"
+            },
+            "details": {
+              "anyOf": [
+                {
+                  "items": {
+                    "$ref": "#/$defs/ErrorDetail"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Details"
+            },
+            "message": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "title": "Message",
+              "type": "string"
+            },
+            "retryable": {
+              "default": false,
+              "title": "Retryable",
+              "type": "boolean"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "title": "McpError",
           "type": "object"
         },
         "SessionMessage": {
@@ -38300,6 +38300,93 @@
     },
     "McpSessionResponse": {
       "$defs": {
+        "ErrorDetail": {
+          "additionalProperties": false,
+          "properties": {
+            "allowed": {
+              "anyOf": [
+                {
+                  "items": {},
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Allowed"
+            },
+            "field": {
+              "title": "Field",
+              "type": "string"
+            },
+            "got": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Got"
+            },
+            "max": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Max"
+            },
+            "min": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Min"
+            },
+            "problem": {
+              "enum": [
+                "required",
+                "not_allowed",
+                "too_small",
+                "too_large",
+                "too_short",
+                "too_long",
+                "wrong_type",
+                "invalid",
+                "beyond_end_of_file",
+                "range_too_long",
+                "start_after_end"
+              ],
+              "title": "Problem",
+              "type": "string"
+            }
+          },
+          "required": [
+            "field",
+            "problem"
+          ],
+          "title": "ErrorDetail",
+          "type": "object"
+        },
         "IndexSnapshot": {
           "additionalProperties": false,
           "properties": {
@@ -38409,7 +38496,7 @@
               "anyOf": [
                 {
                   "items": {
-                    "$ref": "#/$defs/McpErrorDetail"
+                    "$ref": "#/$defs/ErrorDetail"
                   },
                   "type": "array"
                 },
@@ -38443,93 +38530,6 @@
             "message"
           ],
           "title": "McpError",
-          "type": "object"
-        },
-        "McpErrorDetail": {
-          "additionalProperties": false,
-          "properties": {
-            "allowed": {
-              "anyOf": [
-                {
-                  "items": {},
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Allowed"
-            },
-            "field": {
-              "title": "Field",
-              "type": "string"
-            },
-            "got": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Got"
-            },
-            "max": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Max"
-            },
-            "min": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Min"
-            },
-            "problem": {
-              "enum": [
-                "required",
-                "not_allowed",
-                "too_small",
-                "too_large",
-                "too_short",
-                "too_long",
-                "wrong_type",
-                "invalid",
-                "beyond_end_of_file",
-                "range_too_long",
-                "start_after_end"
-              ],
-              "title": "Problem",
-              "type": "string"
-            }
-          },
-          "required": [
-            "field",
-            "problem"
-          ],
-          "title": "ErrorDetail",
           "type": "object"
         },
         "Session": {
@@ -38698,6 +38698,93 @@
     },
     "McpSourceResponse": {
       "$defs": {
+        "ErrorDetail": {
+          "additionalProperties": false,
+          "properties": {
+            "allowed": {
+              "anyOf": [
+                {
+                  "items": {},
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Allowed"
+            },
+            "field": {
+              "title": "Field",
+              "type": "string"
+            },
+            "got": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Got"
+            },
+            "max": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Max"
+            },
+            "min": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Min"
+            },
+            "problem": {
+              "enum": [
+                "required",
+                "not_allowed",
+                "too_small",
+                "too_large",
+                "too_short",
+                "too_long",
+                "wrong_type",
+                "invalid",
+                "beyond_end_of_file",
+                "range_too_long",
+                "start_after_end"
+              ],
+              "title": "Problem",
+              "type": "string"
+            }
+          },
+          "required": [
+            "field",
+            "problem"
+          ],
+          "title": "ErrorDetail",
+          "type": "object"
+        },
         "Evidence": {
           "additionalProperties": false,
           "properties": {
@@ -38857,7 +38944,7 @@
               "anyOf": [
                 {
                   "items": {
-                    "$ref": "#/$defs/McpErrorDetail"
+                    "$ref": "#/$defs/ErrorDetail"
                   },
                   "type": "array"
                 },
@@ -38891,93 +38978,6 @@
             "message"
           ],
           "title": "McpError",
-          "type": "object"
-        },
-        "McpErrorDetail": {
-          "additionalProperties": false,
-          "properties": {
-            "allowed": {
-              "anyOf": [
-                {
-                  "items": {},
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Allowed"
-            },
-            "field": {
-              "title": "Field",
-              "type": "string"
-            },
-            "got": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Got"
-            },
-            "max": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Max"
-            },
-            "min": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Min"
-            },
-            "problem": {
-              "enum": [
-                "required",
-                "not_allowed",
-                "too_small",
-                "too_large",
-                "too_short",
-                "too_long",
-                "wrong_type",
-                "invalid",
-                "beyond_end_of_file",
-                "range_too_long",
-                "start_after_end"
-              ],
-              "title": "Problem",
-              "type": "string"
-            }
-          },
-          "required": [
-            "field",
-            "problem"
-          ],
-          "title": "ErrorDetail",
           "type": "object"
         },
         "SourceIndexResponse": {

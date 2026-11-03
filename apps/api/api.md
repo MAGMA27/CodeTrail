@@ -48,6 +48,8 @@ Run 的 `analysis_kind` 默认是 `issue`；real 与 external Run 可声明 `und
 
 ## 错误与限制
 
+HTTP 错误响应包含 `code` 和安全的 `message`；当服务或请求校验能提供字段级信息时，还会包含可选 `details`。每项 detail 给出字段、稳定的问题类型及适用的允许值或边界，不回显对象/数组输入；没有 detail 时响应仍省略该字段。字段定义见 [ErrorDetail 与 ApiErrorResponse](app/contracts.py)，HTTP 与 MCP 共用同一映射规则。
+
 ### 持久后台任务
 
 GitHub 导入、GitHub 失败重试与清理重试、GitHub 远端刷新、项目索引重建以任务形式提交。写请求返回统一 `JobStatusResponse` 和稳定 `job_id`；初始 GitHub 导入在 Project 创建前可用 `GET /api/jobs/{job_id}` 轮询，已有 Project 归属的任务使用 `GET /api/projects/{project_id}/jobs/{job_id}`；未绑定任务使用 `POST /api/jobs/{job_id}/cancel`，已有归属任务使用 `POST /api/projects/{project_id}/jobs/{job_id}/cancel`。`Idempotency-Key`（GitHub 导入也接受请求字段）重复提交映射到原 job。队列断开或浏览器关闭不会取消已提交任务。

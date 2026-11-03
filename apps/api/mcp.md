@@ -2,7 +2,7 @@
 
 ## 工具响应与错误
 
-CodeTrail 工具成功和失败都通过原工具的响应模型返回，字段形状保持一致。失败时 `ok=false` 并包含 `error`（`code`、短英文 `message`、`retryable`）；参数校验失败使用 `invalid_input`，可在 `details` 中按字段给出问题类型及适用的边界值。`details` 缺省时不出现在旧错误响应中。
+CodeTrail 工具成功和失败都通过原工具的响应模型返回，字段形状保持一致。失败时 `ok=false` 并包含 `error`（`code`、短英文 `message`、`retryable`）；参数校验失败使用 `invalid_input`，可在可选 `details` 中按字段给出问题类型及适用的边界值。HTTP 与 MCP 共用该详情映射；`got` 只包含明确安全的标量、不超过 80 字符且可解析为数值的字符串或短 literal 值，必填缺失、请求体、敏感字段和值类型不适用时省略。`details` 缺省时不出现在旧错误响应中。
 
 所有 CodeTrail 工具失败都设置 MCP `isError=true`，包括业务错误和参数校验错误；失败仍提供符合该工具 `outputSchema` 的结构化响应。成功结果的 `isError=false`。每个工具的文本内容是紧凑 JSON，解析后与 `structuredContent` 完全相同。`get_overview.max_output_bytes` 按该紧凑文本的 UTF-8 字节数约束，并保留 512 字节的封装余量。
 

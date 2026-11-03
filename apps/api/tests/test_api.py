@@ -469,6 +469,61 @@ def test_http_index_query_and_snapshot_evidence_flow(tmp_path: Path) -> None:
     )
 
 
+def test_http_errors_include_shared_details_only_when_available(tmp_path: Path, monkeypatch) -> None:
+    application = create_app({}, data_root=tmp_path / "data")
+    project_id = "project-error-test"
+    index_id = "index-error-test"
+
+    def fail_read_source(_project_id, _index_id, _path, start_line, end_line):
+        if start_line > end_line:
+            raise ServiceError(
+                "invalid_input", 400, "start_line must be less than or equal to end_line",
+                details=[{"field": "start_line", "problem": "start_after_end"}],
+            )
+        if end_line - start_line + 1 > 200:
+            raise ServiceError(
+                "invalid_input", 400, "read_source supports at most 200 lines",
+                details=[{"field": "end_line", "problem": "range_too_long", "max": 200}],
+            )
+        raise ServiceError(
+            "invalid_input", 400, "start_line is beyond the end of the file (25 lines)",
+            details=[{"field": "start_line", "problem": "beyond_end_of_file", "max": 25}],
+        )
+
+    monkeypatch.setattr(application.state.workspace_service, "read_source", fail_read_source)
+    source_url = f"/api/projects/{project_id}/indexes/{index_id}/source?path=timeout_demo%2Fconfig.py&start_line={{start}}&end_line={{end}}"
+
+    expected_details = {
+        (1, 300): [{"field": "end_line", "problem": "range_too_long", "max": 200}],
+        (50, 10): [{"field": "start_line", "problem": "start_after_end"}],
+        (100, 100): [{"field": "start_line", "problem": "beyond_end_of_file", "max": 25}],
+    }
+    for (start, end), details in expected_details.items():
+        status, body = request(application, "GET", source_url.format(start=start, end=end))
+        assert status == 400
+        assert body["details"] == details
+
+    status, invalid = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/indexes/{index_id}/search?limit=1000",
+    )
+    assert status == 422
+    assert invalid["message"] == "request parameters are invalid"
+    assert {item["field"]: item["problem"] for item in invalid["details"]} == {
+        "query": "required",
+        "limit": "too_large",
+    }
+    assert "pydantic" not in json.dumps(invalid).lower()
+
+    status, no_details = request(application, "GET", "/api/projects/project-does-not-exist")
+    assert status == 404
+    assert "details" not in no_details
+    assert json.dumps(no_details, separators=(",", ":")) == (
+        '{"schema_version":"0.1.0","code":"not_found","message":"project was not found"}'
+    )
+
+
 def test_project_workspace_isolated_and_restores_after_service_reopen(tmp_path: Path) -> None:
     repository_one = copy_fixture_named(tmp_path, "project-one")
     repository_two = copy_fixture_named(tmp_path, "project-two")

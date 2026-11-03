@@ -29,6 +29,7 @@ from .contracts import (
     CreateRunResponse,
     CreateSessionRequest,
     EdgeKind,
+    ErrorDetail,
     FeatureGraphResponse,
     FeatureGenerationRequest,
     FeatureGenerationListResponse,
@@ -68,6 +69,7 @@ from .contracts import (
     SourceIndexResponse,
     TrashListResponse,
 )
+from .errors import safe_error_message, validation_error_details
 from .github import GitHubClient
 from .indexing import IndexingControl
 from .config import ModelProviderConfig
@@ -204,15 +206,20 @@ def create_app(
 
     @application.exception_handler(ServiceError)
     async def handle_service_error(_request: Request, exc: ServiceError) -> JSONResponse:
-        return _error_response(exc.status_code, exc.code, exc.message)
+        return _error_response(exc.status_code, exc.code, safe_error_message(exc.message), exc.details)
 
     @application.exception_handler(StorageError)
     async def handle_storage_error(_request: Request, _exc: StorageError) -> JSONResponse:
         return _error_response(500, "internal_error", "local index storage failed")
 
     @application.exception_handler(RequestValidationError)
-    async def handle_validation_error(_request: Request, _exc: RequestValidationError) -> JSONResponse:
-        return _error_response(422, "invalid_input", "request parameters are invalid")
+    async def handle_validation_error(_request: Request, exc: RequestValidationError) -> JSONResponse:
+        return _error_response(
+            422,
+            "invalid_input",
+            "request parameters are invalid",
+            validation_error_details(exc.errors()),
+        )
 
     @application.get("/api/health", response_model=HealthResponse)
     async def health() -> HealthResponse:
@@ -1062,8 +1069,13 @@ def _require_model_config_write(request: Request) -> None:
         raise ServiceError("forbidden", 403, "model configuration writes require an allowed web origin")
 
 
-def _error_response(status_code: int, code: str, message: str) -> JSONResponse:
-    payload = ApiErrorResponse(code=code, message=message)
+def _error_response(
+    status_code: int,
+    code: str,
+    message: str,
+    details: list[ErrorDetail] | None = None,
+) -> JSONResponse:
+    payload = ApiErrorResponse(code=code, message=message, details=details)
     return JSONResponse(status_code=status_code, content=payload.model_dump(mode="json"))
 
 

@@ -2944,6 +2944,7 @@ ApiErrorCode: TypeAlias = Literal[
 class ApiErrorResponse(VersionedModel):
     code: ApiErrorCode
     message: str = Field(min_length=1, max_length=2_000)
+    details: list[ErrorDetail] | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class SaveModelConfigRequest(VersionedModel):
@@ -2982,22 +2983,10 @@ class ModelConfigSettingsResponse(VersionedModel):
     real_run_enabled: bool
 
 
-McpErrorCode: TypeAlias = Literal[
-    "not_found",
-    "invalid_input",
-    "conflict",
-    "budget_exceeded",
-    "download_timeout",
-    "index_too_large",
-    "index_source_rejected",
-    "index_timeout",
-    "index_cancelled",
-    "internal_error",
-    "forbidden",
-]
+McpErrorCode: TypeAlias = ApiErrorCode
 
 
-class McpErrorDetail(ContractModel):
+class ErrorDetail(ContractModel):
     model_config = ConfigDict(extra="forbid", title="ErrorDetail")
 
     field: str
@@ -3017,7 +3006,7 @@ class McpError(VersionedModel):
     code: McpErrorCode
     message: str = Field(min_length=1, max_length=2_000)
     retryable: bool = False
-    details: list[McpErrorDetail] | None = Field(default=None, exclude_if=lambda value: value is None)
+    details: list[ErrorDetail] | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class McpResultBase(VersionedModel):

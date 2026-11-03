@@ -5,10 +5,8 @@ from __future__ import annotations
 import json
 import logging
 import os
-import re
 import sys
-from enum import Enum
-from typing import Annotated, Any, Literal, TypeVar, get_args, get_origin
+from typing import Annotated, Any, Literal, TypeVar
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
 from mcp.server import MCPServer
@@ -36,7 +34,6 @@ from .contracts import (
     AppendSessionMessageRequest,
     CreateSessionRequest,
     McpError,
-    McpErrorDetail,
     McpFeatureGenerationListResponse,
     McpFeatureGraphResponse,
     McpFeatureGenerationResponse,
@@ -98,6 +95,7 @@ from .contracts import (
 )
 from .overview import bound_overview_output
 from .service import IndexService, RepositoryRegistry, ServiceError, WorkspaceService
+from .errors import ERROR_CODES, safe_error_message, validation_error_details
 
 
 logger = logging.getLogger(__name__)
@@ -118,7 +116,11 @@ class _CodeTrailMCPServer(MCPServer):
             if isinstance(cause, ValidationError):
                 if any(item.get("type") == "extra_forbidden" for item in cause.errors()):
                     raise
-                details = _validation_details(cause, tool.fn_metadata.arg_model)
+                annotations = {
+                    name: field.annotation
+                    for name, field in tool.fn_metadata.arg_model.model_fields.items()
+                }
+                details = validation_error_details(cause, arg_annotations=annotations)
                 count = len({detail.field.split(".", 1)[0] for detail in details})
                 error = McpError(
                     code="invalid_input",
@@ -173,65 +175,6 @@ class _CodeTrailMCPServer(MCPServer):
 def _compact_json(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
-
-def _validation_details(
-    error: ValidationError,
-    arg_model: type,
-) -> list[McpErrorDetail]:
-    details: list[McpErrorDetail] = []
-    mapping = {
-        "missing": "required", "literal_error": "not_allowed", "enum": "not_allowed",
-        "greater_than": "too_small", "greater_than_equal": "too_small",
-        "less_than": "too_large", "less_than_equal": "too_large",
-        "string_too_short": "too_short", "too_short": "too_short",
-        "string_too_long": "too_long", "too_long": "too_long",
-    }
-    for item in error.errors():
-        location = tuple(item.get("loc", ()))
-        field_path = ".".join(str(part) for part in location if part != "") or "arguments"
-        error_type = str(item.get("type", ""))
-        problem = mapping.get(error_type)
-        if problem is None:
-            problem = "wrong_type" if error_type.endswith(("_type", "_parsing")) else "invalid"
-        field_name = str(location[0]) if location else ""
-        field_info = arg_model.model_fields.get(field_name)
-        annotation = field_info.annotation if field_info is not None else None
-        union_args = get_args(annotation)
-        non_nullable_args = [item for item in union_args if item is not type(None)]
-        if len(non_nullable_args) == 1 and len(non_nullable_args) != len(union_args):
-            annotation = non_nullable_args[0]
-        if any(isinstance(part, int) for part in location[1:]):
-            annotation_args = get_args(annotation)
-            if annotation_args:
-                annotation = annotation_args[0]
-        if get_origin(annotation) is Literal:
-            allowed = list(get_args(annotation))
-        elif isinstance(annotation, type) and issubclass(annotation, Enum):
-            allowed = [item.value for item in annotation]
-        else:
-            allowed = None
-        ctx = item.get("ctx") or {}
-        limits = {
-            "min": ctx.get("ge", ctx.get("gt", ctx.get("min_length"))),
-            "max": ctx.get("le", ctx.get("lt", ctx.get("max_length"))),
-        }
-        if problem == "too_small" and limits["min"] is None:
-            limits["min"] = ctx.get("gt", ctx.get("ge"))
-        if problem == "too_large" and limits["max"] is None:
-            limits["max"] = ctx.get("lt", ctx.get("le"))
-        raw = item.get("input")
-        got = None if problem == "required" or isinstance(raw, (dict, list)) else str(raw)[:80]
-        details.append(
-            McpErrorDetail(
-                field=field_path,
-                problem=problem,
-                allowed=allowed,
-                min=limits["min"],
-                max=limits["max"],
-                got=got,
-            )
-        )
-    return details
 
 _WORKBENCH_URL_ENV = "CODETRAIL_WORKBENCH_URL"
 _DEFAULT_WORKBENCH_URL = "http://localhost:3000"
@@ -1740,10 +1683,8 @@ def _project_indexes_response(result: ProjectIndexListResponse, limit: int) -> M
 
 
 def _mcp_error(exc: ServiceError) -> McpError:
-    code = exc.code if exc.code in {"not_found", "invalid_input", "conflict", "budget_exceeded", "download_timeout", "index_too_large", "index_source_rejected", "index_timeout", "index_cancelled", "internal_error", "forbidden"} else "internal_error"
-    message = exc.message if code == exc.code else "local MCP query failed"
-    if re.search(r"validation error for|errors\.pydantic\.dev", message, re.IGNORECASE):
-        message = "invalid input"
+    code = exc.code if exc.code in ERROR_CODES else "internal_error"
+    message = safe_error_message(exc.message) if code == exc.code else "local MCP query failed"
     return McpError(
         code=code,
         message=message,
