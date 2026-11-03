@@ -1540,13 +1540,23 @@ class ModuleSymbolsPageResponse(VersionedModel):
     def validate_module_scope(self) -> ModuleSymbolsPageResponse:
         if self.module.index_id != self.index_id or self.module.kind != "module":
             raise ValueError("module symbols page must include its module root from the selected index")
-        symbol_ids = {symbol.symbol_id for symbol in self.symbols}
+        symbol_ids = {
+            symbol.symbol_id if isinstance(symbol, Symbol) else symbol.id
+            for symbol in self.symbols
+        }
         if len(symbol_ids) != len(self.symbols):
             raise ValueError("module symbols page must contain unique symbols")
         if any(
-            (symbol.index_id != self.index_id or symbol.path != self.module.path)
+            (
+                symbol.index_id != self.index_id
+                or symbol.path != self.module.path
+                or symbol.kind not in {"class", "function", "test"}
+            )
             if isinstance(symbol, Symbol)
-            else (not symbol.at.startswith(f"{self.module.path}:") or symbol.kind not in {"class", "function", "test"})
+            else (
+                symbol.at.rpartition(":")[:2] != (self.module.path, ":")
+                or symbol.kind not in {"class", "function", "test"}
+            )
             for symbol in self.symbols
         ):
             raise ValueError("module symbols page crossed its index or module scope")

@@ -1580,7 +1580,11 @@ async def _exercise_stdio(
             "GET",
             f"/api/projects/{project_id}/indexes/{index_id}/search?query=handle&limit=1&detail=summary",
         )
-        assert search_first_status == 200 and search_first["page"]["next_cursor"]
+        assert search_first_status == 200 and search_first["matches"] and search_first["page"]["next_cursor"]
+        default_search_result = await client.call_tool("search_code", {
+            "project_id": project_id, "index_id": index_id, "query": "handle", "limit": 1,
+        })
+        assert default_search_result.structured_content["result"] == search_first
         search_cursor = search_first["page"]["next_cursor"]
         search_page_status, search_page = await _request(
             application,
@@ -1601,6 +1605,18 @@ async def _exercise_stdio(
                 "AND path = 'timeout_demo/dispatch.py'",
                 (index_id,),
             ).fetchone()["symbol_id"]
+        module_symbols_path = (
+            f"/api/projects/{project_id}/indexes/{index_id}/modules/{dispatch_module_id}/symbols"
+        )
+        module_symbols_status, http_module_symbols = await _request(
+            application, "GET", f"{module_symbols_path}?limit=40&detail=summary",
+        )
+        assert module_symbols_status == 200 and http_module_symbols["symbols"]
+        mcp_module_symbols = await client.call_tool("list_module_symbols", {
+            "project_id": project_id, "index_id": index_id, "module_id": dispatch_module_id,
+        })
+        assert mcp_module_symbols.structured_content["result"] == http_module_symbols
+
         unresolved_path = f"/api/projects/{project_id}/indexes/{index_id}/unresolved"
         unresolved_first_status, unresolved_first = await _request(
             application,
@@ -1631,7 +1647,7 @@ async def _exercise_stdio(
             f"/api/projects/{project_id}/indexes/{index_id}/neighbors"
             f"?symbol_id={symbol_id}&direction=callers&depth=1&limit=40&edge_kinds=calls&detail=summary",
         )
-        assert summary_http_status == 200
+        assert summary_http_status == 200 and summary_http_neighbors["neighbors"]
         summary_mcp_neighbors = await client.call_tool("get_neighbors", {
             "project_id": project_id,
             "index_id": index_id,

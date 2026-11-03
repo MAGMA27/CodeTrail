@@ -34,6 +34,7 @@ from app.contracts import (
     SourceLocation,
     SourceIndexResponse,
     Symbol,
+    SymbolRef,
     SseEventFrame,
     SseStreamEnd,
     SseStreamEndFrame,
@@ -339,6 +340,35 @@ def test_module_symbol_page_contract_keeps_definitions_inside_the_module_snapsho
         has_more=True,
     )
     assert page.symbols == [function]
+
+    summary_ref = SymbolRef(
+        id=function.symbol_id,
+        name=function.qualified_name,
+        kind=function.kind,
+        at=f"{function.path}:{function.start_line}-{function.end_line}",
+    )
+    summary_page = ModuleSymbolsPageResponse(
+        project_id="project-symbol-page",
+        index_id=module.index_id,
+        module=module,
+        symbols=[summary_ref],
+    )
+    assert summary_page.symbols == [summary_ref]
+
+    with pytest.raises(ValidationError, match="unique symbols"):
+        ModuleSymbolsPageResponse(
+            project_id="project-symbol-page",
+            index_id=module.index_id,
+            module=module,
+            symbols=[function, summary_ref],
+        )
+    with pytest.raises(ValidationError, match="module scope"):
+        ModuleSymbolsPageResponse(
+            project_id="project-symbol-page",
+            index_id=module.index_id,
+            module=module,
+            symbols=[summary_ref.model_copy(update={"at": "pkg/other.py:3-4"})],
+        )
 
     with pytest.raises(ValidationError, match="module scope"):
         ModuleSymbolsPageResponse(

@@ -1344,9 +1344,13 @@ def test_project_search_summary_full_paging_and_legacy_http_shape(tmp_path: Path
     service = application.state.workspace_service
     full = service.search(project_id, index_id, "timeout", 40, detail="full")
     summary = service.search(project_id, index_id, "timeout", 1, detail="summary")
+    assert summary.matches
     assert [item.symbol.id for item in summary.matches] == [full.matches[0].symbol.symbol_id]
     assert summary.matches[0].symbol.id == full.matches[0].symbol.symbol_id
     assert summary.matches[0].symbol.name == full.matches[0].symbol.qualified_name
+    status, http_summary = request(application, "GET", f"{route}?query=timeout&limit=1&detail=summary")
+    assert status == 200 and http_summary["matches"]
+    assert http_summary["matches"][0]["symbol"]["id"] == summary.matches[0].symbol.id
     pages = list(summary.matches)
     cursor = summary.page.next_cursor
     while cursor:
@@ -1358,13 +1362,22 @@ def test_project_search_summary_full_paging_and_legacy_http_shape(tmp_path: Path
     project = service._require_project_index(project_id, index_id)
     with service.registry.store_for_repository(project.repository_id) as store:
         module_id = store.connection.execute(
-            "SELECT symbol_id FROM symbols WHERE index_id = ? AND kind = 'module' ORDER BY path LIMIT 1",
+            "SELECT symbol_id FROM symbols WHERE index_id = ? AND kind = 'module' "
+            "AND path = 'timeout_demo/dispatch.py'",
             (index_id,),
         ).fetchone()["symbol_id"]
     full_symbols = service.list_module_symbols(project_id, index_id, module_id, 1, None, detail="full")
     summary_symbols = service.list_module_symbols(project_id, index_id, module_id, 1, None, detail="summary")
+    assert summary_symbols.symbols
     assert [item.symbol_id for item in full_symbols.symbols] == [item.id for item in summary_symbols.symbols]
     assert all(item.at.startswith(f"{full_symbols.module.path}:") for item in summary_symbols.symbols)
+    status, http_summary_symbols = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/indexes/{index_id}/modules/{module_id}/symbols?limit=1&detail=summary",
+    )
+    assert status == 200 and http_summary_symbols["symbols"]
+    assert http_summary_symbols["symbols"][0]["id"] == summary_symbols.symbols[0].id
 
     from app.service import ServiceError
 
@@ -1406,7 +1419,6 @@ def test_project_neighbors_summary_and_unresolved_pages_share_mcp_service(tmp_pa
     assert summary["possible_unresolved_callers"]["total"] == full["completeness"]["possible_unresolved_caller_count"]
     assert "nodes" not in summary
     assert "list_unresolved" in summary["completeness"]["hint"]
-
     status, start_search = request(application, "GET", f"/api/indexes/{index_id}/search?query=start&limit=40")
     assert status == 200
     start_id = next(
@@ -1418,6 +1430,7 @@ def test_project_neighbors_summary_and_unresolved_pages_share_mcp_service(tmp_pa
     assert status == 200
     status, both_summary = request(application, "GET", f"{neighbors_path}?{both_query}&detail=summary")
     assert status == 200
+    assert both_full["neighbors"] and both_summary["neighbors"]
     full_relations = {
         (
             item["symbol"]["symbol_id"], item["edge"]["kind"],
@@ -1430,12 +1443,22 @@ def test_project_neighbors_summary_and_unresolved_pages_share_mcp_service(tmp_pa
         for item in both_summary["neighbors"]
     } == full_relations
     assert {item["orientation"] for item in both_summary["neighbors"]} == {"incoming", "outgoing"}
+    service = application.state.workspace_service
+    service_summary = service.neighbors(
+        project_id, index_id, start_id, "both", 1, 40, ("calls",), detail="summary"
+    )
+    assert service_summary.neighbors
+    assert all(hasattr(item, "to") for item in service_summary.neighbors)
 
     unresolved_path = f"/api/projects/{project_id}/indexes/{index_id}/unresolved"
     status, first = request(
         application, "GET", f"{unresolved_path}?symbol_id={dispatch_id}&direction=outgoing&limit=1"
     )
-    assert status == 200
+    assert status == 200 and first["items"]
+    service_first = service.list_unresolved(
+        project_id, index_id, symbol_id=dispatch_id, direction="outgoing", limit=1
+    )
+    assert service_first.items
     paged = list(first["items"])
     cursor = first["page"]["next_cursor"]
     while cursor:
