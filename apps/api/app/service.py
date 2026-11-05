@@ -69,7 +69,22 @@ from .contracts import (
     LocalImportResponse,
     ModelConfigSettingsResponse,
     NeighborCompleteness,
+    NeighborSummary,
     NeighborsIndexResponse,
+    PossibleUnresolvedCallersSummary,
+    UnresolvedCompleteness,
+    UnresolvedPage,
+    UnresolvedPageSummaryItem,
+    UnresolvedScope,
+    UnresolvedSummary,
+    UnresolvedSummaryItem,
+    DEFAULT_UNRESOLVED_PAGE_LIMIT,
+    DEFAULT_UNRESOLVED_PAGE_DETAIL,
+    DEFAULT_UNRESOLVED_DIRECTION,
+    MAX_UNRESOLVED_PAGE_LIMIT,
+    UNRESOLVED_SUMMARY_SAMPLE_LIMIT,
+    POSSIBLE_CALLER_SUMMARY_SAMPLE_LIMIT,
+    MAX_REASON_LENGTH,
     ModuleSymbolsPageResponse,
     ProjectOverview,
     OverviewClassification,
@@ -101,6 +116,7 @@ from .contracts import (
     MAX_OVERVIEW_MODULES,
     MAX_OVERVIEW_PATHS,
     MAX_OVERVIEW_RELATIONS,
+    MAX_PAGE_SIZE,
     Project,
     ProjectIndexListResponse,
     ProjectListResponse,
@@ -137,6 +153,12 @@ from .contracts import (
     SearchCodeFailure,
     SearchCodeSuccess,
     SearchIndexResponse,
+    HTTP_DEFAULT_DETAIL,
+    SearchMatch,
+    SearchSummaryMatch,
+    SymbolRef,
+    SEARCH_MAX_SCAN,
+    SEARCH_SNIPPET_MAX_LENGTH,
     Symbol,
     SaveModelConfigRequest,
     Session,
@@ -1525,7 +1547,11 @@ class IndexService:
                 contextual_calls=list(result.contextual_calls),
                 unresolved=list(result.unresolved),
                 possible_unresolved_callers=list(result.possible_unresolved_callers),
-                completeness=result.completeness,
+                completeness=(
+                    _with_query_truncation(result.completeness, result.truncation_reason)
+                    if result.completeness is not None and result.truncated
+                    else result.completeness
+                ),
                 truncated=result.truncated,
                 truncation_reason=result.truncation_reason,
                 index_truncated=result.index_truncated,
@@ -1586,7 +1612,7 @@ class IndexService:
                         truncation_reason = unresolved_reason
                     truncated = True
                 completeness = result.completeness
-                if completeness is not None and truncated and "query_truncated" not in completeness.reasons:
+                if completeness is not None and truncated:
                     completeness = _with_query_truncation(completeness, truncation_reason)
                 return GetNeighborsSuccess(
                     request_id=request.request_id,
@@ -3901,9 +3927,85 @@ class WorkspaceService:
         self._require_project_index(project_id, index_id)
         return self.index_service.get_index(index_id)
 
-    def search(self, project_id: str, index_id: str, query: str, limit: int) -> SearchIndexResponse:
-        self._require_project_index(project_id, index_id)
-        return self.index_service.search(index_id, query, limit)
+    def search(
+        self, project_id: str, index_id: str, query: str, limit: int,
+        *, detail: Literal["summary", "full"] = HTTP_DEFAULT_DETAIL, cursor: str | None = None,
+    ) -> SearchIndexResponse:
+        project = self._require_project_index(project_id, index_id)
+        if not 1 <= limit <= MAX_PAGE_SIZE:
+            raise ServiceError("invalid_input", 400, "search limit is outside the allowed range")
+        scan_limit = SEARCH_MAX_SCAN if detail == "summary" or cursor is not None else limit
+        try:
+            with self.registry.store_for_repository(project.repository_id) as store:
+                result = store.search_symbols_bounded(
+                    index_id, query, limit=scan_limit, allow_extended_limit=scan_limit > MAX_PAGE_SIZE,
+                )
+        except StorageInputError as exc:
+            raise ServiceError("invalid_input", 400, "search parameters are invalid") from exc
+        except StorageNotFoundError as exc:
+            raise ServiceError("not_found", 404, "requested index was not found") from exc
+        except StorageError as exc:
+            raise ServiceError("internal_error", 500, "local index storage failed") from exc
+        available = len(result.matches)
+        offset = self._decode_overview_cursor(cursor, project_id, index_id, "search", None, None, available) if cursor else 0
+        matches = result.matches[offset:offset + limit]
+        next_offset = offset + len(matches)
+        if detail == "summary":
+            definition_lines: dict[str, str] = {}
+            summary_symbols = [item.symbol for item in matches if item.symbol.kind in {"class", "function"}]
+            if summary_symbols:
+                try:
+                    with self.registry.store_for_repository(project.repository_id) as store:
+                        definition_lines = store.search_definition_lines(
+                            index_id, [symbol.symbol_id for symbol in summary_symbols]
+                        )
+                except (StorageInputError, StorageNotFoundError, StorageError):
+                    # Snippets are optional display context. A failure to read them must
+                    # not turn an otherwise valid search page into an internal error.
+                    definition_lines = {}
+
+            def summary_snippet(symbol_id: str) -> str | None:
+                raw_line = definition_lines.get(symbol_id)
+                if not isinstance(raw_line, str):
+                    return None
+                line = raw_line.strip()
+                if not line or "\n" in line or "\r" in line:
+                    return None
+                return line[:SEARCH_SNIPPET_MAX_LENGTH]
+
+            response_matches = [SearchSummaryMatch(
+                rank=item.match.rank,
+                symbol=self._symbol_ref(item.symbol),
+                matched_terms=item.match.matched_terms,
+                snippet=summary_snippet(item.symbol.symbol_id),
+            ) for item in matches]
+        else:
+            response_matches = [SearchMatch(
+                rank=item.match.rank,
+                symbol=item.match.symbol,
+                matched_terms=item.match.matched_terms,
+            ) for item in matches]
+        return SearchIndexResponse(
+            index_id=index_id,
+            matches=response_matches,
+            truncated=result.truncated,
+            truncation_reason=result.truncation_reason,
+            page=OverviewPage(
+                returned=len(matches), total=None if result.truncated else available,
+                next_cursor=(self._encode_overview_cursor(project_id, index_id, "search", next_offset, None, None)
+                             if next_offset < available else None),
+                order="rank,symbol_id",
+            ) if cursor is not None or detail == "summary" else None,
+        )
+
+    @staticmethod
+    def _symbol_ref(symbol: Symbol) -> SymbolRef:
+        return SymbolRef(
+            id=symbol.symbol_id,
+            name=symbol.qualified_name,
+            kind=symbol.kind,
+            at=f"{symbol.path}:{symbol.start_line}-{symbol.end_line}",
+        )
 
     def list_module_symbols(
         self,
@@ -3912,6 +4014,7 @@ class WorkspaceService:
         module_id: str,
         limit: int,
         cursor: str | None,
+        *, detail: Literal["summary", "full"] = HTTP_DEFAULT_DETAIL,
     ) -> ModuleSymbolsPageResponse:
         """Page fixed-snapshot definitions only after project/index ownership checks."""
 
@@ -3929,7 +4032,7 @@ class WorkspaceService:
                 project_id=project_id,
                 index_id=index_id,
                 module=page.module,
-                symbols=list(page.symbols),
+                symbols=(list(page.symbols) if detail == "full" else [self._symbol_ref(symbol) for symbol in page.symbols]),
                 next_cursor=page.next_cursor,
                 has_more=page.has_more,
             )
@@ -3938,6 +4041,11 @@ class WorkspaceService:
         except StorageNotFoundError as exc:
             raise ServiceError("not_found", 404, "requested module was not found in the project index") from exc
         except StorageInputError as exc:
+            if cursor is not None:
+                raise ServiceError(
+                    "invalid_input", 400, "invalid or expired cursor",
+                    details=[{"field": "cursor", "problem": "invalid"}],
+                ) from exc
             raise ServiceError("invalid_input", 400, "module symbol page parameters are invalid") from exc
         except StorageBudgetError as exc:
             raise ServiceError("budget_exceeded", 429, "module symbol page exceeds its output budget") from exc
@@ -3953,9 +4061,211 @@ class WorkspaceService:
         depth: int,
         limit: int,
         edge_kinds: tuple[str, ...] | None = None,
+        *, detail: Literal["summary", "full"] = HTTP_DEFAULT_DETAIL,
     ) -> NeighborsIndexResponse:
         self._require_project_index(project_id, index_id)
-        return self.index_service.neighbors(index_id, symbol_id, direction, depth, limit, edge_kinds)
+        result = self.index_service.neighbors(index_id, symbol_id, direction, depth, limit, edge_kinds)
+        if detail == "full":
+            return result
+        nodes_by_id = {symbol.symbol_id: symbol for symbol in result.nodes or []}
+
+        def summarize(reference: Any) -> UnresolvedSummaryItem:
+            source = nodes_by_id.get(reference.source_symbol_id)
+            return UnresolvedSummaryItem(
+                id=reference.unresolved_id,
+                at=f"{reference.path}:{reference.start_line}",
+                expression=reference.expression,
+                reason=reference.reason,
+                source=self._symbol_ref(source) if source is not None else None,
+                possible_target_count=len(reference.possible_target_ids),
+            )
+
+        unresolved = result.unresolved or []
+        reasons: dict[str, int] = {}
+        sources: dict[str, int] = {}
+        for item in unresolved:
+            reasons[item.reason] = reasons.get(item.reason, 0) + 1
+            sources[item.source_symbol_id] = sources.get(item.source_symbol_id, 0) + 1
+        sources = dict(sorted(sources.items(), key=lambda item: (-item[1], item[0])))
+        callers = result.possible_unresolved_callers
+        callers_queried = direction != "callees" and (edge_kinds is None or "calls" in edge_kinds)
+        caller_count: int | None = (
+            callers.total if isinstance(callers, PossibleUnresolvedCallersSummary)
+            else result.completeness.possible_unresolved_caller_count if result.completeness else None
+        )
+        if caller_count is None and callers_queried:
+            caller_count = 0
+        completeness = result.completeness
+        if completeness is not None:
+            hints: list[str] = [completeness.hint] if completeness.hint else []
+            if hints:
+                prefix = " ".join(part.strip().rstrip(".;") + "." for part in hints if part.strip())
+                if direction != "callers" and sources:
+                    top_sources = ", ".join(
+                        f"list_unresolved(symbol_id='{source_id}', direction='outgoing')"
+                        for source_id in list(sources)[:UNRESOLVED_SUMMARY_SAMPLE_LIMIT]
+                    )
+                    expansion = (
+                        f"Expand with: {top_sources}, and call it for each source in unresolved_summary.by_source."
+                    )
+                else:
+                    expansion = ""
+                if direction != "callees":
+                    incoming = f"Also check list_unresolved(symbol_id='{symbol_id}', direction='possible_incoming')."
+                    expansion = f"{expansion} {incoming}".strip()
+                hint = f"{prefix} {expansion}".strip()
+                completeness = completeness.model_copy(
+                    update={"hint": hint[:MAX_REASON_LENGTH]}
+                )
+        summary_callers = callers if isinstance(callers, PossibleUnresolvedCallersSummary) else PossibleUnresolvedCallersSummary(
+            total=caller_count,
+            sample=[summarize(item) for item in callers[:POSSIBLE_CALLER_SUMMARY_SAMPLE_LIMIT]],
+        )
+        return result.model_copy(update={
+            "nodes": None,
+            "neighbors": [
+                NeighborSummary(
+                    to=self._symbol_ref(item.symbol),
+                    via=f"{item.edge.source_location.path}:{item.edge.source_location.start_line}",
+                    depth=item.depth,
+                    edge_kind=item.edge.kind,
+                    orientation=(
+                        "self" if item.edge.source_id == item.edge.target_id
+                        else "incoming" if item.edge.source_id == item.symbol.symbol_id
+                        else "outgoing"
+                    ),
+                )
+                for item in result.neighbors if hasattr(item, "symbol")
+            ],
+            "contextual_calls": [],
+            "unresolved": None,
+            "unresolved_summary": UnresolvedSummary(
+                total=len(unresolved),
+                by_reason=reasons,
+                by_source=sources,
+                sample=[summarize(item) for item in unresolved[:UNRESOLVED_SUMMARY_SAMPLE_LIMIT]],
+            ),
+            "possible_unresolved_callers": summary_callers,
+            "completeness": completeness,
+        })
+
+    def list_unresolved(
+        self,
+        project_id: str,
+        index_id: str,
+        *,
+        symbol_id: str | None = None,
+        module_id: str | None = None,
+        direction: Literal["outgoing", "possible_incoming"] = DEFAULT_UNRESOLVED_DIRECTION,
+        reason: str | None = None,
+        cursor: str | None = None,
+        limit: int = DEFAULT_UNRESOLVED_PAGE_LIMIT,
+        detail: Literal["summary", "full"] = DEFAULT_UNRESOLVED_PAGE_DETAIL,
+    ) -> UnresolvedPage:
+        project = self._require_project_index(project_id, index_id)
+        if (symbol_id is None) == (module_id is None):
+            details = (
+                [{"field": "symbol_id", "problem": "required"}, {"field": "module_id", "problem": "required"}]
+                if symbol_id is None
+                else [{"field": "module_id", "problem": "not_allowed"}]
+            )
+            raise ServiceError(
+                "invalid_input", 400, "exactly one of symbol_id or module_id is required",
+                details=details,
+            )
+        if direction == "possible_incoming" and symbol_id is None:
+            raise ServiceError(
+                "invalid_input", 400, "possible_incoming requires symbol_id",
+                details=[{"field": "symbol_id", "problem": "required"}],
+            )
+        if not 1 <= limit <= MAX_UNRESOLVED_PAGE_LIMIT:
+            raise ServiceError("invalid_input", 400, "unresolved page limit is outside the allowed range")
+        if reason is not None and (not reason or len(reason) > MAX_REASON_LENGTH):
+            raise ServiceError("invalid_input", 400, "unresolved reason filter is invalid")
+        target_scope = f"symbol:{symbol_id}" if symbol_id is not None else f"module:{module_id}"
+        scope_key = f"{direction}:{target_scope}"
+        offset = 0
+        try:
+            with self.registry.store_for_repository(project.repository_id) as store:
+                total, items = store.list_unresolved(
+                    index_id,
+                    symbol_id=symbol_id,
+                    module_id=module_id,
+                    direction=direction,
+                    reason=reason,
+                    offset=0,
+                    limit=limit,
+                )
+                if cursor is not None:
+                    offset = self._decode_overview_cursor(cursor, project_id, index_id, "un", scope_key, reason, total)
+                    total, items = store.list_unresolved(
+                        index_id,
+                        symbol_id=symbol_id,
+                        module_id=module_id,
+                        direction=direction,
+                        reason=reason,
+                        offset=offset,
+                        limit=limit,
+                    )
+                else:
+                    items = items[:limit]
+            next_offset = offset + len(items)
+            next_cursor = (
+                self._encode_overview_cursor(project_id, index_id, "un", next_offset, scope_key, reason)
+                if next_offset < total else None
+            )
+            unresolved_coverage = self.index_service.get_index(index_id).unresolved_truncated
+            coverage_reason = (
+                "index_unresolved_truncated" if unresolved_coverage is True
+                else "index_unresolved_coverage_unknown" if unresolved_coverage is None
+                else None
+            )
+            reasons: list[str] = [coverage_reason] if coverage_reason is not None else []
+            if next_cursor is not None:
+                reasons.insert(0, "more_items")
+                status = "truncated"
+                hint = "Fetch the next page using page.next_cursor."
+            elif coverage_reason is not None:
+                status = "possibly_incomplete"
+                hint = (
+                    "The index omitted unresolved references when it was built."
+                    if unresolved_coverage is True
+                    else "This index does not record whether unresolved references were truncated."
+                )
+            else:
+                status, hint = "complete", None
+            response_items = list(items) if detail == "full" else [
+                UnresolvedPageSummaryItem(
+                    id=item.unresolved_id,
+                    at=f"{item.path}:{item.start_line}",
+                    expression=item.expression,
+                    reason=item.reason,
+                    source_symbol_id=item.source_symbol_id,
+                    possible_target_count=len(item.possible_target_ids),
+                )
+                for item in items
+            ]
+            return UnresolvedPage(
+                project_id=project_id,
+                index_id=index_id,
+                scope=UnresolvedScope(
+                    symbol_id=symbol_id, module_id=module_id, direction=direction, reason=reason,
+                ),
+                detail=detail,
+                items=response_items,
+                page=OverviewPage(
+                    returned=len(items), total=total, next_cursor=next_cursor, order="path,line,id",
+                ),
+                completeness=UnresolvedCompleteness(status=status, reasons=reasons, hint=hint),
+            )
+        except ServiceError:
+            raise
+        except StorageNotFoundError as exc:
+            raise ServiceError("not_found", 404, "requested symbol or module was not found in the project index") from exc
+        except StorageInputError as exc:
+            raise ServiceError("invalid_input", 400, "unresolved query parameters are invalid") from exc
+        except StorageError as exc:
+            raise ServiceError("internal_error", 500, "local index storage failed") from exc
 
     def read_source(
         self,
@@ -6271,6 +6581,8 @@ def _with_query_truncation(
     completeness: NeighborCompleteness,
     truncation_reason: str | None,
 ) -> NeighborCompleteness:
+    if "query_truncated" in completeness.reasons:
+        return completeness
     hint = f"{completeness.hint or ''} This result stopped at a budget ({truncation_reason}).".strip()
     return NeighborCompleteness.model_validate(
         {

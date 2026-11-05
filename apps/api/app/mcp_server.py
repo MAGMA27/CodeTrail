@@ -47,6 +47,7 @@ from .contracts import (
     McpJourneyCatalogResponse,
     McpJourneyResponse,
     McpNeighborsResponse,
+    McpUnresolvedResponse,
     McpModuleSymbolsResponse,
     McpOverviewResponse,
     McpOverviewItemsResponse,
@@ -190,8 +191,12 @@ _NeighborEdgeKind = Literal["imports", "calls"]
 _ImpactDirection = Literal["callers", "callees"]
 _ProjectId = Annotated[Identifier, Field(description="Stable CodeTrail project ID.")]
 _IndexId = Annotated[Identifier, Field(description="Immutable CodeTrail index ID.")]
+_SymbolId = Annotated[Identifier, Field(description="Symbol ID in the selected immutable index.")]
 _ModuleId = Annotated[Identifier, Field(description="Module symbol ID from the selected immutable index.")]
 _Query = Annotated[str, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_QUERY_LENGTH, description="Symbol or source text query.")]
+_SearchLimit = Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_PAGE_SIZE, description="Maximum number of returned search items.")]
+_SearchCursor = Annotated[str | None, Field(max_length=shared.MAX_OVERVIEW_CURSOR_LENGTH, description="Opaque search cursor from a previous page; round-trip it unchanged.")]
+_Detail = Literal["summary", "full"]
 _Path = Annotated[str, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_PATH_LENGTH, description="Relative path in the indexed snapshot.")]
 _LocalPath = Annotated[str, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_LOCAL_PATH_LENGTH, description="Absolute path visible to the local API service.")]
 _Line = Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, description="One-based source line.")]
@@ -219,6 +224,12 @@ _OverviewPageLimit = Annotated[
     int,
     Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_OVERVIEW_PAGE_LIMIT, description="Maximum items in one overview section page."),
 ]
+_UnresolvedPageLimit = Annotated[
+    int,
+    Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_UNRESOLVED_PAGE_LIMIT, description="Maximum unresolved items in one page."),
+]
+_UnresolvedCursor = Annotated[str | None, Field(max_length=shared.MAX_OVERVIEW_CURSOR_LENGTH, description="Opaque unresolved cursor; round-trip unchanged.")]
+_UnresolvedReason = Annotated[str | None, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_REASON_LENGTH)]
 _OverviewCursor = Annotated[str | None, Field(max_length=shared.MAX_OVERVIEW_CURSOR_LENGTH, description="Opaque cursor from a previous page; round-trip it unchanged. Invalid or expired cursor values are rejected.")]
 _OverviewModuleFilter = Annotated[str | None, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_IDENTIFIER_LENGTH)]
 _OverviewClassifications = Annotated[
@@ -494,7 +505,8 @@ def create_mcp_server(
         description=(
             "Search symbols and captured source text in one explicitly selected project/index pair. "
             "Exact qualified and leaf symbol names rank before partial names and symbol-scoped body matches; "
-            "results are capped at 40 and report truncation."
+            "Summary results use compact symbol references by default; pass detail='full' for the legacy symbol objects. "
+            "Pages are ordered by rank,symbol_id and use a cursor from the previous response."
         ),
         structured_output=True,
     )
@@ -502,12 +514,14 @@ def create_mcp_server(
         project_id: _ProjectId,
         index_id: _IndexId,
         query: _Query,
-        limit: _Limit = shared.MAX_PAGE_SIZE,
+        limit: _SearchLimit = shared.MCP_DEFAULT_SEARCH_LIMIT,
+        detail: _Detail = shared.MCP_DEFAULT_DETAIL,
+        cursor: _SearchCursor = None,
     ) -> McpSearchResponse:
         try:
             return McpSearchResponse(
                 ok=True,
-                result=service.search(project_id, index_id, query, limit),
+                result=service.search(project_id, index_id, query, limit, detail=detail, cursor=cursor),
             )
         except ServiceError as exc:
             return _failure(McpSearchResponse, exc)
@@ -520,7 +534,7 @@ def create_mcp_server(
         description=(
             "List indexed class, function, and test definitions from one module path in the selected immutable project/index. "
             "This reports definitions captured by the index and does not imply complete parsing. Pages are bounded to 40 items "
-            "and share the API output budget; pass the returned cursor unchanged to continue."
+            "and share the API output budget; summary returns compact symbol references, while detail='full' returns legacy symbols."
         ),
         structured_output=True,
     )
@@ -530,11 +544,12 @@ def create_mcp_server(
         module_id: _ModuleId,
         limit: _Limit = shared.MAX_PAGE_SIZE,
         cursor: _ModuleSymbolsCursor = None,
+        detail: _Detail = shared.MCP_DEFAULT_DETAIL,
     ) -> McpModuleSymbolsResponse:
         try:
             return McpModuleSymbolsResponse(
                 ok=True,
-                result=service.list_module_symbols(project_id, index_id, module_id, limit, cursor),
+                result=service.list_module_symbols(project_id, index_id, module_id, limit, cursor, detail=detail),
             )
         except ServiceError as exc:
             return _failure(McpModuleSymbolsResponse, exc)
@@ -599,7 +614,9 @@ def create_mcp_server(
             "callers or callees. Always read completeness: status possibly_incomplete lists reasons and a hint; "
             "possible_unresolved_callers samples unresolved calls that name the root symbol. In callers mode "
             "unresolved is empty; in callees/both it lists unresolved calls made by returned nodes. Each neighbor "
-            "carries depth, the hop at which its edge was reached."
+            "carries depth, the hop at which its edge was reached. Default detail='summary' returns compact neighbors "
+            "with edge kind/orientation, unresolved counts and samples, and omits nodes/contextual_calls; use "
+            "detail='full' for the complete legacy response."
         ),
         structured_output=True,
     )
@@ -611,6 +628,7 @@ def create_mcp_server(
         depth: _Depth = shared.MAX_GRAPH_DEPTH,
         limit: _Limit = shared.MAX_PAGE_SIZE,
         edge_kinds: list[_NeighborEdgeKind] | None = None,
+        detail: _Detail = shared.MCP_DEFAULT_DETAIL,
     ) -> McpNeighborsResponse:
         try:
             result = service.neighbors(
@@ -621,12 +639,48 @@ def create_mcp_server(
                 depth,
                 limit,
                 tuple(edge_kinds) if edge_kinds else None,
+                detail=detail,
             )
             return McpNeighborsResponse(ok=True, result=result)
         except ServiceError as exc:
             return _failure(McpNeighborsResponse, exc)
         except Exception:
             return _unexpected_failure("get_neighbors", McpNeighborsResponse)
+
+    @server.tool(
+        name="list_unresolved",
+        title="List unresolved calls",
+        description=(
+            "Page unresolved references for one symbol or module in the selected project/index. "
+            "direction='outgoing' lists calls made by that scope; 'possible_incoming' requires symbol_id and "
+            "lists unresolved calls that may name that symbol. Filter by the open reason string when needed. "
+            "Summary items contain id, location, expression, reason, source symbol ID, and possible-target count; "
+            "pass detail='full' for complete unresolved references. The cursor is valid across detail levels. "
+            "Round-trip page.next_cursor unchanged."
+        ),
+        structured_output=True,
+    )
+    def list_unresolved(
+        project_id: _ProjectId,
+        index_id: _IndexId,
+        symbol_id: _SymbolId | None = None,
+        module_id: _ModuleId | None = None,
+        direction: Literal["outgoing", "possible_incoming"] = shared.DEFAULT_UNRESOLVED_DIRECTION,
+        reason: _UnresolvedReason = None,
+        cursor: _UnresolvedCursor = None,
+        limit: _UnresolvedPageLimit = shared.DEFAULT_UNRESOLVED_PAGE_LIMIT,
+        detail: _Detail = shared.DEFAULT_UNRESOLVED_PAGE_DETAIL,
+    ) -> McpUnresolvedResponse:
+        try:
+            result = service.list_unresolved(
+                project_id, index_id, symbol_id=symbol_id, module_id=module_id,
+                direction=direction, reason=reason, cursor=cursor, limit=limit, detail=detail,
+            )
+            return McpUnresolvedResponse(ok=True, result=result)
+        except ServiceError as exc:
+            return _failure(McpUnresolvedResponse, exc)
+        except Exception:
+            return _unexpected_failure("list_unresolved", McpUnresolvedResponse)
 
     @server.tool(
         name="get_overview",
@@ -647,17 +701,60 @@ def create_mcp_server(
     def get_overview(
         project_id: _ProjectId,
         index_id: _IndexId,
-        detail: Literal["summary", "full"] = "summary",
-        module_limit: Annotated[_SkeletonModuleLimit, Field(description="Used only in summary mode; ignored in full mode.")] = shared.DEFAULT_SKELETON_MODULES,
-        relation_limit: Annotated[_SkeletonRelationLimit, Field(description="Used only in summary mode; ignored in full mode.")] = shared.DEFAULT_SKELETON_RELATIONS,
-        cursor: Annotated[_OverviewCursor, Field(description="Used only in summary mode; ignored in full mode.")] = None,
-        max_depth: Annotated[_OverviewDepth, Field(description="Used only in full mode; ignored in summary mode.")] = shared.DEFAULT_OVERVIEW_DEPTH,
-        max_paths: Annotated[_OverviewPaths, Field(description="Used only in full mode; ignored in summary mode.")] = shared.MAX_OVERVIEW_PATHS,
-        max_modules: Annotated[_OverviewModules, Field(description="Used only in full mode; ignored in summary mode.")] = shared.DEFAULT_OVERVIEW_MODULES,
-        max_groups: Annotated[_OverviewGroups, Field(description="Used only in full mode; ignored in summary mode.")] = shared.DEFAULT_OVERVIEW_GROUPS,
-        max_module_relations: Annotated[_OverviewModuleRelations, Field(description="Used only in full mode; ignored in summary mode.")] = shared.DEFAULT_OVERVIEW_RELATIONS,
-        max_classifications: Annotated[_OverviewClassifications, Field(description="Used only in full mode; ignored in summary mode.")] = shared.DEFAULT_OVERVIEW_CLASSIFICATIONS,
+        detail: Literal["summary", "full"] = shared.MCP_DEFAULT_DETAIL,
+        module_limit: Annotated[_SkeletonModuleLimit, Field(description="Used only in summary mode; non-default values are rejected in full mode.")] = shared.DEFAULT_SKELETON_MODULES,
+        relation_limit: Annotated[_SkeletonRelationLimit, Field(description="Used only in summary mode; non-default values are rejected in full mode.")] = shared.DEFAULT_SKELETON_RELATIONS,
+        cursor: Annotated[_OverviewCursor, Field(description="Used only in summary mode; non-null values are rejected in full mode.")] = None,
+        max_depth: Annotated[_OverviewDepth, Field(description="Used only in full mode; non-default values are rejected in summary mode.")] = shared.DEFAULT_OVERVIEW_DEPTH,
+        max_paths: Annotated[_OverviewPaths, Field(description="Used only in full mode; non-default values are rejected in summary mode.")] = shared.MAX_OVERVIEW_PATHS,
+        max_modules: Annotated[_OverviewModules, Field(description="Used only in full mode; non-default values are rejected in summary mode.")] = shared.DEFAULT_OVERVIEW_MODULES,
+        max_groups: Annotated[_OverviewGroups, Field(description="Used only in full mode; non-default values are rejected in summary mode.")] = shared.DEFAULT_OVERVIEW_GROUPS,
+        max_module_relations: Annotated[_OverviewModuleRelations, Field(description="Used only in full mode; non-default values are rejected in summary mode.")] = shared.DEFAULT_OVERVIEW_RELATIONS,
+        max_classifications: Annotated[_OverviewClassifications, Field(description="Used only in full mode; non-default values are rejected in summary mode.")] = shared.DEFAULT_OVERVIEW_CLASSIFICATIONS,
     ) -> McpOverviewResponse:
+        invalid_parameters: list[dict[str, object]] = []
+        mode_defaults = (
+            (
+                "summary",
+                (
+                    ("max_depth", max_depth, shared.DEFAULT_OVERVIEW_DEPTH),
+                    ("max_paths", max_paths, shared.MAX_OVERVIEW_PATHS),
+                    ("max_modules", max_modules, shared.DEFAULT_OVERVIEW_MODULES),
+                    ("max_groups", max_groups, shared.DEFAULT_OVERVIEW_GROUPS),
+                    ("max_module_relations", max_module_relations, shared.DEFAULT_OVERVIEW_RELATIONS),
+                    ("max_classifications", max_classifications, shared.DEFAULT_OVERVIEW_CLASSIFICATIONS),
+                ),
+            ),
+            (
+                "full",
+                (
+                    ("module_limit", module_limit, shared.DEFAULT_SKELETON_MODULES),
+                    ("relation_limit", relation_limit, shared.DEFAULT_SKELETON_RELATIONS),
+                    ("cursor", cursor, None),
+                ),
+            ),
+        )
+        disallowed_mode = "summary" if detail == "summary" else "full"
+        for mode, parameters in mode_defaults:
+            if mode != disallowed_mode:
+                continue
+            for field_name, value, default in parameters:
+                if value != default:
+                    invalid_parameters.append({
+                        "field": field_name,
+                        "problem": "not_allowed",
+                        "got": str(value),
+                    })
+        if invalid_parameters:
+            return _failure(
+                McpOverviewResponse,
+                ServiceError(
+                    "invalid_input",
+                    400,
+                    f"parameter is not valid for detail='{detail}'",
+                    details=invalid_parameters,
+                ),
+            )
         try:
             if detail == "summary":
                 result = service.get_overview_skeleton(
@@ -709,7 +806,7 @@ def create_mcp_server(
         limit: _OverviewPageLimit = shared.DEFAULT_OVERVIEW_PAGE_LIMIT,
         module_id: _OverviewModuleFilter = None,
         category: OverviewClassificationKind | None = None,
-        detail: Literal["summary", "full"] = "summary",
+        detail: Literal["summary", "full"] = shared.DEFAULT_OVERVIEW_PAGE_DETAIL,
     ) -> McpOverviewItemsResponse:
         try:
             result = service.list_overview_items(

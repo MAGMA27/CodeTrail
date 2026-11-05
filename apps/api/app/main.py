@@ -76,6 +76,7 @@ from .contracts import (
     SaveModelConfigRequest,
     SourceIndexResponse,
     TrashListResponse,
+    UnresolvedPage,
 )
 from .errors import safe_error_message, validation_error_details
 from .config import ModelProviderConfig
@@ -848,7 +849,7 @@ def create_app(
         limit: int = Query(default=shared.DEFAULT_OVERVIEW_PAGE_LIMIT, ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_OVERVIEW_PAGE_LIMIT),
         module_id: str | None = Query(default=None, min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_IDENTIFIER_LENGTH),
         category: OverviewClassificationKind | None = Query(default=None),
-        detail: Literal["summary", "full"] = Query(default="summary"),
+        detail: Literal["summary", "full"] = Query(default=shared.DEFAULT_OVERVIEW_PAGE_DETAIL),
     ) -> OverviewItemsPage:
         return await run_in_threadpool(
             workspace_service.list_overview_items,
@@ -954,9 +955,13 @@ def create_app(
         project_id: Identifier,
         index_id: Identifier,
         query: str = Query(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_QUERY_LENGTH),
-        limit: int = Query(default=shared.MAX_PAGE_SIZE, ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_PAGE_SIZE),
+        limit: int = Query(default=shared.DEFAULT_SEARCH_LIMIT, ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_PAGE_SIZE),
+        detail: Literal["summary", "full"] = Query(default=shared.HTTP_DEFAULT_DETAIL),
+        cursor: str | None = Query(default=None, max_length=shared.MAX_OVERVIEW_CURSOR_LENGTH),
     ) -> SearchIndexResponse:
-        return await run_in_threadpool(workspace_service.search, project_id, index_id, query, limit)
+        return await run_in_threadpool(
+            workspace_service.search, project_id, index_id, query, limit, detail=detail, cursor=cursor,
+        )
 
     @application.get(
         "/api/projects/{project_id}/indexes/{index_id}/modules/{module_id}/symbols",
@@ -969,6 +974,7 @@ def create_app(
         module_id: Identifier,
         limit: int = Query(default=shared.MAX_PAGE_SIZE, ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_PAGE_SIZE),
         cursor: str | None = Query(default=None, max_length=shared.MAX_CURSOR_LENGTH),
+        detail: Literal["summary", "full"] = Query(default=shared.HTTP_DEFAULT_DETAIL),
     ) -> ModuleSymbolsPageResponse:
         return await run_in_threadpool(
             workspace_service.list_module_symbols,
@@ -977,6 +983,7 @@ def create_app(
             module_id,
             limit,
             cursor,
+            detail=detail,
         )
 
     @application.get(
@@ -992,6 +999,7 @@ def create_app(
         depth: int = Query(default=shared.MAX_GRAPH_DEPTH, ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_GRAPH_DEPTH),
         limit: int = Query(default=shared.MAX_PAGE_SIZE, ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_PAGE_SIZE),
         edge_kinds: list[EdgeKind] | None = Query(default=None),
+        detail: Literal["summary", "full"] = Query(default=shared.HTTP_DEFAULT_DETAIL),
     ) -> NeighborsIndexResponse:
         return await run_in_threadpool(
             workspace_service.neighbors,
@@ -1002,6 +1010,36 @@ def create_app(
             depth,
             limit,
             tuple(edge_kinds) if edge_kinds else None,
+            detail=detail,
+        )
+
+    @application.get(
+        "/api/projects/{project_id}/indexes/{index_id}/unresolved",
+        response_model=UnresolvedPage,
+        responses=_API_ERROR_RESPONSES,
+    )
+    async def list_project_unresolved(
+        project_id: Identifier,
+        index_id: Identifier,
+        symbol_id: Identifier | None = Query(default=None),
+        module_id: Identifier | None = Query(default=None),
+        direction: Literal["outgoing", "possible_incoming"] = Query(default=shared.DEFAULT_UNRESOLVED_DIRECTION),
+        reason: str | None = Query(default=None, min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_REASON_LENGTH),
+        cursor: str | None = Query(default=None, max_length=shared.MAX_OVERVIEW_CURSOR_LENGTH),
+        limit: int = Query(default=shared.DEFAULT_UNRESOLVED_PAGE_LIMIT, ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_UNRESOLVED_PAGE_LIMIT),
+        detail: Literal["summary", "full"] = Query(default=shared.DEFAULT_UNRESOLVED_PAGE_DETAIL),
+    ) -> UnresolvedPage:
+        return await run_in_threadpool(
+            workspace_service.list_unresolved,
+            project_id,
+            index_id,
+            symbol_id=symbol_id,
+            module_id=module_id,
+            direction=direction,
+            reason=reason,
+            cursor=cursor,
+            limit=limit,
+            detail=detail,
         )
 
     @application.get(

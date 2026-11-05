@@ -16,6 +16,10 @@
 
 `list_module_symbols` 先从指定 immutable index 校验 `kind=module` 的 root，再按其固定 `path` 查询 `class`、`function`、`test` 定义；它不读 live source、不使用 FTS 或 neighbors，也不计算全量计数。排序为 `(start_line, symbol_id)`，用 `(start_line, symbol_id)` keyset 续页；游标含 v1、完整 SHA-256 project/index/module scope fingerprint 与最后排序键，最多 500 字符。页默认/最多 40 项，响应序列化含 module root 在 40,000 字节内；预算只容纳部分定义时返回短页和可续游标，连首项也放不下时返回 `budget_exceeded`。`symbols_module_page(index_id,path,start_line,symbol_id)` 是兼容旧库的 `CREATE INDEX IF NOT EXISTS` 辅助查询索引；它不改变既有 symbols、immutable snapshot 或 Symbol identity。
 
+`list_unresolved` 复用 `unresolved_references` 与 `unresolved_targets`，不新增表或索引。出向 symbol 查询按 `source_symbol_id` 过滤；module 查询先校验 module root，再按固定 module path 联接该路径下的 source symbols；possible incoming 复用邻接查询已有的 possible target/name 匹配条件。计数与一条 `ORDER BY path COLLATE BINARY, start_line, unresolved_id LIMIT/OFFSET` 页查询分别计算，候选 targets 只为当前页批量加载。邻接 full unresolved 也使用相同的 `path,line,id` 顺序，确保逐页展开与完整响应一致。
+
+搜索 summary 的定义片段只为当前返回页读取：按页内 symbol IDs 找到需要的固定快照文件，一次批量读取这些文件，再按定义起始行提取首行；不会对每个搜索结果单独读文件，也不会为 full 搜索额外读取源码。
+
 ## 接口与依赖
 
 `contextual_calls` 独立保存特定构造接收者的一跳字段调用，绑定同一不可变 index、实际 `calls` 激活边和四处源码位置。写入时验证完整 Symbol 元数据、激活边端点和位置、源码路径与行范围；旧快照读取为空。邻接查询只在激活边实际返回时附带对应条件记录，并与静态邻接共用最多 200 条关系、时间及输出字节预算，SQL 使用有界 LIMIT 与 deadline progress handler。条件目标不加入普通 nodes，也不写入 static_edges；静态影响、概览可达性和历史报告不据此扩展。`binding_mutation_after_escape_unverified` 明确标识初始绑定在对象逃逸后是否改写未知。

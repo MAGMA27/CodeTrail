@@ -9,7 +9,7 @@ import sqlite3
 import pytest
 
 from app import storage as storage_module
-from app.contracts import CodeEdge, ContextualCall, SourceLocation
+from app.contracts import CodeEdge, ContextualCall, MAX_CURSOR_LENGTH, SourceLocation
 from app.indexing import build_source_snapshot, extract_definitions
 from app.relations import RelationIndex, extract_relations
 from app.storage import (
@@ -382,7 +382,7 @@ def test_module_symbol_pages_are_scoped_stable_and_share_the_serialized_budget(
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     module.index_id,
-                    f"module-page-symbol-{ordinal:02d}",
+                    f"sym-{ordinal:032x}",
                     module.path,
                     f"pkg.synthetic_{ordinal}",
                     ("class", "function", "test")[ordinal % 3],
@@ -394,7 +394,7 @@ def test_module_symbol_pages_are_scoped_stable_and_share_the_serialized_budget(
         assert first.module == module
         assert first.has_more is True
         assert len(first.symbols) == 40
-        assert first.next_cursor is not None and len(first.next_cursor) <= 500
+        assert first.next_cursor is not None and len(first.next_cursor) <= 40
 
         second = store.list_module_symbols(
             "project-page",
@@ -404,6 +404,20 @@ def test_module_symbol_pages_are_scoped_stable_and_share_the_serialized_budget(
         )
         assert second.has_more is False
         assert second.next_cursor is None
+        legacy_symbol = first.symbols[-1]
+        legacy_payload = storage_module.json.dumps({
+            "version": 1,
+            "scope": storage_module._module_symbols_scope_fingerprint(
+                "project-page", module.index_id, module.symbol_id,
+            ),
+            "start_line": legacy_symbol.start_line,
+            "symbol_id": legacy_symbol.symbol_id,
+        }, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        legacy_cursor = storage_module.base64.urlsafe_b64encode(legacy_payload).decode("ascii")
+        legacy_second = store.list_module_symbols(
+            "project-page", module.index_id, module.symbol_id, cursor=legacy_cursor,
+        )
+        assert legacy_second.symbols == second.symbols
         combined = (*first.symbols, *second.symbols)
         assert len(combined) == 46  # 45 injected definitions plus the parsed function.
         assert len({symbol.symbol_id for symbol in combined}) == len(combined)
@@ -436,7 +450,7 @@ def test_module_symbol_pages_are_scoped_stable_and_share_the_serialized_budget(
             "version": 1,
             "scope": cursor_scope,
             "start_line": 20,
-            "symbol_id": "module-page-symbol-00",
+            "symbol_id": f"sym-{0:032x}",
         }
         for invalid_fields in (
             {**cursor_fields, "extra": True},
@@ -475,6 +489,43 @@ def test_module_symbol_pages_are_scoped_stable_and_share_the_serialized_budget(
         monkeypatch.setattr(storage_module, "_MODULE_SYMBOLS_MAX_OUTPUT_BYTES", storage_module._model_size(one_item) - 1)
         with pytest.raises(StorageBudgetError, match="first module definition"):
             store.list_module_symbols("project-page", module.index_id, module.symbol_id, limit=40)
+
+
+def test_module_symbol_pages_support_legacy_symbol_ids_with_bounded_cursor(tmp_path: Path) -> None:
+    repository = tmp_path / "legacy-repo"
+    repository.mkdir()
+    (repository / "pkg.py").write_text("", encoding="utf-8")
+    relation = relation_for_repository(repository, repository_id="legacy-module-page", index_id="legacy-module-index")
+    module = next(symbol for symbol in relation.symbols if symbol.kind == "module" and symbol.path == "pkg.py")
+
+    with IndexStore(tmp_path / "legacy-module-page.sqlite3") as store:
+        store.write_index(relation)
+        for ordinal in range(2):
+            store.connection.execute(
+                "INSERT INTO symbols (index_id, symbol_id, path, qualified_name, kind, start_line, end_line) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    module.index_id,
+                    f"module-page-symbol-{ordinal:02d}",
+                    module.path,
+                    f"pkg.legacy_{ordinal}",
+                    "function",
+                    ordinal + 10,
+                    ordinal + 10,
+                ),
+            )
+
+        first = store.list_module_symbols("project-legacy", module.index_id, module.symbol_id, limit=1)
+        assert [symbol.symbol_id for symbol in first.symbols] == ["module-page-symbol-00"]
+        assert first.has_more is True
+        assert first.next_cursor is not None
+        assert len(first.next_cursor) <= MAX_CURSOR_LENGTH
+        second = store.list_module_symbols(
+            "project-legacy", module.index_id, module.symbol_id, limit=1, cursor=first.next_cursor,
+        )
+        assert [symbol.symbol_id for symbol in second.symbols] == ["module-page-symbol-01"]
+        assert second.has_more is False
+        assert second.next_cursor is None
 
 
 def test_module_symbol_cursor_rejects_version_and_other_module_scope(tmp_path: Path) -> None:
@@ -1179,6 +1230,10 @@ def test_neighbor_completeness_reports_possible_unresolved_callers(tmp_path: Pat
     index_id = relation.snapshot.index.index_id
     by_name = {symbol.qualified_name: symbol for symbol in relation.symbols}
     root_id = by_name["pkg.models.Response.raise_for_status"].symbol_id
+    module_id = next(
+        symbol.symbol_id for symbol in relation.symbols
+        if symbol.kind == "module" and symbol.path == "pkg/models.py"
+    )
 
     with IndexStore(tmp_path / "index.sqlite3") as store:
         store.write_index(relation)
@@ -1198,6 +1253,31 @@ def test_neighbor_completeness_reports_possible_unresolved_callers(tmp_path: Pat
             (item.source_symbol_id, item.expression, item.reason)
             for item in callers.possible_unresolved_callers
         ] == [(by_name["pkg.models.unknown"].symbol_id, "response.raise_for_status()", "receiver_type_unknown")]
+
+        incoming_total, incoming_first = store.list_unresolved(
+            index_id, symbol_id=root_id, direction="possible_incoming", limit=1
+        )
+        assert incoming_total == callers.completeness.possible_unresolved_caller_count
+        assert [item.unresolved_id for item in incoming_first] == [
+            item.unresolved_id for item in callers.possible_unresolved_callers
+        ]
+
+        module_total, module_page = store.list_unresolved(index_id, module_id=module_id, limit=1)
+        module_ids = [item.unresolved_id for item in module_page]
+        offset = len(module_page)
+        while offset < module_total:
+            _, next_page = store.list_unresolved(
+                index_id, module_id=module_id, limit=1, offset=offset
+            )
+            module_ids.extend(item.unresolved_id for item in next_page)
+            offset += len(next_page)
+        expected_module_ids = [
+            item.unresolved_id for item in sorted(
+                (item for item in relation.unresolved if item.path == "pkg/models.py"),
+                key=lambda item: (item.path, item.start_line, item.unresolved_id),
+            )
+        ]
+        assert module_ids == expected_module_ids
 
         callees = store.get_neighbors(index_id, root_id, "callees", depth=2, limit=40, edge_kinds=("calls",))
         assert [(item.symbol.qualified_name, item.depth) for item in callees.neighbors] == [

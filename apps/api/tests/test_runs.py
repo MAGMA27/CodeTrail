@@ -9,7 +9,7 @@ import shutil
 import threading
 import time
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 
 import pytest
 
@@ -266,6 +266,79 @@ def test_trash_rejects_active_fixture_run_without_running_its_worker(tmp_path: P
     assert status == 409
     assert project_conflict["code"] == "conflict"
     assert run_id
+
+
+def test_run_neighbors_truncation_completeness_matches_direct_query(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    application, project_id, index_id = setup_workspace(tmp_path)
+    original_get_neighbors = IndexStore.get_neighbors
+
+    def get_neighbors_with_one_node_budget(
+        store: IndexStore,
+        requested_index_id: str,
+        symbol_id: str,
+        direction: str,
+        depth: int = 2,
+        limit: int = 40,
+        **kwargs,
+    ):
+        return original_get_neighbors(
+            store,
+            requested_index_id,
+            symbol_id,
+            direction,  # type: ignore[arg-type]
+            depth=depth,
+            limit=1,
+            **kwargs,
+        )
+
+    monkeypatch.setattr(IndexStore, "get_neighbors", get_neighbors_with_one_node_budget)
+
+    status, search = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/indexes/{index_id}/search?query=load_settings&limit=8",
+    )
+    assert status == 200
+    target = next(
+        match["symbol"]
+        for match in search["matches"]
+        if "load_settings" in match["symbol"]["qualified_name"]
+    )
+    query = urlencode(
+        {
+            "symbol_id": target["symbol_id"],
+            "direction": "both",
+            "depth": 2,
+            "limit": 20,
+        }
+    )
+    status, direct = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/indexes/{index_id}/neighbors?{query}",
+    )
+    assert status == 200
+    assert direct["truncated"] is True
+    assert "query_truncated" in direct["completeness"]["reasons"]
+
+    session_id = create_session(application, project_id, index_id, "truncated neighbors")
+    run_id = start_run(application, project_id, session_id, run_payload(index_id))
+    terminal = wait_for_terminal(application, project_id, session_id, run_id)
+    assert terminal["run"]["status"] == "succeeded"
+    status, tool_results = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/sessions/{session_id}/runs/{run_id}/tool-results",
+    )
+    assert status == 200
+    result = next(item for item in tool_results["results"] if item["tool"] == "get_neighbors")
+    assert result["root"]["symbol_id"] == target["symbol_id"]
+    assert result["truncated"] is True
+    assert result["completeness"] == direct["completeness"]
+
 
 def test_internal_run_neighbors_bounds_unresolved_without_losing_graph_or_evidence(
     tmp_path: Path,

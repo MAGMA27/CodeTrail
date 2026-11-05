@@ -294,6 +294,7 @@ def test_module_symbol_http_pages_match_cold_stdio_mcp(tmp_path: Path) -> None:
                         "module_id": module.symbol_id,
                         "limit": 25,
                         "cursor": page_cursor,
+                        "detail": "full",
                     },
                 )
                 assert result.structured_content["ok"] is True
@@ -544,6 +545,7 @@ def test_constructor_attribute_calls_match_http_and_cold_stdio(tmp_path: Path) -
                     "depth": 1,
                     "limit": 40,
                     "edge_kinds": ["calls"],
+                    "detail": "full",
                 },
             )
             assert result.structured_content["ok"] is True
@@ -642,6 +644,7 @@ def test_real_stdio_client_scopes_two_projects_with_same_named_symbols(tmp_path:
                         "index_id": index_ids[repository_id],
                         "query": "DEFAULT_TIMEOUT",
                         "limit": 4,
+                        "detail": "full",
                     },
                 )
                 assert search_result.structured_content["result"] == http_searches[repository_id]
@@ -831,6 +834,7 @@ def test_mcp_local_import_is_opt_in_and_shares_http_state(tmp_path: Path) -> Non
                 "list_module_symbols",
                 "read_source",
                 "get_neighbors",
+                "list_unresolved",
                 "get_overview",
                 "list_overview_items",
                 "get_module",
@@ -894,6 +898,7 @@ def test_mcp_local_import_is_opt_in_and_shares_http_state(tmp_path: Path) -> Non
                 "list_module_symbols",
                 "read_source",
                 "get_neighbors",
+                "list_unresolved",
                 "get_overview",
                 "list_overview_items",
                 "get_module",
@@ -1260,6 +1265,7 @@ def test_mcp_reads_server_feature_generations_without_registering_model_generati
                 "list_module_symbols",
                 "read_source",
                 "get_neighbors",
+                "list_unresolved",
                 "get_overview",
                 "list_overview_items",
                 "get_module",
@@ -1495,6 +1501,7 @@ async def _exercise_stdio(
         "list_module_symbols",
         "read_source",
         "get_neighbors",
+        "list_unresolved",
         "get_overview",
         "list_overview_items",
         "get_module",
@@ -1559,7 +1566,7 @@ async def _exercise_stdio(
 
         search_result = await client.call_tool(
             "search_code",
-            {"project_id": project_id, "index_id": index_id, "query": "load_settings", "limit": 4},
+            {"project_id": project_id, "index_id": index_id, "query": "load_settings", "limit": 4, "detail": "full"},
         )
         assert search_result.structured_content == {
             "schema_version": "0.1.0",
@@ -1567,6 +1574,90 @@ async def _exercise_stdio(
             "error": None,
             "result": http_search,
         }
+
+        search_first_status, search_first = await _request(
+            application,
+            "GET",
+            f"/api/projects/{project_id}/indexes/{index_id}/search?query=handle&limit=1&detail=summary",
+        )
+        assert search_first_status == 200 and search_first["matches"] and search_first["page"]["next_cursor"]
+        default_search_result = await client.call_tool("search_code", {
+            "project_id": project_id, "index_id": index_id, "query": "handle", "limit": 1,
+        })
+        assert default_search_result.structured_content["result"] == search_first
+        search_cursor = search_first["page"]["next_cursor"]
+        search_page_status, search_page = await _request(
+            application,
+            "GET",
+            f"/api/projects/{project_id}/indexes/{index_id}/search?query=handle&limit=1&detail=summary&cursor={search_cursor}",
+        )
+        assert search_page_status == 200
+        mcp_search_page = await client.call_tool("search_code", {
+            "project_id": project_id, "index_id": index_id, "query": "handle", "limit": 1,
+            "detail": "summary", "cursor": search_cursor,
+        })
+        assert mcp_search_page.structured_content["result"] == search_page
+
+        project_record = application.state.workspace_service._require_project_index(project_id, index_id)
+        with application.state.workspace_service.registry.store_for_repository(project_record.repository_id) as store:
+            dispatch_module_id = store.connection.execute(
+                "SELECT symbol_id FROM symbols WHERE index_id = ? AND kind = 'module' "
+                "AND path = 'timeout_demo/dispatch.py'",
+                (index_id,),
+            ).fetchone()["symbol_id"]
+        module_symbols_path = (
+            f"/api/projects/{project_id}/indexes/{index_id}/modules/{dispatch_module_id}/symbols"
+        )
+        module_symbols_status, http_module_symbols = await _request(
+            application, "GET", f"{module_symbols_path}?limit=40&detail=summary",
+        )
+        assert module_symbols_status == 200 and http_module_symbols["symbols"]
+        mcp_module_symbols = await client.call_tool("list_module_symbols", {
+            "project_id": project_id, "index_id": index_id, "module_id": dispatch_module_id,
+        })
+        assert mcp_module_symbols.structured_content["result"] == http_module_symbols
+
+        unresolved_path = f"/api/projects/{project_id}/indexes/{index_id}/unresolved"
+        unresolved_first_status, unresolved_first = await _request(
+            application,
+            "GET",
+            f"{unresolved_path}?module_id={dispatch_module_id}&direction=outgoing&limit=1",
+        )
+        assert unresolved_first_status == 200 and unresolved_first["page"]["next_cursor"]
+        unresolved_cursor = unresolved_first["page"]["next_cursor"]
+        unresolved_page_status, unresolved_page = await _request(
+            application,
+            "GET",
+            f"{unresolved_path}?module_id={dispatch_module_id}&direction=outgoing&limit=1&cursor={unresolved_cursor}",
+        )
+        assert unresolved_page_status == 200
+        mcp_unresolved_page = await client.call_tool("list_unresolved", {
+            "project_id": project_id,
+            "index_id": index_id,
+            "module_id": dispatch_module_id,
+            "direction": "outgoing",
+            "limit": 1,
+            "cursor": unresolved_cursor,
+        })
+        assert mcp_unresolved_page.structured_content["result"] == unresolved_page
+
+        summary_http_status, summary_http_neighbors = await _request(
+            application,
+            "GET",
+            f"/api/projects/{project_id}/indexes/{index_id}/neighbors"
+            f"?symbol_id={symbol_id}&direction=callers&depth=1&limit=40&edge_kinds=calls&detail=summary",
+        )
+        assert summary_http_status == 200 and summary_http_neighbors["neighbors"]
+        summary_mcp_neighbors = await client.call_tool("get_neighbors", {
+            "project_id": project_id,
+            "index_id": index_id,
+            "symbol_id": symbol_id,
+            "direction": "callers",
+            "depth": 1,
+            "limit": 40,
+            "edge_kinds": ["calls"],
+        })
+        assert summary_mcp_neighbors.structured_content["result"] == summary_http_neighbors
 
         neighbors_result = await client.call_tool(
             "get_neighbors",
@@ -1578,6 +1669,7 @@ async def _exercise_stdio(
                 "depth": 1,
                 "limit": 40,
                 "edge_kinds": ["calls"],
+                "detail": "full",
             },
         )
         assert neighbors_result.structured_content == {
@@ -1655,6 +1747,42 @@ async def _exercise_stdio(
         assert skeleton["page"]["total"] > 0
         assert skeleton["sections"]
         assert any(item["section"] == "module_relations" and item["total"] > 0 for item in skeleton["sections"])
+
+        invalid_summary_options = await client.call_tool("get_overview", {
+            "project_id": project_id,
+            "index_id": index_id,
+            "detail": "summary",
+            "max_paths": 3,
+            "max_modules": 20,
+        })
+        assert invalid_summary_options.is_error is True
+        assert invalid_summary_options.structured_content["error"]["code"] == "invalid_input"
+        assert invalid_summary_options.structured_content["error"]["message"] == "parameter is not valid for detail='summary'"
+        assert [item["field"] for item in invalid_summary_options.structured_content["error"]["details"]] == [
+            "max_paths", "max_modules",
+        ]
+        assert all(
+            item["problem"] == "not_allowed"
+            for item in invalid_summary_options.structured_content["error"]["details"]
+        )
+
+        invalid_full_options = await client.call_tool("get_overview", {
+            "project_id": project_id,
+            "index_id": index_id,
+            "detail": "full",
+            "module_limit": 1,
+            "relation_limit": 1,
+            "cursor": "c1.mo.0.deadbeef",
+        })
+        assert invalid_full_options.is_error is True
+        assert invalid_full_options.structured_content["error"]["code"] == "invalid_input"
+        assert [item["field"] for item in invalid_full_options.structured_content["error"]["details"]] == [
+            "module_limit", "relation_limit", "cursor",
+        ]
+        assert all(
+            item["problem"] == "not_allowed"
+            for item in invalid_full_options.structured_content["error"]["details"]
+        )
 
         overview_result = await client.call_tool(
             "get_overview",

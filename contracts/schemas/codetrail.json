@@ -25940,7 +25940,14 @@
             },
             "symbols": {
               "items": {
-                "$ref": "#/$defs/Symbol"
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/Symbol"
+                  },
+                  {
+                    "$ref": "#/$defs/SymbolRef"
+                  }
+                ]
               },
               "maxItems": 40,
               "title": "Symbols",
@@ -26014,6 +26021,49 @@
             "kind"
           ],
           "title": "Symbol",
+          "type": "object"
+        },
+        "SymbolRef": {
+          "additionalProperties": false,
+          "description": "Compact stable reference to a symbol in the response index snapshot.",
+          "properties": {
+            "at": {
+              "maxLength": 524,
+              "minLength": 1,
+              "title": "At",
+              "type": "string"
+            },
+            "id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Id",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "module",
+                "file",
+                "class",
+                "function",
+                "test"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "name": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "kind",
+            "at"
+          ],
+          "title": "SymbolRef",
           "type": "object"
         }
       },
@@ -26445,6 +26495,60 @@
           "title": "NeighborCompleteness",
           "type": "object"
         },
+        "NeighborSummary": {
+          "additionalProperties": false,
+          "properties": {
+            "depth": {
+              "anyOf": [
+                {
+                  "maximum": 3,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Depth"
+            },
+            "edge_kind": {
+              "enum": [
+                "contains",
+                "imports",
+                "calls"
+              ],
+              "title": "Edge Kind",
+              "type": "string"
+            },
+            "orientation": {
+              "enum": [
+                "outgoing",
+                "incoming",
+                "self"
+              ],
+              "title": "Orientation",
+              "type": "string"
+            },
+            "to": {
+              "$ref": "#/$defs/SymbolRef"
+            },
+            "via": {
+              "maxLength": 524,
+              "minLength": 1,
+              "title": "Via",
+              "type": "string"
+            }
+          },
+          "required": [
+            "to",
+            "via",
+            "edge_kind",
+            "orientation"
+          ],
+          "title": "NeighborSummary",
+          "type": "object"
+        },
         "NeighborsIndexResponse": {
           "additionalProperties": false,
           "properties": {
@@ -26518,25 +26622,46 @@
             },
             "neighbors": {
               "items": {
-                "$ref": "#/$defs/Neighbor"
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/Neighbor"
+                  },
+                  {
+                    "$ref": "#/$defs/NeighborSummary"
+                  }
+                ]
               },
               "title": "Neighbors",
               "type": "array"
             },
             "nodes": {
-              "items": {
-                "$ref": "#/$defs/Symbol"
-              },
-              "title": "Nodes",
-              "type": "array"
+              "anyOf": [
+                {
+                  "items": {
+                    "$ref": "#/$defs/Symbol"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Nodes"
             },
             "possible_unresolved_callers": {
-              "items": {
-                "$ref": "#/$defs/UnresolvedReference"
-              },
-              "maxItems": 10,
-              "title": "Possible Unresolved Callers",
-              "type": "array"
+              "anyOf": [
+                {
+                  "items": {
+                    "$ref": "#/$defs/UnresolvedReference"
+                  },
+                  "type": "array"
+                },
+                {
+                  "$ref": "#/$defs/PossibleUnresolvedCallersSummary"
+                }
+              ],
+              "maxLength": 10,
+              "title": "Possible Unresolved Callers"
             },
             "root": {
               "$ref": "#/$defs/Symbol"
@@ -26566,11 +26691,29 @@
               "title": "Truncation Reason"
             },
             "unresolved": {
-              "items": {
-                "$ref": "#/$defs/UnresolvedReference"
-              },
-              "title": "Unresolved",
-              "type": "array"
+              "anyOf": [
+                {
+                  "items": {
+                    "$ref": "#/$defs/UnresolvedReference"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Unresolved"
+            },
+            "unresolved_summary": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/UnresolvedSummary"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             }
           },
           "required": [
@@ -26578,6 +26721,37 @@
             "root"
           ],
           "title": "NeighborsIndexResponse",
+          "type": "object"
+        },
+        "PossibleUnresolvedCallersSummary": {
+          "additionalProperties": false,
+          "properties": {
+            "sample": {
+              "items": {
+                "$ref": "#/$defs/UnresolvedSummaryItem"
+              },
+              "maxItems": 3,
+              "title": "Sample",
+              "type": "array"
+            },
+            "total": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Total"
+            }
+          },
+          "required": [
+            "total",
+            "sample"
+          ],
+          "title": "PossibleUnresolvedCallersSummary",
           "type": "object"
         },
         "SourceLocation": {
@@ -26669,6 +26843,49 @@
           "title": "Symbol",
           "type": "object"
         },
+        "SymbolRef": {
+          "additionalProperties": false,
+          "description": "Compact stable reference to a symbol in the response index snapshot.",
+          "properties": {
+            "at": {
+              "maxLength": 524,
+              "minLength": 1,
+              "title": "At",
+              "type": "string"
+            },
+            "id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Id",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "module",
+                "file",
+                "class",
+                "function",
+                "test"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "name": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "kind",
+            "at"
+          ],
+          "title": "SymbolRef",
+          "type": "object"
+        },
         "UnresolvedReference": {
           "additionalProperties": false,
           "properties": {
@@ -26739,6 +26956,102 @@
             "reason"
           ],
           "title": "UnresolvedReference",
+          "type": "object"
+        },
+        "UnresolvedSummary": {
+          "additionalProperties": false,
+          "properties": {
+            "by_reason": {
+              "additionalProperties": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "title": "By Reason",
+              "type": "object"
+            },
+            "by_source": {
+              "additionalProperties": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "title": "By Source",
+              "type": "object"
+            },
+            "sample": {
+              "items": {
+                "$ref": "#/$defs/UnresolvedSummaryItem"
+              },
+              "maxItems": 3,
+              "title": "Sample",
+              "type": "array"
+            },
+            "total": {
+              "minimum": 0,
+              "title": "Total",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "total",
+            "by_reason",
+            "by_source",
+            "sample"
+          ],
+          "title": "UnresolvedSummary",
+          "type": "object"
+        },
+        "UnresolvedSummaryItem": {
+          "additionalProperties": false,
+          "properties": {
+            "at": {
+              "maxLength": 524,
+              "minLength": 1,
+              "title": "At",
+              "type": "string"
+            },
+            "expression": {
+              "maxLength": 1000,
+              "minLength": 1,
+              "title": "Expression",
+              "type": "string"
+            },
+            "id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Id",
+              "type": "string"
+            },
+            "possible_target_count": {
+              "minimum": 0,
+              "title": "Possible Target Count",
+              "type": "integer"
+            },
+            "reason": {
+              "maxLength": 1000,
+              "minLength": 1,
+              "title": "Reason",
+              "type": "string"
+            },
+            "source": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/SymbolRef"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "required": [
+            "id",
+            "at",
+            "expression",
+            "reason",
+            "possible_target_count"
+          ],
+          "title": "UnresolvedSummaryItem",
           "type": "object"
         }
       },
@@ -27930,10 +28243,12 @@
               "type": "object"
             },
             "entry_reachable": {
+              "default": false,
               "title": "Entry Reachable",
               "type": "boolean"
             },
             "in_relations": {
+              "default": 0,
               "minimum": 0,
               "title": "In Relations",
               "type": "integer"
@@ -27945,6 +28260,7 @@
               "type": "string"
             },
             "out_relations": {
+              "default": 0,
               "minimum": 0,
               "title": "Out Relations",
               "type": "integer"
@@ -27958,10 +28274,7 @@
           },
           "required": [
             "module_id",
-            "path",
-            "entry_reachable",
-            "in_relations",
-            "out_relations"
+            "path"
           ],
           "title": "OverviewModuleSummary",
           "type": "object"
@@ -30234,10 +30547,12 @@
               "type": "object"
             },
             "entry_reachable": {
+              "default": false,
               "title": "Entry Reachable",
               "type": "boolean"
             },
             "in_relations": {
+              "default": 0,
               "minimum": 0,
               "title": "In Relations",
               "type": "integer"
@@ -30249,6 +30564,7 @@
               "type": "string"
             },
             "out_relations": {
+              "default": 0,
               "minimum": 0,
               "title": "Out Relations",
               "type": "integer"
@@ -30262,10 +30578,7 @@
           },
           "required": [
             "module_id",
-            "path",
-            "entry_reachable",
-            "in_relations",
-            "out_relations"
+            "path"
           ],
           "title": "OverviewModuleSummary",
           "type": "object"
@@ -39516,6 +39829,54 @@
           "title": "McpError",
           "type": "object"
         },
+        "OverviewPage": {
+          "additionalProperties": false,
+          "properties": {
+            "next_cursor": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Next Cursor"
+            },
+            "order": {
+              "maxLength": 100,
+              "minLength": 1,
+              "title": "Order",
+              "type": "string"
+            },
+            "returned": {
+              "minimum": 0,
+              "title": "Returned",
+              "type": "integer"
+            },
+            "total": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Total"
+            }
+          },
+          "required": [
+            "returned",
+            "total",
+            "order"
+          ],
+          "title": "OverviewPage",
+          "type": "object"
+        },
         "SearchIndexResponse": {
           "additionalProperties": false,
           "properties": {
@@ -39527,10 +39888,28 @@
             },
             "matches": {
               "items": {
-                "$ref": "#/$defs/SearchMatch"
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/SearchMatch"
+                  },
+                  {
+                    "$ref": "#/$defs/SearchSummaryMatch"
+                  }
+                ]
               },
               "title": "Matches",
               "type": "array"
+            },
+            "page": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/OverviewPage"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             },
             "schema_version": {
               "const": "0.1.0",
@@ -39589,6 +39968,48 @@
             "matched_terms"
           ],
           "title": "SearchMatch",
+          "type": "object"
+        },
+        "SearchSummaryMatch": {
+          "additionalProperties": false,
+          "properties": {
+            "matched_terms": {
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "title": "Matched Terms",
+              "type": "array"
+            },
+            "rank": {
+              "exclusiveMinimum": 0,
+              "title": "Rank",
+              "type": "integer"
+            },
+            "snippet": {
+              "anyOf": [
+                {
+                  "maxLength": 120,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Snippet"
+            },
+            "symbol": {
+              "$ref": "#/$defs/SymbolRef"
+            }
+          },
+          "required": [
+            "rank",
+            "symbol",
+            "matched_terms"
+          ],
+          "title": "SearchSummaryMatch",
           "type": "object"
         },
         "Symbol": {
@@ -39650,6 +40071,49 @@
             "kind"
           ],
           "title": "Symbol",
+          "type": "object"
+        },
+        "SymbolRef": {
+          "additionalProperties": false,
+          "description": "Compact stable reference to a symbol in the response index snapshot.",
+          "properties": {
+            "at": {
+              "maxLength": 524,
+              "minLength": 1,
+              "title": "At",
+              "type": "string"
+            },
+            "id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Id",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "module",
+                "file",
+                "class",
+                "function",
+                "test"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "name": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "kind",
+            "at"
+          ],
+          "title": "SymbolRef",
           "type": "object"
         }
       },
@@ -41553,6 +42017,536 @@
       "title": "McpSourceResponse",
       "type": "object"
     },
+    "McpUnresolvedResponse": {
+      "$defs": {
+        "ErrorDetail": {
+          "additionalProperties": false,
+          "properties": {
+            "allowed": {
+              "anyOf": [
+                {
+                  "items": {},
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Allowed"
+            },
+            "field": {
+              "title": "Field",
+              "type": "string"
+            },
+            "got": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Got"
+            },
+            "max": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Max"
+            },
+            "min": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Min"
+            },
+            "problem": {
+              "enum": [
+                "required",
+                "not_allowed",
+                "too_small",
+                "too_large",
+                "too_short",
+                "too_long",
+                "wrong_type",
+                "invalid",
+                "beyond_end_of_file",
+                "range_too_long",
+                "start_after_end"
+              ],
+              "title": "Problem",
+              "type": "string"
+            }
+          },
+          "required": [
+            "field",
+            "problem"
+          ],
+          "title": "ErrorDetail",
+          "type": "object"
+        },
+        "McpError": {
+          "additionalProperties": false,
+          "description": "Domain failure returned inside a read-only MCP tool result.",
+          "properties": {
+            "code": {
+              "enum": [
+                "not_found",
+                "invalid_input",
+                "conflict",
+                "budget_exceeded",
+                "download_timeout",
+                "index_too_large",
+                "index_source_rejected",
+                "index_timeout",
+                "index_cancelled",
+                "internal_error",
+                "forbidden"
+              ],
+              "title": "Code",
+              "type": "string"
+            },
+            "details": {
+              "anyOf": [
+                {
+                  "items": {
+                    "$ref": "#/$defs/ErrorDetail"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Details"
+            },
+            "message": {
+              "maxLength": 2000,
+              "minLength": 1,
+              "title": "Message",
+              "type": "string"
+            },
+            "retryable": {
+              "default": false,
+              "title": "Retryable",
+              "type": "boolean"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "title": "McpError",
+          "type": "object"
+        },
+        "OverviewPage": {
+          "additionalProperties": false,
+          "properties": {
+            "next_cursor": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Next Cursor"
+            },
+            "order": {
+              "maxLength": 100,
+              "minLength": 1,
+              "title": "Order",
+              "type": "string"
+            },
+            "returned": {
+              "minimum": 0,
+              "title": "Returned",
+              "type": "integer"
+            },
+            "total": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Total"
+            }
+          },
+          "required": [
+            "returned",
+            "total",
+            "order"
+          ],
+          "title": "OverviewPage",
+          "type": "object"
+        },
+        "UnresolvedCompleteness": {
+          "additionalProperties": false,
+          "properties": {
+            "hint": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Hint"
+            },
+            "reasons": {
+              "items": {
+                "enum": [
+                  "more_items",
+                  "index_unresolved_truncated",
+                  "index_unresolved_coverage_unknown"
+                ],
+                "type": "string"
+              },
+              "title": "Reasons",
+              "type": "array"
+            },
+            "status": {
+              "enum": [
+                "complete",
+                "truncated",
+                "possibly_incomplete"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "title": "UnresolvedCompleteness",
+          "type": "object"
+        },
+        "UnresolvedPage": {
+          "additionalProperties": false,
+          "properties": {
+            "completeness": {
+              "$ref": "#/$defs/UnresolvedCompleteness"
+            },
+            "detail": {
+              "default": "summary",
+              "enum": [
+                "summary",
+                "full"
+              ],
+              "title": "Detail",
+              "type": "string"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "items": {
+              "items": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/UnresolvedPageSummaryItem"
+                  },
+                  {
+                    "$ref": "#/$defs/UnresolvedReference"
+                  }
+                ]
+              },
+              "maxItems": 40,
+              "title": "Items",
+              "type": "array"
+            },
+            "page": {
+              "$ref": "#/$defs/OverviewPage"
+            },
+            "project_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Project Id",
+              "type": "string"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            },
+            "scope": {
+              "$ref": "#/$defs/UnresolvedScope"
+            }
+          },
+          "required": [
+            "project_id",
+            "index_id",
+            "scope",
+            "items",
+            "page",
+            "completeness"
+          ],
+          "title": "UnresolvedPage",
+          "type": "object"
+        },
+        "UnresolvedPageSummaryItem": {
+          "additionalProperties": false,
+          "properties": {
+            "at": {
+              "maxLength": 524,
+              "minLength": 1,
+              "title": "At",
+              "type": "string"
+            },
+            "expression": {
+              "maxLength": 1000,
+              "minLength": 1,
+              "title": "Expression",
+              "type": "string"
+            },
+            "id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Id",
+              "type": "string"
+            },
+            "possible_target_count": {
+              "minimum": 0,
+              "title": "Possible Target Count",
+              "type": "integer"
+            },
+            "reason": {
+              "maxLength": 1000,
+              "minLength": 1,
+              "title": "Reason",
+              "type": "string"
+            },
+            "source_symbol_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Source Symbol Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "at",
+            "expression",
+            "reason",
+            "source_symbol_id",
+            "possible_target_count"
+          ],
+          "title": "UnresolvedPageSummaryItem",
+          "type": "object"
+        },
+        "UnresolvedReference": {
+          "additionalProperties": false,
+          "properties": {
+            "end_line": {
+              "exclusiveMinimum": 0,
+              "title": "End Line",
+              "type": "integer"
+            },
+            "expression": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Expression",
+              "type": "string"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "possible_target_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "title": "Possible Target Ids",
+              "type": "array"
+            },
+            "reason": {
+              "maxLength": 1000,
+              "minLength": 1,
+              "title": "Reason",
+              "type": "string"
+            },
+            "source_symbol_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Source Symbol Id",
+              "type": "string"
+            },
+            "start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Start Line",
+              "type": "integer"
+            },
+            "unresolved_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Unresolved Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "start_line",
+            "end_line",
+            "unresolved_id",
+            "index_id",
+            "source_symbol_id",
+            "path",
+            "expression",
+            "reason"
+          ],
+          "title": "UnresolvedReference",
+          "type": "object"
+        },
+        "UnresolvedScope": {
+          "additionalProperties": false,
+          "properties": {
+            "direction": {
+              "enum": [
+                "outgoing",
+                "possible_incoming"
+              ],
+              "title": "Direction",
+              "type": "string"
+            },
+            "module_id": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Module Id"
+            },
+            "reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Reason"
+            },
+            "symbol_id": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Symbol Id"
+            }
+          },
+          "required": [
+            "direction"
+          ],
+          "title": "UnresolvedScope",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/McpError"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "result": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UnresolvedPage"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "schema_version": {
+          "const": "0.1.0",
+          "default": "0.1.0",
+          "title": "Schema Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ok"
+      ],
+      "title": "McpUnresolvedResponse",
+      "type": "object"
+    },
     "ModelConfigSettingsResponse": {
       "additionalProperties": false,
       "properties": {
@@ -41858,6 +42852,49 @@
           ],
           "title": "Symbol",
           "type": "object"
+        },
+        "SymbolRef": {
+          "additionalProperties": false,
+          "description": "Compact stable reference to a symbol in the response index snapshot.",
+          "properties": {
+            "at": {
+              "maxLength": 524,
+              "minLength": 1,
+              "title": "At",
+              "type": "string"
+            },
+            "id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Id",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "module",
+                "file",
+                "class",
+                "function",
+                "test"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "name": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "kind",
+            "at"
+          ],
+          "title": "SymbolRef",
+          "type": "object"
         }
       },
       "additionalProperties": false,
@@ -41904,7 +42941,14 @@
         },
         "symbols": {
           "items": {
-            "$ref": "#/$defs/Symbol"
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Symbol"
+              },
+              {
+                "$ref": "#/$defs/SymbolRef"
+              }
+            ]
           },
           "maxItems": 40,
           "title": "Symbols",
@@ -56958,6 +58002,346 @@
         }
       },
       "title": "TrashListResponse",
+      "type": "object"
+    },
+    "UnresolvedPage": {
+      "$defs": {
+        "OverviewPage": {
+          "additionalProperties": false,
+          "properties": {
+            "next_cursor": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Next Cursor"
+            },
+            "order": {
+              "maxLength": 100,
+              "minLength": 1,
+              "title": "Order",
+              "type": "string"
+            },
+            "returned": {
+              "minimum": 0,
+              "title": "Returned",
+              "type": "integer"
+            },
+            "total": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Total"
+            }
+          },
+          "required": [
+            "returned",
+            "total",
+            "order"
+          ],
+          "title": "OverviewPage",
+          "type": "object"
+        },
+        "UnresolvedCompleteness": {
+          "additionalProperties": false,
+          "properties": {
+            "hint": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Hint"
+            },
+            "reasons": {
+              "items": {
+                "enum": [
+                  "more_items",
+                  "index_unresolved_truncated",
+                  "index_unresolved_coverage_unknown"
+                ],
+                "type": "string"
+              },
+              "title": "Reasons",
+              "type": "array"
+            },
+            "status": {
+              "enum": [
+                "complete",
+                "truncated",
+                "possibly_incomplete"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "title": "UnresolvedCompleteness",
+          "type": "object"
+        },
+        "UnresolvedPageSummaryItem": {
+          "additionalProperties": false,
+          "properties": {
+            "at": {
+              "maxLength": 524,
+              "minLength": 1,
+              "title": "At",
+              "type": "string"
+            },
+            "expression": {
+              "maxLength": 1000,
+              "minLength": 1,
+              "title": "Expression",
+              "type": "string"
+            },
+            "id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Id",
+              "type": "string"
+            },
+            "possible_target_count": {
+              "minimum": 0,
+              "title": "Possible Target Count",
+              "type": "integer"
+            },
+            "reason": {
+              "maxLength": 1000,
+              "minLength": 1,
+              "title": "Reason",
+              "type": "string"
+            },
+            "source_symbol_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Source Symbol Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "at",
+            "expression",
+            "reason",
+            "source_symbol_id",
+            "possible_target_count"
+          ],
+          "title": "UnresolvedPageSummaryItem",
+          "type": "object"
+        },
+        "UnresolvedReference": {
+          "additionalProperties": false,
+          "properties": {
+            "end_line": {
+              "exclusiveMinimum": 0,
+              "title": "End Line",
+              "type": "integer"
+            },
+            "expression": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Expression",
+              "type": "string"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "possible_target_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "title": "Possible Target Ids",
+              "type": "array"
+            },
+            "reason": {
+              "maxLength": 1000,
+              "minLength": 1,
+              "title": "Reason",
+              "type": "string"
+            },
+            "source_symbol_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Source Symbol Id",
+              "type": "string"
+            },
+            "start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Start Line",
+              "type": "integer"
+            },
+            "unresolved_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Unresolved Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "start_line",
+            "end_line",
+            "unresolved_id",
+            "index_id",
+            "source_symbol_id",
+            "path",
+            "expression",
+            "reason"
+          ],
+          "title": "UnresolvedReference",
+          "type": "object"
+        },
+        "UnresolvedScope": {
+          "additionalProperties": false,
+          "properties": {
+            "direction": {
+              "enum": [
+                "outgoing",
+                "possible_incoming"
+              ],
+              "title": "Direction",
+              "type": "string"
+            },
+            "module_id": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Module Id"
+            },
+            "reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Reason"
+            },
+            "symbol_id": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Symbol Id"
+            }
+          },
+          "required": [
+            "direction"
+          ],
+          "title": "UnresolvedScope",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "completeness": {
+          "$ref": "#/$defs/UnresolvedCompleteness"
+        },
+        "detail": {
+          "default": "summary",
+          "enum": [
+            "summary",
+            "full"
+          ],
+          "title": "Detail",
+          "type": "string"
+        },
+        "index_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Index Id",
+          "type": "string"
+        },
+        "items": {
+          "items": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/UnresolvedPageSummaryItem"
+              },
+              {
+                "$ref": "#/$defs/UnresolvedReference"
+              }
+            ]
+          },
+          "maxItems": 40,
+          "title": "Items",
+          "type": "array"
+        },
+        "page": {
+          "$ref": "#/$defs/OverviewPage"
+        },
+        "project_id": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Project Id",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "0.1.0",
+          "default": "0.1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "scope": {
+          "$ref": "#/$defs/UnresolvedScope"
+        }
+      },
+      "required": [
+        "project_id",
+        "index_id",
+        "scope",
+        "items",
+        "page",
+        "completeness"
+      ],
+      "title": "UnresolvedPage",
       "type": "object"
     },
     "UnresolvedReference": {
