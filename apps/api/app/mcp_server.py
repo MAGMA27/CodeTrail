@@ -377,6 +377,7 @@ def create_mcp_server(
         name="codetrail",
         title="CodeTrail workspace" if local_import_enabled or github_import_enabled or index_write_enabled or session_write_enabled or run_write_enabled or external_run_enabled else "CodeTrail read-only workspace",
         description=server_description,
+        instructions=call_flow,
         version="0.2.0",
         log_level="WARNING",
     )

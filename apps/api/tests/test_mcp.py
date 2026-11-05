@@ -1512,6 +1512,10 @@ async def _exercise_stdio(
         "get_feature_graph",
     } | RUN_READ_TOOLS
     async with Client(parameters, read_timeout_seconds=10) as client:
+        instructions = client.instructions
+        assert instructions is not None
+        assert "get_overview" in instructions
+        assert "list_unresolved" in instructions
         tools = await client.list_tools()
         assert {tool.name for tool in tools.tools} == expected_tools
         assert all(tool.output_schema for tool in tools.tools)
