@@ -1,13 +1,25 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import json
+import shutil
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 from pydantic import ValidationError
 
-from app.contracts import Evidence, JourneyCoverage, IndexSnapshot, JourneySummary
+from app.contracts import (
+    CreateProjectIndexRequest,
+    CreateProjectRequest,
+    Evidence,
+    JourneyCoverage,
+    IndexSnapshot,
+    JourneySummary,
+)
 from app.indexing import SnapshotFile, SourceSnapshot, extract_definitions
+from app.main import create_app
 from app.journeys import _extract_ui_facts, build_journey_catalog, build_project_journey
 from app.mcp_server import _mcp_journey_response
 from app.overview import build_project_overview
@@ -22,6 +34,49 @@ SOURCE_PATHS = (
     "apps/api/app/main.py",
     "apps/api/app/service.py",
 )
+
+
+async def _request(application, target: str) -> dict:
+    parsed = urlsplit(target)
+    messages: list[dict] = []
+    response_complete = asyncio.Event()
+    received = False
+
+    async def receive() -> dict:
+        nonlocal received
+        if received:
+            await response_complete.wait()
+            return {"type": "http.disconnect"}
+        received = True
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message: dict) -> None:
+        messages.append(message)
+        if message["type"] == "http.response.body" and not message.get("more_body", False):
+            response_complete.set()
+
+    await application(
+        {
+            "type": "http",
+            "asgi": {"version": "3.0", "spec_version": "2.3"},
+            "http_version": "1.1",
+            "method": "GET",
+            "scheme": "http",
+            "path": parsed.path,
+            "raw_path": parsed.path.encode("ascii"),
+            "query_string": parsed.query.encode("ascii"),
+            "headers": [(b"host", b"testserver")],
+            "client": ("127.0.0.1", 50000),
+            "server": ("testserver", 80),
+            "root_path": "",
+        },
+        receive,
+        send,
+    )
+    response_start = next(message for message in messages if message["type"] == "http.response.start")
+    body = b"".join(message.get("body", b"") for message in messages if message["type"] == "http.response.body")
+    assert response_start["status"] == 200, body
+    return json.loads(body or b"{}")
 
 
 def _codetrail_source_relation():
@@ -206,6 +261,60 @@ def test_real_local_import_source_builds_bounded_journey_with_explicit_gaps() ->
     assert any("操作源码证据" in marker for marker in missing_evidence.markers)
     assert any("处理符号的源码证据" in marker for marker in missing_evidence.markers)
     assert all(evidence is not None for step in missing_evidence.steps for evidence in step.evidence)
+
+
+def test_journey_summary_keeps_reopenable_evidence_and_http_default_is_full(tmp_path: Path) -> None:
+    fixture_root = ROOT / "fixtures" / "repos" / "preferences-demo"
+    repository = tmp_path / "preferences-demo"
+    shutil.copytree(fixture_root, repository, ignore=shutil.ignore_patterns("__pycache__", ".codetrail"))
+    application = create_app({"preferences-demo": repository}, data_root=tmp_path / "data")
+    service = application.state.workspace_service
+    project = service.create_project(CreateProjectRequest(name="Journey fixture", repository_id="preferences-demo"))
+    indexed = service.create_project_index(
+        project.project_id,
+        CreateProjectIndexRequest(revision="journey-summary-test", dirty=False),
+    )
+    catalog = service.get_journey_catalog(project.project_id, indexed.index.index_id)
+    assert catalog.journeys
+    journey_id = catalog.journeys[0].journey_id
+
+    full = service.get_journey(project.project_id, indexed.index.index_id, journey_id)
+    summary = service.get_journey(project.project_id, indexed.index.index_id, journey_id, detail="summary")
+    assert summary.action_label == full.summary.action_label
+    for full_step, summary_step in zip(full.steps, summary.steps, strict=True):
+        assert [symbol.id for symbol in summary_step.symbols] == [symbol.symbol_id for symbol in full_step.symbols]
+        assert [item.evidence_id for item in summary_step.evidence] == [
+            item.evidence_id for item in full_step.evidence
+        ]
+        for evidence_ref, evidence in zip(summary_step.evidence, full_step.evidence, strict=True):
+            assert (evidence_ref.path, evidence_ref.start_line, evidence_ref.end_line) == (
+                evidence.path,
+                evidence.start_line,
+                evidence.end_line,
+            )
+            reopened = service.read_source(
+                project.project_id,
+                indexed.index.index_id,
+                evidence_ref.path,
+                evidence_ref.start_line,
+                evidence_ref.end_line,
+            )
+            assert reopened.evidence.excerpt == evidence.excerpt
+
+    mcp_summary = _mcp_journey_response(summary, "http://localhost:3000")
+    assert {item.evidence_id for item in mcp_summary.references} == {
+        evidence.evidence_id for step in full.steps for evidence in step.evidence
+    }
+
+    async def verify_http_shapes() -> None:
+        route = (
+            f"/api/projects/{project.project_id}/indexes/{indexed.index.index_id}"
+            f"/journeys/{journey_id}"
+        )
+        assert await _request(application, route) == full.model_dump(mode="json")
+        assert await _request(application, f"{route}?detail=summary") == summary.model_dump(mode="json")
+
+    asyncio.run(verify_http_shapes())
 
 
 def test_one_ui_action_may_have_multiple_http_journeys() -> None:

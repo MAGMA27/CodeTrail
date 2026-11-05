@@ -6,7 +6,8 @@ import re
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from app.mcp_server import _citation_url, _session_url
+from app.contracts import IndexSnapshot, JourneyEvidenceRef, JourneyStep, ProjectJourney, SymbolRef
+from app.mcp_server import _citation_url, _mcp_journey_response, _session_url
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -55,4 +56,59 @@ def test_mcp_workbench_urls_match_web_query_readers_and_routes() -> None:
     }
     emitted_paths = {url.path or "/" for url in urls}
     assert emitted_paths <= route_paths
+
+
+def test_summary_journey_keeps_mcp_evidence_reference_urls() -> None:
+    index = IndexSnapshot(
+        index_id="index-a",
+        repository_id="repo-a",
+        revision="revision-a",
+        dirty=False,
+        snapshot_hash="a" * 64,
+        status="ready",
+        rules_version="rules-a",
+    )
+    journey = ProjectJourney(
+        project_id="project-a",
+        index=index,
+        rules_version="rules-a",
+        journey_id="journey-a",
+        action_label="Save preferences",
+        steps=[
+            JourneyStep(
+                step_id="step-a",
+                role="trigger",
+                title="Submit form",
+                relation_kind="ui_action",
+                certainty="static",
+                explanation="The form submits the action.",
+                symbols=[SymbolRef(id="symbol-a", name="Preferences.save", kind="function", at="src/preferences.py:3-5")],
+                evidence=[
+                    JourneyEvidenceRef(
+                        evidence_id="evidence-a",
+                        content_hash="b" * 64,
+                        path="src/preferences.py",
+                        start_line=3,
+                        end_line=5,
+                    )
+                ],
+            )
+        ],
+    )
+
+    response = _mcp_journey_response(journey, "https://codetrail.example")
+
+    assert response.ok is True
+    assert response.journey is not None
+    assert response.references[0].evidence_id == "evidence-a"
+    assert response.references[0].url == _citation_url(
+        "https://codetrail.example",
+        project_id="project-a",
+        index_id="index-a",
+        path="src/preferences.py",
+        start_line=3,
+        end_line=5,
+        content_hash="b" * 64,
+        evidence_id="evidence-a",
+    )
 

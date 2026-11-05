@@ -1912,8 +1912,17 @@ async def _exercise_stdio(
 
 def test_mcp_run_reads_share_http_state_and_writes_are_separately_opt_in(tmp_path: Path) -> None:
     repository = copy_fixture(tmp_path)
+    preferences_repository = tmp_path / "preferences-demo"
+    shutil.copytree(
+        ROOT / "fixtures" / "repos" / "preferences-demo",
+        preferences_repository,
+        ignore=shutil.ignore_patterns("__pycache__", ".codetrail"),
+    )
     data_root = tmp_path / "data"
-    application = create_app({"timeout-demo": repository}, data_root=data_root)
+    application = create_app(
+        {"timeout-demo": repository, "preferences-demo": preferences_repository},
+        data_root=data_root,
+    )
     status, project = request(
         application,
         "POST",
@@ -1938,6 +1947,30 @@ def test_mcp_run_reads_share_http_state_and_writes_are_separately_opt_in(tmp_pat
     )
     assert status == 200
     session_id = session["session"]["session_id"]
+
+    status, journey_project = request(
+        application,
+        "POST",
+        "/api/projects",
+        {"name": "MCP journey fixture", "repository_id": "preferences-demo"},
+    )
+    assert status == 200
+    journey_project_id = journey_project["project_id"]
+    status, journey_index = request(
+        application,
+        "POST",
+        f"/api/projects/{journey_project_id}/indexes",
+        {"revision": "mcp-journey-v1", "dirty": False},
+    )
+    assert status == 200
+    journey_index_id = journey_index["index"]["index_id"]
+    status, journey_catalog = request(
+        application,
+        "GET",
+        f"/api/projects/{journey_project_id}/indexes/{journey_index_id}/journeys",
+    )
+    assert status == 200 and journey_catalog["journeys"]
+    journey_id = journey_catalog["journeys"][0]["journey_id"]
     status, _ = request(
         application,
         "POST",
@@ -1947,7 +1980,10 @@ def test_mcp_run_reads_share_http_state_and_writes_are_separately_opt_in(tmp_pat
     assert status == 200
 
     environment = {
-        "CODETRAIL_REPOSITORIES": json.dumps({"timeout-demo": str(repository)}),
+        "CODETRAIL_REPOSITORIES": json.dumps({
+            "timeout-demo": str(repository),
+            "preferences-demo": str(preferences_repository),
+        }),
         "CODETRAIL_DATA_DIR": str(data_root),
         "CODETRAIL_WORKBENCH_URL": "http://localhost:3000",
     }
@@ -2002,6 +2038,24 @@ def test_mcp_run_reads_share_http_state_and_writes_are_separately_opt_in(tmp_pat
             assert "start_session_run" not in tools
             assert "cancel_session_run" not in tools
 
+            status, http_journey_summary = await _request(
+                application,
+                "GET",
+                f"/api/projects/{journey_project_id}/indexes/{journey_index_id}/journeys/{journey_id}?detail=summary",
+            )
+            assert status == 200
+            journey_result = await client.call_tool(
+                "get_journey",
+                {
+                    "project_id": journey_project_id,
+                    "index_id": journey_index_id,
+                    "journey_id": journey_id,
+                },
+            )
+            assert journey_result.structured_content["ok"] is True
+            assert journey_result.structured_content["journey"] == http_journey_summary
+            assert journey_result.structured_content["references"]
+
             history = await client.call_tool(
                 "list_session_runs",
                 {"project_id": project_id, "session_id": session_id},
@@ -2038,7 +2092,7 @@ def test_mcp_run_reads_share_http_state_and_writes_are_separately_opt_in(tmp_pat
                 application,
                 "GET",
                 f"/api/projects/{project_id}/sessions/{session_id}/runs/{http_run_id}/impact"
-                f"?candidate_id={candidate_id}&direction=callers&depth=2&limit=40",
+                f"?candidate_id={candidate_id}&direction=callers&depth=2&limit=40&detail=summary",
             )
             assert status == 200
             impact = await client.call_tool(

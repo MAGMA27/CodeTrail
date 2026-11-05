@@ -64,6 +64,8 @@ from .contracts import (
     IndexSnapshot,
     ProjectJourney,
     ProjectJourneyCatalog,
+    JourneyStep,
+    JourneyEvidenceRef,
     IssueModelFinal,
     LocalImportRequest,
     LocalImportResponse,
@@ -123,6 +125,8 @@ from .contracts import (
     TrashListResponse,
     Report,
     RunImpactResponse,
+    RunImpactSummaryResponse,
+    ImpactLayerSummary,
     ReportResponse,
     ReadSourceParams,
     ReadSourceFailure,
@@ -2965,7 +2969,8 @@ class WorkspaceService:
         direction: ImpactDirection = "callers",
         depth: int = 2,
         limit: int = 40,
-    ) -> RunImpactResponse:
+        detail: Literal["summary", "full"] = HTTP_DEFAULT_DETAIL,
+    ) -> RunImpactResponse | RunImpactSummaryResponse:
         """Read a bounded static impact view rooted in one saved report symbol."""
 
         if (candidate_id is None) == (finding_id is None):
@@ -3021,7 +3026,7 @@ class WorkspaceService:
 
                 scope_note = _impact_scope_note(direction, depth)
                 if mapping_status == "unmapped":
-                    return RunImpactResponse(
+                    response = RunImpactResponse(
                         project_id=project_id,
                         session_id=session_id,
                         run_id=run_id,
@@ -3047,6 +3052,7 @@ class WorkspaceService:
                         index_unresolved_truncated=coverage.index_unresolved_truncated,
                         index_unresolved_truncation_reason=coverage.index_unresolved_truncation_reason,
                     )
+                    return self._summarize_run_impact(response) if detail == "summary" else response
 
                 assert root_symbol_id is not None
                 result = store.get_static_impact(
@@ -3056,7 +3062,7 @@ class WorkspaceService:
                     depth,
                     limit,
                 )
-                return RunImpactResponse(
+                response = RunImpactResponse(
                     project_id=project_id,
                     session_id=session_id,
                     run_id=run_id,
@@ -3090,12 +3096,65 @@ class WorkspaceService:
                     index_unresolved_truncated=result.index_unresolved_truncated,
                     index_unresolved_truncation_reason=result.index_unresolved_truncation_reason,
                 )
+                return self._summarize_run_impact(response) if detail == "summary" else response
         except StorageNotFoundError as exc:
             raise ServiceError("not_found", 404, "Run, report, candidate, or finding was not found") from exc
         except StorageInputError as exc:
             raise ServiceError("invalid_input", 400, "Run impact parameters are invalid") from exc
         except StorageError as exc:
             raise ServiceError("internal_error", 500, "local Run impact storage failed") from exc
+
+    def _summarize_run_impact(self, result: RunImpactResponse) -> RunImpactSummaryResponse:
+        node_by_id = {symbol.symbol_id: symbol for symbol in result.nodes}
+        unresolved_by_id = {item.unresolved_id: item for item in result.unresolved}
+        unknown_references = [
+            unresolved_by_id[identifier]
+            for layer in result.layers if layer.kind == "unknown"
+            for identifier in layer.unresolved_ids
+            if identifier in unresolved_by_id
+        ]
+        reason_counts: dict[str, int] = {}
+        for reference in unknown_references:
+            reason_counts[reference.reason] = reason_counts.get(reference.reason, 0) + 1
+        layers = []
+        for layer in result.layers:
+            if layer.kind == "unknown":
+                sample = [
+                    UnresolvedSummaryItem(
+                        id=reference.unresolved_id,
+                        at=f"{reference.path}:{reference.start_line}-{reference.end_line}",
+                        expression=reference.expression,
+                        reason=reference.reason,
+                        source=(self._symbol_ref(node_by_id[reference.source_symbol_id])
+                                if reference.source_symbol_id in node_by_id else None),
+                        possible_target_count=len(reference.possible_target_ids),
+                    )
+                    for reference in unknown_references[:UNRESOLVED_SUMMARY_SAMPLE_LIMIT]
+                ]
+                layers.append(ImpactLayerSummary(
+                    kind=layer.kind,
+                    count=len(layer.unresolved_ids),
+                    sample=sample,
+                    reason_counts=reason_counts,
+                    expand="list_unresolved",
+                ))
+            else:
+                symbols = [node_by_id[item] for item in layer.symbol_ids if item in node_by_id]
+                layers.append(ImpactLayerSummary(
+                    kind=layer.kind,
+                    count=len(layer.symbol_ids),
+                    sample=[self._symbol_ref(symbol) for symbol in symbols[:UNRESOLVED_SUMMARY_SAMPLE_LIMIT]],
+                    expand="detail=full",
+                ))
+        return RunImpactSummaryResponse(
+            project_id=result.project_id,
+            session_id=result.session_id,
+            run_id=result.run_id,
+            index_id=result.index_id,
+            direction=result.direction,
+            layers=layers,
+            incomplete=(result.truncated or result.index_truncated or result.index_unresolved_truncated is True),
+        )
 
     def cancel_run(
         self,
@@ -4793,7 +4852,14 @@ class WorkspaceService:
         except StorageError as exc:
             raise ServiceError("internal_error", 500, "local index storage failed") from exc
 
-    def get_journey(self, project_id: str, index_id: str, journey_id: str) -> ProjectJourney:
+    def get_journey(
+        self,
+        project_id: str,
+        index_id: str,
+        journey_id: str,
+        *,
+        detail: Literal["summary", "full"] = HTTP_DEFAULT_DETAIL,
+    ) -> ProjectJourney:
         """Read one bounded action journey and its same-snapshot source evidence."""
 
         self._require_project_index(project_id, index_id)
@@ -4819,7 +4885,37 @@ class WorkspaceService:
                 )
             if journey is None:
                 raise ServiceError("not_found", 404, "journey was not found in the selected index")
-            return journey
+            if detail == "full":
+                return journey
+            return ProjectJourney(
+                project_id=journey.project_id,
+                index=journey.index,
+                rules_version=journey.rules_version,
+                journey_id=journey.journey_id,
+                action_label=journey.summary.action_label,
+                steps=[
+                    JourneyStep(
+                        step_id=step.step_id,
+                        role=step.role,
+                        title=step.title,
+                        relation_kind=step.relation_kind,
+                        certainty=step.certainty,
+                        explanation=step.explanation,
+                        symbols=[self._symbol_ref(symbol) for symbol in step.symbols],
+                        evidence=[
+                            JourneyEvidenceRef(
+                                evidence_id=evidence.evidence_id,
+                                content_hash=evidence.content_hash,
+                                path=evidence.path,
+                                start_line=evidence.start_line,
+                                end_line=evidence.end_line,
+                            )
+                            for evidence in step.evidence
+                        ],
+                    )
+                    for step in journey.steps
+                ],
+            )
         except ServiceError:
             raise
         except ValueError as exc:

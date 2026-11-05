@@ -62,6 +62,7 @@ from .contracts import (
     RefreshProjectIndexRequest,
     ReportResponse,
     RunImpactResponse,
+    RunImpactSummaryResponse,
     RunEventsResponse,
     RunListResponse,
     RunStatusResponse,
@@ -659,7 +660,7 @@ def create_app(
 
     @application.get(
         "/api/projects/{project_id}/sessions/{session_id}/runs/{run_id}/impact",
-        response_model=RunImpactResponse,
+        response_model=RunImpactResponse | RunImpactSummaryResponse,
         responses=_API_ERROR_RESPONSES,
     )
     async def get_run_impact(
@@ -671,7 +672,8 @@ def create_app(
         direction: ImpactDirection = Query(default="callers"),
         depth: int = Query(default=shared.MAX_GRAPH_DEPTH, ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_GRAPH_DEPTH),
         limit: int = Query(default=shared.MAX_PAGE_SIZE, ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_PAGE_SIZE),
-    ) -> RunImpactResponse:
+        detail: Literal["summary", "full"] = Query(default=shared.HTTP_DEFAULT_DETAIL),
+    ) -> RunImpactResponse | RunImpactSummaryResponse:
         return await run_in_threadpool(
             workspace_service.get_run_impact,
             project_id,
@@ -682,6 +684,7 @@ def create_app(
             direction=direction,
             depth=depth,
             limit=limit,
+            detail=detail,
         )
 
     @application.post(
@@ -888,8 +891,19 @@ def create_app(
         response_model=ProjectJourney,
         responses=_API_ERROR_RESPONSES,
     )
-    async def get_project_journey(project_id: Identifier, index_id: Identifier, journey_id: Identifier) -> ProjectJourney:
-        return await run_in_threadpool(workspace_service.get_journey, project_id, index_id, journey_id)
+    async def get_project_journey(
+        project_id: Identifier,
+        index_id: Identifier,
+        journey_id: Identifier,
+        detail: Literal["summary", "full"] = Query(default=shared.HTTP_DEFAULT_DETAIL),
+    ) -> ProjectJourney:
+        return await run_in_threadpool(
+            workspace_service.get_journey,
+            project_id,
+            index_id,
+            journey_id,
+            detail=detail,
+        )
 
     @application.post(
         "/api/projects/{project_id}/indexes/{index_id}/features",

@@ -72,7 +72,16 @@ def test_registered_tool_output_schemas_are_compact_and_validate_fixture_results
 ) -> None:
     repository = tmp_path / "timeout-demo"
     shutil.copytree(FIXTURE_ROOT, repository, ignore=shutil.ignore_patterns("__pycache__", ".codetrail"))
-    application = create_app({"timeout-demo": repository}, data_root=tmp_path / "data")
+    preferences_repository = tmp_path / "preferences-demo"
+    shutil.copytree(
+        ROOT / "fixtures" / "repos" / "preferences-demo",
+        preferences_repository,
+        ignore=shutil.ignore_patterns("__pycache__", ".codetrail"),
+    )
+    application = create_app(
+        {"timeout-demo": repository, "preferences-demo": preferences_repository},
+        data_root=tmp_path / "data",
+    )
     service = application.state.workspace_service
     project = service.create_project(CreateProjectRequest(name="MCP schema fixture", repository_id="timeout-demo"))
     created = service.create_project_index(
@@ -80,6 +89,16 @@ def test_registered_tool_output_schemas_are_compact_and_validate_fixture_results
         CreateProjectIndexRequest(revision="mcp-schema-fixture-v1", dirty=False),
     )
     index_id = created.index.index_id
+    journey_project = service.create_project(
+        CreateProjectRequest(name="Journey schema fixture", repository_id="preferences-demo"),
+    )
+    journey_index = service.create_project_index(
+        journey_project.project_id,
+        CreateProjectIndexRequest(revision="mcp-journey-schema-v1", dirty=False),
+    )
+    journey_catalog = service.get_journey_catalog(journey_project.project_id, journey_index.index.index_id)
+    assert journey_catalog.journeys
+    journey_id = journey_catalog.journeys[0].journey_id
     with application.state.registry.store_for_repository("timeout-demo") as store:
         relation = store.load_index(index_id)
     assert relation is not None
@@ -163,6 +182,10 @@ def test_registered_tool_output_schemas_are_compact_and_validate_fixture_results
             "get_run_impact", project_id=project_id, session_id=session.session_id,
             run_id=run.run_id, **impact_scope,
         )
+        await call(
+            "get_run_impact", project_id=project_id, session_id=session.session_id,
+            run_id=run.run_id, detail="full", **impact_scope,
+        )
 
         overview = await call("get_overview", project_id=project_id, index_id=index_id)
         await call("get_overview", project_id=project_id, index_id=index_id, detail="full")
@@ -198,6 +221,24 @@ def test_registered_tool_output_schemas_are_compact_and_validate_fixture_results
         await call(
             "get_journey", expect_ok=False,
             project_id=project_id, index_id=index_id, journey_id="journey-not-in-fixture",
+        )
+        await call(
+            "get_journey", expect_ok=False,
+            project_id=project_id, index_id=index_id,
+            journey_id="journey-not-in-fixture", detail="full",
+        )
+        await call(
+            "get_journey",
+            project_id=journey_project.project_id,
+            index_id=journey_index.index.index_id,
+            journey_id=journey_id,
+        )
+        await call(
+            "get_journey",
+            project_id=journey_project.project_id,
+            index_id=journey_index.index.index_id,
+            journey_id=journey_id,
+            detail="full",
         )
         await call(
             "get_feature_generation", expect_ok=False,

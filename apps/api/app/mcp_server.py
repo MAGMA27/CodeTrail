@@ -361,22 +361,19 @@ def create_mcp_server(
     session_write_enabled = service.registry.mcp_session_write_enabled
     run_write_enabled = service.registry.mcp_run_write_enabled
     external_run_enabled = service.registry.mcp_external_run_enabled
-    server_description = (
+    call_flow = (
         "Call list_projects → check_index_freshness → get_overview (skeleton) → "
         "list_overview_items/get_module → search_code/get_neighbors/list_unresolved as needed → read_source; "
         "request detail='full' only when required. Round-trip cursors unchanged. "
         "If completeness is not complete, do not conclude absence. "
         "Discover CodeTrail projects and query one explicitly selected immutable index. "
+    )
+    server_description = call_flow + (
         "Default tools are read-only. Explicitly enabled session writes, bounded fixture/real Run start/cancel, "
-        "Codex external-Agent Run and feature-submission tools, "
-        "local/GitHub import/status/retry, and index refresh are separately gated."
+        "Codex external-Agent Run and feature-submission tools, local/GitHub import/status/retry, "
+        "and index refresh are separately gated."
         if local_import_enabled or github_import_enabled or index_write_enabled or session_write_enabled or run_write_enabled or external_run_enabled
-        else "Call list_projects → check_index_freshness → get_overview (skeleton) → "
-        "list_overview_items/get_module → search_code/get_neighbors/list_unresolved as needed → read_source; "
-        "request detail='full' only when required. Round-trip cursors unchanged. "
-        "If completeness is not complete, do not conclude absence. "
-        "Discover CodeTrail projects and query one explicitly selected immutable index. "
-        "All tools are read-only and never execute repository code."
+        else "All tools are read-only and never execute repository code."
     )
     server = _CodeTrailMCPServer(
         name="codetrail",
@@ -953,7 +950,9 @@ def create_mcp_server(
         name="get_journey",
         title="Read one action journey",
         description=(
-            "Read at most eight responsibility steps and source excerpts for one exact journey_id from one immutable index. "
+            "Read at most eight responsibility steps for one exact journey_id from one immutable index. "
+            "Default detail='summary' omits source excerpts but keeps evidence IDs and source ranges; "
+            "detail='full' returns excerpts. "
             "Static calls, HTTP shape matches, and unconfirmed UI/result relationships remain separately labeled."
         ),
         structured_output=True,
@@ -962,9 +961,10 @@ def create_mcp_server(
         project_id: _ProjectId,
         index_id: _IndexId,
         journey_id: _IndexId,
+        detail: Literal["summary", "full"] = shared.MCP_DEFAULT_DETAIL,
     ) -> McpJourneyResponse:
         try:
-            result = service.get_journey(project_id, index_id, journey_id)
+            result = service.get_journey(project_id, index_id, journey_id, detail=detail)
             return _mcp_journey_response(result, citation_url)
         except ServiceError as exc:
             return _failure(McpJourneyResponse, exc)
@@ -1193,9 +1193,10 @@ def create_mcp_server(
         direction: _ImpactDirection = "callers",
         depth: _Depth = shared.MAX_GRAPH_DEPTH,
         limit: _Limit = shared.MAX_PAGE_SIZE,
+        detail: Literal["summary", "full"] = shared.MCP_DEFAULT_DETAIL,
     ) -> McpRunImpactResponse:
         try:
-            result: RunImpactResponse = service.get_run_impact(
+            result = service.get_run_impact(
                 project_id,
                 session_id,
                 run_id,
@@ -1204,6 +1205,7 @@ def create_mcp_server(
                 direction=direction,
                 depth=depth,
                 limit=limit,
+                detail=detail,
             )
             return McpRunImpactResponse(ok=True, result=result)
         except ServiceError as exc:
@@ -2028,7 +2030,10 @@ def _mcp_overview_response(result: ProjectOverview, base_url: str) -> McpOvervie
     )
 
 
-def _mcp_journey_response(result: ProjectJourney, base_url: str) -> McpJourneyResponse:
+def _mcp_journey_response(
+    result: ProjectJourney,
+    base_url: str,
+) -> McpJourneyResponse:
     references: list[EvidenceReference] = []
     seen: set[str] = set()
     for step in result.steps:
@@ -2039,7 +2044,7 @@ def _mcp_journey_response(result: ProjectJourney, base_url: str) -> McpJourneyRe
             references.append(
                 EvidenceReference(
                     project_id=result.project_id,
-                    index_id=evidence.index_id,
+                    index_id=result.index.index_id,
                     path=evidence.path,
                     start_line=evidence.start_line,
                     end_line=evidence.end_line,
@@ -2048,7 +2053,7 @@ def _mcp_journey_response(result: ProjectJourney, base_url: str) -> McpJourneyRe
                     url=_citation_url(
                         base_url,
                         project_id=result.project_id,
-                        index_id=evidence.index_id,
+                        index_id=result.index.index_id,
                         path=evidence.path,
                         start_line=evidence.start_line,
                         end_line=evidence.end_line,
