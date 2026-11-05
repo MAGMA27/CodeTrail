@@ -108,8 +108,96 @@ from .errors import ERROR_CODES, safe_error_message, validation_error_details
 logger = logging.getLogger(__name__)
 
 
+def _slim_output_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    """Compact one MCP output schema while preserving its validation rules."""
+
+    schema_maps = {"$defs", "properties", "patternProperties", "dependentSchemas"}
+    schema_values = {"additionalProperties", "unevaluatedProperties", "items", "contains", "not", "if", "then", "else"}
+
+    def clean(value: Any, *, schema_node: bool = True) -> Any:
+        if isinstance(value, list):
+            return [clean(item, schema_node=schema_node) for item in value]
+        if not isinstance(value, dict):
+            return value
+        result: dict[str, Any] = {}
+        for key, item in value.items():
+            if schema_node and key in {"title", "description"}:
+                continue
+            if key in {"anyOf", "allOf"} and isinstance(item, list):
+                branches: list[Any] = []
+                seen: set[str] = set()
+                for branch in item:
+                    cleaned = clean(branch, schema_node=True)
+                    fingerprint = json.dumps(cleaned, sort_keys=True, separators=(",", ":"))
+                    if fingerprint not in seen:
+                        branches.append(cleaned)
+                        seen.add(fingerprint)
+                result[key] = branches
+            elif key in schema_maps and isinstance(item, dict):
+                result[key] = {name: clean(child, schema_node=True) for name, child in item.items()}
+            elif key in schema_values:
+                result[key] = clean(item, schema_node=True)
+            else:
+                result[key] = clean(item, schema_node=False)
+        return result
+
+    compact = clean(schema)
+    definitions = compact.get("$defs")
+    if not isinstance(definitions, dict):
+        return compact
+
+    reachable: set[str] = set()
+
+    def visit(value: Any) -> None:
+        if isinstance(value, dict):
+            ref = value.get("$ref")
+            if isinstance(ref, str) and ref.startswith("#/$defs/"):
+                name = ref.removeprefix("#/$defs/")
+                if name not in reachable and name in definitions:
+                    reachable.add(name)
+                    visit(definitions[name])
+            for item in value.values():
+                visit(item)
+        elif isinstance(value, list):
+            for item in value:
+                visit(item)
+
+    root = {key: value for key, value in compact.items() if key != "$defs"}
+    visit(root)
+    compact["$defs"] = {name: value for name, value in definitions.items() if name in reachable}
+    if not compact["$defs"]:
+        compact.pop("$defs")
+    return compact
+
+
 class _CodeTrailMCPServer(MCPServer):
     """Normalize CodeTrail tool failures and text output at the SDK boundary."""
+
+    def add_tool(
+        self,
+        fn: Any,
+        name: str | None = None,
+        title: str | None = None,
+        description: str | None = None,
+        annotations: Any = None,
+        icons: Any = None,
+        meta: Any = None,
+        structured_output: bool | None = None,
+    ) -> None:
+        super().add_tool(
+            fn,
+            name=name,
+            title=title,
+            description=description,
+            annotations=annotations,
+            icons=icons,
+            meta=meta,
+            structured_output=structured_output,
+        )
+        tool = self._tool_manager.get_tool(name or fn.__name__)
+        metadata = tool.fn_metadata if tool is not None else None
+        if metadata is not None and isinstance(metadata.output_schema, dict):
+            metadata.output_schema = _slim_output_schema(metadata.output_schema)
 
     async def call_tool(self, name: str, arguments: dict[str, Any], context: Any = None) -> Any:
         try:
@@ -274,12 +362,20 @@ def create_mcp_server(
     run_write_enabled = service.registry.mcp_run_write_enabled
     external_run_enabled = service.registry.mcp_external_run_enabled
     server_description = (
+        "Call list_projects → check_index_freshness → get_overview (skeleton) → "
+        "list_overview_items/get_module → search_code/get_neighbors/list_unresolved as needed → read_source; "
+        "request detail='full' only when required. Round-trip cursors unchanged. "
+        "If completeness is not complete, do not conclude absence. "
         "Discover CodeTrail projects and query one explicitly selected immutable index. "
         "Default tools are read-only. Explicitly enabled session writes, bounded fixture/real Run start/cancel, "
         "Codex external-Agent Run and feature-submission tools, "
         "local/GitHub import/status/retry, and index refresh are separately gated."
         if local_import_enabled or github_import_enabled or index_write_enabled or session_write_enabled or run_write_enabled or external_run_enabled
-        else "Discover CodeTrail projects and query one explicitly selected immutable index. "
+        else "Call list_projects → check_index_freshness → get_overview (skeleton) → "
+        "list_overview_items/get_module → search_code/get_neighbors/list_unresolved as needed → read_source; "
+        "request detail='full' only when required. Round-trip cursors unchanged. "
+        "If completeness is not complete, do not conclude absence. "
+        "Discover CodeTrail projects and query one explicitly selected immutable index. "
         "All tools are read-only and never execute repository code."
     )
     server = _CodeTrailMCPServer(
