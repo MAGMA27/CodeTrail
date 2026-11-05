@@ -347,7 +347,7 @@ def create_app(
         responses=_API_ERROR_RESPONSES,
     )
     async def list_projects() -> ProjectListResponse:
-        return await run_in_threadpool(workspace_service.list_projects)
+        return await run_in_threadpool(workspace_service.list_projects, limit=None)
 
     @application.get(
         "/api/trash",
@@ -712,7 +712,7 @@ def create_app(
         responses=_API_ERROR_RESPONSES,
     )
     async def list_project_indexes(project_id: Identifier) -> ProjectIndexListResponse:
-        return await run_in_threadpool(workspace_service.list_project_indexes, project_id)
+        return await run_in_threadpool(workspace_service.list_project_indexes, project_id, limit=None)
 
     @application.post(
         "/api/projects/{project_id}/indexes",

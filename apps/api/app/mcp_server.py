@@ -74,7 +74,6 @@ from .contracts import (
     McpExternalToolResponse,
     LocalImportRequest,
     LocalImportResponse,
-    ProjectIndexListResponse,
     OverviewSectionCoverage,
     OverviewSection,
     OverviewClassificationKind,
@@ -273,7 +272,6 @@ def _compact_json(value: object) -> str:
 
 _WORKBENCH_URL_ENV = "CODETRAIL_WORKBENCH_URL"
 _DEFAULT_WORKBENCH_URL = "http://localhost:3000"
-_MAX_DISCOVERY_ITEMS = 100
 _RETRYABLE_CODES = {"budget_exceeded", "download_timeout", "index_timeout", "index_cancelled", "internal_error"}
 _NeighborEdgeKind = Literal["imports", "calls"]
 _ImpactDirection = Literal["callers", "callees"]
@@ -291,7 +289,7 @@ _Line = Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, description="One-based
 _Limit = Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_PAGE_SIZE, description="Maximum number of returned items.")]
 _Depth = Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_GRAPH_DEPTH, description="Static graph traversal depth.")]
 _ImpactId = Annotated[str | None, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_IDENTIFIER_LENGTH, description="Exact candidate or finding ID from the saved Run report.")]
-_DiscoveryLimit = Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=_MAX_DISCOVERY_ITEMS, description="Maximum discovery items.")]
+_DiscoveryLimit = Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_DISCOVERY_ITEMS, description="Maximum discovery items.")]
 _OverviewDepth = Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_OVERVIEW_DEPTH, description="Maximum static overview path depth.")]
 _OverviewPaths = Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_OVERVIEW_PATHS, description="Maximum returned overview paths.")]
 _OverviewModules = Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_OVERVIEW_MODULES, description="Maximum returned overview modules.")]
@@ -388,20 +386,18 @@ def create_mcp_server(
         title="List CodeTrail projects",
         description=(
             "List the configured local CodeTrail projects and their available immutable indexes. "
-            f"This is the only discovery tool that does not require a project_id; output is capped at {_MAX_DISCOVERY_ITEMS}."
+            f"This is the only discovery tool that does not require a project_id; output is capped at {shared.MAX_DISCOVERY_ITEMS}."
         ),
         structured_output=True,
     )
-    def list_projects(limit: _DiscoveryLimit = _MAX_DISCOVERY_ITEMS) -> McpProjectListResponse:
+    def list_projects(limit: _DiscoveryLimit = shared.MAX_DISCOVERY_ITEMS) -> McpProjectListResponse:
         try:
-            result = service.list_projects()
-            projects = result.projects[:limit]
-            truncated = len(result.projects) > len(projects)
+            result = service.list_projects(limit=limit)
             return McpProjectListResponse(
                 ok=True,
-                projects=projects,
-                truncated=truncated,
-                truncation_reason=f"max_projects={limit}" if truncated else None,
+                projects=result.projects,
+                truncated=result.truncated,
+                truncation_reason=result.truncation_reason,
             )
         except ServiceError as exc:
             return _failure(McpProjectListResponse, exc)
@@ -499,17 +495,25 @@ def create_mcp_server(
         title="List project indexes",
         description=(
             "List immutable indexes owned by the explicit project_id. "
-            f"The latest and currently building IDs are returned separately; output is capped at {_MAX_DISCOVERY_ITEMS}."
+            f"The latest and currently building IDs are returned separately; output is capped at {shared.MAX_DISCOVERY_ITEMS}."
         ),
         structured_output=True,
     )
     def list_indexes(
         project_id: _ProjectId,
-        limit: _DiscoveryLimit = _MAX_DISCOVERY_ITEMS,
+        limit: _DiscoveryLimit = shared.MAX_DISCOVERY_ITEMS,
     ) -> McpProjectIndexesResponse:
         try:
-            result = service.list_project_indexes(project_id)
-            return _project_indexes_response(result, limit)
+            result = service.list_project_indexes(project_id, limit=limit)
+            return McpProjectIndexesResponse(
+                ok=True,
+                project_id=result.project_id,
+                indexes=result.indexes,
+                latest_index_id=result.latest_index_id,
+                building_index_id=result.building_index_id,
+                truncated=result.truncated,
+                truncation_reason=result.truncation_reason,
+            )
         except ServiceError as exc:
             return McpProjectIndexesResponse(
                 ok=False,
@@ -1926,25 +1930,6 @@ def _citation_url(
         }
     )
     return f"{base_url}?{query}"
-
-
-def _project_indexes_response(result: ProjectIndexListResponse, limit: int) -> McpProjectIndexesResponse:
-    indexes = list(result.indexes)
-    truncated = len(indexes) > limit
-    visible_indexes = indexes[:limit]
-    if result.latest_index_id and result.latest_index_id not in {index.index_id for index in visible_indexes}:
-        latest = next((index for index in indexes if index.index_id == result.latest_index_id), None)
-        if latest is not None and visible_indexes:
-            visible_indexes[-1] = latest
-    return McpProjectIndexesResponse(
-        ok=True,
-        project_id=result.project_id,
-        indexes=visible_indexes,
-        latest_index_id=result.latest_index_id,
-        building_index_id=result.building_index_id,
-        truncated=truncated,
-        truncation_reason=f"max_indexes={limit}" if truncated else None,
-    )
 
 
 def _mcp_error(exc: ServiceError) -> McpError:

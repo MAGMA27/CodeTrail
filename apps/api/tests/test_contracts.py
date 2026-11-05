@@ -6,6 +6,7 @@ import copy
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import get_args, get_origin
 
 import pytest
 from pydantic import ValidationError
@@ -23,6 +24,11 @@ from app.contracts import (
     GetNeighborsSuccess,
     IndexFreshness,
     McpSourceResponse,
+    McpImportResponse,
+    McpProjectIndexesResponse,
+    GitHubImportResponse,
+    LocalImportResponse,
+    ProjectIndexListResponse,
     McpError,
     ModuleSymbolsPageResponse,
     OverviewCompleteness,
@@ -69,6 +75,35 @@ def test_fixture_response_bundle_is_valid(scenario_id: str) -> None:
         "run.cancelled",
         "run.interrupted",
     }
+
+
+def _without_none(annotation: object) -> object:
+    if get_origin(annotation) is not None:
+        args = get_args(annotation)
+        if type(None) in args:
+            remaining = tuple(arg for arg in args if arg is not type(None))
+            return remaining[0] if len(remaining) == 1 else remaining
+    return annotation
+
+
+def test_http_workspace_fields_remain_present_in_mcp_models() -> None:
+    """Guard copied fields; import nullability differs intentionally in MCP's union envelope."""
+
+    pairs = (
+        (ProjectIndexListResponse, McpProjectIndexesResponse),
+        (LocalImportResponse, McpImportResponse),
+        (GitHubImportResponse, McpImportResponse),
+    )
+    for http_model, mcp_model in pairs:
+        for name, http_field in http_model.model_fields.items():
+            assert name in mcp_model.model_fields, f"{mcp_model.__name__} lost {http_model.__name__}.{name}"
+            mcp_field = mcp_model.model_fields[name]
+            assert _without_none(http_field.annotation) == _without_none(mcp_field.annotation), (
+                f"{mcp_model.__name__}.{name} changed the HTTP field type"
+            )
+            assert http_field.metadata == mcp_field.metadata, (
+                f"{mcp_model.__name__}.{name} changed the HTTP field constraints"
+            )
 
 
 def test_success_bundle_keeps_static_and_candidate_edges_separate() -> None:

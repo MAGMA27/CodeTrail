@@ -59,6 +59,7 @@ DEFAULT_UNRESOLVED_DIRECTION = "outgoing"
 DEFAULT_UNRESOLVED_PAGE_DETAIL = "summary"
 UNRESOLVED_SUMMARY_SAMPLE_LIMIT = 3
 POSSIBLE_CALLER_SUMMARY_SAMPLE_LIMIT = 3
+MAX_DISCOVERY_ITEMS = 100
 SEARCH_MAX_SCAN = 200
 SEARCH_SNIPPET_MAX_LENGTH = 120
 MIN_RUN_SEQUENCE = 0
@@ -396,11 +397,23 @@ class ProjectListResponse(VersionedModel):
     projects: list[Project] = Field(default_factory=list)
 
 
-class ProjectIndexListResponse(VersionedModel):
+class WorkspaceProjectListResult(ProjectListResponse):
+    """Shared workspace result with optional bounded-discovery metadata."""
+
+    truncated: bool = False
+    truncation_reason: str | None = Field(default=None, max_length=MAX_REASON_LENGTH)
+
+
+class ProjectIndexListFields(ContractModel):
+    """Index-list fields shared by HTTP and MCP response envelopes."""
+
     project_id: Identifier
     indexes: list[IndexSnapshot] = Field(default_factory=list)
     latest_index_id: Identifier | None = None
     building_index_id: Identifier | None = None
+
+
+class ProjectIndexListResponse(ProjectIndexListFields, VersionedModel):
 
     @model_validator(mode="after")
     def validate_index_list(self) -> ProjectIndexListResponse:
@@ -410,6 +423,13 @@ class ProjectIndexListResponse(VersionedModel):
         if self.latest_index_id is not None and self.latest_index_id not in index_ids:
             raise ValueError("project latest index must be present in the index list")
         return self
+
+
+class WorkspaceProjectIndexListResult(ProjectIndexListResponse):
+    """Shared index-list result with optional bounded-discovery metadata."""
+
+    truncated: bool = False
+    truncation_reason: str | None = Field(default=None, max_length=MAX_REASON_LENGTH)
 
 
 SessionMessageSource: TypeAlias = Literal["human", "agent"]
@@ -3499,11 +3519,7 @@ class McpProjectResponse(McpResultBase):
     project: Project | None = None
 
 
-class McpProjectIndexesResponse(McpResultBase):
-    project_id: Identifier
-    indexes: list[IndexSnapshot] = Field(default_factory=list)
-    latest_index_id: Identifier | None = None
-    building_index_id: Identifier | None = None
+class McpProjectIndexesResponse(ProjectIndexListFields, McpResultBase):
     truncated: bool = False
     truncation_reason: str | None = Field(default=None, max_length=1_000)
 
@@ -4009,11 +4025,11 @@ class McpExternalCompleteResponse(McpResultBase):
 class McpImportResponse(McpResultBase):
     """Structured MCP result for an enabled local or GitHub import tool."""
 
-    source_path: str | None = Field(default=None, max_length=4_000)
+    source_path: str | None = Field(default=None, min_length=MIN_REQUEST_VALUE, max_length=4_000)
     project: Project | None = None
     attempt: ImportAttempt | None = None
     index: IndexResponse | None = None
-    source_url: str | None = Field(default=None, max_length=4_000)
+    source_url: str | None = Field(default=None, min_length=MIN_REQUEST_VALUE, max_length=4_000)
     requested_ref: str | None = Field(default=None, max_length=200)
     resolved_ref: str | None = Field(default=None, max_length=200)
     resolved_commit: str | None = Field(default=None, max_length=64)

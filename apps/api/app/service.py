@@ -120,8 +120,8 @@ from .contracts import (
     MAX_OVERVIEW_RELATIONS,
     MAX_PAGE_SIZE,
     Project,
-    ProjectIndexListResponse,
-    ProjectListResponse,
+    WorkspaceProjectIndexListResult,
+    WorkspaceProjectListResult,
     TrashListResponse,
     Report,
     RunImpactResponse,
@@ -1859,7 +1859,7 @@ class WorkspaceService:
             )
         return _project_response(record)
 
-    def list_projects(self) -> ProjectListResponse:
+    def list_projects(self, limit: int | None = None) -> WorkspaceProjectListResult:
         self._ensure_legacy_projects()
         self._ensure_managed_projects()
         records: list[ProjectRecord] = []
@@ -1870,7 +1870,14 @@ class WorkspaceService:
             with self.registry.store_for_repository(repository_id) as store:
                 records.extend(store.list_projects())
         records.sort(key=lambda record: (record.created_at, record.project_id))
-        return ProjectListResponse(projects=[_project_response(record) for record in records])
+        projects = [_project_response(record) for record in records]
+        truncated = limit is not None and len(projects) > limit
+        visible_projects = projects if limit is None else projects[:limit]
+        return WorkspaceProjectListResult(
+            projects=visible_projects,
+            truncated=truncated,
+            truncation_reason=f"max_projects={limit}" if truncated else None,
+        )
 
     def list_trash(self) -> TrashListResponse:
         self._ensure_legacy_projects()
@@ -1967,16 +1974,27 @@ class WorkspaceService:
     def get_project(self, project_id: str) -> Project:
         return _project_response(self._find_project(project_id))
 
-    def list_project_indexes(self, project_id: str) -> ProjectIndexListResponse:
+    def list_project_indexes(
+        self, project_id: str, limit: int | None = None
+    ) -> WorkspaceProjectIndexListResult:
         project = self._find_project(project_id)
         with self.registry.store_for_repository(project.repository_id) as store:
             indexes = store.list_project_indexes(project.project_id)
             current = store.load_project(project.project_id)
-        return ProjectIndexListResponse(
+        all_indexes = list(indexes)
+        truncated = limit is not None and len(all_indexes) > limit
+        visible_indexes = all_indexes if limit is None else all_indexes[:limit]
+        if current.latest_index_id and current.latest_index_id not in {index.index_id for index in visible_indexes}:
+            latest = next((index for index in all_indexes if index.index_id == current.latest_index_id), None)
+            if latest is not None and visible_indexes:
+                visible_indexes[-1] = latest
+        return WorkspaceProjectIndexListResult(
             project_id=project.project_id,
-            indexes=list(indexes),
+            indexes=visible_indexes,
             latest_index_id=current.latest_index_id,
             building_index_id=current.building_index_id,
+            truncated=truncated,
+            truncation_reason=f"max_indexes={limit}" if truncated else None,
         )
 
     def create_session(self, project_id: str, request: CreateSessionRequest) -> SessionResponse:
