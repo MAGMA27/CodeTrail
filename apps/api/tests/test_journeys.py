@@ -101,7 +101,7 @@ def _codetrail_source_relation():
         dirty=True,
         snapshot_hash=snapshot_hash,
         status="ready",
-        rules_version="in-memory-source-test+typescript-facts-v5+relations-v13",
+        rules_version="in-memory-source-test+typescript-facts-v5+relations-v14",
     )
     snapshot = SourceSnapshot(index=index, files=tuple(files), issues=())
     relation = extract_relations(extract_definitions(snapshot), max_seconds=8)
@@ -174,7 +174,7 @@ def _preferences_source_relation(
         dirty=True,
         snapshot_hash=snapshot_hash,
         status="ready",
-        rules_version="in-memory-source-test+typescript-facts-v5+relations-v13",
+        rules_version="in-memory-source-test+typescript-facts-v5+relations-v14",
     )
     snapshot = SourceSnapshot(index=index, files=tuple(files), issues=())
     definitions = extract_definitions(snapshot)
@@ -203,6 +203,150 @@ def _preferences_source_relation(
         )
 
     return relation, read_evidence
+
+
+def _typescript_client_relation(*, flood_path: str, max_edges: int | None, reverse_paths: bool = False):
+    sources = {
+        "ui/settings.tsx": '''import { savePreferences } from "../lib/api";
+
+export function Settings() {
+  function save() { void savePreferences(); }
+  return <button onClick={save}>Save</button>;
+}
+''',
+        "lib/api.ts": '''const apiBaseUrl = "";
+
+function requestJson(path: string, validator: (value: unknown) => boolean, init: RequestInit = {}) {
+  const { timeoutMs, ...requestInit } = init;
+  void timeoutMs;
+  void validator;
+  return fetch(`${apiBaseUrl}${path}`, { ...requestInit });
+}
+
+export function savePreferences() {
+  return requestJson("/api/preferences", (value) => Boolean(value), { method: "POST" });
+}
+''',
+        "lib/unrelated.ts": '''const apiBaseUrl = "";
+
+function requestJson(path: string, validator: (value: unknown) => boolean, init: RequestInit = {}) {
+  const { timeoutMs, ...requestInit } = init;
+  void timeoutMs;
+  void validator;
+  return fetch(`${apiBaseUrl}${path}`, { ...requestInit });
+}
+
+export function loadProfile() {
+  return requestJson("/api/profile", (value) => Boolean(value));
+}
+''',
+        "server.py": '''from fastapi import FastAPI
+
+app = FastAPI()
+
+@app.post("/api/preferences")
+def save_preferences():
+    return {"ok": True}
+
+@app.get("/api/profile")
+def get_profile():
+    return {"name": "Ada"}
+''',
+        flood_path: "\n".join(
+            [*(f"def target_{number}(): pass" for number in range(20)),
+             "def flood():", *(f"    target_{number}()" for number in range(20)), ""]
+        ),
+    }
+    files = []
+    for path, text in sources.items():
+        raw = text.encode("utf-8")
+        files.append(SnapshotFile(
+            path=path,
+            size=len(raw),
+            content_hash=hashlib.sha256(raw).hexdigest(),
+            text=text,
+        ))
+    files.sort(key=lambda item: item.path)
+    if reverse_paths:
+        files.reverse()
+    snapshot_hash = hashlib.sha256("".join(sorted(item.content_hash for item in files)).encode()).hexdigest()
+    index = IndexSnapshot(
+        index_id="journey-typescript-client-test",
+        repository_id="journey-typescript-client-test",
+        revision="source-test",
+        dirty=True,
+        snapshot_hash=snapshot_hash,
+        status="ready",
+        rules_version="in-memory-source-test+typescript-facts-v5+relations-v14",
+    )
+    relation = extract_relations(
+        extract_definitions(SourceSnapshot(index=index, files=tuple(files), issues=())),
+        max_seconds=8,
+        **({} if max_edges is None else {"max_edges": max_edges}),
+    )
+    file_by_path = {item.path: item for item in files}
+
+    def read_evidence(index_id: str, path: str, start_line: int, end_line: int) -> Evidence:
+        source = file_by_path[path]
+        identity = f"{index_id}\0{path}\0{start_line}\0{end_line}\0{source.content_hash}"
+        return Evidence(
+            evidence_id=f"evidence-{hashlib.sha256(identity.encode()).hexdigest()[:32]}",
+            index_id=index_id,
+            path=path,
+            start_line=start_line,
+            end_line=end_line,
+            excerpt="\n".join(source.text.splitlines()[start_line - 1 : end_line]),
+            content_hash=source.content_hash,
+            kind="source",
+        )
+
+    return relation, read_evidence
+
+
+@pytest.mark.parametrize("flood_path", ("00_generated_edges.py", "zz_generated_edges.py"))
+def test_typescript_call_path_survives_python_flood_and_is_path_order_independent(flood_path: str) -> None:
+    unlimited, read_evidence = _typescript_client_relation(flood_path=flood_path, max_edges=None)
+    limited, _ = _typescript_client_relation(flood_path=flood_path, max_edges=8)
+    reordered, _ = _typescript_client_relation(flood_path=flood_path, max_edges=8, reverse_paths=True)
+    unlimited_overview = build_project_overview("journey-typescript-client-test", unlimited, read_evidence)
+    limited_overview = build_project_overview("journey-typescript-client-test", limited, read_evidence)
+    reordered_overview = build_project_overview("journey-typescript-client-test", reordered, read_evidence)
+    unlimited_catalog, _ = build_journey_catalog("journey-typescript-client-test", unlimited, unlimited_overview)
+    limited_catalog, _ = build_journey_catalog("journey-typescript-client-test", limited, limited_overview)
+    reordered_catalog, _ = build_journey_catalog("journey-typescript-client-test", reordered, reordered_overview)
+
+    expected_ids = [item.journey_id for item in unlimited_catalog.journeys]
+    assert len(expected_ids) == 1
+    assert [item.journey_id for item in limited_catalog.journeys] == expected_ids
+    assert [item.journey_id for item in reordered_catalog.journeys] == expected_ids
+    assert [edge.edge_id for edge in limited.edges] == [edge.edge_id for edge in reordered.edges]
+    assert limited.truncated is True
+
+
+def test_truncated_typescript_call_path_reports_unreachable_action_count() -> None:
+    relation, read_evidence = _typescript_client_relation(
+        flood_path="00_generated_edges.py", max_edges=1
+    )
+    overview = build_project_overview("journey-typescript-client-test", relation, read_evidence)
+    catalog, _specs = build_journey_catalog("journey-typescript-client-test", relation, overview)
+
+    assert catalog.journeys == []
+    limitations = [item for item in catalog.coverage.limitations if "关系边预算" in item]
+    assert len(limitations) == 1
+    assert "1 个带 handler 且没有 HTTP 旅程的操作" in limitations[0]
+    assert "可能" in limitations[0]
+
+
+def test_truncated_typescript_call_path_does_not_count_actions_with_http_journeys() -> None:
+    relation, read_evidence = _typescript_client_relation(
+        flood_path="00_generated_edges.py", max_edges=8
+    )
+    overview = build_project_overview("journey-typescript-client-test", relation, read_evidence)
+    catalog, _specs = build_journey_catalog("journey-typescript-client-test", relation, overview)
+
+    assert relation.truncated is True
+    assert len(catalog.journeys) == 1
+    assert not any("关系边预算" in item for item in catalog.coverage.limitations)
 
 
 @pytest.mark.parametrize("generated_path", ("00_generated_edges.py", "zz_generated_edges.py"))

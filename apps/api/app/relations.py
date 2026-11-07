@@ -30,7 +30,7 @@ RelationKind = Literal["imports", "calls"]
 BindingKind = Literal["module", "symbol"]
 RelationScopeKind = Literal["module", "class", "function"]
 # The semantic version changes when the graph/unresolved meaning changes.
-RELATION_SEMANTICS_VERSION = "relations-v13"
+RELATION_SEMANTICS_VERSION = "relations-v14"
 # HTTP request facts are retained even when later graph work hits its edge budget.
 HTTP_REQUEST_FACTS_COMPLETE_FROM_RELATION_VERSION = 13
 # This version only governs the persisted, index-independent facts payload.
@@ -38,7 +38,7 @@ RELATION_FACT_EXTRACTION_RULES_VERSION = "python-relation-facts-v6"
 _RELATION_FACTS_FORMAT_VERSION = "relation-facts-v6"
 # This namespace is part of generated immutable index IDs. Bump it when source
 # boundaries or build rules can change an index with the same content hash.
-INDEX_BUILD_IDENTITY_VERSION = "relations-v17"
+INDEX_BUILD_IDENTITY_VERSION = "relations-v18"
 HTTP_REQUEST_FACTS_INCOMPLETE_REASON = "HTTP request facts incomplete"
 
 # Relation budgets. Defaults come from measured full extractions (see
@@ -559,7 +559,7 @@ def extract_relations(
     facts_by_path: dict[str, RelationFileFacts] = {}
     facts_complete = True
 
-    for source_file in snapshot.files:
+    for source_file in sorted(snapshot.files, key=lambda item: item.path):
         if control is not None:
             control.check()
         if budget.truncated:
@@ -599,7 +599,7 @@ def extract_relations(
         facts_by_path[source_file.path] = facts
 
     scope_facts_by_key: dict[tuple[str, str, RelationScopeKind, int], RelationScopeFacts] = {}
-    for path, facts in facts_by_path.items():
+    for path, facts in sorted(facts_by_path.items()):
         if facts.scope is not None:
             _collect_scope_facts(path, facts.scope, scope_facts_by_key)
 
@@ -625,7 +625,7 @@ def extract_relations(
     binding_mutation_after_escape_unverified_site_ids: set[str] = set()
     multisegment_attribute_writes: dict[str, list[Symbol | _FieldOf | None]] = {}
     if facts_complete and not budget.truncated:
-        for source_file in snapshot.files:
+        for source_file in sorted(snapshot.files, key=lambda item: item.path):
             facts = facts_by_path.get(source_file.path)
             module_symbol = maps.modules_by_path.get(source_file.path)
             if facts is None or facts.syntax_error or facts.scope is None or module_symbol is None:
@@ -670,37 +670,14 @@ def extract_relations(
             budget,
         )
 
-    if not budget.truncated:
-        for source_file in snapshot.files:
-            if budget.truncated:
-                break
-            facts = facts_by_path.get(source_file.path)
-            if facts is None or facts.syntax_error or facts.scope is None:
-                continue
-            module_symbol = maps.modules_by_path.get(source_file.path)
-            if module_symbol is None:
-                continue
-            resolver = _RelationFactResolver(
-                path=source_file.path,
-                module_name=facts.module_name,
-                scope_facts=facts.scope,
-                module_symbol=module_symbol,
-                maps=maps,
-                scope_facts_by_key=scope_facts_by_key,
-                budget=budget,
-                edges=edges,
-                unresolved=unresolved,
-                constructor_attribute_bindings=constructor_attribute_bindings,
-                factory_returns=factory_returns,
-                hierarchy=hierarchy,
-            )
-            resolver.visit_scope()
-
     modules_by_path = maps.modules_by_path
     target_files = set(modules_by_path)
     edge_occurrences: dict[tuple[str, str, int, int], int] = {}
     unresolved_occurrences: dict[tuple[str, str, int, int], int] = {}
-    for path, fact in definitions.typescript_imports:
+    for path, fact in sorted(
+        definitions.typescript_imports,
+        key=lambda item: (item[0], item[1].start_line, item[1].end_line, item[1].specifier, item[1].kind),
+    ):
         if budget.truncated:
             break
         source_module = modules_by_path.get(path)
@@ -771,7 +748,10 @@ def extract_relations(
 
     http_client_requests: list[HttpClientRequestFact] = []
     request_occurrences: dict[tuple[str, str, int, int], int] = {}
-    for path, fact in definitions.typescript_http_requests:
+    for path, fact in sorted(
+        definitions.typescript_http_requests,
+        key=lambda item: (item[0], item[1].start_line, item[1].end_line, item[1].client_name),
+    ):
         if time.monotonic() >= budget.deadline:
             budget._stop(f"max_seconds exceeded; {HTTP_REQUEST_FACTS_INCOMPLETE_REASON}")
             break
@@ -825,35 +805,19 @@ def extract_relations(
                 )
             )
 
-    contextual_calls = (
-        _resolve_contextual_calls(
-            snapshot.index.index_id,
-            constructor_sites,
-            activation_call_sites,
-            unsafe_constructor_classes,
-            escaped_instance_site_ids,
-            binding_mutation_after_escape_unverified_site_ids,
-            scope_facts_by_key,
-            maps,
-            constructor_writes,
-            indirect_constructor_writes,
-            multisegment_attribute_writes,
-            edges,
-            budget,
-            factory_returns.site_aliases,
-            constructor_attribute_bindings,
-        )
-        if facts_complete
-        else []
-    )
-
     export_targets: dict[tuple[str, str], list[tuple[str, int]]] = {}
     for path, fact in definitions.typescript_exports:
         export_targets.setdefault((path, fact.exported_name), []).append(
             (fact.target_qualified_name, fact.target_start_line)
         )
     typescript_call_occurrences: dict[tuple[str, str, int, int], int] = {}
-    for path, fact in definitions.typescript_calls:
+    for path, fact in sorted(
+        definitions.typescript_calls,
+        key=lambda item: (
+            item[0], item[1].start_line, item[1].end_line,
+            item[1].caller_qualified_name, item[1].expression,
+        ),
+    ):
         if budget.truncated:
             break
         if time.monotonic() >= budget.deadline:
@@ -932,6 +896,56 @@ def extract_relations(
                 start_line=fact.start_line,
                 end_line=fact.end_line,
             ))
+
+    # Resolve TypeScript facts before Python calls so Python-heavy snapshots cannot
+    # consume the shared edge budget before TSX action-to-client paths are recorded.
+    if not budget.truncated:
+        for source_file in sorted(snapshot.files, key=lambda item: item.path):
+            if budget.truncated:
+                break
+            facts = facts_by_path.get(source_file.path)
+            if facts is None or facts.syntax_error or facts.scope is None:
+                continue
+            module_symbol = maps.modules_by_path.get(source_file.path)
+            if module_symbol is None:
+                continue
+            resolver = _RelationFactResolver(
+                path=source_file.path,
+                module_name=facts.module_name,
+                scope_facts=facts.scope,
+                module_symbol=module_symbol,
+                maps=maps,
+                scope_facts_by_key=scope_facts_by_key,
+                budget=budget,
+                edges=edges,
+                unresolved=unresolved,
+                constructor_attribute_bindings=constructor_attribute_bindings,
+                factory_returns=factory_returns,
+                hierarchy=hierarchy,
+            )
+            resolver.visit_scope()
+
+    contextual_calls = (
+        _resolve_contextual_calls(
+            snapshot.index.index_id,
+            constructor_sites,
+            activation_call_sites,
+            unsafe_constructor_classes,
+            escaped_instance_site_ids,
+            binding_mutation_after_escape_unverified_site_ids,
+            scope_facts_by_key,
+            maps,
+            constructor_writes,
+            indirect_constructor_writes,
+            multisegment_attribute_writes,
+            edges,
+            budget,
+            factory_returns.site_aliases,
+            constructor_attribute_bindings,
+        )
+        if facts_complete
+        else []
+    )
 
     if not facts_complete and not budget.truncated:
         budget._stop("max_seconds exceeded")
