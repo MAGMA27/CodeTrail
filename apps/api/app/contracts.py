@@ -2494,21 +2494,21 @@ class ProjectJourney(VersionedModel):
 
     @model_validator(mode="after")
     def validate_journey(self) -> ProjectJourney:
+        if self.summary is None or self.coverage is None:
+            raise ValueError("journeys require the action summary and coverage")
+        if self.summary.journey_id != self.journey_id or self.summary.index_id != self.index.index_id:
+            raise ValueError("journey summary must match the response identity and snapshot")
         if self.action_label is not None:
-            if self.summary is not None:
-                raise ValueError("journey summary must use action_label without a full summary")
+            if self.action_label != self.summary.action_label:
+                raise ValueError("journey action label must match its summary")
             if any(not isinstance(symbol, SymbolRef) for step in self.steps for symbol in step.symbols):
                 raise ValueError("journey summaries must use SymbolRef values")
-            if any(not isinstance(evidence, JourneyEvidenceRef) for step in self.steps for evidence in step.evidence):
+            if any(not isinstance(item, JourneyEvidenceRef) for step in self.steps for item in step.evidence):
                 raise ValueError("journey summaries must use evidence references without excerpts")
         else:
-            if self.summary is None or self.coverage is None:
-                raise ValueError("full journeys require the legacy summary and coverage")
-            if self.summary.journey_id != self.journey_id or self.summary.index_id != self.index.index_id:
-                raise ValueError("journey summary must match the response identity and snapshot")
             if any(not isinstance(symbol, Symbol) for step in self.steps for symbol in step.symbols):
                 raise ValueError("full journeys must use full Symbol values")
-            if any(not isinstance(evidence, Evidence) for step in self.steps for evidence in step.evidence):
+            if any(not isinstance(item, Evidence) for step in self.steps for item in step.evidence):
                 raise ValueError("full journeys must use full evidence values")
         if len({step.step_id for step in self.steps}) != len(self.steps):
             raise ValueError("journey step IDs must be unique")
@@ -2516,7 +2516,7 @@ class ProjectJourney(VersionedModel):
             for step in self.steps:
                 if any(symbol.index_id != self.index.index_id for symbol in step.symbols):
                     raise ValueError("journey symbols must belong to the same index")
-                if any(evidence.index_id != self.index.index_id for evidence in step.evidence):
+                if any(item.index_id != self.index.index_id for item in step.evidence):
                     raise ValueError("journey evidence must belong to the same snapshot")
         return self
 

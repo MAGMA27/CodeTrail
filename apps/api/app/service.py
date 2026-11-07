@@ -4914,6 +4914,7 @@ class WorkspaceService:
                 index=journey.index,
                 rules_version=journey.rules_version,
                 journey_id=journey.journey_id,
+                summary=journey.summary,
                 action_label=journey.summary.action_label,
                 steps=[
                     JourneyStep(
@@ -4937,6 +4938,8 @@ class WorkspaceService:
                     )
                     for step in journey.steps
                 ],
+                coverage=journey.coverage,
+                markers=journey.markers,
             )
         except ServiceError:
             raise

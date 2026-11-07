@@ -280,8 +280,27 @@ def test_journey_summary_keeps_reopenable_evidence_and_http_default_is_full(tmp_
 
     full = service.get_journey(project.project_id, indexed.index.index_id, journey_id)
     summary = service.get_journey(project.project_id, indexed.index.index_id, journey_id, detail="summary")
+    assert summary.summary == full.summary
     assert summary.action_label == full.summary.action_label
+    assert summary.coverage == full.coverage
+    assert summary.markers == full.markers
+    assert summary.summary is not None
+    assert full.summary is not None
+    assert (
+        summary.summary.event_name,
+        summary.summary.action_path,
+        summary.summary.action_start_line,
+        summary.summary.method,
+        summary.summary.path,
+    ) == (
+        full.summary.event_name,
+        full.summary.action_path,
+        full.summary.action_start_line,
+        full.summary.method,
+        full.summary.path,
+    )
     for full_step, summary_step in zip(full.steps, summary.steps, strict=True):
+        assert summary_step.step_id == full_step.step_id
         assert [symbol.id for symbol in summary_step.symbols] == [symbol.symbol_id for symbol in full_step.symbols]
         assert [item.evidence_id for item in summary_step.evidence] == [
             item.evidence_id for item in full_step.evidence
