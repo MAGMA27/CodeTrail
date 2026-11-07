@@ -17916,6 +17916,48 @@
           "title": "Evidence",
           "type": "object"
         },
+        "JourneyEvidenceRef": {
+          "additionalProperties": false,
+          "description": "Stable source location sufficient to reopen one journey excerpt.",
+          "properties": {
+            "content_hash": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Content Hash",
+              "type": "string"
+            },
+            "end_line": {
+              "exclusiveMinimum": 0,
+              "title": "End Line",
+              "type": "integer"
+            },
+            "evidence_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Evidence Id",
+              "type": "string"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Start Line",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "evidence_id",
+            "content_hash",
+            "path",
+            "start_line",
+            "end_line"
+          ],
+          "title": "JourneyEvidenceRef",
+          "type": "object"
+        },
         "Symbol": {
           "additionalProperties": false,
           "properties": {
@@ -17976,6 +18018,49 @@
           ],
           "title": "Symbol",
           "type": "object"
+        },
+        "SymbolRef": {
+          "additionalProperties": false,
+          "description": "Compact stable reference to a symbol in the response index snapshot.",
+          "properties": {
+            "at": {
+              "maxLength": 524,
+              "minLength": 1,
+              "title": "At",
+              "type": "string"
+            },
+            "id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Id",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "module",
+                "file",
+                "class",
+                "function",
+                "test"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "name": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "kind",
+            "at"
+          ],
+          "title": "SymbolRef",
+          "type": "object"
         }
       },
       "additionalProperties": false,
@@ -17992,7 +18077,14 @@
         },
         "evidence": {
           "items": {
-            "$ref": "#/$defs/Evidence"
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Evidence"
+              },
+              {
+                "$ref": "#/$defs/JourneyEvidenceRef"
+              }
+            ]
           },
           "maxItems": 8,
           "title": "Evidence",
@@ -18035,7 +18127,14 @@
         },
         "symbols": {
           "items": {
-            "$ref": "#/$defs/Symbol"
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Symbol"
+              },
+              {
+                "$ref": "#/$defs/SymbolRef"
+              }
+            ]
           },
           "maxItems": 8,
           "title": "Symbols",
@@ -22125,6 +22224,7 @@
           "anyOf": [
             {
               "maxLength": 4000,
+              "minLength": 1,
               "type": "string"
             },
             {
@@ -22138,6 +22238,7 @@
           "anyOf": [
             {
               "maxLength": 4000,
+              "minLength": 1,
               "type": "string"
             },
             {
@@ -25322,6 +25423,48 @@
           "title": "JourneyCoverage",
           "type": "object"
         },
+        "JourneyEvidenceRef": {
+          "additionalProperties": false,
+          "description": "Stable source location sufficient to reopen one journey excerpt.",
+          "properties": {
+            "content_hash": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Content Hash",
+              "type": "string"
+            },
+            "end_line": {
+              "exclusiveMinimum": 0,
+              "title": "End Line",
+              "type": "integer"
+            },
+            "evidence_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Evidence Id",
+              "type": "string"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Start Line",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "evidence_id",
+            "content_hash",
+            "path",
+            "start_line",
+            "end_line"
+          ],
+          "title": "JourneyEvidenceRef",
+          "type": "object"
+        },
         "JourneyStep": {
           "additionalProperties": false,
           "description": "One user-language responsibility step with explicitly typed evidence.",
@@ -25337,7 +25480,14 @@
             },
             "evidence": {
               "items": {
-                "$ref": "#/$defs/Evidence"
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/Evidence"
+                  },
+                  {
+                    "$ref": "#/$defs/JourneyEvidenceRef"
+                  }
+                ]
               },
               "maxItems": 8,
               "title": "Evidence",
@@ -25380,7 +25530,14 @@
             },
             "symbols": {
               "items": {
-                "$ref": "#/$defs/Symbol"
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/Symbol"
+                  },
+                  {
+                    "$ref": "#/$defs/SymbolRef"
+                  }
+                ]
               },
               "maxItems": 8,
               "title": "Symbols",
@@ -25569,10 +25726,32 @@
         },
         "ProjectJourney": {
           "additionalProperties": false,
-          "description": "A bounded action-to-handler journey derived from one index snapshot.",
+          "description": "Full or summary view of one action journey from an immutable index.",
           "properties": {
+            "action_label": {
+              "anyOf": [
+                {
+                  "maxLength": 300,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Action Label"
+            },
             "coverage": {
-              "$ref": "#/$defs/JourneyCoverage"
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/JourneyCoverage"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             },
             "index": {
               "$ref": "#/$defs/IndexSnapshot"
@@ -25619,7 +25798,15 @@
               "type": "array"
             },
             "summary": {
-              "$ref": "#/$defs/JourneySummary"
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/JourneySummary"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             }
           },
           "required": [
@@ -25627,9 +25814,7 @@
             "index",
             "rules_version",
             "journey_id",
-            "summary",
-            "steps",
-            "coverage"
+            "steps"
           ],
           "title": "ProjectJourney",
           "type": "object"
@@ -25693,6 +25878,49 @@
             "kind"
           ],
           "title": "Symbol",
+          "type": "object"
+        },
+        "SymbolRef": {
+          "additionalProperties": false,
+          "description": "Compact stable reference to a symbol in the response index snapshot.",
+          "properties": {
+            "at": {
+              "maxLength": 524,
+              "minLength": 1,
+              "title": "At",
+              "type": "string"
+            },
+            "id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Id",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "module",
+                "file",
+                "class",
+                "function",
+                "test"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "name": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "kind",
+            "at"
+          ],
+          "title": "SymbolRef",
           "type": "object"
         }
       },
@@ -35209,6 +35437,73 @@
           "title": "ImpactLayer",
           "type": "object"
         },
+        "ImpactLayerSummary": {
+          "additionalProperties": false,
+          "description": "Compact count and samples for one fixed Run impact layer.",
+          "properties": {
+            "count": {
+              "minimum": 0,
+              "title": "Count",
+              "type": "integer"
+            },
+            "expand": {
+              "enum": [
+                "detail=full",
+                "list_unresolved"
+              ],
+              "title": "Expand",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "report_anchor",
+                "static_direct",
+                "static_indirect",
+                "unknown"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "reason_counts": {
+              "anyOf": [
+                {
+                  "additionalProperties": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Reason Counts"
+            },
+            "sample": {
+              "items": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/SymbolRef"
+                  },
+                  {
+                    "$ref": "#/$defs/UnresolvedSummaryItem"
+                  }
+                ]
+              },
+              "maxItems": 3,
+              "title": "Sample",
+              "type": "array"
+            }
+          },
+          "required": [
+            "kind",
+            "count",
+            "expand"
+          ],
+          "title": "ImpactLayerSummary",
+          "type": "object"
+        },
         "ImpactPath": {
           "additionalProperties": false,
           "description": "One explainable static calls path from an impact root.",
@@ -35567,6 +35862,74 @@
           "title": "RunImpactResponse",
           "type": "object"
         },
+        "RunImpactSummaryResponse": {
+          "additionalProperties": false,
+          "description": "Compact summary view of the same bounded static Run impact query.",
+          "properties": {
+            "direction": {
+              "enum": [
+                "callers",
+                "callees"
+              ],
+              "title": "Direction",
+              "type": "string"
+            },
+            "incomplete": {
+              "default": false,
+              "title": "Incomplete",
+              "type": "boolean"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "layers": {
+              "items": {
+                "$ref": "#/$defs/ImpactLayerSummary"
+              },
+              "maxItems": 4,
+              "minItems": 4,
+              "title": "Layers",
+              "type": "array"
+            },
+            "project_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Project Id",
+              "type": "string"
+            },
+            "run_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Run Id",
+              "type": "string"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            },
+            "session_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "project_id",
+            "session_id",
+            "run_id",
+            "index_id",
+            "direction",
+            "layers"
+          ],
+          "title": "RunImpactSummaryResponse",
+          "type": "object"
+        },
         "SourceLocation": {
           "additionalProperties": false,
           "properties": {
@@ -35656,6 +36019,49 @@
           "title": "Symbol",
           "type": "object"
         },
+        "SymbolRef": {
+          "additionalProperties": false,
+          "description": "Compact stable reference to a symbol in the response index snapshot.",
+          "properties": {
+            "at": {
+              "maxLength": 524,
+              "minLength": 1,
+              "title": "At",
+              "type": "string"
+            },
+            "id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Id",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "module",
+                "file",
+                "class",
+                "function",
+                "test"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "name": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "kind",
+            "at"
+          ],
+          "title": "SymbolRef",
+          "type": "object"
+        },
         "UnresolvedReference": {
           "additionalProperties": false,
           "properties": {
@@ -35727,6 +36133,60 @@
           ],
           "title": "UnresolvedReference",
           "type": "object"
+        },
+        "UnresolvedSummaryItem": {
+          "additionalProperties": false,
+          "properties": {
+            "at": {
+              "maxLength": 524,
+              "minLength": 1,
+              "title": "At",
+              "type": "string"
+            },
+            "expression": {
+              "maxLength": 1000,
+              "minLength": 1,
+              "title": "Expression",
+              "type": "string"
+            },
+            "id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Id",
+              "type": "string"
+            },
+            "possible_target_count": {
+              "minimum": 0,
+              "title": "Possible Target Count",
+              "type": "integer"
+            },
+            "reason": {
+              "maxLength": 1000,
+              "minLength": 1,
+              "title": "Reason",
+              "type": "string"
+            },
+            "source": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/SymbolRef"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            }
+          },
+          "required": [
+            "id",
+            "at",
+            "expression",
+            "reason",
+            "possible_target_count"
+          ],
+          "title": "UnresolvedSummaryItem",
+          "type": "object"
         }
       },
       "additionalProperties": false,
@@ -35753,10 +36213,14 @@
               "$ref": "#/$defs/RunImpactResponse"
             },
             {
+              "$ref": "#/$defs/RunImpactSummaryResponse"
+            },
+            {
               "type": "null"
             }
           ],
-          "default": null
+          "default": null,
+          "title": "Result"
         },
         "schema_version": {
           "const": "0.1.0",
@@ -43861,6 +44325,48 @@
           "title": "JourneyCoverage",
           "type": "object"
         },
+        "JourneyEvidenceRef": {
+          "additionalProperties": false,
+          "description": "Stable source location sufficient to reopen one journey excerpt.",
+          "properties": {
+            "content_hash": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Content Hash",
+              "type": "string"
+            },
+            "end_line": {
+              "exclusiveMinimum": 0,
+              "title": "End Line",
+              "type": "integer"
+            },
+            "evidence_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Evidence Id",
+              "type": "string"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Start Line",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "evidence_id",
+            "content_hash",
+            "path",
+            "start_line",
+            "end_line"
+          ],
+          "title": "JourneyEvidenceRef",
+          "type": "object"
+        },
         "JourneyStep": {
           "additionalProperties": false,
           "description": "One user-language responsibility step with explicitly typed evidence.",
@@ -43876,7 +44382,14 @@
             },
             "evidence": {
               "items": {
-                "$ref": "#/$defs/Evidence"
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/Evidence"
+                  },
+                  {
+                    "$ref": "#/$defs/JourneyEvidenceRef"
+                  }
+                ]
               },
               "maxItems": 8,
               "title": "Evidence",
@@ -43919,7 +44432,14 @@
             },
             "symbols": {
               "items": {
-                "$ref": "#/$defs/Symbol"
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/Symbol"
+                  },
+                  {
+                    "$ref": "#/$defs/SymbolRef"
+                  }
+                ]
               },
               "maxItems": 8,
               "title": "Symbols",
@@ -44105,13 +44625,78 @@
           ],
           "title": "Symbol",
           "type": "object"
+        },
+        "SymbolRef": {
+          "additionalProperties": false,
+          "description": "Compact stable reference to a symbol in the response index snapshot.",
+          "properties": {
+            "at": {
+              "maxLength": 524,
+              "minLength": 1,
+              "title": "At",
+              "type": "string"
+            },
+            "id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Id",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "module",
+                "file",
+                "class",
+                "function",
+                "test"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "name": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "kind",
+            "at"
+          ],
+          "title": "SymbolRef",
+          "type": "object"
         }
       },
       "additionalProperties": false,
-      "description": "A bounded action-to-handler journey derived from one index snapshot.",
+      "description": "Full or summary view of one action journey from an immutable index.",
       "properties": {
+        "action_label": {
+          "anyOf": [
+            {
+              "maxLength": 300,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Action Label"
+        },
         "coverage": {
-          "$ref": "#/$defs/JourneyCoverage"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/JourneyCoverage"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "index": {
           "$ref": "#/$defs/IndexSnapshot"
@@ -44158,7 +44743,15 @@
           "type": "array"
         },
         "summary": {
-          "$ref": "#/$defs/JourneySummary"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/JourneySummary"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -44166,9 +44759,7 @@
         "index",
         "rules_version",
         "journey_id",
-        "summary",
-        "steps",
-        "coverage"
+        "steps"
       ],
       "title": "ProjectJourney",
       "type": "object"

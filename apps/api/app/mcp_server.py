@@ -74,7 +74,6 @@ from .contracts import (
     McpExternalToolResponse,
     LocalImportRequest,
     LocalImportResponse,
-    ProjectIndexListResponse,
     OverviewSectionCoverage,
     OverviewSection,
     OverviewClassificationKind,
@@ -108,8 +107,96 @@ from .errors import ERROR_CODES, safe_error_message, validation_error_details
 logger = logging.getLogger(__name__)
 
 
+def _slim_output_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    """Compact one MCP output schema while preserving its validation rules."""
+
+    schema_maps = {"$defs", "properties", "patternProperties", "dependentSchemas"}
+    schema_values = {"additionalProperties", "unevaluatedProperties", "items", "contains", "not", "if", "then", "else"}
+
+    def clean(value: Any, *, schema_node: bool = True) -> Any:
+        if isinstance(value, list):
+            return [clean(item, schema_node=schema_node) for item in value]
+        if not isinstance(value, dict):
+            return value
+        result: dict[str, Any] = {}
+        for key, item in value.items():
+            if schema_node and key in {"title", "description"}:
+                continue
+            if key in {"anyOf", "allOf"} and isinstance(item, list):
+                branches: list[Any] = []
+                seen: set[str] = set()
+                for branch in item:
+                    cleaned = clean(branch, schema_node=True)
+                    fingerprint = json.dumps(cleaned, sort_keys=True, separators=(",", ":"))
+                    if fingerprint not in seen:
+                        branches.append(cleaned)
+                        seen.add(fingerprint)
+                result[key] = branches
+            elif key in schema_maps and isinstance(item, dict):
+                result[key] = {name: clean(child, schema_node=True) for name, child in item.items()}
+            elif key in schema_values:
+                result[key] = clean(item, schema_node=True)
+            else:
+                result[key] = clean(item, schema_node=False)
+        return result
+
+    compact = clean(schema)
+    definitions = compact.get("$defs")
+    if not isinstance(definitions, dict):
+        return compact
+
+    reachable: set[str] = set()
+
+    def visit(value: Any) -> None:
+        if isinstance(value, dict):
+            ref = value.get("$ref")
+            if isinstance(ref, str) and ref.startswith("#/$defs/"):
+                name = ref.removeprefix("#/$defs/")
+                if name not in reachable and name in definitions:
+                    reachable.add(name)
+                    visit(definitions[name])
+            for item in value.values():
+                visit(item)
+        elif isinstance(value, list):
+            for item in value:
+                visit(item)
+
+    root = {key: value for key, value in compact.items() if key != "$defs"}
+    visit(root)
+    compact["$defs"] = {name: value for name, value in definitions.items() if name in reachable}
+    if not compact["$defs"]:
+        compact.pop("$defs")
+    return compact
+
+
 class _CodeTrailMCPServer(MCPServer):
     """Normalize CodeTrail tool failures and text output at the SDK boundary."""
+
+    def add_tool(
+        self,
+        fn: Any,
+        name: str | None = None,
+        title: str | None = None,
+        description: str | None = None,
+        annotations: Any = None,
+        icons: Any = None,
+        meta: Any = None,
+        structured_output: bool | None = None,
+    ) -> None:
+        super().add_tool(
+            fn,
+            name=name,
+            title=title,
+            description=description,
+            annotations=annotations,
+            icons=icons,
+            meta=meta,
+            structured_output=structured_output,
+        )
+        tool = self._tool_manager.get_tool(name or fn.__name__)
+        metadata = tool.fn_metadata if tool is not None else None
+        if metadata is not None and isinstance(metadata.output_schema, dict):
+            metadata.output_schema = _slim_output_schema(metadata.output_schema)
 
     async def call_tool(self, name: str, arguments: dict[str, Any], context: Any = None) -> Any:
         try:
@@ -185,7 +272,6 @@ def _compact_json(value: object) -> str:
 
 _WORKBENCH_URL_ENV = "CODETRAIL_WORKBENCH_URL"
 _DEFAULT_WORKBENCH_URL = "http://localhost:3000"
-_MAX_DISCOVERY_ITEMS = 100
 _RETRYABLE_CODES = {"budget_exceeded", "download_timeout", "index_timeout", "index_cancelled", "internal_error"}
 _NeighborEdgeKind = Literal["imports", "calls"]
 _ImpactDirection = Literal["callers", "callees"]
@@ -203,7 +289,7 @@ _Line = Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, description="One-based
 _Limit = Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_PAGE_SIZE, description="Maximum number of returned items.")]
 _Depth = Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_GRAPH_DEPTH, description="Static graph traversal depth.")]
 _ImpactId = Annotated[str | None, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_IDENTIFIER_LENGTH, description="Exact candidate or finding ID from the saved Run report.")]
-_DiscoveryLimit = Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=_MAX_DISCOVERY_ITEMS, description="Maximum discovery items.")]
+_DiscoveryLimit = Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_DISCOVERY_ITEMS, description="Maximum discovery items.")]
 _OverviewDepth = Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_OVERVIEW_DEPTH, description="Maximum static overview path depth.")]
 _OverviewPaths = Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_OVERVIEW_PATHS, description="Maximum returned overview paths.")]
 _OverviewModules = Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_OVERVIEW_MODULES, description="Maximum returned overview modules.")]
@@ -273,19 +359,25 @@ def create_mcp_server(
     session_write_enabled = service.registry.mcp_session_write_enabled
     run_write_enabled = service.registry.mcp_run_write_enabled
     external_run_enabled = service.registry.mcp_external_run_enabled
-    server_description = (
+    call_flow = (
+        "Call list_projects → check_index_freshness → get_overview (skeleton) → "
+        "list_overview_items/get_module → search_code/get_neighbors/list_unresolved as needed → read_source; "
+        "request detail='full' only when required. Round-trip cursors unchanged. "
+        "If completeness is not complete, do not conclude absence. "
         "Discover CodeTrail projects and query one explicitly selected immutable index. "
+    )
+    server_description = call_flow + (
         "Default tools are read-only. Explicitly enabled session writes, bounded fixture/real Run start/cancel, "
-        "Codex external-Agent Run and feature-submission tools, "
-        "local/GitHub import/status/retry, and index refresh are separately gated."
+        "Codex external-Agent Run and feature-submission tools, local/GitHub import/status/retry, "
+        "and index refresh are separately gated."
         if local_import_enabled or github_import_enabled or index_write_enabled or session_write_enabled or run_write_enabled or external_run_enabled
-        else "Discover CodeTrail projects and query one explicitly selected immutable index. "
-        "All tools are read-only and never execute repository code."
+        else "All tools are read-only and never execute repository code."
     )
     server = _CodeTrailMCPServer(
         name="codetrail",
         title="CodeTrail workspace" if local_import_enabled or github_import_enabled or index_write_enabled or session_write_enabled or run_write_enabled or external_run_enabled else "CodeTrail read-only workspace",
         description=server_description,
+        instructions=call_flow,
         version="0.2.0",
         log_level="WARNING",
     )
@@ -295,20 +387,18 @@ def create_mcp_server(
         title="List CodeTrail projects",
         description=(
             "List the configured local CodeTrail projects and their available immutable indexes. "
-            f"This is the only discovery tool that does not require a project_id; output is capped at {_MAX_DISCOVERY_ITEMS}."
+            f"This is the only discovery tool that does not require a project_id; output is capped at {shared.MAX_DISCOVERY_ITEMS}."
         ),
         structured_output=True,
     )
-    def list_projects(limit: _DiscoveryLimit = _MAX_DISCOVERY_ITEMS) -> McpProjectListResponse:
+    def list_projects(limit: _DiscoveryLimit = shared.MAX_DISCOVERY_ITEMS) -> McpProjectListResponse:
         try:
-            result = service.list_projects()
-            projects = result.projects[:limit]
-            truncated = len(result.projects) > len(projects)
+            result = service.list_projects(limit=limit)
             return McpProjectListResponse(
                 ok=True,
-                projects=projects,
-                truncated=truncated,
-                truncation_reason=f"max_projects={limit}" if truncated else None,
+                projects=result.projects,
+                truncated=result.truncated,
+                truncation_reason=result.truncation_reason,
             )
         except ServiceError as exc:
             return _failure(McpProjectListResponse, exc)
@@ -406,17 +496,25 @@ def create_mcp_server(
         title="List project indexes",
         description=(
             "List immutable indexes owned by the explicit project_id. "
-            f"The latest and currently building IDs are returned separately; output is capped at {_MAX_DISCOVERY_ITEMS}."
+            f"The latest and currently building IDs are returned separately; output is capped at {shared.MAX_DISCOVERY_ITEMS}."
         ),
         structured_output=True,
     )
     def list_indexes(
         project_id: _ProjectId,
-        limit: _DiscoveryLimit = _MAX_DISCOVERY_ITEMS,
+        limit: _DiscoveryLimit = shared.MAX_DISCOVERY_ITEMS,
     ) -> McpProjectIndexesResponse:
         try:
-            result = service.list_project_indexes(project_id)
-            return _project_indexes_response(result, limit)
+            result = service.list_project_indexes(project_id, limit=limit)
+            return McpProjectIndexesResponse(
+                ok=True,
+                project_id=result.project_id,
+                indexes=result.indexes,
+                latest_index_id=result.latest_index_id,
+                building_index_id=result.building_index_id,
+                truncated=result.truncated,
+                truncation_reason=result.truncation_reason,
+            )
         except ServiceError as exc:
             return McpProjectIndexesResponse(
                 ok=False,
@@ -857,7 +955,9 @@ def create_mcp_server(
         name="get_journey",
         title="Read one action journey",
         description=(
-            "Read at most eight responsibility steps and source excerpts for one exact journey_id from one immutable index. "
+            "Read at most eight responsibility steps for one exact journey_id from one immutable index. "
+            "Default detail='summary' omits source excerpts but keeps evidence IDs and source ranges; "
+            "detail='full' returns excerpts. "
             "Static calls, HTTP shape matches, and unconfirmed UI/result relationships remain separately labeled."
         ),
         structured_output=True,
@@ -866,9 +966,10 @@ def create_mcp_server(
         project_id: _ProjectId,
         index_id: _IndexId,
         journey_id: _IndexId,
+        detail: Literal["summary", "full"] = shared.MCP_DEFAULT_DETAIL,
     ) -> McpJourneyResponse:
         try:
-            result = service.get_journey(project_id, index_id, journey_id)
+            result = service.get_journey(project_id, index_id, journey_id, detail=detail)
             return _mcp_journey_response(result, citation_url)
         except ServiceError as exc:
             return _failure(McpJourneyResponse, exc)
@@ -1097,9 +1198,10 @@ def create_mcp_server(
         direction: _ImpactDirection = "callers",
         depth: _Depth = shared.MAX_GRAPH_DEPTH,
         limit: _Limit = shared.MAX_PAGE_SIZE,
+        detail: Literal["summary", "full"] = shared.MCP_DEFAULT_DETAIL,
     ) -> McpRunImpactResponse:
         try:
-            result: RunImpactResponse = service.get_run_impact(
+            result = service.get_run_impact(
                 project_id,
                 session_id,
                 run_id,
@@ -1108,6 +1210,7 @@ def create_mcp_server(
                 direction=direction,
                 depth=depth,
                 limit=limit,
+                detail=detail,
             )
             return McpRunImpactResponse(ok=True, result=result)
         except ServiceError as exc:
@@ -1830,25 +1933,6 @@ def _citation_url(
     return f"{base_url}?{query}"
 
 
-def _project_indexes_response(result: ProjectIndexListResponse, limit: int) -> McpProjectIndexesResponse:
-    indexes = list(result.indexes)
-    truncated = len(indexes) > limit
-    visible_indexes = indexes[:limit]
-    if result.latest_index_id and result.latest_index_id not in {index.index_id for index in visible_indexes}:
-        latest = next((index for index in indexes if index.index_id == result.latest_index_id), None)
-        if latest is not None and visible_indexes:
-            visible_indexes[-1] = latest
-    return McpProjectIndexesResponse(
-        ok=True,
-        project_id=result.project_id,
-        indexes=visible_indexes,
-        latest_index_id=result.latest_index_id,
-        building_index_id=result.building_index_id,
-        truncated=truncated,
-        truncation_reason=f"max_indexes={limit}" if truncated else None,
-    )
-
-
 def _mcp_error(exc: ServiceError) -> McpError:
     code = exc.code if exc.code in ERROR_CODES else "internal_error"
     message = safe_error_message(exc.message) if code == exc.code else "local MCP query failed"
@@ -1932,7 +2016,10 @@ def _mcp_overview_response(result: ProjectOverview, base_url: str) -> McpOvervie
     )
 
 
-def _mcp_journey_response(result: ProjectJourney, base_url: str) -> McpJourneyResponse:
+def _mcp_journey_response(
+    result: ProjectJourney,
+    base_url: str,
+) -> McpJourneyResponse:
     references: list[EvidenceReference] = []
     seen: set[str] = set()
     for step in result.steps:
@@ -1943,7 +2030,7 @@ def _mcp_journey_response(result: ProjectJourney, base_url: str) -> McpJourneyRe
             references.append(
                 EvidenceReference(
                     project_id=result.project_id,
-                    index_id=evidence.index_id,
+                    index_id=result.index.index_id,
                     path=evidence.path,
                     start_line=evidence.start_line,
                     end_line=evidence.end_line,
@@ -1952,7 +2039,7 @@ def _mcp_journey_response(result: ProjectJourney, base_url: str) -> McpJourneyRe
                     url=_citation_url(
                         base_url,
                         project_id=result.project_id,
-                        index_id=evidence.index_id,
+                        index_id=result.index.index_id,
                         path=evidence.path,
                         start_line=evidence.start_line,
                         end_line=evidence.end_line,

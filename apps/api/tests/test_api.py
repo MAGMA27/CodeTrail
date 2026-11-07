@@ -17,6 +17,8 @@ import pytest
 
 from app.contracts import (
     CreateIndexRequest,
+    CreateProjectIndexRequest,
+    CreateProjectRequest,
     GetNeighborsParams,
     GetNeighborsSuccess,
     ReadSourceParams,
@@ -1323,6 +1325,85 @@ def test_tool_adapter_returns_contract_results_and_safe_failures(tmp_path: Path)
     assert {
         item.symbol.qualified_name for item in neighbors.neighbors
     }.isdisjoint({"timeout_demo.handlers.handle", "timeout_demo.other_handlers.handle"})
+
+
+def test_mcp_discovery_truncation_keeps_legacy_wire_shape_and_http_unbounded(tmp_path: Path) -> None:
+    repository = tmp_path / "timeout-demo"
+    shutil.copytree(FIXTURE_ROOT, repository, ignore=shutil.ignore_patterns("__pycache__", ".codetrail"))
+    application = create_app({"timeout-demo": repository}, data_root=tmp_path / "data")
+    service = application.state.workspace_service
+    projects = [
+        service.create_project(CreateProjectRequest(name=f"Discovery {number}", repository_id="timeout-demo"))
+        for number in range(2)
+    ]
+    first_project = projects[0]
+    service.create_project_index(
+        first_project.project_id,
+        CreateProjectIndexRequest(revision="discovery-v1", dirty=False),
+    )
+    source_file = next(repository.rglob("*.py"))
+    source_file.write_text(source_file.read_text(encoding="utf-8") + "\n# second discovery snapshot\n", encoding="utf-8")
+    service.create_project_index(
+        first_project.project_id,
+        CreateProjectIndexRequest(revision="discovery-v2", dirty=False),
+    )
+
+    from app.contracts import McpProjectIndexesResponse, McpProjectListResponse
+    from app.mcp_server import create_mcp_server
+
+    server = create_mcp_server(service)
+    all_projects = service.list_projects()
+    all_indexes = service.list_project_indexes(first_project.project_id)
+    assert len(all_projects.projects) > 1
+    assert len(all_indexes.indexes) > 1
+
+    async def exercise() -> None:
+        projects_result = await server.call_tool("list_projects", {"limit": 1})
+        legacy_projects = McpProjectListResponse(
+            ok=True,
+            projects=all_projects.projects[:1],
+            truncated=True,
+            truncation_reason="max_projects=1",
+        )
+        expected_projects = legacy_projects.model_dump(mode="json", by_alias=True)
+        assert projects_result.structured_content == expected_projects
+        assert list(projects_result.structured_content) == [
+            "schema_version", "ok", "error", "projects", "truncated", "truncation_reason"
+        ]
+        assert projects_result.content[0].text == json.dumps(expected_projects, ensure_ascii=False, separators=(",", ":"))
+
+        indexes = list(all_indexes.indexes)
+        visible_indexes = indexes[:1]
+        if all_indexes.latest_index_id not in {item.index_id for item in visible_indexes}:
+            latest = next(item for item in indexes if item.index_id == all_indexes.latest_index_id)
+            if visible_indexes:
+                visible_indexes[-1] = latest
+        legacy_indexes = McpProjectIndexesResponse(
+            ok=True,
+            project_id=all_indexes.project_id,
+            indexes=visible_indexes,
+            latest_index_id=all_indexes.latest_index_id,
+            building_index_id=all_indexes.building_index_id,
+            truncated=True,
+            truncation_reason="max_indexes=1",
+        )
+        expected_indexes = legacy_indexes.model_dump(mode="json", by_alias=True)
+        indexes_result = await server.call_tool("list_indexes", {"project_id": first_project.project_id, "limit": 1})
+        assert indexes_result.structured_content == expected_indexes
+        assert list(indexes_result.structured_content) == [
+            "schema_version", "ok", "error", "project_id", "indexes", "latest_index_id",
+            "building_index_id", "truncated", "truncation_reason",
+        ]
+        assert indexes_result.content[0].text == json.dumps(expected_indexes, ensure_ascii=False, separators=(",", ":"))
+
+        status, http_projects = await _request(application, "GET", "/api/projects")
+        assert status == 200 and len(http_projects["projects"]) == len(all_projects.projects)
+        status, http_indexes = await _request(
+            application, "GET", f"/api/projects/{first_project.project_id}/indexes"
+        )
+        assert status == 200 and len(http_indexes["indexes"]) == len(all_indexes.indexes)
+
+    asyncio.run(exercise())
 
 
 def test_project_search_summary_full_paging_and_legacy_http_shape(tmp_path: Path) -> None:

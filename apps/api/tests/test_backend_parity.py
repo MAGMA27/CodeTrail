@@ -80,7 +80,7 @@ MCP_ONLY_PARAMETERS: dict[tuple[str, str], str] = {
 # Bounds remain compared below, while this rule ties each adapter default to contracts.py.
 ADAPTER_DEFAULTS = {
     (tool, "detail"): ("HTTP_DEFAULT_DETAIL", "MCP_DEFAULT_DETAIL")
-    for tool in ("search_code", "list_module_symbols", "get_neighbors")
+    for tool in ("search_code", "list_module_symbols", "get_neighbors", "get_journey", "get_run_impact")
 } | {
     ("search_code", "limit"): ("DEFAULT_SEARCH_LIMIT", "MCP_DEFAULT_SEARCH_LIMIT"),
 }

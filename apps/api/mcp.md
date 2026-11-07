@@ -1,5 +1,13 @@
 # 本地 MCP 配置
 
+## 推荐调用顺序
+
+1. `list_projects` 选择项目，再调用 `check_index_freshness` 检查所选索引。
+2. `get_overview` 默认返回骨架；按需展开 `list_overview_items` 或 `get_module`。
+3. 按问题调用 `search_code`、`get_neighbors` 或 `list_unresolved`。
+4. 需要核对源码时调用 `read_source`；仅在确实需要完整对象时传 `detail="full"`。
+5. 对分页游标原样 round-trip。`completeness` 不为 `complete` 时，不要据此断言某项不存在。
+
 ## HTTP 与 MCP 一致性检查
 
 HTTP and MCP adapters call the same `WorkspaceService`; `factory.py` owns their implementation wiring. CI runs `lint-imports` to prevent the adapters from importing storage, indexing, graph, execution, or job implementation modules directly. The parity test enumerates every registered MCP tool with its HTTP route (or an explained MCP-only workflow) and compares shared parameter constraints with OpenAPI. A separate AST check requires request limits/defaults and API error definitions to come from `contracts.py`.
@@ -21,6 +29,8 @@ GitHub 导入、GitHub 重试、远端刷新和项目索引刷新提交持久 jo
 | MCP 工具 | 默认变化 | 迁移方式 |
 |---|---|---|
 | `get_neighbors` | 默认从完整邻接响应改为 summary；邻居带紧凑目标、关系类型和相对根方向，`nodes`/`contextual_calls` 隐去，unresolved 明细变为计数和样例 | 需要旧字段时传 `detail="full"`；需要 unresolved 明细时调用 `list_unresolved(symbol_id=..., direction="outgoing"|"possible_incoming")` |
+| `get_journey` | 默认返回步骤摘要；保留 SymbolRef、证据 ID、路径与行范围，省略源码摘录 | 传 `detail="full"` 读取完整旧形状和摘录；summary 中的证据可用 `read_source(path, start_line, end_line)` 重开 |
+| `get_run_impact` | 默认返回四层计数和每层最多 3 条紧凑样例；unknown 层附原因计数 | 传 `detail="full"` 读取完整旧形状；查看 unresolved 明细时用 `list_unresolved` |
 
 `python -m app.mcp_server` 启动 MCP SDK `2.2.0` 的本地 stdio 服务；stdout 只承载协议帧，日志写 stderr。服务复用 WorkspaceService，不直接访问 SQLite，不创建索引，不执行仓库代码。
 

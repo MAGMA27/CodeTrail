@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 import json
 import shutil
@@ -481,6 +482,27 @@ def test_run_impact_is_report_scoped_bounded_and_empty_without_a_candidate(tmp_p
     assert all(path["symbol_ids"][0] == candidate_symbol_id for path in callers["paths"])
     assert "静态可达不等同于已确认影响" in callers["scope_note"]
     assert_impact_layers(callers)
+    status, explicit_full = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/sessions/{session_id}/runs/{run_id}/impact"
+        f"?candidate_id={candidate_id}&detail=full",
+    )
+    assert status == 200
+    assert explicit_full == callers
+    summary = application.state.workspace_service.get_run_impact(
+        project_id,
+        session_id,
+        run_id,
+        candidate_id=candidate_id,
+        detail="summary",
+    )
+    assert all(hasattr(layer, "count") for layer in summary.layers)
+    for summary_layer, full_layer in zip(summary.layers, callers["layers"], strict=True):
+        assert summary_layer.count == len(full_layer["symbol_ids"]) + len(full_layer["unresolved_ids"])
+        assert len(summary_layer.sample) <= 3
+    assert summary.layers[-1].count == len(callers["layers"][-1]["unresolved_ids"])
+    assert summary.layers[-1].reason_counts == dict(Counter(item["reason"] for item in callers["unresolved"]))
 
     source_root = application.state.workspace_service.registry.root_for("timeout-demo")
     config_path = source_root / "timeout_demo" / "config.py"

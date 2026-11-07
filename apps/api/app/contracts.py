@@ -59,6 +59,7 @@ DEFAULT_UNRESOLVED_DIRECTION = "outgoing"
 DEFAULT_UNRESOLVED_PAGE_DETAIL = "summary"
 UNRESOLVED_SUMMARY_SAMPLE_LIMIT = 3
 POSSIBLE_CALLER_SUMMARY_SAMPLE_LIMIT = 3
+MAX_DISCOVERY_ITEMS = 100
 SEARCH_MAX_SCAN = 200
 SEARCH_SNIPPET_MAX_LENGTH = 120
 MIN_RUN_SEQUENCE = 0
@@ -396,11 +397,23 @@ class ProjectListResponse(VersionedModel):
     projects: list[Project] = Field(default_factory=list)
 
 
-class ProjectIndexListResponse(VersionedModel):
+class WorkspaceProjectListResult(ProjectListResponse):
+    """Shared workspace result with optional bounded-discovery metadata."""
+
+    truncated: bool = False
+    truncation_reason: str | None = Field(default=None, max_length=MAX_REASON_LENGTH)
+
+
+class ProjectIndexListFields(ContractModel):
+    """Index-list fields shared by HTTP and MCP response envelopes."""
+
     project_id: Identifier
     indexes: list[IndexSnapshot] = Field(default_factory=list)
     latest_index_id: Identifier | None = None
     building_index_id: Identifier | None = None
+
+
+class ProjectIndexListResponse(ProjectIndexListFields, VersionedModel):
 
     @model_validator(mode="after")
     def validate_index_list(self) -> ProjectIndexListResponse:
@@ -410,6 +423,13 @@ class ProjectIndexListResponse(VersionedModel):
         if self.latest_index_id is not None and self.latest_index_id not in index_ids:
             raise ValueError("project latest index must be present in the index list")
         return self
+
+
+class WorkspaceProjectIndexListResult(ProjectIndexListResponse):
+    """Shared index-list result with optional bounded-discovery metadata."""
+
+    truncated: bool = False
+    truncation_reason: str | None = Field(default=None, max_length=MAX_REASON_LENGTH)
 
 
 SessionMessageSource: TypeAlias = Literal["human", "agent"]
@@ -1896,6 +1916,53 @@ class RunImpactResponse(VersionedModel):
         return self
 
 
+class ImpactLayerSummary(ContractModel):
+    """Compact count and samples for one fixed Run impact layer."""
+
+    kind: ImpactLayerKind
+    count: NonNegativeInt
+    sample: list[SymbolRef | UnresolvedSummaryItem] = Field(
+        default_factory=list,
+        max_length=UNRESOLVED_SUMMARY_SAMPLE_LIMIT,
+    )
+    reason_counts: dict[str, NonNegativeInt] | None = None
+    expand: Literal["detail=full", "list_unresolved"]
+
+    @model_validator(mode="after")
+    def validate_sample_kind(self) -> ImpactLayerSummary:
+        if self.kind == "unknown":
+            if any(not isinstance(item, UnresolvedSummaryItem) for item in self.sample):
+                raise ValueError("unknown impact samples must be unresolved summaries")
+            if self.expand != "list_unresolved":
+                raise ValueError("unknown impact layers must expand through list_unresolved")
+        else:
+            if any(not isinstance(item, SymbolRef) for item in self.sample):
+                raise ValueError("symbol impact samples must be SymbolRef values")
+            if self.expand != "detail=full":
+                raise ValueError("symbol impact layers must expand through full detail")
+        return self
+
+
+class RunImpactSummaryResponse(VersionedModel):
+    """Compact summary view of the same bounded static Run impact query."""
+
+    project_id: Identifier
+    session_id: Identifier
+    run_id: Identifier
+    index_id: Identifier
+    direction: ImpactDirection
+    layers: list[ImpactLayerSummary] = Field(min_length=4, max_length=4)
+    incomplete: bool = False
+
+    @model_validator(mode="after")
+    def validate_summary(self) -> RunImpactSummaryResponse:
+        if tuple(layer.kind for layer in self.layers) != _IMPACT_LAYER_KINDS:
+            raise ValueError("impact layers must be report_anchor, static_direct, static_indirect, and unknown")
+        if any(layer.kind == "unknown" for layer in self.layers[:-1]):
+            raise ValueError("only the unknown impact layer can contain unresolved samples")
+        return self
+
+
 OverviewEntryKind: TypeAlias = Literal["python_main_module", "python_main_guard", "fastapi_route", "pluggy_hookimpl"]
 OverviewHttpMethod: TypeAlias = Literal[
     "GET",
@@ -2359,34 +2426,72 @@ class JourneyStep(ContractModel):
     relation_kind: Literal["ui_action", "ui_callback", "calls", "http_shape", "result_display", "unresolved"]
     certainty: Literal["static", "shape", "unconfirmed"]
     explanation: str = Field(min_length=1, max_length=1_000)
-    symbols: list[Symbol] = Field(default_factory=list, max_length=8)
-    evidence: list[Evidence] = Field(default_factory=list, max_length=8)
+    symbols: list[Symbol | SymbolRef] = Field(default_factory=list, max_length=8)
+    evidence: list["Evidence | JourneyEvidenceRef"] = Field(default_factory=list, max_length=8)
 
 
 class ProjectJourney(VersionedModel):
-    """A bounded action-to-handler journey derived from one index snapshot."""
+    """Full or summary view of one action journey from an immutable index."""
 
     project_id: Identifier
     index: IndexSnapshot
     rules_version: Identifier
     journey_id: Identifier
-    summary: JourneySummary
+    summary: JourneySummary | None = Field(default=None, exclude_if=lambda value: value is None)
+    action_label: str | None = Field(default=None, min_length=1, max_length=300, exclude_if=lambda value: value is None)
     steps: list[JourneyStep] = Field(min_length=1, max_length=8)
-    coverage: JourneyCoverage
+    coverage: JourneyCoverage | None = Field(default=None, exclude_if=lambda value: value is None)
     markers: list[str] = Field(default_factory=list, max_length=20)
 
     @model_validator(mode="after")
     def validate_journey(self) -> ProjectJourney:
-        if self.summary.journey_id != self.journey_id or self.summary.index_id != self.index.index_id:
-            raise ValueError("journey summary must match the response identity and snapshot")
+        if self.action_label is not None:
+            if self.summary is not None:
+                raise ValueError("journey summary must use action_label without a full summary")
+            if any(not isinstance(symbol, SymbolRef) for step in self.steps for symbol in step.symbols):
+                raise ValueError("journey summaries must use SymbolRef values")
+            if any(not isinstance(evidence, JourneyEvidenceRef) for step in self.steps for evidence in step.evidence):
+                raise ValueError("journey summaries must use evidence references without excerpts")
+        else:
+            if self.summary is None or self.coverage is None:
+                raise ValueError("full journeys require the legacy summary and coverage")
+            if self.summary.journey_id != self.journey_id or self.summary.index_id != self.index.index_id:
+                raise ValueError("journey summary must match the response identity and snapshot")
+            if any(not isinstance(symbol, Symbol) for step in self.steps for symbol in step.symbols):
+                raise ValueError("full journeys must use full Symbol values")
+            if any(not isinstance(evidence, Evidence) for step in self.steps for evidence in step.evidence):
+                raise ValueError("full journeys must use full evidence values")
         if len({step.step_id for step in self.steps}) != len(self.steps):
             raise ValueError("journey step IDs must be unique")
-        for step in self.steps:
-            if any(symbol.index_id != self.index.index_id for symbol in step.symbols):
-                raise ValueError("journey symbols must belong to the same index")
-            if any(evidence.index_id != self.index.index_id for evidence in step.evidence):
-                raise ValueError("journey evidence must belong to the same snapshot")
+        if self.action_label is None:
+            for step in self.steps:
+                if any(symbol.index_id != self.index.index_id for symbol in step.symbols):
+                    raise ValueError("journey symbols must belong to the same index")
+                if any(evidence.index_id != self.index.index_id for evidence in step.evidence):
+                    raise ValueError("journey evidence must belong to the same snapshot")
         return self
+
+
+class JourneyEvidenceRef(ContractModel):
+    """Stable source location sufficient to reopen one journey excerpt."""
+
+    evidence_id: Identifier
+    content_hash: Sha256
+    path: RelativePath
+    start_line: PositiveInt
+    end_line: PositiveInt
+
+    _normalize_path = field_validator("path")(_validate_relative_path)
+
+    @model_validator(mode="after")
+    def validate_range(self) -> JourneyEvidenceRef:
+        if self.end_line < self.start_line or self.end_line - self.start_line + 1 > MAX_RUN_SOURCE_LINES:
+            raise ValueError("journey evidence range is invalid")
+        return self
+
+
+JourneyStep.model_rebuild()
+RunImpactResult: TypeAlias = RunImpactResponse | RunImpactSummaryResponse
 
 
 OverviewSection: TypeAlias = Literal[
@@ -3414,11 +3519,7 @@ class McpProjectResponse(McpResultBase):
     project: Project | None = None
 
 
-class McpProjectIndexesResponse(McpResultBase):
-    project_id: Identifier
-    indexes: list[IndexSnapshot] = Field(default_factory=list)
-    latest_index_id: Identifier | None = None
-    building_index_id: Identifier | None = None
+class McpProjectIndexesResponse(ProjectIndexListFields, McpResultBase):
     truncated: bool = False
     truncation_reason: str | None = Field(default=None, max_length=1_000)
 
@@ -3587,11 +3688,7 @@ class McpJourneyResponse(McpResultBase):
         if self.ok:
             if self.journey is None:
                 raise ValueError("successful journey results require a journey")
-            evidence_ids = {
-                evidence.evidence_id
-                for step in self.journey.steps
-                for evidence in step.evidence
-            }
+            evidence_ids = {evidence.evidence_id for step in self.journey.steps for evidence in step.evidence}
             if any(
                 reference.index_id != self.journey.index.index_id
                 or reference.evidence_id not in evidence_ids
@@ -3824,7 +3921,7 @@ class McpRunReportResponse(McpResultBase):
 class McpRunImpactResponse(McpResultBase):
     """Read-only MCP envelope for a bounded Run candidate impact query."""
 
-    result: RunImpactResponse | None = None
+    result: RunImpactResult | None = None
 
     @model_validator(mode="after")
     def validate_run_impact_result(self) -> McpRunImpactResponse:
@@ -3928,11 +4025,11 @@ class McpExternalCompleteResponse(McpResultBase):
 class McpImportResponse(McpResultBase):
     """Structured MCP result for an enabled local or GitHub import tool."""
 
-    source_path: str | None = Field(default=None, max_length=4_000)
+    source_path: str | None = Field(default=None, min_length=MIN_REQUEST_VALUE, max_length=4_000)
     project: Project | None = None
     attempt: ImportAttempt | None = None
     index: IndexResponse | None = None
-    source_url: str | None = Field(default=None, max_length=4_000)
+    source_url: str | None = Field(default=None, min_length=MIN_REQUEST_VALUE, max_length=4_000)
     requested_ref: str | None = Field(default=None, max_length=200)
     resolved_ref: str | None = Field(default=None, max_length=200)
     resolved_commit: str | None = Field(default=None, max_length=64)
