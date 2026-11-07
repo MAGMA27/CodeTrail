@@ -30,6 +30,7 @@ from app.contracts import (
     ToolRequest,
 )
 from app.main import _allowed_origins, _run_with_disconnect, create_app
+from app.mcp_server import create_mcp_server
 from app.service import IndexService, RepositoryRegistry, ServiceError
 
 
@@ -885,6 +886,72 @@ def test_legacy_project_trash_is_not_recreated_and_direct_index_write_is_blocked
     assert status == 200
     status, visible_index = request(reopened, "GET", f"/api/indexes/{index_id}")
     assert status == 200
+
+
+def test_import_validation_preserves_each_transport_error_details(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CODETRAIL_MCP_LOCAL_IMPORT_ENABLED", "1")
+    monkeypatch.setenv("CODETRAIL_MCP_GITHUB_IMPORT_ENABLED", "1")
+    application = create_app(
+        {},
+        data_root=tmp_path / "data",
+        allowed_import_roots=(tmp_path,),
+        github_import_enabled=True,
+        mcp_github_import_enabled=True,
+    )
+    server = create_mcp_server(application.state.workspace_service)
+    from app import contracts
+
+    async def exercise() -> None:
+        cases = (
+            ("/api/imports/local", "import_local_path", {"name": "", "path": str(tmp_path)}, "name", "name", ""),
+            ("/api/imports/local", "import_local_path", {"name": "Valid", "path": ""}, "path", "arguments", ""),
+            (
+                "/api/imports/local",
+                "import_local_path",
+                {"name": "Valid", "path": "/" + "x" * contracts.MAX_LOCAL_PATH_LENGTH},
+                "path",
+                "arguments",
+                None,
+            ),
+            (
+                "/api/imports/github",
+                "import_github_repository",
+                {"name": "", "url": "https://github.com/owner/repository"},
+                "name",
+                "name",
+                "",
+            ),
+            (
+                "/api/imports/github",
+                "import_github_repository",
+                {"name": "Valid", "url": "https://" + "x" * contracts.MAX_LOCAL_PATH_LENGTH},
+                "url",
+                "url",
+                None,
+            ),
+        )
+        for route, tool_name, payload, expected_field, expected_mcp_field, expected_mcp_got in cases:
+            status, http_error = await _request(application, "POST", route, payload)
+            mcp_result = await server.call_tool(tool_name, payload)
+            assert mcp_result.structured_content is not None
+            assert mcp_result.structured_content["ok"] is False
+            mcp_error = mcp_result.structured_content["error"]
+            assert http_error["code"] == mcp_error["code"] == "invalid_input"
+            assert http_error["message"] == "request parameters are invalid"
+            assert mcp_error["message"] == "1 tool argument is invalid"
+            assert status == 422
+            assert http_error["details"][0]["field"] == expected_field
+            assert mcp_error["details"][0]["field"] == expected_mcp_field
+            expected_problem = "too_long" if expected_mcp_got is None else "too_short"
+            assert http_error["details"][0]["problem"] == expected_problem
+            assert mcp_error["details"][0]["problem"] == expected_problem
+            assert http_error["details"][0].get("got") is None
+            assert mcp_error["details"][0].get("got") == expected_mcp_got
+
+    asyncio.run(exercise())
 
 
 def test_local_import_is_bounded_persistent_idempotent_and_retryable(tmp_path: Path) -> None:

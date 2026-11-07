@@ -287,7 +287,6 @@ _SearchLimit = Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_P
 _SearchCursor = Annotated[str | None, Field(max_length=shared.MAX_OVERVIEW_CURSOR_LENGTH, description="Opaque search cursor from a previous page; round-trip it unchanged.")]
 _Detail = Literal["summary", "full"]
 _Path = Annotated[str, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_PATH_LENGTH, description="Relative path in the indexed snapshot.")]
-_LocalPath = Annotated[str, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_LOCAL_PATH_LENGTH, description="Absolute path visible to the local API service.")]
 _Line = Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, description="One-based source line.")]
 _Limit = Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_PAGE_SIZE, description="Maximum number of returned items.")]
 _Depth = Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_GRAPH_DEPTH, description="Static graph traversal depth.")]
@@ -589,7 +588,7 @@ def create_mcp_server(
             project_id: _ProjectId,
             index_id: _IndexId,
             revision: Annotated[str, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_IDENTIFIER_LENGTH)] = shared.DEFAULT_SOURCE_REVISION,
-            dirty: bool = True,
+            dirty: shared.ImportDirty = shared.DEFAULT_IMPORT_DIRTY,
         ) -> McpJobResponse:
             try:
                 job = service.submit_job("project_index_refresh", project_id, {
@@ -1750,11 +1749,11 @@ def create_mcp_server(
             structured_output=True,
         )
         def import_local_path(
-            name: Annotated[str, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_IDENTIFIER_LENGTH, description="Project display name.")],
-            path: _LocalPath,
-            revision: Annotated[str, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_IDENTIFIER_LENGTH)] = shared.DEFAULT_SOURCE_REVISION,
-            dirty: bool = True,
-            idempotency_key: Annotated[str | None, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_IDENTIFIER_LENGTH)] = None,
+            name: shared.ImportProjectName,
+            path: shared.ImportLocalPath,
+            revision: shared.ImportRevision = shared.DEFAULT_SOURCE_REVISION,
+            dirty: shared.ImportDirty = shared.DEFAULT_IMPORT_DIRTY,
+            idempotency_key: shared.ImportIdempotencyKey = shared.DEFAULT_IMPORT_IDEMPOTENCY_KEY,
         ) -> McpImportResponse:
             try:
                 result = service.import_local(
@@ -1841,10 +1840,10 @@ def create_mcp_server(
             structured_output=True,
         )
         def import_github_repository(
-            name: Annotated[str, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_IDENTIFIER_LENGTH, description="Project display name.")],
-            url: Annotated[str, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_LOCAL_PATH_LENGTH, description="Official GitHub HTTPS repository URL.")],
-            ref: Annotated[str | None, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_IDENTIFIER_LENGTH, description="Optional branch, tag, or commit ref.")] = None,
-            idempotency_key: Annotated[str | None, Field(min_length=shared.MIN_REQUEST_VALUE, max_length=shared.MAX_IDENTIFIER_LENGTH)] = None,
+            name: shared.ImportProjectName,
+            url: shared.GitHubImportUrl,
+            ref: shared.GitHubImportRef = shared.DEFAULT_IMPORT_REF,
+            idempotency_key: shared.ImportIdempotencyKey = shared.DEFAULT_IMPORT_IDEMPOTENCY_KEY,
         ) -> McpJobResponse:
             try:
                 request = GitHubImportRequest(

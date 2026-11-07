@@ -68,6 +68,8 @@ GitHub 导入、GitHub 失败重试与清理重试、GitHub 远端刷新、项�
 
 本地/GitHub 导入继续执行绝对路径、allow-list、符号链接/junction、官方 URL、归档安全、时间和大小边界；HTTP 写入口默认只接受 loopback 客户端，可选 `CODETRAIL_TRUSTED_WRITE_NETWORKS` 允许显式列出的来源 CIDR。未知项目、非所属索引/Session/Run 返回 `not_found`，参数、预算和执行容量边界返回 `invalid_input` 或可重试的 `budget_exceeded`，失败不泄露宿主路径。
 
+本地与 GitHub 导入的项目名、路径/URL、revision/ref 和幂等键字段约束由 `contracts.py` 中的 Annotated 别名同时供 HTTP 请求体和 MCP 平铺参数使用；两侧共享非空及长度边界。路径绝对性、来源 allow-list、GitHub scheme/host 及导入能力开关由共享 WorkspaceService/Registry 校验。HTTP 请求体校验详情不回显提交值；MCP 详情按通用安全值规则处理，任意本地路径和 URL 不作为 `got` 回显。两种适配器保留各自既有的校验错误消息。
+
 代码理解提交还会拒绝重复步骤 ID、未实际返回的步骤 evidence/symbol、分析类型与 Run 不匹配、`complete` 中的 unknown，以及任何 Issue findings/candidate links；步骤顺序是 Agent 解释顺序，不改变静态图或影响查询语义。
 
 Run 拒绝空消息、跨 Project/Session/Index/Generation、不合法 cutoff 和越界预算；索引 freshness 对本地来源读取源码 manifest，对 GitHub 来源只解析跟踪 ref 的远端 commit。两者的文件读取、来源边界、TOCTOU 或扫描预算异常都返回 `unknown`，不能当作一致；GitHub 的显式更新使用独立 `github-refresh`，只接受项目当前 latest，服务端复核/下载失败不替换旧 latest，检查与下载间 ref 移动时以实际导入 commit 为准。real 只有在对应显式能力开关和服务端 `config.json` 有效时才会执行，external 还要求 `CODETRAIL_MCP_EXTERNAL_RUN_ENABLED=1` 和 Codex 来源。输入/工具调用、单次/总源码行、输入/输出字符、模型调用/修复、模型输入/输出、事件、总时间和并发都有服务端上限。概览识别另受 2 秒默认总时间、200 个入口候选、模块/组/模块关系预算约束；组总量来源于固定快照，即使组内模块因 `max_modules` 不可见也会在下钻时说明。仅支持模块/函数体直接语句中直接确认的 FastAPI 实例、字面量路径和静态方法，不展开控制流块或类体，也不解析 `APIRouter`、`include_router`、`mount`、动态路径或运行时注册。活动 Run、幂等语义不一致和快照冲突返回 conflict，未知归属返回 not_found，模型不可用、模型失败、非法结构化输出、预算或容量失败返回明确错误；real 失败不回退 fixture，external 不能提交未由本 Run 实际返回的证据或符号。容量错误可重试，且不写入 queued Run。报告只引用已持久化的同快照工具 evidence；取消/中断报告不生成候选结论。读接口带 project/session/run 作用域和有界游标，默认 MCP 读工具不会启动执行，external 终态拒绝后续写入。
