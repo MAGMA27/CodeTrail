@@ -122,6 +122,9 @@ def _slim_output_schema(schema: dict[str, Any]) -> dict[str, Any]:
         for key, item in value.items():
             if schema_node and key in {"title", "description"}:
                 continue
+            # Defaults are annotations; stripping them does not change output validation.
+            if schema_node and key == "default":
+                continue
             if key in {"anyOf", "allOf"} and isinstance(item, list):
                 branches: list[Any] = []
                 seen: set[str] = set()
@@ -391,12 +394,13 @@ def create_mcp_server(
         ),
         structured_output=True,
     )
-    def list_projects(limit: _DiscoveryLimit = shared.MAX_DISCOVERY_ITEMS) -> McpProjectListResponse:
+    def list_projects(limit: _DiscoveryLimit = shared.MCP_DEFAULT_DISCOVERY_LIMIT) -> McpProjectListResponse:
         try:
             result = service.list_projects(limit=limit)
             return McpProjectListResponse(
                 ok=True,
                 projects=result.projects,
+                total=result.total,
                 truncated=result.truncated,
                 truncation_reason=result.truncation_reason,
             )
@@ -502,7 +506,7 @@ def create_mcp_server(
     )
     def list_indexes(
         project_id: _ProjectId,
-        limit: _DiscoveryLimit = shared.MAX_DISCOVERY_ITEMS,
+        limit: _DiscoveryLimit = shared.MCP_DEFAULT_DISCOVERY_LIMIT,
     ) -> McpProjectIndexesResponse:
         try:
             result = service.list_project_indexes(project_id, limit=limit)
@@ -510,6 +514,7 @@ def create_mcp_server(
                 ok=True,
                 project_id=result.project_id,
                 indexes=result.indexes,
+                total=result.total,
                 latest_index_id=result.latest_index_id,
                 building_index_id=result.building_index_id,
                 truncated=result.truncated,

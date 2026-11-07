@@ -71,8 +71,6 @@ SCHEMA_DIFFERENCES: dict[tuple[str, str, str], str] = {
 }
 
 MCP_ONLY_PARAMETERS: dict[tuple[str, str], str] = {
-    ("list_projects", "limit"): "MCP applies bounded discovery truncation; HTTP returns the full project list.",
-    ("list_indexes", "limit"): "MCP applies bounded discovery truncation; HTTP returns the full index list.",
     ("get_overview", "detail"): "MCP selects the summary skeleton or full HTTP overview representation.",
 }
 
@@ -83,6 +81,9 @@ ADAPTER_DEFAULTS = {
     for tool in ("search_code", "list_module_symbols", "get_neighbors", "get_journey", "get_run_impact")
 } | {
     ("search_code", "limit"): ("DEFAULT_SEARCH_LIMIT", "MCP_DEFAULT_SEARCH_LIMIT"),
+} | {
+    (tool, "limit"): ("HTTP_DEFAULT_DISCOVERY_LIMIT", "MCP_DEFAULT_DISCOVERY_LIMIT")
+    for tool in ("list_projects", "list_indexes")
 }
 
 COMPARABLE_SCHEMA_KEYS = (

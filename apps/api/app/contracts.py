@@ -52,6 +52,7 @@ DEFAULT_SEARCH_LIMIT = MAX_PAGE_SIZE
 MCP_DEFAULT_SEARCH_LIMIT = 10
 HTTP_DEFAULT_DETAIL = "full"
 MCP_DEFAULT_DETAIL = "summary"
+HTTP_DEFAULT_DISCOVERY_LIMIT = None
 DEFAULT_OVERVIEW_PAGE_DETAIL = "summary"
 DEFAULT_UNRESOLVED_PAGE_LIMIT = 20
 MAX_UNRESOLVED_PAGE_LIMIT = MAX_PAGE_SIZE
@@ -60,6 +61,7 @@ DEFAULT_UNRESOLVED_PAGE_DETAIL = "summary"
 UNRESOLVED_SUMMARY_SAMPLE_LIMIT = 3
 POSSIBLE_CALLER_SUMMARY_SAMPLE_LIMIT = 3
 MAX_DISCOVERY_ITEMS = 100
+MCP_DEFAULT_DISCOVERY_LIMIT = MAX_DISCOVERY_ITEMS
 SEARCH_MAX_SCAN = 200
 SEARCH_SNIPPET_MAX_LENGTH = 120
 MIN_RUN_SEQUENCE = 0
@@ -393,15 +395,21 @@ class Project(VersionedModel):
         return self
 
 
-class ProjectListResponse(VersionedModel):
+class ProjectListFields(ContractModel):
+    """Project-list fields shared by HTTP and MCP response envelopes."""
+
     projects: list[Project] = Field(default_factory=list)
+    total: NonNegativeInt = 0
+    truncated: bool = False
+    truncation_reason: str | None = Field(default=None, max_length=MAX_REASON_LENGTH)
+
+
+class ProjectListResponse(ProjectListFields, VersionedModel):
+    pass
 
 
 class WorkspaceProjectListResult(ProjectListResponse):
     """Shared workspace result with optional bounded-discovery metadata."""
-
-    truncated: bool = False
-    truncation_reason: str | None = Field(default=None, max_length=MAX_REASON_LENGTH)
 
 
 class ProjectIndexListFields(ContractModel):
@@ -409,8 +417,11 @@ class ProjectIndexListFields(ContractModel):
 
     project_id: Identifier
     indexes: list[IndexSnapshot] = Field(default_factory=list)
+    total: NonNegativeInt = 0
     latest_index_id: Identifier | None = None
     building_index_id: Identifier | None = None
+    truncated: bool = False
+    truncation_reason: str | None = Field(default=None, max_length=MAX_REASON_LENGTH)
 
 
 class ProjectIndexListResponse(ProjectIndexListFields, VersionedModel):
@@ -427,9 +438,6 @@ class ProjectIndexListResponse(ProjectIndexListFields, VersionedModel):
 
 class WorkspaceProjectIndexListResult(ProjectIndexListResponse):
     """Shared index-list result with optional bounded-discovery metadata."""
-
-    truncated: bool = False
-    truncation_reason: str | None = Field(default=None, max_length=MAX_REASON_LENGTH)
 
 
 SessionMessageSource: TypeAlias = Literal["human", "agent"]
@@ -3501,10 +3509,7 @@ class McpResultBase(VersionedModel):
         return self
 
 
-class McpProjectListResponse(McpResultBase):
-    projects: list[Project] = Field(default_factory=list)
-    truncated: bool = False
-    truncation_reason: str | None = Field(default=None, max_length=1_000)
+class McpProjectListResponse(ProjectListFields, McpResultBase):
 
     @model_validator(mode="after")
     def validate_truncation(self) -> McpProjectListResponse:
@@ -3520,8 +3525,6 @@ class McpProjectResponse(McpResultBase):
 
 
 class McpProjectIndexesResponse(ProjectIndexListFields, McpResultBase):
-    truncated: bool = False
-    truncation_reason: str | None = Field(default=None, max_length=1_000)
 
     @model_validator(mode="after")
     def validate_truncation(self) -> McpProjectIndexesResponse:

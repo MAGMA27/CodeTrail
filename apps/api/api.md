@@ -14,6 +14,8 @@
 
 ### Project 与 Session 回收站
 
+`GET /api/projects` 与 `GET /api/projects/{project_id}/indexes` 接受可选 `limit`，范围为 1–100；两侧返回的 `total` 是完整列表数量，并以 `truncated`/`truncation_reason` 表明是否限额。HTTP 省略时继续返回完整列表；MCP 省略时使用 100。索引列表即使截断也会保留 latest index，且返回项数量不超过 limit。
+
 `GET /api/trash` 返回可恢复项目和独立移除的 Session；`DELETE /api/projects/{project_id}` 与 `DELETE /api/projects/{project_id}/sessions/{session_id}` 将对象软移除，`POST /api/projects/{project_id}/restore` 与 `POST /api/projects/{project_id}/sessions/{session_id}/restore` 显式恢复。移除不会物理删除来源、索引、消息、Run、报告或 evidence。普通列表与作用域读取隐藏移除对象；按 `index_id` 的兼容 HTTP 查询也会校验其仍有活动 Project 归属。恢复 Project 不会恢复独立移除的 Session。活动 Run、索引更新、导入或功能生成期间返回可重试的 409；这些入口仍由 WorkspaceService 和现有 Pydantic 契约拥有，不向 MCP 开放新的写工具。
 
 `GET /api/model-config` 只返回 provider、base URL、model 和 `has_api_key`；`POST /api/model-config` 要求 loopback 客户端，或来自 `CODETRAIL_TRUSTED_WRITE_NETWORKS` 明确列出的 CIDR；该变量默认空。Compose 将 API 和 Web 端口绑定到宿主机 loopback，只信任声明的 Docker 私有子网，并设置浏览器使用的 localhost origins。有 `Origin` 时还必须精确匹配配置的 Web Origin；没有 `Origin` 的本地 CLI 请求允许写入。provider/model 会去除首尾空白并拒绝空值；base URL 必须是有效的绝对 HTTP(S) URL，不能包含 userinfo 凭据。留空 API Key 保留当前值，`remove_api_key=true` 才清除。每个 Registry 在同一锁内读取当前值、合并新设置并原子持久化，避免并发空 key 更新覆盖刚保存的 key；文件通过同目录临时文件和原子替换写入，失败保留旧文件。请求和持久文件包含密钥，响应与日志不包含密钥。API 与 MCP 每个新 real 功能生成/Run 都从共享文件读取配置；Run 在创建时冻结模型配置供 worker 使用。保存只做契约校验和持久化，不试连供应商或发送源码。

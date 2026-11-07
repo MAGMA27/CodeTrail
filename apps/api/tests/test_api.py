@@ -16,6 +16,8 @@ from urllib.parse import urlsplit
 import pytest
 
 from app.contracts import (
+    MAX_DISCOVERY_ITEMS,
+    MIN_REQUEST_VALUE,
     CreateIndexRequest,
     CreateProjectIndexRequest,
     CreateProjectRequest,
@@ -1327,7 +1329,7 @@ def test_tool_adapter_returns_contract_results_and_safe_failures(tmp_path: Path)
     }.isdisjoint({"timeout_demo.handlers.handle", "timeout_demo.other_handlers.handle"})
 
 
-def test_mcp_discovery_truncation_keeps_legacy_wire_shape_and_http_unbounded(tmp_path: Path) -> None:
+def test_project_discovery_truncation_is_shared_by_http_and_mcp(tmp_path: Path) -> None:
     repository = tmp_path / "timeout-demo"
     shutil.copytree(FIXTURE_ROOT, repository, ignore=shutil.ignore_patterns("__pycache__", ".codetrail"))
     application = create_app({"timeout-demo": repository}, data_root=tmp_path / "data")
@@ -1347,6 +1349,11 @@ def test_mcp_discovery_truncation_keeps_legacy_wire_shape_and_http_unbounded(tmp
         first_project.project_id,
         CreateProjectIndexRequest(revision="discovery-v2", dirty=False),
     )
+    source_file.write_text(source_file.read_text(encoding="utf-8") + "\n# third discovery snapshot\n", encoding="utf-8")
+    service.create_project_index(
+        first_project.project_id,
+        CreateProjectIndexRequest(revision="discovery-v3", dirty=False),
+    )
 
     from app.contracts import McpProjectIndexesResponse, McpProjectListResponse
     from app.mcp_server import create_mcp_server
@@ -1362,13 +1369,14 @@ def test_mcp_discovery_truncation_keeps_legacy_wire_shape_and_http_unbounded(tmp
         legacy_projects = McpProjectListResponse(
             ok=True,
             projects=all_projects.projects[:1],
+            total=all_projects.total,
             truncated=True,
             truncation_reason="max_projects=1",
         )
         expected_projects = legacy_projects.model_dump(mode="json", by_alias=True)
         assert projects_result.structured_content == expected_projects
         assert list(projects_result.structured_content) == [
-            "schema_version", "ok", "error", "projects", "truncated", "truncation_reason"
+            "schema_version", "ok", "error", "projects", "total", "truncated", "truncation_reason"
         ]
         assert projects_result.content[0].text == json.dumps(expected_projects, ensure_ascii=False, separators=(",", ":"))
 
@@ -1382,6 +1390,7 @@ def test_mcp_discovery_truncation_keeps_legacy_wire_shape_and_http_unbounded(tmp
             ok=True,
             project_id=all_indexes.project_id,
             indexes=visible_indexes,
+            total=all_indexes.total,
             latest_index_id=all_indexes.latest_index_id,
             building_index_id=all_indexes.building_index_id,
             truncated=True,
@@ -1391,17 +1400,85 @@ def test_mcp_discovery_truncation_keeps_legacy_wire_shape_and_http_unbounded(tmp
         indexes_result = await server.call_tool("list_indexes", {"project_id": first_project.project_id, "limit": 1})
         assert indexes_result.structured_content == expected_indexes
         assert list(indexes_result.structured_content) == [
-            "schema_version", "ok", "error", "project_id", "indexes", "latest_index_id",
+            "schema_version", "ok", "error", "project_id", "indexes", "total", "latest_index_id",
             "building_index_id", "truncated", "truncation_reason",
         ]
         assert indexes_result.content[0].text == json.dumps(expected_indexes, ensure_ascii=False, separators=(",", ":"))
 
+        status, http_projects = await _request(application, "GET", "/api/projects?limit=1")
+        assert status == 200
+        assert http_projects["projects"] == expected_projects["projects"]
+        assert http_projects["total"] == all_projects.total
+        assert http_projects["truncated"] is True
+        assert http_projects["truncation_reason"] == "max_projects=1"
+
+        status, http_indexes = await _request(
+            application, "GET", f"/api/projects/{first_project.project_id}/indexes?limit=1"
+        )
+        assert status == 200
+        assert http_indexes["indexes"] == expected_indexes["indexes"]
+        assert http_indexes["total"] == all_indexes.total
+        assert http_indexes["truncated"] is True
+        assert http_indexes["truncation_reason"] == "max_indexes=1"
+        assert len(http_indexes["indexes"]) == 1
+        assert http_indexes["indexes"][-1]["index_id"] == all_indexes.latest_index_id
+
         status, http_projects = await _request(application, "GET", "/api/projects")
         assert status == 200 and len(http_projects["projects"]) == len(all_projects.projects)
+        assert http_projects["total"] == all_projects.total
+        assert http_projects["truncated"] is False
         status, http_indexes = await _request(
             application, "GET", f"/api/projects/{first_project.project_id}/indexes"
         )
         assert status == 200 and len(http_indexes["indexes"]) == len(all_indexes.indexes)
+        assert http_indexes["total"] == all_indexes.total
+        assert http_indexes["truncated"] is False
+
+        for limit, problem in ((MIN_REQUEST_VALUE - 1, "too_small"), (MAX_DISCOVERY_ITEMS + 1, "too_large")):
+            for path in ("/api/projects", f"/api/projects/{first_project.project_id}/indexes"):
+                status, invalid = await _request(application, "GET", f"{path}?limit={limit}")
+                assert status == 422
+                assert invalid["code"] == "invalid_input"
+                assert invalid["details"][0]["field"] == "limit"
+                assert invalid["details"][0]["problem"] == problem
+
+            projects_invalid = await server.call_tool("list_projects", {"limit": limit})
+            indexes_invalid = await server.call_tool(
+                "list_indexes", {"project_id": first_project.project_id, "limit": limit}
+            )
+            for invalid in (projects_invalid.structured_content, indexes_invalid.structured_content):
+                assert invalid["ok"] is False
+                assert invalid["error"]["code"] == "invalid_input"
+                assert invalid["error"]["details"][0]["field"] == "limit"
+                assert invalid["error"]["details"][0]["problem"] == problem
+
+        historical_latest_id = all_indexes.indexes[-1].index_id
+        with application.state.registry.store_for_repository("timeout-demo") as store:
+            store._connection.execute(
+                "UPDATE projects SET latest_index_id = ? WHERE project_id = ?",
+                (historical_latest_id, first_project.project_id),
+            )
+        complete_after_pointer_change = service.list_project_indexes(first_project.project_id)
+        expected_ids = [complete_after_pointer_change.indexes[0].index_id, historical_latest_id]
+        status, bounded_indexes = await _request(
+            application,
+            "GET",
+            f"/api/projects/{first_project.project_id}/indexes?limit=2",
+        )
+        assert status == 200
+        assert [item["index_id"] for item in bounded_indexes["indexes"]] == expected_ids
+        assert len(bounded_indexes["indexes"]) <= 2
+        assert len({item["index_id"] for item in bounded_indexes["indexes"]}) == len(bounded_indexes["indexes"])
+        assert bounded_indexes["latest_index_id"] == historical_latest_id
+        assert bounded_indexes["total"] == complete_after_pointer_change.total
+        assert bounded_indexes["truncated"] is True
+
+        bounded_mcp_indexes = await server.call_tool(
+            "list_indexes", {"project_id": first_project.project_id, "limit": 2}
+        )
+        assert bounded_mcp_indexes.structured_content["indexes"] == bounded_indexes["indexes"]
+        assert bounded_mcp_indexes.structured_content["total"] == bounded_indexes["total"]
+        assert bounded_mcp_indexes.structured_content["truncated"] is True
 
     asyncio.run(exercise())
 

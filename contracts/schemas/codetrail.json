@@ -31826,6 +31826,12 @@
           "title": "Schema Version",
           "type": "string"
         },
+        "total": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Total",
+          "type": "integer"
+        },
         "truncated": {
           "default": false,
           "title": "Truncated",
@@ -32111,6 +32117,12 @@
           "default": "0.1.0",
           "title": "Schema Version",
           "type": "string"
+        },
+        "total": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Total",
+          "type": "integer"
         },
         "truncated": {
           "default": false,
