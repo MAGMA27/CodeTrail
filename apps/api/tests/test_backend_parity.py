@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import ast
+from pathlib import Path
+
+from pydantic import TypeAdapter
 
 from app.main import create_app
 from app.mcp_server import create_mcp_server
@@ -71,8 +75,6 @@ SCHEMA_DIFFERENCES: dict[tuple[str, str, str], str] = {
 }
 
 MCP_ONLY_PARAMETERS: dict[tuple[str, str], str] = {
-    ("list_projects", "limit"): "MCP applies bounded discovery truncation; HTTP returns the full project list.",
-    ("list_indexes", "limit"): "MCP applies bounded discovery truncation; HTTP returns the full index list.",
     ("get_overview", "detail"): "MCP selects the summary skeleton or full HTTP overview representation.",
 }
 
@@ -83,6 +85,9 @@ ADAPTER_DEFAULTS = {
     for tool in ("search_code", "list_module_symbols", "get_neighbors", "get_journey", "get_run_impact")
 } | {
     ("search_code", "limit"): ("DEFAULT_SEARCH_LIMIT", "MCP_DEFAULT_SEARCH_LIMIT"),
+} | {
+    (tool, "limit"): ("HTTP_DEFAULT_DISCOVERY_LIMIT", "MCP_DEFAULT_DISCOVERY_LIMIT")
+    for tool in ("list_projects", "list_indexes")
 }
 
 COMPARABLE_SCHEMA_KEYS = (
@@ -245,3 +250,126 @@ def test_registered_mcp_tools_have_an_explicit_http_parity_entry(tmp_path, monke
     assert used_mcp_only_parameters == set(MCP_ONLY_PARAMETERS), (
         f"Stale MCP-only parameter allowlist entries: {sorted(set(MCP_ONLY_PARAMETERS) - used_mcp_only_parameters)}"
     )
+
+
+def test_import_request_fields_come_from_the_same_contract_aliases(tmp_path, monkeypatch) -> None:
+    from app import contracts
+
+    for flag in (
+        "CODETRAIL_MCP_LOCAL_IMPORT_ENABLED",
+        "CODETRAIL_MCP_GITHUB_IMPORT_ENABLED",
+    ):
+        monkeypatch.setenv(flag, "1")
+    monkeypatch.setenv("CODETRAIL_GITHUB_IMPORT_ENABLED", "1")
+
+    application = create_app({}, data_root=tmp_path / "data")
+    tools = asyncio.run(
+        _registered_tool_schemas(
+            create_mcp_server(application.state.workspace_service)
+        )
+    )
+    openapi = application.openapi()
+    http_fields = {
+        "import_local_path": _http_parameters(openapi, openapi["paths"]["/api/imports/local"]["post"]),
+        "import_github_repository": _http_parameters(openapi, openapi["paths"]["/api/imports/github"]["post"]),
+    }
+    aliases = {
+        "import_local_path": {
+            "name": contracts.ImportProjectName,
+            "path": contracts.ImportLocalPath,
+            "revision": contracts.ImportRevision,
+            "dirty": contracts.ImportDirty,
+            "idempotency_key": contracts.ImportIdempotencyKey,
+        },
+        "import_github_repository": {
+            "name": contracts.ImportProjectName,
+            "url": contracts.GitHubImportUrl,
+            "ref": contracts.GitHubImportRef,
+            "idempotency_key": contracts.ImportIdempotencyKey,
+        },
+    }
+
+    app_root = Path(__file__).resolve().parents[1] / "app"
+    contract_tree = ast.parse((app_root / "contracts.py").read_text(encoding="utf-8"))
+    model_nodes = {
+        node.name: node
+        for node in contract_tree.body
+        if isinstance(node, ast.ClassDef) and node.name in {"LocalImportRequest", "GitHubImportRequest"}
+    }
+    expected_model_annotations = {
+        "LocalImportRequest": {
+            "name": "ImportProjectName", "path": "ImportLocalPath", "revision": "ImportRevision",
+            "dirty": "ImportDirty",
+            "idempotency_key": "ImportIdempotencyKey",
+        },
+        "GitHubImportRequest": {
+            "name": "ImportProjectName", "url": "GitHubImportUrl", "ref": "GitHubImportRef",
+            "idempotency_key": "ImportIdempotencyKey",
+        },
+    }
+    for model_name, fields in expected_model_annotations.items():
+        model_fields = {
+            node.target.id: ast.unparse(node.annotation)
+            for node in model_nodes[model_name].body
+            if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
+        }
+        for field_name, alias_name in fields.items():
+            assert model_fields[field_name] == alias_name
+
+    mcp_tree = ast.parse((app_root / "mcp_server.py").read_text(encoding="utf-8"))
+    tool_nodes = {
+        node.name: node
+        for node in ast.walk(mcp_tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name in {"import_local_path", "import_github_repository"}
+    }
+    expected_mcp_annotations = {
+        "import_local_path": {
+            "name": "shared.ImportProjectName", "path": "shared.ImportLocalPath",
+            "revision": "shared.ImportRevision", "idempotency_key": "shared.ImportIdempotencyKey",
+            "dirty": "shared.ImportDirty",
+        },
+        "import_github_repository": {
+            "name": "shared.ImportProjectName", "url": "shared.GitHubImportUrl",
+            "ref": "shared.GitHubImportRef", "idempotency_key": "shared.ImportIdempotencyKey",
+        },
+    }
+    for tool_name, fields in aliases.items():
+        argument_annotations = {
+            argument.arg: ast.unparse(argument.annotation)
+            for argument in tool_nodes[tool_name].args.args
+            if argument.annotation is not None
+        }
+        for field_name, alias_annotation in expected_mcp_annotations[tool_name].items():
+            assert argument_annotations[field_name] == alias_annotation
+
+    for tool_name, fields in aliases.items():
+        mcp_fields = tools[tool_name]["properties"]
+        for field_name, alias in fields.items():
+            alias_schema = TypeAdapter(alias).json_schema()
+            expected = _effective_constraints(openapi, alias_schema)
+            expected.pop("default", None)  # Defaults are supplied by each transport signature.
+            http_constraints = _effective_constraints(openapi, http_fields[tool_name][field_name])
+            mcp_constraints = _effective_constraints(openapi, mcp_fields[field_name])
+            http_constraints.pop("default", None)
+            mcp_constraints.pop("default", None)
+            assert http_constraints == expected
+            assert mcp_constraints == expected
+            assert _resolve_schema(openapi, http_fields[tool_name][field_name]).get("description") == alias_schema.get("description")
+            assert _resolve_schema(openapi, mcp_fields[field_name]).get("description") == alias_schema.get("description")
+
+    shared_defaults = {
+        ("import_local_path", "revision"): contracts.DEFAULT_SOURCE_REVISION,
+        ("import_local_path", "dirty"): contracts.DEFAULT_IMPORT_DIRTY,
+        ("import_local_path", "idempotency_key"): contracts.DEFAULT_IMPORT_IDEMPOTENCY_KEY,
+        ("import_github_repository", "ref"): contracts.DEFAULT_IMPORT_REF,
+        ("import_github_repository", "idempotency_key"): contracts.DEFAULT_IMPORT_IDEMPOTENCY_KEY,
+    }
+    for (tool_name, field_name), expected_default in shared_defaults.items():
+        http_default = _resolve_schema(openapi, http_fields[tool_name][field_name]).get("default")
+        mcp_default = _resolve_schema(openapi, tools[tool_name]["properties"][field_name]).get("default")
+        assert http_default == mcp_default == expected_default
+
+
+async def _registered_tool_schemas(server) -> dict[str, dict]:
+    return {tool.name: tool.input_schema for tool in await server.list_tools()}

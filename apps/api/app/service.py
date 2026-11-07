@@ -1875,6 +1875,7 @@ class WorkspaceService:
         visible_projects = projects if limit is None else projects[:limit]
         return WorkspaceProjectListResult(
             projects=visible_projects,
+            total=len(projects),
             truncated=truncated,
             truncation_reason=f"max_projects={limit}" if truncated else None,
         )
@@ -1988,9 +1989,12 @@ class WorkspaceService:
             latest = next((index for index in all_indexes if index.index_id == current.latest_index_id), None)
             if latest is not None and visible_indexes:
                 visible_indexes[-1] = latest
+                order = {index.index_id: position for position, index in enumerate(all_indexes)}
+                visible_indexes.sort(key=lambda index: order[index.index_id])
         return WorkspaceProjectIndexListResult(
             project_id=project.project_id,
             indexes=visible_indexes,
+            total=len(all_indexes),
             latest_index_id=current.latest_index_id,
             building_index_id=current.building_index_id,
             truncated=truncated,
@@ -4910,6 +4914,7 @@ class WorkspaceService:
                 index=journey.index,
                 rules_version=journey.rules_version,
                 journey_id=journey.journey_id,
+                summary=journey.summary,
                 action_label=journey.summary.action_label,
                 steps=[
                     JourneyStep(
@@ -4933,6 +4938,8 @@ class WorkspaceService:
                     )
                     for step in journey.steps
                 ],
+                coverage=journey.coverage,
+                markers=journey.markers,
             )
         except ServiceError:
             raise

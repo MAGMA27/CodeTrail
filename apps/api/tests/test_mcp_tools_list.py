@@ -18,7 +18,7 @@ from app.contracts import (
     Issue,
 )
 from app.main import create_app
-from app.mcp_server import create_mcp_server
+from app.mcp_server import _slim_output_schema, create_mcp_server
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -53,7 +53,11 @@ def _validate_refs(schema: dict) -> None:
 def _schema_metadata_keys(schema: object) -> set[str]:
     keys: set[str] = set()
     if isinstance(schema, dict):
-        keys.update(key for key in ("title", "description") if key in schema)
+        keys.update(
+            key
+            for key in ("title", "description", "default", "examples", "deprecated", "readOnly", "writeOnly", "$comment")
+            if key in schema
+        )
         for key in ("$defs", "properties", "patternProperties", "dependentSchemas"):
             if isinstance(schema.get(key), dict):
                 for child in schema[key].values():
@@ -113,13 +117,15 @@ def test_registered_tool_output_schemas_are_compact_and_validate_fixture_results
         total_size = sum(sizes.values())
         print(f"total outputSchema={total_size} B across {len(tools)} tools")
         assert len(tools) == 27
-        assert total_size < 200_000
+        assert total_size < 180_000
 
         schemas = {tool.name: tool.output_schema for tool in tools}
         for name, schema in schemas.items():
             assert schema is not None
             _validate_refs(schema)
             Draft202012Validator.check_schema(schema)
+            assert schema.get("type") == "object" and schema.get("properties"), name
+            assert schema.get("additionalProperties") is False, name
             assert not _schema_metadata_keys(schema), f"Output schema metadata was not stripped: {name}"
 
         async def call(name: str, *, expect_ok: bool = True, **arguments: object) -> dict:
@@ -250,3 +256,102 @@ def test_registered_tool_output_schemas_are_compact_and_validate_fixture_results
         )
 
     asyncio.run(exercise())
+
+
+def test_slim_output_schema_deduplicates_equivalent_definitions_and_rewrites_refs() -> None:
+    schema = {
+        "$defs": {
+            "First": {
+                "type": "object",
+                "properties": {"value": {"type": "string", "enum": ["a", "b"]}},
+                "required": ["value"],
+                "additionalProperties": False,
+            },
+            "Second": {
+                "type": "object",
+                "properties": {"value": {"type": "string", "enum": ["a", "b"]}},
+                "required": ["value"],
+                "additionalProperties": False,
+            },
+        },
+        "type": "object",
+        "properties": {
+            "first": {"$ref": "#/$defs/First"},
+            "second": {"$ref": "#/$defs/Second"},
+        },
+        "required": ["first", "second"],
+        "additionalProperties": False,
+    }
+    compact = _slim_output_schema(schema)
+    assert set(compact["$defs"]) == {"First"}
+    assert compact["properties"]["second"]["$ref"] == "#/$defs/First"
+    _validate_refs(compact)
+
+    original_validator = Draft202012Validator(schema)
+    compact_validator = Draft202012Validator(compact)
+    samples = [
+        {"first": {"value": "a"}, "second": {"value": "b"}},
+        {"first": {"value": "invalid"}, "second": {"value": "a"}},
+        {"first": {"value": "a", "extra": True}, "second": {"value": "b"}},
+    ]
+    assert [original_validator.is_valid(sample) for sample in samples] == [
+        compact_validator.is_valid(sample) for sample in samples
+    ]
+
+
+def test_slim_output_schema_traverses_only_schema_positions() -> None:
+    shared_type = {"type": "string", "enum": ["first", "second"]}
+    shared_enum = {"type": "integer", "minimum": 1, "maximum": 4}
+    schema = {
+        "$defs": {
+            "First": {
+                "type": "object",
+                "properties": {"type": shared_type, "enum": shared_enum},
+                "required": ["type", "enum"],
+                "additionalProperties": False,
+            },
+            "Second": {
+                "type": "object",
+                "properties": {"type": shared_type, "enum": shared_enum, "extra": {"type": "boolean"}},
+                "required": ["type", "enum", "extra"],
+                "additionalProperties": False,
+            },
+        },
+        "type": "object",
+        "properties": {
+            "first": {"$ref": "#/$defs/First"},
+            "second": {"$ref": "#/$defs/Second"},
+            "enum_value": {"enum": [{"type": "string", "enum": ["literal"]}]},
+        },
+        "required": ["first", "second", "enum_value"],
+        "additionalProperties": False,
+    }
+
+    compact = _slim_output_schema(schema)
+    assert set(compact["properties"]) == {"first", "second", "enum_value"}
+    assert compact["properties"]["enum_value"]["enum"] == [{"type": "string", "enum": ["literal"]}]
+    for ref in (compact["properties"]["first"]["$ref"], compact["properties"]["second"]["$ref"]):
+        definition = compact["$defs"][ref.removeprefix("#/$defs/")]
+        properties = definition["properties"]
+        assert set(properties) >= {"type", "enum"}
+        assert properties["type"].get("$ref")
+        assert properties["enum"].get("$ref")
+    _validate_refs(compact)
+
+    samples = [
+        {
+            "first": {"type": "first", "enum": 2},
+            "second": {"type": "second", "enum": 3, "extra": True},
+            "enum_value": {"type": "string", "enum": ["literal"]},
+        },
+        {
+            "first": {"type": "rejected", "enum": 2},
+            "second": {"type": "second", "enum": 3, "extra": True},
+            "enum_value": {"type": "string", "enum": ["literal"]},
+        },
+    ]
+    original_validator = Draft202012Validator(schema)
+    compact_validator = Draft202012Validator(compact)
+    assert [original_validator.is_valid(sample) for sample in samples] == [
+        compact_validator.is_valid(sample) for sample in samples
+    ]

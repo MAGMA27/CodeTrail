@@ -13518,6 +13518,7 @@
           "title": "Idempotency Key"
         },
         "name": {
+          "description": "Project display name.",
           "maxLength": 200,
           "minLength": 1,
           "title": "Name",
@@ -13535,6 +13536,7 @@
             }
           ],
           "default": null,
+          "description": "Optional branch, tag, or commit ref.",
           "title": "Ref"
         },
         "schema_version": {
@@ -13544,6 +13546,7 @@
           "type": "string"
         },
         "url": {
+          "description": "Official GitHub HTTPS repository URL.",
           "maxLength": 4000,
           "minLength": 1,
           "title": "Url",
@@ -18284,12 +18287,14 @@
           "title": "Idempotency Key"
         },
         "name": {
+          "description": "Project display name.",
           "maxLength": 200,
           "minLength": 1,
           "title": "Name",
           "type": "string"
         },
         "path": {
+          "description": "Absolute path visible to the local API service.",
           "maxLength": 4000,
           "minLength": 1,
           "title": "Path",
@@ -31826,6 +31831,12 @@
           "title": "Schema Version",
           "type": "string"
         },
+        "total": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Total",
+          "type": "integer"
+        },
         "truncated": {
           "default": false,
           "title": "Truncated",
@@ -32111,6 +32122,12 @@
           "default": "0.1.0",
           "title": "Schema Version",
           "type": "string"
+        },
+        "total": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Total",
+          "type": "integer"
         },
         "truncated": {
           "default": false,

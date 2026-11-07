@@ -6,7 +6,15 @@ import re
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from app.contracts import IndexSnapshot, JourneyEvidenceRef, JourneyStep, ProjectJourney, SymbolRef
+from app.contracts import (
+    IndexSnapshot,
+    JourneyCoverage,
+    JourneyEvidenceRef,
+    JourneyStep,
+    JourneySummary,
+    ProjectJourney,
+    SymbolRef,
+)
 from app.mcp_server import _citation_url, _mcp_journey_response, _session_url
 
 
@@ -73,6 +81,16 @@ def test_summary_journey_keeps_mcp_evidence_reference_urls() -> None:
         index=index,
         rules_version="rules-a",
         journey_id="journey-a",
+        summary=JourneySummary(
+            journey_id="journey-a",
+            index_id="index-a",
+            action_label="Save preferences",
+            event_name="onSubmit",
+            action_path="src/preferences.tsx",
+            action_start_line=3,
+            method=None,
+            path=None,
+        ),
         action_label="Save preferences",
         steps=[
             JourneyStep(
@@ -94,6 +112,7 @@ def test_summary_journey_keeps_mcp_evidence_reference_urls() -> None:
                 ],
             )
         ],
+        coverage=JourneyCoverage(journey_count=1),
     )
 
     response = _mcp_journey_response(journey, "https://codetrail.example")
