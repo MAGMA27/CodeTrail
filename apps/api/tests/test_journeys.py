@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import shutil
+from dataclasses import replace
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -100,7 +101,7 @@ def _codetrail_source_relation():
         dirty=True,
         snapshot_hash=snapshot_hash,
         status="ready",
-        rules_version="in-memory-source-test+typescript-facts-v5",
+        rules_version="in-memory-source-test+typescript-facts-v5+relations-v13",
     )
     snapshot = SourceSnapshot(index=index, files=tuple(files), issues=())
     relation = extract_relations(extract_definitions(snapshot), max_seconds=8)
@@ -173,7 +174,7 @@ def _preferences_source_relation(
         dirty=True,
         snapshot_hash=snapshot_hash,
         status="ready",
-        rules_version="in-memory-source-test+typescript-facts-v5",
+        rules_version="in-memory-source-test+typescript-facts-v5+relations-v13",
     )
     snapshot = SourceSnapshot(index=index, files=tuple(files), issues=())
     definitions = extract_definitions(snapshot)
@@ -232,6 +233,42 @@ def test_edge_budget_preserves_http_facts_associations_and_journey_ids(generated
     assert limited.truncated is True
     assert limited_catalog.coverage.relation_truncated is True
     assert any("关系索引扫描未完成" in item for item in limited_catalog.coverage.limitations)
+    assert limited_catalog.coverage.http_association_status == "complete"
+
+
+@pytest.mark.parametrize("legacy_version", ("relations-v11", "relations-v12"))
+def test_legacy_truncated_relations_report_incomplete_http_journey_coverage(
+    legacy_version: str,
+) -> None:
+    relation, read_evidence = _preferences_source_relation()
+    index = relation.snapshot.index.model_copy(
+        update={
+            "rules_version": (
+                f"in-memory-source-test+typescript-facts-v5+{legacy_version}"
+            )
+        }
+    )
+    legacy_relation = replace(
+        relation,
+        definitions=replace(
+            relation.definitions,
+            snapshot=replace(relation.snapshot, index=index),
+        ),
+        truncated=True,
+        truncation_reason="max_edges reached while collecting contextual calls",
+        http_client_requests=(),
+    )
+
+    overview = build_project_overview("preferences-demo", legacy_relation, read_evidence)
+    catalog, _specs = build_journey_catalog("preferences-demo", legacy_relation, overview)
+
+    assert overview.http_association_coverage.client_request_count == 0
+    assert overview.http_association_coverage.analysis_status == "incomplete"
+    assert catalog.coverage.http_association_status == "incomplete"
+    assert any(
+        "HTTP method/path association 覆盖不完整" in item
+        for item in catalog.coverage.limitations
+    )
 
 
 def test_python_only_project_has_no_actions_and_is_not_truncated() -> None:

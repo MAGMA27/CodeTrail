@@ -31,6 +31,8 @@ BindingKind = Literal["module", "symbol"]
 RelationScopeKind = Literal["module", "class", "function"]
 # The semantic version changes when the graph/unresolved meaning changes.
 RELATION_SEMANTICS_VERSION = "relations-v13"
+# HTTP request facts are retained even when later graph work hits its edge budget.
+HTTP_REQUEST_FACTS_COMPLETE_FROM_RELATION_VERSION = 13
 # This version only governs the persisted, index-independent facts payload.
 RELATION_FACT_EXTRACTION_RULES_VERSION = "python-relation-facts-v6"
 _RELATION_FACTS_FORMAT_VERSION = "relation-facts-v6"
