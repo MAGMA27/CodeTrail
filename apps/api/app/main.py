@@ -346,8 +346,15 @@ def create_app(
         response_model=ProjectListResponse,
         responses=_API_ERROR_RESPONSES,
     )
-    async def list_projects() -> ProjectListResponse:
-        return await run_in_threadpool(workspace_service.list_projects, limit=None)
+    async def list_projects(
+        limit: int | None = Query(
+            default=shared.HTTP_DEFAULT_DISCOVERY_LIMIT,
+            ge=shared.MIN_REQUEST_VALUE,
+            le=shared.MAX_DISCOVERY_ITEMS,
+            description="Maximum number of projects to return.",
+        ),
+    ) -> ProjectListResponse:
+        return await run_in_threadpool(workspace_service.list_projects, limit=limit)
 
     @application.get(
         "/api/trash",
@@ -711,8 +718,16 @@ def create_app(
         response_model=ProjectIndexListResponse,
         responses=_API_ERROR_RESPONSES,
     )
-    async def list_project_indexes(project_id: Identifier) -> ProjectIndexListResponse:
-        return await run_in_threadpool(workspace_service.list_project_indexes, project_id, limit=None)
+    async def list_project_indexes(
+        project_id: Identifier,
+        limit: int | None = Query(
+            default=shared.HTTP_DEFAULT_DISCOVERY_LIMIT,
+            ge=shared.MIN_REQUEST_VALUE,
+            le=shared.MAX_DISCOVERY_ITEMS,
+            description="Maximum number of indexes to return.",
+        ),
+    ) -> ProjectIndexListResponse:
+        return await run_in_threadpool(workspace_service.list_project_indexes, project_id, limit=limit)
 
     @application.post(
         "/api/projects/{project_id}/indexes",

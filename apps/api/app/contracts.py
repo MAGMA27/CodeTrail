@@ -24,6 +24,9 @@ from .config import normalize_model_config_base_url, normalize_model_config_text
 
 SCHEMA_VERSION = "0.1.0"
 DEFAULT_SOURCE_REVISION = "working-tree"
+DEFAULT_IMPORT_DIRTY = True
+DEFAULT_IMPORT_REF = None
+DEFAULT_IMPORT_IDEMPOTENCY_KEY = None
 
 # Shared request limits used by HTTP, MCP, and request contract declarations.
 MIN_REQUEST_VALUE = 1
@@ -52,6 +55,7 @@ DEFAULT_SEARCH_LIMIT = MAX_PAGE_SIZE
 MCP_DEFAULT_SEARCH_LIMIT = 10
 HTTP_DEFAULT_DETAIL = "full"
 MCP_DEFAULT_DETAIL = "summary"
+HTTP_DEFAULT_DISCOVERY_LIMIT = None
 DEFAULT_OVERVIEW_PAGE_DETAIL = "summary"
 DEFAULT_UNRESOLVED_PAGE_LIMIT = 20
 MAX_UNRESOLVED_PAGE_LIMIT = MAX_PAGE_SIZE
@@ -60,6 +64,45 @@ DEFAULT_UNRESOLVED_PAGE_DETAIL = "summary"
 UNRESOLVED_SUMMARY_SAMPLE_LIMIT = 3
 POSSIBLE_CALLER_SUMMARY_SAMPLE_LIMIT = 3
 MAX_DISCOVERY_ITEMS = 100
+MCP_DEFAULT_DISCOVERY_LIMIT = MAX_DISCOVERY_ITEMS
+# Import request fields shared by the HTTP body models and MCP tool arguments.
+ImportProjectName: TypeAlias = Annotated[
+    str,
+    Field(min_length=MIN_REQUEST_VALUE, max_length=MAX_IDENTIFIER_LENGTH, description="Project display name."),
+]
+ImportLocalPath: TypeAlias = Annotated[
+    str,
+    Field(
+        min_length=MIN_REQUEST_VALUE,
+        max_length=MAX_LOCAL_PATH_LENGTH,
+        description="Absolute path visible to the local API service.",
+    ),
+]
+ImportRevision: TypeAlias = Annotated[
+    str,
+    Field(min_length=MIN_REQUEST_VALUE, max_length=MAX_IDENTIFIER_LENGTH),
+]
+ImportIdempotencyKey: TypeAlias = Annotated[
+    str | None,
+    Field(min_length=MIN_REQUEST_VALUE, max_length=MAX_IDENTIFIER_LENGTH),
+]
+GitHubImportUrl: TypeAlias = Annotated[
+    str,
+    Field(
+        min_length=MIN_REQUEST_VALUE,
+        max_length=MAX_LOCAL_PATH_LENGTH,
+        description="Official GitHub HTTPS repository URL.",
+    ),
+]
+GitHubImportRef: TypeAlias = Annotated[
+    str | None,
+    Field(
+        min_length=MIN_REQUEST_VALUE,
+        max_length=MAX_IDENTIFIER_LENGTH,
+        description="Optional branch, tag, or commit ref.",
+    ),
+]
+ImportDirty: TypeAlias = bool
 SEARCH_MAX_SCAN = 200
 SEARCH_SNIPPET_MAX_LENGTH = 120
 MIN_RUN_SEQUENCE = 0
@@ -301,20 +344,20 @@ class CreateProjectRequest(VersionedModel):
 class LocalImportRequest(VersionedModel):
     """A server-local source registration and bounded synchronous import request."""
 
-    name: str = Field(min_length=MIN_REQUEST_VALUE, max_length=MAX_IDENTIFIER_LENGTH)
-    path: str = Field(min_length=MIN_REQUEST_VALUE, max_length=MAX_LOCAL_PATH_LENGTH)
-    revision: str = Field(default=DEFAULT_SOURCE_REVISION, min_length=MIN_REQUEST_VALUE, max_length=MAX_IDENTIFIER_LENGTH)
-    dirty: bool = True
-    idempotency_key: str | None = Field(default=None, min_length=MIN_REQUEST_VALUE, max_length=MAX_IDENTIFIER_LENGTH)
+    name: ImportProjectName
+    path: ImportLocalPath
+    revision: ImportRevision = DEFAULT_SOURCE_REVISION
+    dirty: ImportDirty = DEFAULT_IMPORT_DIRTY
+    idempotency_key: ImportIdempotencyKey = DEFAULT_IMPORT_IDEMPOTENCY_KEY
 
 
 class GitHubImportRequest(VersionedModel):
     """A bounded import request for one public GitHub repository."""
 
-    name: str = Field(min_length=MIN_REQUEST_VALUE, max_length=MAX_IDENTIFIER_LENGTH)
-    url: str = Field(min_length=MIN_REQUEST_VALUE, max_length=MAX_LOCAL_PATH_LENGTH)
-    ref: str | None = Field(default=None, min_length=MIN_REQUEST_VALUE, max_length=MAX_IDENTIFIER_LENGTH)
-    idempotency_key: str | None = Field(default=None, min_length=MIN_REQUEST_VALUE, max_length=MAX_IDENTIFIER_LENGTH)
+    name: ImportProjectName
+    url: GitHubImportUrl
+    ref: GitHubImportRef = DEFAULT_IMPORT_REF
+    idempotency_key: ImportIdempotencyKey = DEFAULT_IMPORT_IDEMPOTENCY_KEY
 
 
 class CreateProjectIndexRequest(VersionedModel):
@@ -393,15 +436,21 @@ class Project(VersionedModel):
         return self
 
 
-class ProjectListResponse(VersionedModel):
+class ProjectListFields(ContractModel):
+    """Project-list fields shared by HTTP and MCP response envelopes."""
+
     projects: list[Project] = Field(default_factory=list)
+    total: NonNegativeInt = 0
+    truncated: bool = False
+    truncation_reason: str | None = Field(default=None, max_length=MAX_REASON_LENGTH)
+
+
+class ProjectListResponse(ProjectListFields, VersionedModel):
+    pass
 
 
 class WorkspaceProjectListResult(ProjectListResponse):
     """Shared workspace result with optional bounded-discovery metadata."""
-
-    truncated: bool = False
-    truncation_reason: str | None = Field(default=None, max_length=MAX_REASON_LENGTH)
 
 
 class ProjectIndexListFields(ContractModel):
@@ -409,8 +458,11 @@ class ProjectIndexListFields(ContractModel):
 
     project_id: Identifier
     indexes: list[IndexSnapshot] = Field(default_factory=list)
+    total: NonNegativeInt = 0
     latest_index_id: Identifier | None = None
     building_index_id: Identifier | None = None
+    truncated: bool = False
+    truncation_reason: str | None = Field(default=None, max_length=MAX_REASON_LENGTH)
 
 
 class ProjectIndexListResponse(ProjectIndexListFields, VersionedModel):
@@ -427,9 +479,6 @@ class ProjectIndexListResponse(ProjectIndexListFields, VersionedModel):
 
 class WorkspaceProjectIndexListResult(ProjectIndexListResponse):
     """Shared index-list result with optional bounded-discovery metadata."""
-
-    truncated: bool = False
-    truncation_reason: str | None = Field(default=None, max_length=MAX_REASON_LENGTH)
 
 
 SessionMessageSource: TypeAlias = Literal["human", "agent"]
@@ -3501,10 +3550,7 @@ class McpResultBase(VersionedModel):
         return self
 
 
-class McpProjectListResponse(McpResultBase):
-    projects: list[Project] = Field(default_factory=list)
-    truncated: bool = False
-    truncation_reason: str | None = Field(default=None, max_length=1_000)
+class McpProjectListResponse(ProjectListFields, McpResultBase):
 
     @model_validator(mode="after")
     def validate_truncation(self) -> McpProjectListResponse:
@@ -3520,8 +3566,6 @@ class McpProjectResponse(McpResultBase):
 
 
 class McpProjectIndexesResponse(ProjectIndexListFields, McpResultBase):
-    truncated: bool = False
-    truncation_reason: str | None = Field(default=None, max_length=1_000)
 
     @model_validator(mode="after")
     def validate_truncation(self) -> McpProjectIndexesResponse:

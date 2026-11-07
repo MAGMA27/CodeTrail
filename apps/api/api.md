@@ -14,6 +14,8 @@
 
 ### Project 与 Session 回收站
 
+`GET /api/projects` 与 `GET /api/projects/{project_id}/indexes` 接受可选 `limit`，范围为 1–100；两侧返回的 `total` 是完整列表数量，并以 `truncated`/`truncation_reason` 表明是否限额。HTTP 省略时继续返回完整列表；MCP 省略时使用 100。索引列表即使截断也会保留 latest index，且返回项数量不超过 limit。
+
 `GET /api/trash` 返回可恢复项目和独立移除的 Session；`DELETE /api/projects/{project_id}` 与 `DELETE /api/projects/{project_id}/sessions/{session_id}` 将对象软移除，`POST /api/projects/{project_id}/restore` 与 `POST /api/projects/{project_id}/sessions/{session_id}/restore` 显式恢复。移除不会物理删除来源、索引、消息、Run、报告或 evidence。普通列表与作用域读取隐藏移除对象；按 `index_id` 的兼容 HTTP 查询也会校验其仍有活动 Project 归属。恢复 Project 不会恢复独立移除的 Session。活动 Run、索引更新、导入或功能生成期间返回可重试的 409；这些入口仍由 WorkspaceService 和现有 Pydantic 契约拥有，不向 MCP 开放新的写工具。
 
 `GET /api/model-config` 只返回 provider、base URL、model 和 `has_api_key`；`POST /api/model-config` 要求 loopback 客户端，或来自 `CODETRAIL_TRUSTED_WRITE_NETWORKS` 明确列出的 CIDR；该变量默认空。Compose 将 API 和 Web 端口绑定到宿主机 loopback，只信任声明的 Docker 私有子网，并设置浏览器使用的 localhost origins。有 `Origin` 时还必须精确匹配配置的 Web Origin；没有 `Origin` 的本地 CLI 请求允许写入。provider/model 会去除首尾空白并拒绝空值；base URL 必须是有效的绝对 HTTP(S) URL，不能包含 userinfo 凭据。留空 API Key 保留当前值，`remove_api_key=true` 才清除。每个 Registry 在同一锁内读取当前值、合并新设置并原子持久化，避免并发空 key 更新覆盖刚保存的 key；文件通过同目录临时文件和原子替换写入，失败保留旧文件。请求和持久文件包含密钥，响应与日志不包含密钥。API 与 MCP 每个新 real 功能生成/Run 都从共享文件读取配置；Run 在创建时冻结模型配置供 worker 使用。保存只做契约校验和持久化，不试连供应商或发送源码。
@@ -65,6 +67,8 @@ GitHub 导入、GitHub 失败重试与清理重试、GitHub 远端刷新、项�
 取消 queued job 立即终结；运行任务进入 cancel_requested，由 GitHub 下载和索引控制检查点协作取消。尚未绑定 Project 的导入可通过 `POST /api/jobs/{job_id}/cancel` 取消；已绑定任务继续使用 project-scoped 取消并校验归属。提交时按规范化仓库身份与请求 ref 合并活跃任务；worker 解析 commit 后在 SQLite 事务中声明仓库/commit 构建键，同 SHA 活跃任务合并并跟随其终态，ready 不可变快照由现有语义复用，不缓存裸 ref 的成功结果。一次任务执行是至少一次语义，IndexStore 仅在完整索引构建后提交 ready；本 PR 仍依赖共享数据卷与 SQLite 单机部署边界。
 
 本地/GitHub 导入继续执行绝对路径、allow-list、符号链接/junction、官方 URL、归档安全、时间和大小边界；HTTP 写入口默认只接受 loopback 客户端，可选 `CODETRAIL_TRUSTED_WRITE_NETWORKS` 允许显式列出的来源 CIDR。未知项目、非所属索引/Session/Run 返回 `not_found`，参数、预算和执行容量边界返回 `invalid_input` 或可重试的 `budget_exceeded`，失败不泄露宿主路径。
+
+本地与 GitHub 导入的项目名、路径/URL、revision/ref 和幂等键字段约束由 `contracts.py` 中的 Annotated 别名同时供 HTTP 请求体和 MCP 平铺参数使用；两侧共享非空及长度边界。路径绝对性、来源 allow-list、GitHub scheme/host 及导入能力开关由共享 WorkspaceService/Registry 校验。HTTP 请求体校验详情不回显提交值；MCP 详情按通用安全值规则处理，任意本地路径和 URL 不作为 `got` 回显。两种适配器保留各自既有的校验错误消息。
 
 代码理解提交还会拒绝重复步骤 ID、未实际返回的步骤 evidence/symbol、分析类型与 Run 不匹配、`complete` 中的 unknown，以及任何 Issue findings/candidate links；步骤顺序是 Agent 解释顺序，不改变静态图或影响查询语义。
 

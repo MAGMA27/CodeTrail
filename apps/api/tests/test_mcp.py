@@ -340,6 +340,8 @@ def test_real_stdio_client_matches_http_and_returns_evidence_link(tmp_path: Path
 
     status, http_project = request(application, "GET", f"/api/projects/{project_id}")
     assert status == 200
+    status, http_projects = request(application, "GET", "/api/projects")
+    assert status == 200
     status, http_indexes = request(application, "GET", f"/api/projects/{project_id}/indexes")
     assert status == 200
     status, http_index = request(application, "GET", f"/api/projects/{project_id}/indexes/{index_id}")
@@ -428,6 +430,7 @@ def test_real_stdio_client_matches_http_and_returns_evidence_link(tmp_path: Path
             index_id=index_id,
             symbol_id=symbol_id,
             http_project=http_project,
+            http_projects=http_projects,
             http_indexes=http_indexes,
             http_index=http_index,
             http_search=http_search,
@@ -1477,6 +1480,7 @@ async def _exercise_stdio(
     index_id: str,
     symbol_id: str,
     http_project: dict,
+    http_projects: dict,
     http_indexes: dict,
     http_index: dict,
     http_search: dict,
@@ -1532,6 +1536,7 @@ async def _exercise_stdio(
         projects_result = await client.call_tool("list_projects")
         assert projects_result.structured_content["ok"] is True
         assert projects_result.structured_content["projects"] == [http_project]
+        assert projects_result.structured_content["total"] == http_projects["total"]
         assert projects_result.structured_content["truncated"] is False
         assert projects_result.structured_content["truncation_reason"] is None
 
@@ -1542,6 +1547,7 @@ async def _exercise_stdio(
             "error": None,
             "project_id": project_id,
             "indexes": http_indexes["indexes"],
+            "total": http_indexes["total"],
             "latest_index_id": http_indexes["latest_index_id"],
             "building_index_id": http_indexes["building_index_id"],
             "truncated": False,
