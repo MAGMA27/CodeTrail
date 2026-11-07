@@ -37,7 +37,11 @@ from .indexing import (
     SubsystemSpec,
     parse_subsystem_manifest,
 )
-from .relations import RelationIndex, relation_coverage_limitations
+from .relations import (
+    HTTP_REQUEST_FACTS_INCOMPLETE_REASON,
+    RelationIndex,
+    relation_coverage_limitations,
+)
 
 
 RULES_VERSION = "python-entry-v7+http-shape-v2+architecture-v1"
@@ -523,7 +527,12 @@ def build_project_overview(
             "not_analyzed"
             if path_analysis == "not_analyzed"
             else "incomplete"
-            if index.status != "ready" or relation.truncated or relation.unresolved_truncated is True or entry_candidates_truncated
+            if (
+                index.status != "ready"
+                or relation.truncation_reason is not None
+                and HTTP_REQUEST_FACTS_INCOMPLETE_REASON in relation.truncation_reason
+                or entry_candidates_truncated
+            )
             else "complete"
         ),
         path_analysis=path_analysis,

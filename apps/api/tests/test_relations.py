@@ -124,6 +124,20 @@ def test_relation_budget_returns_partial_results_and_reason() -> None:
     assert len(result.edges) == 2
 
 
+def test_unresolved_budget_remains_available_after_edge_truncation() -> None:
+    budget = _RelationBudget(max_edges=1, max_unresolved=2, max_seconds=10)
+
+    assert budget.reserve("edges") is True
+    assert budget.reserve("edges") is False
+    assert budget.reason == "max_edges reached"
+    assert budget.reserve("unresolved") is True
+    assert budget.reserve("unresolved") is True
+    assert budget.reserve("unresolved") is False
+    assert budget.unresolved_count == 2
+    assert budget.unresolved_truncated is True
+    assert budget.unresolved_reason == "max_unresolved reached"
+
+
 def test_relation_time_budget_is_observable() -> None:
     definitions = extract_definitions(
         build_source_snapshot(FIXTURE_ROOT, repository_id="timeout-demo", revision="fixture-v1", dirty=False)

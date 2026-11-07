@@ -23,7 +23,7 @@ from app.main import create_app
 from app.journeys import _extract_ui_facts, build_journey_catalog, build_project_journey
 from app.mcp_server import _mcp_journey_response
 from app.overview import build_project_overview
-from app.relations import extract_relations
+from app.relations import HTTP_REQUEST_FACTS_INCOMPLETE_REASON, extract_relations
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -126,7 +126,12 @@ def _codetrail_source_relation():
     return relation, read_evidence
 
 
-def _preferences_source_relation():
+def _preferences_source_relation(
+    *,
+    extra_python_paths: tuple[str, ...] = (),
+    max_edges: int | None = None,
+    max_seconds: float = 8,
+):
     fixture_root = ROOT / "fixtures" / "repos" / "preferences-demo"
     files = []
     for path in sorted(fixture_root.rglob("*")):
@@ -143,6 +148,23 @@ def _preferences_source_relation():
                 text=text,
             )
         )
+    for path in extra_python_paths:
+        source = "\n".join(
+            [*(f"def target_{number}() -> None: pass" for number in range(12)),
+             "def flood() -> None:",
+             *(f"    target_{number}()" for number in range(12)),
+             ""]
+        )
+        raw = source.encode("utf-8")
+        files.append(
+            SnapshotFile(
+                path=path,
+                size=len(raw),
+                content_hash=hashlib.sha256(raw).hexdigest(),
+                text=source,
+            )
+        )
+    files.sort(key=lambda item: item.path)
     snapshot_hash = hashlib.sha256("".join(item.content_hash for item in files).encode()).hexdigest()
     index = IndexSnapshot(
         index_id="journey-preferences-test",
@@ -154,7 +176,12 @@ def _preferences_source_relation():
         rules_version="in-memory-source-test+typescript-facts-v5",
     )
     snapshot = SourceSnapshot(index=index, files=tuple(files), issues=())
-    relation = extract_relations(extract_definitions(snapshot), max_seconds=8)
+    definitions = extract_definitions(snapshot)
+    relation = extract_relations(
+        definitions,
+        max_seconds=max_seconds,
+        **({} if max_edges is None else {"max_edges": max_edges}),
+    )
     file_by_path = {item.path: item for item in files}
 
     def read_evidence(index_id: str, path: str, start_line: int, end_line: int) -> Evidence:
@@ -175,6 +202,95 @@ def _preferences_source_relation():
         )
 
     return relation, read_evidence
+
+
+@pytest.mark.parametrize("generated_path", ("00_generated_edges.py", "zz_generated_edges.py"))
+def test_edge_budget_preserves_http_facts_associations_and_journey_ids(generated_path: str) -> None:
+    unlimited, read_evidence = _preferences_source_relation(extra_python_paths=(generated_path,))
+    limited, _ = _preferences_source_relation(extra_python_paths=(generated_path,), max_edges=1)
+    unlimited_overview = build_project_overview("preferences-demo", unlimited, read_evidence)
+    limited_overview = build_project_overview("preferences-demo", limited, read_evidence)
+    unlimited_catalog, _ = build_journey_catalog("preferences-demo", unlimited, unlimited_overview)
+    limited_catalog, _ = build_journey_catalog("preferences-demo", limited, limited_overview)
+
+    assert unlimited.http_client_requests
+    assert any(edge.source_location.path == generated_path for edge in unlimited.edges)
+    assert limited.http_client_requests == unlimited.http_client_requests
+    assert [item.model_dump() for item in limited_overview.http_associations] == [
+        item.model_dump() for item in unlimited_overview.http_associations
+    ]
+    assert limited_overview.http_association_coverage.client_request_count == (
+        unlimited_overview.http_association_coverage.client_request_count
+    )
+    assert limited_overview.http_association_coverage.analysis_status == (
+        unlimited_overview.http_association_coverage.analysis_status
+    )
+    assert limited_overview.http_association_coverage.analysis_status == "complete"
+    assert [item.journey_id for item in limited_catalog.journeys] == [
+        item.journey_id for item in unlimited_catalog.journeys
+    ]
+    assert limited.truncated is True
+    assert limited_catalog.coverage.relation_truncated is True
+    assert any("关系索引扫描未完成" in item for item in limited_catalog.coverage.limitations)
+
+
+def test_python_only_project_has_no_actions_and_is_not_truncated() -> None:
+    fixture_root = ROOT / "fixtures" / "repos" / "timeout-demo"
+    files = []
+    for path in sorted(fixture_root.rglob("*.py")):
+        raw = path.read_bytes()
+        files.append(
+            SnapshotFile(
+                path=path.relative_to(fixture_root).as_posix(),
+                size=len(raw),
+                content_hash=hashlib.sha256(raw).hexdigest(),
+                text=raw.decode("utf-8"),
+            )
+        )
+    snapshot_hash = hashlib.sha256("".join(item.content_hash for item in files).encode()).hexdigest()
+    index = IndexSnapshot(
+        index_id="journey-python-only-test",
+        repository_id="timeout-demo",
+        revision="source-test",
+        dirty=True,
+        snapshot_hash=snapshot_hash,
+        status="ready",
+        rules_version="in-memory-source-test",
+    )
+    relation = extract_relations(extract_definitions(SourceSnapshot(index=index, files=tuple(files), issues=())))
+    file_by_path = {item.path: item for item in files}
+
+    def read_evidence(index_id: str, path: str, start_line: int, end_line: int) -> Evidence:
+        source = file_by_path[path]
+        identity = f"{index_id}\0{path}\0{start_line}\0{end_line}\0{source.content_hash}"
+        return Evidence(
+            evidence_id=f"evidence-{hashlib.sha256(identity.encode()).hexdigest()[:32]}",
+            index_id=index_id,
+            path=path,
+            start_line=start_line,
+            end_line=end_line,
+            excerpt="\n".join(source.text.splitlines()[start_line - 1 : end_line]),
+            content_hash=source.content_hash,
+            kind="source",
+        )
+
+    overview = build_project_overview("timeout-demo", relation, read_evidence)
+
+    catalog, _specs = build_journey_catalog("timeout-demo", relation, overview)
+
+    assert catalog.journeys == []
+    assert catalog.coverage.action_count == 0
+    assert catalog.coverage.truncated is False
+    assert catalog.coverage.relation_truncated is False
+
+
+def test_relation_deadline_marks_http_request_facts_incomplete() -> None:
+    relation, _read_evidence = _preferences_source_relation(max_seconds=1e-12)
+
+    assert relation.truncated is True
+    assert relation.truncation_reason is not None
+    assert HTTP_REQUEST_FACTS_INCOMPLETE_REASON in relation.truncation_reason
+    assert relation.http_client_requests == ()
 
 
 def _preferences_journey_catalog():

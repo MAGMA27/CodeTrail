@@ -30,13 +30,14 @@ RelationKind = Literal["imports", "calls"]
 BindingKind = Literal["module", "symbol"]
 RelationScopeKind = Literal["module", "class", "function"]
 # The semantic version changes when the graph/unresolved meaning changes.
-RELATION_SEMANTICS_VERSION = "relations-v12"
+RELATION_SEMANTICS_VERSION = "relations-v13"
 # This version only governs the persisted, index-independent facts payload.
 RELATION_FACT_EXTRACTION_RULES_VERSION = "python-relation-facts-v6"
 _RELATION_FACTS_FORMAT_VERSION = "relation-facts-v6"
 # This namespace is part of generated immutable index IDs. Bump it when source
 # boundaries or build rules can change an index with the same content hash.
-INDEX_BUILD_IDENTITY_VERSION = "relations-v16"
+INDEX_BUILD_IDENTITY_VERSION = "relations-v17"
+HTTP_REQUEST_FACTS_INCOMPLETE_REASON = "HTTP request facts incomplete"
 
 # Relation budgets. Defaults come from measured full extractions (see
 # apps/api/indexing.md); each one can be overridden by its environment variable.
@@ -446,17 +447,20 @@ class _RelationBudget:
         self.unresolved_reason: str | None = None
 
     def reserve(self, category: Literal["edges", "unresolved"]) -> bool:
-        if self.truncated:
-            return False
-        if time.monotonic() >= self.deadline:
-            self._stop("max_seconds exceeded")
-            return False
         if category == "edges":
+            if self.truncated:
+                return False
+            if time.monotonic() >= self.deadline:
+                self._stop("max_seconds exceeded")
+                return False
             if self.edge_count >= self.max_edges:
                 self._stop("max_edges reached")
                 return False
             self.edge_count += 1
         else:
+            if time.monotonic() >= self.deadline:
+                self._stop("max_seconds exceeded")
+                return False
             if self.unresolved_count >= self.max_unresolved:
                 self.unresolved_truncated = True
                 self.unresolved_reason = "max_unresolved reached"
@@ -466,7 +470,10 @@ class _RelationBudget:
 
     def _stop(self, reason: str) -> None:
         self.truncated = True
-        self.reason = reason
+        reasons = self.reason.split("; ") if self.reason else []
+        if reason not in reasons:
+            reasons.append(reason)
+        self.reason = "; ".join(reasons)
 
 
 def _resolve_typescript_module_target(
@@ -763,10 +770,8 @@ def extract_relations(
     http_client_requests: list[HttpClientRequestFact] = []
     request_occurrences: dict[tuple[str, str, int, int], int] = {}
     for path, fact in definitions.typescript_http_requests:
-        if budget.truncated:
-            break
         if time.monotonic() >= budget.deadline:
-            budget._stop("max_seconds exceeded")
+            budget._stop(f"max_seconds exceeded; {HTTP_REQUEST_FACTS_INCOMPLETE_REASON}")
             break
         source_module = modules_by_path.get(path)
         if source_module is None:
