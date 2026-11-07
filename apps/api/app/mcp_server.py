@@ -111,7 +111,38 @@ def _slim_output_schema(schema: dict[str, Any]) -> dict[str, Any]:
     """Compact one MCP output schema while preserving its validation rules."""
 
     schema_maps = {"$defs", "properties", "patternProperties", "dependentSchemas"}
-    schema_values = {"additionalProperties", "unevaluatedProperties", "items", "contains", "not", "if", "then", "else"}
+    schema_lists = {"anyOf", "oneOf", "allOf", "prefixItems"}
+    schema_values = {
+        "additionalProperties",
+        "unevaluatedProperties",
+        "items",
+        "contains",
+        "not",
+        "if",
+        "then",
+        "else",
+        "propertyNames",
+        "contentSchema",
+    }
+
+    def schema_child(key: str, value: Any) -> bool:
+        if key in schema_maps or key in schema_values:
+            return isinstance(value, (dict, bool))
+        return key in schema_lists and isinstance(value, list)
+
+    def map_schema_children(value: dict[str, Any], transform: Any) -> dict[str, Any]:
+        result = dict(value)
+        for key, child in value.items():
+            if key in schema_maps and isinstance(child, dict):
+                result[key] = {name: transform(item) for name, item in child.items()}
+            elif key in schema_lists and isinstance(child, list):
+                result[key] = [transform(item) for item in child]
+            elif key in schema_values and isinstance(child, (dict, bool)):
+                result[key] = transform(child)
+        return result
+
+    def has_schema_children(value: dict[str, Any]) -> bool:
+        return any(schema_child(key, child) for key, child in value.items())
 
     def clean(value: Any, *, schema_node: bool = True) -> Any:
         if isinstance(value, list):
@@ -122,10 +153,10 @@ def _slim_output_schema(schema: dict[str, Any]) -> dict[str, Any]:
         for key, item in value.items():
             if schema_node and key in {"title", "description"}:
                 continue
-            # Defaults are annotations; stripping them does not change output validation.
-            if schema_node and key == "default":
+            # These keywords are annotations and do not affect validation.
+            if schema_node and key in {"default", "examples", "deprecated", "readOnly", "writeOnly", "$comment"}:
                 continue
-            if key in {"anyOf", "allOf"} and isinstance(item, list):
+            if schema_node and key in {"anyOf", "allOf"} and isinstance(item, list):
                 branches: list[Any] = []
                 seen: set[str] = set()
                 for branch in item:
@@ -135,9 +166,11 @@ def _slim_output_schema(schema: dict[str, Any]) -> dict[str, Any]:
                         branches.append(cleaned)
                         seen.add(fingerprint)
                 result[key] = branches
-            elif key in schema_maps and isinstance(item, dict):
+            elif schema_node and key in schema_lists and isinstance(item, list):
+                result[key] = [clean(child, schema_node=True) for child in item]
+            elif schema_node and key in schema_maps and isinstance(item, dict):
                 result[key] = {name: clean(child, schema_node=True) for name, child in item.items()}
-            elif key in schema_values:
+            elif schema_node and key in schema_values:
                 result[key] = clean(item, schema_node=True)
             else:
                 result[key] = clean(item, schema_node=False)
@@ -148,9 +181,126 @@ def _slim_output_schema(schema: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(definitions, dict):
         return compact
 
+    # Pydantic sometimes emits equivalent definitions with different names
+    # (or references to definitions that are themselves equivalent). Compare
+    # definitions after resolving their refs so a duplicate can safely share
+    # the first definition's name.
+    def canonical(value: Any, stack: tuple[str, ...] = ()) -> str:
+        if isinstance(value, bool):
+            return json.dumps(value)
+        if isinstance(value, dict):
+            ref = value.get("$ref")
+            if isinstance(ref, str) and ref.startswith("#/$defs/"):
+                name = ref.removeprefix("#/$defs/")
+                if name in definitions and name not in stack:
+                    expanded_ref = canonical(definitions[name], stack + (name,))
+                    if set(value) == {"$ref"}:
+                        return expanded_ref
+                    siblings = map_schema_children(
+                        {key: item for key, item in value.items() if key != "$ref"},
+                        lambda item: json.loads(canonical(item, stack)),
+                    )
+                    return json.dumps(
+                        {"$resolvedRef": expanded_ref, **siblings},
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    )
+            return json.dumps(
+                map_schema_children(value, lambda item: json.loads(canonical(item, stack))),
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        if isinstance(value, list):
+            return json.dumps([json.loads(canonical(item, stack)) for item in value], separators=(",", ":"))
+        return json.dumps(value, separators=(",", ":"))
+
+    representatives: dict[str, str] = {}
+    replacements: dict[str, str] = {}
+    for name, definition in definitions.items():
+        fingerprint = canonical(definition, (name,))
+        representative = representatives.setdefault(fingerprint, name)
+        if representative != name:
+            replacements[name] = representative
+
+    def rewrite_refs(value: Any) -> Any:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, dict):
+            rewritten = map_schema_children(value, rewrite_refs)
+            ref = rewritten.get("$ref")
+            if isinstance(ref, str) and ref.startswith("#/$defs/"):
+                name = ref.removeprefix("#/$defs/")
+                while name in replacements:
+                    name = replacements[name]
+                rewritten["$ref"] = f"#/$defs/{name}"
+            return rewritten
+        if isinstance(value, list):
+            return [rewrite_refs(item) for item in value]
+        return value
+
+    compact = rewrite_refs(compact)
+    definitions = compact["$defs"]
+    for duplicate in replacements:
+        definitions.pop(duplicate, None)
+
+    # Repeated leaf constraints (notably integer bounds and enums) are often
+    # embedded in otherwise distinct models. Hoist only exact schemas with no
+    # child schemas, where a ref is smaller and has identical semantics.
+    def collect_leaves(value: Any, counts: dict[str, int], schemas: dict[str, dict[str, Any]]) -> None:
+        if isinstance(value, bool):
+            return
+        if isinstance(value, dict):
+            if "type" in value and not has_schema_children(value):
+                fingerprint = json.dumps(value, sort_keys=True, separators=(",", ":"))
+                counts[fingerprint] = counts.get(fingerprint, 0) + 1
+                schemas[fingerprint] = value
+            map_schema_children(value, lambda child: collect_leaves(child, counts, schemas))
+        elif isinstance(value, list):
+            for child in value:
+                collect_leaves(child, counts, schemas)
+
+    leaf_counts: dict[str, int] = {}
+    leaf_schemas: dict[str, dict[str, Any]] = {}
+    collect_leaves(compact, leaf_counts, leaf_schemas)
+    leaf_refs: dict[str, str] = {}
+    shared_leaf_definitions: dict[str, dict[str, Any]] = {}
+    for fingerprint, count in leaf_counts.items():
+        leaf_schema = leaf_schemas[fingerprint]
+        suffix = len(leaf_refs) + len(shared_leaf_definitions) + 1
+        name = f"S{suffix}"
+        while name in definitions or name in shared_leaf_definitions:
+            suffix += 1
+            name = f"S{suffix}"
+        ref = f"#/$defs/{name}"
+        ref_size = len(json.dumps({"$ref": ref}, separators=(",", ":")))
+        definition_overhead = len(json.dumps(name)) + 1
+        if count > 1 and len(fingerprint.encode("utf-8")) * count > ref_size * count + definition_overhead:
+            leaf_refs[fingerprint] = name
+            shared_leaf_definitions[name] = leaf_schema
+
+    def hoist_leaves(value: Any) -> Any:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, dict):
+            if "type" in value and not has_schema_children(value):
+                fingerprint = json.dumps(value, sort_keys=True, separators=(",", ":"))
+                name = leaf_refs.get(fingerprint)
+                if name is not None:
+                    return {"$ref": f"#/$defs/{name}"}
+            return map_schema_children(value, hoist_leaves)
+        if isinstance(value, list):
+            return [hoist_leaves(child) for child in value]
+        return value
+
+    compact = hoist_leaves(compact)
+    definitions = compact["$defs"]
+    definitions.update(shared_leaf_definitions)
+
     reachable: set[str] = set()
 
     def visit(value: Any) -> None:
+        if isinstance(value, bool):
+            return
         if isinstance(value, dict):
             ref = value.get("$ref")
             if isinstance(ref, str) and ref.startswith("#/$defs/"):
@@ -158,8 +308,7 @@ def _slim_output_schema(schema: dict[str, Any]) -> dict[str, Any]:
                 if name not in reachable and name in definitions:
                     reachable.add(name)
                     visit(definitions[name])
-            for item in value.values():
-                visit(item)
+            map_schema_children(value, visit)
         elif isinstance(value, list):
             for item in value:
                 visit(item)
