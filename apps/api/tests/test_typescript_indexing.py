@@ -665,7 +665,7 @@ def test_typescript_rule_upgrade_changes_index_identity_and_preserves_v1_snapsho
     status, project = request(application, "POST", "/api/projects", {"name": "TypeScript v1", "repository_id": "ts"})
     assert status == 200
     project_id = project["project_id"]
-    monkeypatch.setattr(service_module, "INDEX_BUILD_IDENTITY_VERSION", "relations-v12")
+    monkeypatch.setattr(service_module, "INDEX_BUILD_IDENTITY_VERSION", "relations-v17")
     status, old_result = request(
         application,
         "POST",
@@ -682,10 +682,10 @@ def test_typescript_rule_upgrade_changes_index_identity_and_preserves_v1_snapsho
         old_hash = old_row["snapshot_hash"]
         store.connection.execute(
             "UPDATE index_snapshots SET rules_version = ? WHERE index_id = ?",
-            ("source-v3+python-3.13+typescript-5.9.3+typescript-facts-v3+relations-v12", old_index_id),
+            ("source-v4+python-3.13+typescript-5.9.3+typescript-facts-v5+relations-v13", old_index_id),
         )
 
-    monkeypatch.setattr(service_module, "INDEX_BUILD_IDENTITY_VERSION", "relations-v13")
+    monkeypatch.setattr(service_module, "INDEX_BUILD_IDENTITY_VERSION", "relations-v18")
     status, upgraded = request(
         application,
         "POST",
@@ -705,7 +705,9 @@ def test_typescript_rule_upgrade_changes_index_identity_and_preserves_v1_snapsho
             (new_index_id,),
         ).fetchone()
         assert preserved["snapshot_hash"] == old_hash
-        assert "typescript-facts-v3" in preserved["rules_version"]
+        assert preserved["rules_version"].endswith("+relations-v13")
+        assert "typescript-facts-v5" in preserved["rules_version"]
+        assert current["rules_version"].endswith("+relations-v14")
         assert "typescript-facts-v5" in current["rules_version"]
         assert store.read_evidence(old_index_id, "web/api.ts", 1, 1).excerpt.startswith("const apiBaseUrl")
 

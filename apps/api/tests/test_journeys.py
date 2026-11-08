@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import shutil
+from dataclasses import replace
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -23,7 +24,7 @@ from app.main import create_app
 from app.journeys import _extract_ui_facts, build_journey_catalog, build_project_journey
 from app.mcp_server import _mcp_journey_response
 from app.overview import build_project_overview
-from app.relations import extract_relations
+from app.relations import HTTP_REQUEST_FACTS_INCOMPLETE_REASON, extract_relations
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -100,7 +101,7 @@ def _codetrail_source_relation():
         dirty=True,
         snapshot_hash=snapshot_hash,
         status="ready",
-        rules_version="in-memory-source-test+typescript-facts-v5",
+        rules_version="in-memory-source-test+typescript-facts-v5+relations-v14",
     )
     snapshot = SourceSnapshot(index=index, files=tuple(files), issues=())
     relation = extract_relations(extract_definitions(snapshot), max_seconds=8)
@@ -126,7 +127,12 @@ def _codetrail_source_relation():
     return relation, read_evidence
 
 
-def _preferences_source_relation():
+def _preferences_source_relation(
+    *,
+    extra_python_paths: tuple[str, ...] = (),
+    max_edges: int | None = None,
+    max_seconds: float = 8,
+):
     fixture_root = ROOT / "fixtures" / "repos" / "preferences-demo"
     files = []
     for path in sorted(fixture_root.rglob("*")):
@@ -143,6 +149,23 @@ def _preferences_source_relation():
                 text=text,
             )
         )
+    for path in extra_python_paths:
+        source = "\n".join(
+            [*(f"def target_{number}() -> None: pass" for number in range(12)),
+             "def flood() -> None:",
+             *(f"    target_{number}()" for number in range(12)),
+             ""]
+        )
+        raw = source.encode("utf-8")
+        files.append(
+            SnapshotFile(
+                path=path,
+                size=len(raw),
+                content_hash=hashlib.sha256(raw).hexdigest(),
+                text=source,
+            )
+        )
+    files.sort(key=lambda item: item.path)
     snapshot_hash = hashlib.sha256("".join(item.content_hash for item in files).encode()).hexdigest()
     index = IndexSnapshot(
         index_id="journey-preferences-test",
@@ -151,10 +174,15 @@ def _preferences_source_relation():
         dirty=True,
         snapshot_hash=snapshot_hash,
         status="ready",
-        rules_version="in-memory-source-test+typescript-facts-v5",
+        rules_version="in-memory-source-test+typescript-facts-v5+relations-v14",
     )
     snapshot = SourceSnapshot(index=index, files=tuple(files), issues=())
-    relation = extract_relations(extract_definitions(snapshot), max_seconds=8)
+    definitions = extract_definitions(snapshot)
+    relation = extract_relations(
+        definitions,
+        max_seconds=max_seconds,
+        **({} if max_edges is None else {"max_edges": max_edges}),
+    )
     file_by_path = {item.path: item for item in files}
 
     def read_evidence(index_id: str, path: str, start_line: int, end_line: int) -> Evidence:
@@ -175,6 +203,275 @@ def _preferences_source_relation():
         )
 
     return relation, read_evidence
+
+
+def _typescript_client_relation(*, flood_path: str, max_edges: int | None, reverse_paths: bool = False):
+    sources = {
+        "ui/settings.tsx": '''import { savePreferences } from "../lib/api";
+
+export function Settings() {
+  function save() { void savePreferences(); }
+  return <button onClick={save}>Save</button>;
+}
+''',
+        "lib/api.ts": '''const apiBaseUrl = "";
+
+function requestJson(path: string, validator: (value: unknown) => boolean, init: RequestInit = {}) {
+  const { timeoutMs, ...requestInit } = init;
+  void timeoutMs;
+  void validator;
+  return fetch(`${apiBaseUrl}${path}`, { ...requestInit });
+}
+
+export function savePreferences() {
+  return requestJson("/api/preferences", (value) => Boolean(value), { method: "POST" });
+}
+''',
+        "lib/unrelated.ts": '''const apiBaseUrl = "";
+
+function requestJson(path: string, validator: (value: unknown) => boolean, init: RequestInit = {}) {
+  const { timeoutMs, ...requestInit } = init;
+  void timeoutMs;
+  void validator;
+  return fetch(`${apiBaseUrl}${path}`, { ...requestInit });
+}
+
+export function loadProfile() {
+  return requestJson("/api/profile", (value) => Boolean(value));
+}
+''',
+        "server.py": '''from fastapi import FastAPI
+
+app = FastAPI()
+
+@app.post("/api/preferences")
+def save_preferences():
+    return {"ok": True}
+
+@app.get("/api/profile")
+def get_profile():
+    return {"name": "Ada"}
+''',
+        flood_path: "\n".join(
+            [*(f"def target_{number}(): pass" for number in range(20)),
+             "def flood():", *(f"    target_{number}()" for number in range(20)), ""]
+        ),
+    }
+    files = []
+    for path, text in sources.items():
+        raw = text.encode("utf-8")
+        files.append(SnapshotFile(
+            path=path,
+            size=len(raw),
+            content_hash=hashlib.sha256(raw).hexdigest(),
+            text=text,
+        ))
+    files.sort(key=lambda item: item.path)
+    if reverse_paths:
+        files.reverse()
+    snapshot_hash = hashlib.sha256("".join(sorted(item.content_hash for item in files)).encode()).hexdigest()
+    index = IndexSnapshot(
+        index_id="journey-typescript-client-test",
+        repository_id="journey-typescript-client-test",
+        revision="source-test",
+        dirty=True,
+        snapshot_hash=snapshot_hash,
+        status="ready",
+        rules_version="in-memory-source-test+typescript-facts-v5+relations-v14",
+    )
+    relation = extract_relations(
+        extract_definitions(SourceSnapshot(index=index, files=tuple(files), issues=())),
+        max_seconds=8,
+        **({} if max_edges is None else {"max_edges": max_edges}),
+    )
+    file_by_path = {item.path: item for item in files}
+
+    def read_evidence(index_id: str, path: str, start_line: int, end_line: int) -> Evidence:
+        source = file_by_path[path]
+        identity = f"{index_id}\0{path}\0{start_line}\0{end_line}\0{source.content_hash}"
+        return Evidence(
+            evidence_id=f"evidence-{hashlib.sha256(identity.encode()).hexdigest()[:32]}",
+            index_id=index_id,
+            path=path,
+            start_line=start_line,
+            end_line=end_line,
+            excerpt="\n".join(source.text.splitlines()[start_line - 1 : end_line]),
+            content_hash=source.content_hash,
+            kind="source",
+        )
+
+    return relation, read_evidence
+
+
+@pytest.mark.parametrize("flood_path", ("00_generated_edges.py", "zz_generated_edges.py"))
+def test_typescript_call_path_survives_python_flood_and_is_path_order_independent(flood_path: str) -> None:
+    unlimited, read_evidence = _typescript_client_relation(flood_path=flood_path, max_edges=None)
+    limited, _ = _typescript_client_relation(flood_path=flood_path, max_edges=8)
+    reordered, _ = _typescript_client_relation(flood_path=flood_path, max_edges=8, reverse_paths=True)
+    unlimited_overview = build_project_overview("journey-typescript-client-test", unlimited, read_evidence)
+    limited_overview = build_project_overview("journey-typescript-client-test", limited, read_evidence)
+    reordered_overview = build_project_overview("journey-typescript-client-test", reordered, read_evidence)
+    unlimited_catalog, _ = build_journey_catalog("journey-typescript-client-test", unlimited, unlimited_overview)
+    limited_catalog, _ = build_journey_catalog("journey-typescript-client-test", limited, limited_overview)
+    reordered_catalog, _ = build_journey_catalog("journey-typescript-client-test", reordered, reordered_overview)
+
+    expected_ids = [item.journey_id for item in unlimited_catalog.journeys]
+    assert len(expected_ids) == 1
+    assert [item.journey_id for item in limited_catalog.journeys] == expected_ids
+    assert [item.journey_id for item in reordered_catalog.journeys] == expected_ids
+    assert [edge.edge_id for edge in limited.edges] == [edge.edge_id for edge in reordered.edges]
+    assert limited.truncated is True
+
+
+def test_truncated_typescript_call_path_reports_unreachable_action_count() -> None:
+    relation, read_evidence = _typescript_client_relation(
+        flood_path="00_generated_edges.py", max_edges=1
+    )
+    overview = build_project_overview("journey-typescript-client-test", relation, read_evidence)
+    catalog, _specs = build_journey_catalog("journey-typescript-client-test", relation, overview)
+
+    assert catalog.journeys == []
+    limitations = [item for item in catalog.coverage.limitations if "关系边预算" in item]
+    assert len(limitations) == 1
+    assert "1 个带 handler 且没有 HTTP 旅程的操作" in limitations[0]
+    assert "可能" in limitations[0]
+
+
+def test_truncated_typescript_call_path_does_not_count_actions_with_http_journeys() -> None:
+    relation, read_evidence = _typescript_client_relation(
+        flood_path="00_generated_edges.py", max_edges=8
+    )
+    overview = build_project_overview("journey-typescript-client-test", relation, read_evidence)
+    catalog, _specs = build_journey_catalog("journey-typescript-client-test", relation, overview)
+
+    assert relation.truncated is True
+    assert len(catalog.journeys) == 1
+    assert not any("关系边预算" in item for item in catalog.coverage.limitations)
+
+
+@pytest.mark.parametrize("generated_path", ("00_generated_edges.py", "zz_generated_edges.py"))
+def test_edge_budget_preserves_http_facts_associations_and_journey_ids(generated_path: str) -> None:
+    unlimited, read_evidence = _preferences_source_relation(extra_python_paths=(generated_path,))
+    limited, _ = _preferences_source_relation(extra_python_paths=(generated_path,), max_edges=1)
+    unlimited_overview = build_project_overview("preferences-demo", unlimited, read_evidence)
+    limited_overview = build_project_overview("preferences-demo", limited, read_evidence)
+    unlimited_catalog, _ = build_journey_catalog("preferences-demo", unlimited, unlimited_overview)
+    limited_catalog, _ = build_journey_catalog("preferences-demo", limited, limited_overview)
+
+    assert unlimited.http_client_requests
+    assert any(edge.source_location.path == generated_path for edge in unlimited.edges)
+    assert limited.http_client_requests == unlimited.http_client_requests
+    assert [item.model_dump() for item in limited_overview.http_associations] == [
+        item.model_dump() for item in unlimited_overview.http_associations
+    ]
+    assert limited_overview.http_association_coverage.client_request_count == (
+        unlimited_overview.http_association_coverage.client_request_count
+    )
+    assert limited_overview.http_association_coverage.analysis_status == (
+        unlimited_overview.http_association_coverage.analysis_status
+    )
+    assert limited_overview.http_association_coverage.analysis_status == "complete"
+    assert [item.journey_id for item in limited_catalog.journeys] == [
+        item.journey_id for item in unlimited_catalog.journeys
+    ]
+    assert limited.truncated is True
+    assert limited_catalog.coverage.relation_truncated is True
+    assert any("关系索引扫描未完成" in item for item in limited_catalog.coverage.limitations)
+    assert limited_catalog.coverage.http_association_status == "complete"
+
+
+@pytest.mark.parametrize("legacy_version", ("relations-v11", "relations-v12"))
+def test_legacy_truncated_relations_report_incomplete_http_journey_coverage(
+    legacy_version: str,
+) -> None:
+    relation, read_evidence = _preferences_source_relation()
+    index = relation.snapshot.index.model_copy(
+        update={
+            "rules_version": (
+                f"in-memory-source-test+typescript-facts-v5+{legacy_version}"
+            )
+        }
+    )
+    legacy_relation = replace(
+        relation,
+        definitions=replace(
+            relation.definitions,
+            snapshot=replace(relation.snapshot, index=index),
+        ),
+        truncated=True,
+        truncation_reason="max_edges reached while collecting contextual calls",
+        http_client_requests=(),
+    )
+
+    overview = build_project_overview("preferences-demo", legacy_relation, read_evidence)
+    catalog, _specs = build_journey_catalog("preferences-demo", legacy_relation, overview)
+
+    assert overview.http_association_coverage.client_request_count == 0
+    assert overview.http_association_coverage.analysis_status == "incomplete"
+    assert catalog.coverage.http_association_status == "incomplete"
+    assert any(
+        "HTTP method/path association 覆盖不完整" in item
+        for item in catalog.coverage.limitations
+    )
+
+
+def test_python_only_project_has_no_actions_and_is_not_truncated() -> None:
+    fixture_root = ROOT / "fixtures" / "repos" / "timeout-demo"
+    files = []
+    for path in sorted(fixture_root.rglob("*.py")):
+        raw = path.read_bytes()
+        files.append(
+            SnapshotFile(
+                path=path.relative_to(fixture_root).as_posix(),
+                size=len(raw),
+                content_hash=hashlib.sha256(raw).hexdigest(),
+                text=raw.decode("utf-8"),
+            )
+        )
+    snapshot_hash = hashlib.sha256("".join(item.content_hash for item in files).encode()).hexdigest()
+    index = IndexSnapshot(
+        index_id="journey-python-only-test",
+        repository_id="timeout-demo",
+        revision="source-test",
+        dirty=True,
+        snapshot_hash=snapshot_hash,
+        status="ready",
+        rules_version="in-memory-source-test",
+    )
+    relation = extract_relations(extract_definitions(SourceSnapshot(index=index, files=tuple(files), issues=())))
+    file_by_path = {item.path: item for item in files}
+
+    def read_evidence(index_id: str, path: str, start_line: int, end_line: int) -> Evidence:
+        source = file_by_path[path]
+        identity = f"{index_id}\0{path}\0{start_line}\0{end_line}\0{source.content_hash}"
+        return Evidence(
+            evidence_id=f"evidence-{hashlib.sha256(identity.encode()).hexdigest()[:32]}",
+            index_id=index_id,
+            path=path,
+            start_line=start_line,
+            end_line=end_line,
+            excerpt="\n".join(source.text.splitlines()[start_line - 1 : end_line]),
+            content_hash=source.content_hash,
+            kind="source",
+        )
+
+    overview = build_project_overview("timeout-demo", relation, read_evidence)
+
+    catalog, _specs = build_journey_catalog("timeout-demo", relation, overview)
+
+    assert catalog.journeys == []
+    assert catalog.coverage.action_count == 0
+    assert catalog.coverage.truncated is False
+    assert catalog.coverage.relation_truncated is False
+
+
+def test_relation_deadline_marks_http_request_facts_incomplete() -> None:
+    relation, _read_evidence = _preferences_source_relation(max_seconds=1e-12)
+
+    assert relation.truncated is True
+    assert relation.truncation_reason is not None
+    assert HTTP_REQUEST_FACTS_INCOMPLETE_REASON in relation.truncation_reason
+    assert relation.http_client_requests == ()
 
 
 def _preferences_journey_catalog():

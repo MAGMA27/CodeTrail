@@ -37,7 +37,12 @@ from .indexing import (
     SubsystemSpec,
     parse_subsystem_manifest,
 )
-from .relations import RelationIndex, relation_coverage_limitations
+from .relations import (
+    HTTP_REQUEST_FACTS_COMPLETE_FROM_RELATION_VERSION,
+    HTTP_REQUEST_FACTS_INCOMPLETE_REASON,
+    RelationIndex,
+    relation_coverage_limitations,
+)
 
 
 RULES_VERSION = "python-entry-v7+http-shape-v2+architecture-v1"
@@ -73,6 +78,18 @@ _UNKNOWN_BINDING = "unknown"
 
 
 EvidenceReader = Callable[[str, str, int, int], Evidence]
+
+
+def _http_request_facts_complete(relation: RelationIndex) -> bool:
+    if not relation.truncated:
+        return True
+    rules_version = relation.snapshot.index.rules_version or ""
+    match = re.search(r"(?:^|\+)relations-v(\d+)(?:\+|$)", rules_version)
+    return (
+        match is not None
+        and int(match.group(1)) >= HTTP_REQUEST_FACTS_COMPLETE_FROM_RELATION_VERSION
+        and HTTP_REQUEST_FACTS_INCOMPLETE_REASON not in (relation.truncation_reason or "")
+    )
 
 
 @dataclass(frozen=True)
@@ -523,7 +540,11 @@ def build_project_overview(
             "not_analyzed"
             if path_analysis == "not_analyzed"
             else "incomplete"
-            if index.status != "ready" or relation.truncated or relation.unresolved_truncated is True or entry_candidates_truncated
+            if (
+                index.status != "ready"
+                or not _http_request_facts_complete(relation)
+                or entry_candidates_truncated
+            )
             else "complete"
         ),
         path_analysis=path_analysis,

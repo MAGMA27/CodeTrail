@@ -128,6 +128,7 @@ def build_journey_catalog(
             request_destinations.append((association, client, route))
 
     journey_limit_reached = False
+    relation_budget_hidden_action_keys: set[tuple[str, int, str]] = set()
     for action in actions:
         action_key = (
             str(action["path"]),
@@ -204,6 +205,17 @@ def build_journey_catalog(
                 break
         if journey_limit_reached:
             break
+        # An unrelated client is expected to be unreachable from most handlers.
+        # Only flag an action when no associated HTTP client produced a journey.
+        if handlers and action_key not in http_action_keys:
+            relation_budget_hidden_action_keys.add(action_key)
+
+    if relation.truncated and relation_budget_hidden_action_keys:
+        if len(limitations) >= 20:
+            limitations = limitations[:19]
+        limitations.append(
+            f"关系索引已截断，{len(relation_budget_hidden_action_keys)} 个带 handler 且没有 HTTP 旅程的操作可能因关系边预算而未显示。"
+        )
 
     use_local_action_facts = "+typescript-facts-v6" in (relation.snapshot.index.rules_version or "")
     if use_local_action_facts and not journey_limit_reached:
