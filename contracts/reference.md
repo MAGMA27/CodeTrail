@@ -6,7 +6,7 @@
 
 ## 职责与范围
 
-[contracts.py](../apps/api/app/contracts.py) 定义 Project/Index、`IndexFreshness`/`IndexRefreshResponse`、Session、fixture/real/external Run、RunInput、预算、`IssueModelOutput`、公开事件、allowlisted ToolResult、Report、证据/图、MCP envelope 和请求/响应的字段与校验；freshness 契约区分 `consistent`、`changed`、`unknown`、扫描不完整和变化路径列表截断，refresh 契约区分复用与新建且绑定同一基准 index。概览入口的 `fastapi_route` 变体要求方法、声明路径、处理函数 symbol 与同快照范围，`OverviewGroup` 表示 HTTP 路径/源码目录静态组织，`OverviewModuleRelation` 表示同快照可映射的 imports/calls 聚合和代表 `CodeEdge`。旧 Python 入口仍可省略路由字段。[export_schema.py](../apps/api/app/export_schema.py) 生成 [codetrail.json](schemas/codetrail.json)；HTTP 路由和前端分别拥有传输与消费编排。
+[contracts.py](../apps/api/app/contracts.py) 定义 Project/Index、`IndexFreshness`/`IndexRefreshResponse`、Session、fixture/real/external Run、RunInput、预算、`IssueModelOutput`、公开事件、allowlisted ToolResult、Report、证据/图、MCP envelope 和请求/响应的字段与校验；freshness 契约区分 `consistent`、`changed`、`unknown`、扫描不完整和变化路径列表截断，refresh 契约区分复用与新建且绑定同一基准 index。概览入口包含可静态确认的 Python packaging entry point；其 evidence 与 `target_symbol` 指向同快照目标定义，rule_id 区分 scripts、gui-scripts、entry-points group 与 Poetry scripts。`fastapi_route` 变体要求方法、声明路径、处理函数 symbol 与同快照范围，`OverviewGroup` 表示 HTTP 路径/源码目录静态组织，`OverviewModuleRelation` 表示同快照可映射的 imports/calls 聚合和代表 `CodeEdge`。旧 Python 入口仍可省略路由字段。[export_schema.py](../apps/api/app/export_schema.py) 生成 [codetrail.json](schemas/codetrail.json)；HTTP 路由和前端分别拥有传输与消费编排。
 
 后台任务使用 `JobStatusResponse` 表示 job 身份、归属、阶段、有限 attempt 历史、结果摘要、错误和 `merged_into`；`JobAttempt` 表示一次执行的时间、重试次数和阶段。任务状态不与 ImportAttempt 状态混用，具体轮询/取消路由与生命周期见 [API 说明](../apps/api/api.md)。
 

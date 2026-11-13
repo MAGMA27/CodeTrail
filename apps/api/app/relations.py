@@ -38,7 +38,7 @@ RELATION_FACT_EXTRACTION_RULES_VERSION = "python-relation-facts-v6"
 _RELATION_FACTS_FORMAT_VERSION = "relation-facts-v6"
 # This namespace is part of generated immutable index IDs. Bump it when source
 # boundaries or build rules can change an index with the same content hash.
-INDEX_BUILD_IDENTITY_VERSION = "relations-v18"
+INDEX_BUILD_IDENTITY_VERSION = "relations-v19"
 HTTP_REQUEST_FACTS_INCOMPLETE_REASON = "HTTP request facts incomplete"
 
 # Relation budgets. Defaults come from measured full extractions (see

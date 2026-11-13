@@ -10,6 +10,8 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import app.service as service_module
+from app.contracts import CreateProjectIndexRequest, CreateProjectRequest
+from app.indexing import extract_definitions
 from app.main import create_app
 
 
@@ -112,7 +114,7 @@ def test_overview_identifies_main_rules_paths_and_stays_on_snapshot(tmp_path: Pa
     )
     assert status == 200
     assert overview["entry_status"] == "identified"
-    assert overview["rules_version"] == "python-entry-v7+http-shape-v2+architecture-v1"
+    assert overview["rules_version"] == "python-entry-v8+http-shape-v2+architecture-v1"
     assert {entry["kind"] for entry in overview["entries"]} == {
         "python_main_module",
         "python_main_guard",
@@ -157,6 +159,44 @@ def test_overview_identifies_main_rules_paths_and_stays_on_snapshot(tmp_path: Pa
     )
     assert status == 200
     assert old_snapshot == overview
+
+
+def test_legacy_source_v4_relations_v18_overview_without_pyproject_stays_available(
+    tmp_path: Path,
+) -> None:
+    repository = _copy_fixture(tmp_path)
+    application = create_app({"timeout-demo": repository})
+    workspace = application.state.workspace_service
+    index_service = application.state.index_service
+    index_service.rules_version = index_service.rules_version.replace(
+        "source-v5", "source-v4"
+    ).replace("+relations-v19", "+relations-v18")
+    project = workspace.create_project(
+        CreateProjectRequest(name="Legacy overview", repository_id="timeout-demo")
+    )
+    created = workspace._create_project_index(
+        project.project_id,
+        CreateProjectIndexRequest(revision="legacy-v4-v18", dirty=True),
+        expected_latest_index_id=None,
+        identity_version="relations-v18",
+    )
+    (repository / "pyproject.toml").write_text(
+        '[project.scripts]\ncodetrail = "timeout_demo.__main__:main"\n',
+        encoding="utf-8",
+    )
+
+    status, overview = request(
+        application,
+        "GET",
+        f"/api/projects/{project.project_id}/indexes/{created.index.index_id}/overview",
+    )
+
+    assert status == 200
+    assert overview["rules_version"] == "python-entry-v8+http-shape-v2+architecture-v1"
+    assert all(entry["kind"] != "python_packaging_entry" for entry in overview["entries"])
+    assert not any("pyproject.toml entry point 声明未解析" in note for note in overview["notes"])
+    assert created.index.rules_version.startswith("source-v4+")
+    assert "relations-v18" in created.index.index_id
 
 
 def test_overview_cache_is_bounded_keyed_and_scoped(tmp_path: Path, monkeypatch) -> None:
@@ -690,7 +730,7 @@ def test_overview_invalidates_skipped_bindings_without_cross_scope_pollution(tmp
         ("GET", "/outer"),
         ("GET", "/before-star"),
     }
-    assert overview["rules_version"] == "python-entry-v7+http-shape-v2+architecture-v1"
+    assert overview["rules_version"] == "python-entry-v8+http-shape-v2+architecture-v1"
     assert overview["http_association_coverage"]["analysis_status"] == "complete"
 
 
@@ -1090,6 +1130,101 @@ def test_overview_keeps_cycles_bounded_without_inventing_edges(tmp_path: Path) -
     assert len(overview["paths"]) <= 40
 
 
+def test_overview_resolves_packaging_entry_points_from_nested_pyprojects(tmp_path: Path) -> None:
+    repository = tmp_path / "packaging-demo"
+    project = repository / "services" / "sample"
+    package = project / "app"
+    src_package = project / "src" / "app"
+    package.mkdir(parents=True)
+    src_package.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (src_package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "cli.py").write_text(
+        "def main():\n    return 0\n\nclass Runner:\n    def run(self):\n        return 1\n",
+        encoding="utf-8",
+    )
+    (src_package / "gui.py").write_text("def launch():\n    return None\n", encoding="utf-8")
+    (package / "plugin.py").write_text(
+        "class Plugin:\n    def start(self):\n        return None\n",
+        encoding="utf-8",
+    )
+    (package / "legacy.py").write_text("def main():\n    return None\n", encoding="utf-8")
+    (package / "ui.ts").write_text("export function render(): void {}\n", encoding="utf-8")
+    long_entry_name = "x" * 600
+    (project / "pyproject.toml").write_text(
+        "[project.scripts]\n"
+        'codetrail = "app.cli:main [fast]"\n'
+        "non-string = 23\n"
+        f'"{long_entry_name}" = "app.cli:main"\n'
+        "[project.gui-scripts]\n"
+        'sample-gui = "app.gui:launch"\n'
+        '[project.entry-points."codetrail.plugins"]\n'
+        'sample-plugin = "app.plugin:Plugin.start"\n'
+        "[tool.poetry.scripts]\n"
+        'legacy = "app.legacy:main"\n'
+        'missing-module = "app.missing:main"\n'
+        'missing-attr = "app.cli:not_here"\n'
+        'malformed = "not a target"\n',
+        encoding="utf-8",
+    )
+    malformed = repository / "broken" / "pyproject.toml"
+    malformed.parent.mkdir()
+    malformed.write_text("[project.scripts\n", encoding="utf-8")
+
+    application = create_app({"packaging-demo": repository})
+    project_id, index_id = _create_index(application, "Packaging demo", "packaging-demo")
+    status, overview = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/indexes/{index_id}/overview",
+    )
+
+    assert status == 200
+    packaging_entries = [
+        entry for entry in overview["entries"] if entry["kind"] == "python_packaging_entry"
+    ]
+    assert {entry["label"] for entry in packaging_entries} == {
+        "Python packaging entry codetrail (services/sample/pyproject.toml)",
+        "Python packaging entry sample-gui (services/sample/pyproject.toml)",
+        "Python packaging entry sample-plugin (codetrail.plugins) (services/sample/pyproject.toml)",
+        "Python packaging entry legacy (services/sample/pyproject.toml)",
+    }
+    targets = {entry["label"]: entry for entry in packaging_entries}
+    assert targets["Python packaging entry codetrail (services/sample/pyproject.toml)"]["path"] == "services/sample/app/cli.py"
+    assert targets["Python packaging entry codetrail (services/sample/pyproject.toml)"]["target_symbol"]["qualified_name"] == (
+        "services.sample.app.cli.main"
+    )
+    assert targets["Python packaging entry sample-gui (services/sample/pyproject.toml)"]["path"] == "services/sample/src/app/gui.py"
+    assert targets["Python packaging entry sample-plugin (codetrail.plugins) (services/sample/pyproject.toml)"]["evidence"]["excerpt"] == (
+        "    def start(self):\n        return None"
+    )
+    assert all(entry["symbol_id"] and entry["evidence"] for entry in packaging_entries)
+    assert any(
+        note == "5 条 pyproject.toml entry point 声明未解析到快照内定义，未列为入口。"
+        for note in overview["notes"]
+    )
+    assert all(not module["symbol"]["path"].endswith("pyproject.toml") for module in overview["modules"])
+    assert all(not entry["path"].endswith("pyproject.toml") for entry in overview["entries"])
+    workspace = application.state.workspace_service
+    with application.state.registry.store_for_repository("packaging-demo") as store:
+        indexed = store.load_index(index_id)
+        snapshot_files, _issues = store.load_snapshot_manifest(index_id)
+        assert "services/sample/pyproject.toml" in {item.path for item in snapshot_files}
+        assert all(not symbol.path.endswith("pyproject.toml") for symbol in indexed.symbols)
+        definitions = extract_definitions(indexed.definitions.snapshot)
+        assert definitions.ast_parse_count == sum(item.path.endswith(".py") for item in snapshot_files)
+        assert definitions.typescript_parse_file_count == sum(
+            item.path.lower().endswith((".ts", ".tsx")) for item in snapshot_files
+        )
+        assert all(
+            not item.path.endswith("pyproject.toml")
+            for item in store.search_symbols(index_id, "codetrail")
+        )
+    journeys = workspace.get_journey_catalog(project_id, index_id)
+    assert journeys.index.index_id == index_id
+    assert all(not journey.action_path.endswith("pyproject.toml") for journey in journeys.journeys)
+
+
 def test_overview_marks_pluggy_hookimpls_as_entries_without_trusting_shadowed_markers(
     tmp_path: Path,
 ) -> None:
@@ -1181,4 +1316,4 @@ def test_overview_marks_pluggy_hookimpls_as_entries_without_trusting_shadowed_ma
     )
     assert not any(entry["path"] == "demo/spoof.py" for entry in overview["entries"])
     assert not any(entry["path"] == "demo/hooks.py" for entry in overview["entries"])
-    assert overview["rules_version"].startswith("python-entry-v7+")
+    assert overview["rules_version"].startswith("python-entry-v8+")

@@ -336,7 +336,7 @@ type GraphUi = {
   onSelectContextualCallEvidence: (call: ContextualCall, location: SourceLocation) => void;
   codeHasCycle: boolean;
   httpChain: { association: OverviewHttpAssociation; handler: SymbolRecord } | null;
-  entryCallChain: { entry: OverviewEntryPoint; root: SymbolRecord; startKind: "handler" | "module" } | null;
+  entryCallChain: { entry: OverviewEntryPoint; root: SymbolRecord; startKind: "handler" | "target" | "module" } | null;
   entryTrace: {
     focusId: string;
     focusSymbol: SymbolRecord;
@@ -1314,7 +1314,7 @@ function overviewEntryModule(overview: ProjectOverview, entry: OverviewEntryPoin
   return architectureEntryModule(overview, entry);
 }
 
-function overviewEntryStart(overview: ProjectOverview, entry: OverviewEntryPoint): { root: SymbolRecord; startKind: "handler" | "module" } | null {
+function overviewEntryStart(overview: ProjectOverview, entry: OverviewEntryPoint): { root: SymbolRecord; startKind: "handler" | "target" | "module" } | null {
   const indexId = overview.index.index_id;
   if (entry.index_id !== indexId) return null;
   if (entry.kind === "fastapi_route") {
@@ -1323,12 +1323,18 @@ function overviewEntryStart(overview: ProjectOverview, entry: OverviewEntryPoint
       ? { root: handler, startKind: "handler" }
       : null;
   }
+  if (entry.kind === "python_packaging_entry") {
+    const target = entry.target_symbol;
+    return target?.index_id === indexId && target.path === entry.path && target.symbol_id === entry.symbol_id && ["function", "class"].includes(target.kind)
+      ? { root: target, startKind: "target" }
+      : null;
+  }
   const module = overviewEntryModule(overview, entry);
   return module ? { root: module.symbol, startKind: "module" } : null;
 }
 
 function overviewEntryKindLabel(entry: OverviewEntryPoint): string {
-  return entry.kind === "fastapi_route" ? "HTTP 入口" : entry.kind === "python_main_module" ? "Python 启动文件" : entry.kind === "pluggy_hookimpl" ? "pluggy 插件钩子" : "Python 启动块";
+  return entry.kind === "fastapi_route" ? "HTTP 入口" : entry.kind === "python_main_module" ? "Python 启动文件" : entry.kind === "pluggy_hookimpl" ? "pluggy 插件钩子" : entry.kind === "python_packaging_entry" ? "Python packaging 入口" : "Python 启动块";
 }
 
 const classificationLabels = {
@@ -1861,7 +1867,7 @@ function ArchitectureSection({ overview, knowledge, graph, panelMode, onPanelMod
           {focusedGroup && selectedArchitectureGroup && selectedArchitectureGroup.group_id !== focusedGroup.group_id ? <button type="button" className="ct-architecture-action is-primary" onClick={() => focusArchitectureGroup(selectedArchitectureGroup)}>切换到所选分组</button> : null}
           {focusedGroup ? <button type="button" className="ct-architecture-action" onClick={returnToOverview}>返回项目总览</button> : null}
           {focusedEntry ? <span className="ct-architecture-focus-status" role="status" title={`${focusedEntry.path}:L${focusedEntry.start_line}–L${focusedEntry.end_line}`}>
-            当前入口 · {overviewEntryKindLabel(focusedEntry)} · {focusedEntryStart?.startKind === "handler" ? "handler 起点" : focusedEntryStart ? "模块起点" : "起点未解析"} · {focusedEntryStart?.root.qualified_name ?? focusedEntry.path}
+            当前入口 · {overviewEntryKindLabel(focusedEntry)} · {focusedEntryStart?.startKind === "handler" ? "handler 起点" : focusedEntryStart?.startKind === "target" ? "目标定义起点" : focusedEntryStart ? "模块起点" : "起点未解析"} · {focusedEntryStart?.root.qualified_name ?? focusedEntry.path}
           </span> : null}
           <button type="button" className="ct-architecture-action is-quiet" onClick={resetArchitecture}>重置画布</button>
         </div>
@@ -2908,7 +2914,7 @@ function GraphPanel({ graph }: { graph: GraphUi }) {
           <p>客户端函数只作入口锚点；入口图初始从该 handler 查询同一 index 的静态 calls，最多向下 2 层、40 个符号。选中节点后可按该符号查询 callers/callees 的一跳关系。深度之外、未解析或未提取的关系不会补猜。</p>
         </div> : null}
         {graph.entryCallChain ? <div className="ct-entry-call-context">
-          <div><small>{overviewEntryKindLabel(graph.entryCallChain.entry)} · {graph.entryCallChain.startKind === "handler" ? "handler 起点" : "模块起点"}</small><strong title={graph.entryCallChain.root.qualified_name}>{graph.entryCallChain.root.qualified_name}</strong><code>{graph.entryCallChain.root.path}:L{graph.entryCallChain.root.start_line}–L{graph.entryCallChain.root.end_line}</code></div>
+          <div><small>{overviewEntryKindLabel(graph.entryCallChain.entry)} · {graph.entryCallChain.startKind === "handler" ? "handler 起点" : graph.entryCallChain.startKind === "target" ? "目标定义起点" : "模块起点"}</small><strong title={graph.entryCallChain.root.qualified_name}>{graph.entryCallChain.root.qualified_name}</strong><code>{graph.entryCallChain.root.path}:L{graph.entryCallChain.root.start_line}–L{graph.entryCallChain.root.end_line}</code></div>
           <p>入口图初始查询此起点向下 2 层、最多 40 个符号的同快照静态 calls；后续可从选中符号追踪 callers/callees 一跳关系。模块入口从模块符号起查；没有可解析 handler 时不补造入口函数。静态可达不代表运行时必然执行，也不表示数据流。</p>
           <div><button type="button" className="ct-link-button" onClick={graph.onSelectEntryChainSource} disabled={!graph.entryCallChain.entry.evidence}>查看入口源码</button></div>
         </div> : null}
