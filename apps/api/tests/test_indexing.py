@@ -191,6 +191,27 @@ def test_oversized_subsystem_manifest_is_non_blocking_and_not_read(tmp_path: Pat
     assert issue.size == SUBSYSTEM_MANIFEST_MAX_BYTES + 1
 
 
+def test_pyproject_metadata_is_captured_but_not_parsed_as_source(tmp_path: Path) -> None:
+    package = tmp_path / "app"
+    package.mkdir()
+    (package / "cli.py").write_text("def main():\n    return 0\n", encoding="utf-8")
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text('[project.scripts]\ncli = "app.cli:main"\n', encoding="utf-8")
+
+    snapshot = build_source_snapshot(tmp_path, repository_id="pyproject-metadata")
+    definitions = extract_definitions(snapshot)
+
+    metadata = next(item for item in snapshot.files if item.path == "pyproject.toml")
+    assert 'cli = "app.cli:main"' in metadata.text
+    assert snapshot.index.status == "ready"
+    assert all(symbol.path != "pyproject.toml" for symbol in definitions.symbols)
+
+    pyproject.write_text('[project.scripts]\ncli = "app.cli:other"\n', encoding="utf-8")
+    changed = build_source_snapshot(tmp_path, repository_id="pyproject-metadata")
+    assert changed.index.snapshot_hash != snapshot.index.snapshot_hash
+    assert changed.index.index_id != snapshot.index.index_id
+
+
 def test_relation_rule_identity_separates_same_source_snapshot(tmp_path: Path) -> None:
     source = tmp_path / "module.py"
     source.write_text("def first() -> str:\n    return 'same'\n", encoding="utf-8")

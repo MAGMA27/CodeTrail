@@ -193,7 +193,7 @@ type HttpEntryChain = {
 type OverviewEntryCallChain = {
   entry: OverviewEntryPoint;
   root: SymbolRecord;
-  startKind: "handler" | "module";
+  startKind: "handler" | "target" | "module";
 };
 
 type GraphViewport = { x: number; y: number; zoom: number };
@@ -3987,9 +3987,16 @@ export default function Workbench() {
       const indexId = indexResponse.index.index_id;
       if (overview.project_id !== selectedProjectId || overview.index.index_id !== indexId || entry.index_id !== indexId) return;
       const module = architectureEntryModule(overview, entry);
-      const root = entry.kind === "fastapi_route" ? entry.handler_symbol : module?.symbol;
-      const startKind = entry.kind === "fastapi_route" ? "handler" : "module";
-      if (!root || root.index_id !== indexId || (entry.kind === "fastapi_route" && (root.kind !== "function" || root.path !== entry.path)) || (entry.kind !== "fastapi_route" && root.kind !== "module")) return;
+      const root = entry.kind === "fastapi_route"
+        ? entry.handler_symbol
+        : entry.kind === "python_packaging_entry"
+          ? entry.target_symbol
+          : module?.symbol;
+      const startKind = entry.kind === "fastapi_route" ? "handler" : entry.kind === "python_packaging_entry" ? "target" : "module";
+      if (!root || root.index_id !== indexId) return;
+      if (entry.kind === "fastapi_route" && (root.kind !== "function" || root.path !== entry.path)) return;
+      if (entry.kind === "python_packaging_entry" && ((root.kind !== "function" && root.kind !== "class") || root.path !== entry.path || root.symbol_id !== entry.symbol_id)) return;
+      if (entry.kind !== "fastapi_route" && entry.kind !== "python_packaging_entry" && root.kind !== "module") return;
       const callChain: OverviewEntryCallChain = { entry, root, startKind };
       selectSymbol(root);
       setSelectedOverviewEntryId(entry.entry_point_id);

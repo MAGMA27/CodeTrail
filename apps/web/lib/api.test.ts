@@ -542,6 +542,30 @@ test("project overview validator accepts a FastAPI route while preserving legacy
   assert.equal(isProjectOverviewResponse(routeOverview), false);
 });
 
+test("project overview validator binds packaging entries to their resolved target", () => {
+  const packagingOverview = structuredClone(overview()) as unknown as {
+    entries: Array<Record<string, unknown>>;
+    modules: Array<{ symbol: Record<string, unknown> }>;
+  } & Record<string, unknown>;
+  packagingOverview.entries[0] = {
+    ...packagingOverview.entries[0],
+    kind: "python_packaging_entry",
+    symbol_id: functionId,
+    target_symbol: {
+      ...packagingOverview.modules[0].symbol,
+      symbol_id: functionId,
+      qualified_name: "pkg.__main__.main",
+      kind: "function",
+      start_line: 2,
+      end_line: 2,
+    },
+  };
+  assert.equal(isProjectOverviewResponse(packagingOverview), true);
+
+  (packagingOverview.entries[0].target_symbol as Record<string, unknown>).symbol_id = "other-symbol";
+  assert.equal(isProjectOverviewResponse(packagingOverview), false);
+});
+
 test("neighbor validator keeps query and index truncation states separate", () => {
   const symbol = {
     symbol_id: "symbol-neighbor",

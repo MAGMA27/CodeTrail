@@ -30,6 +30,11 @@ export function architectureEntryModule(overview: ProjectOverview, entry: Overvi
       module.index_id === indexId && module.symbol.index_id === indexId && module.symbol.kind === "module" && module.symbol.path === entry.path,
     ) ?? null;
   }
+  if (entry.kind === "python_packaging_entry") {
+    return overview.modules.find((module) =>
+      module.index_id === indexId && module.symbol.index_id === indexId && module.symbol.kind === "module" && module.symbol.path === entry.path,
+    ) ?? null;
+  }
   return overview.modules.find((module) =>
     module.index_id === indexId && module.symbol.index_id === indexId && module.symbol.kind === "module" && module.symbol.path === entry.path &&
     (module.module_id === entry.symbol_id || module.symbol.symbol_id === entry.symbol_id),
@@ -41,7 +46,7 @@ export function summarizeArchitectureEntries(
   entriesById: ReadonlyMap<string, OverviewEntryPoint>,
   unmappedEntryPointIds: ReadonlySet<string> = new Set(),
 ): ArchitectureEntryCounts {
-  const counts: ArchitectureEntryCounts = { fastapi_route: 0, python_main_module: 0, python_main_guard: 0, pluggy_hookimpl: 0, unreturned: 0, unmapped: 0 };
+  const counts: ArchitectureEntryCounts = { fastapi_route: 0, python_main_module: 0, python_main_guard: 0, pluggy_hookimpl: 0, python_packaging_entry: 0, unreturned: 0, unmapped: 0 };
   for (const entryPointId of new Set(entryPointIds)) {
     const entry = entriesById.get(entryPointId);
     if (entry && unmappedEntryPointIds.has(entryPointId)) counts.unmapped += 1;
@@ -57,6 +62,7 @@ export function architectureEntrySummary(counts: ArchitectureEntryCounts): strin
     counts.python_main_module > 0 ? `Python启动文件 ${counts.python_main_module}` : null,
     counts.python_main_guard > 0 ? `__main__启动块 ${counts.python_main_guard}` : null,
     counts.pluggy_hookimpl > 0 ? `pluggy插件钩子 ${counts.pluggy_hookimpl}` : null,
+    counts.python_packaging_entry > 0 ? `Python packaging 入口 ${counts.python_packaging_entry}` : null,
     counts.unmapped > 0 ? `入口模块未映射 ${counts.unmapped}` : null,
     counts.unreturned > 0 ? `入口明细未返回 ${counts.unreturned}` : null,
   ].filter((item): item is string => item !== null).join(" · ");

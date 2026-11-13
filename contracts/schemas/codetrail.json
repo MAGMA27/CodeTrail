@@ -27800,7 +27800,7 @@
         },
         "OverviewEntryPoint": {
           "additionalProperties": false,
-          "description": "One rule-supported Python or FastAPI entry candidate in an immutable snapshot.",
+          "description": "One rule-supported application entry candidate in an immutable snapshot.",
           "properties": {
             "declared_path": {
               "anyOf": [
@@ -27904,7 +27904,8 @@
                 "python_main_module",
                 "python_main_guard",
                 "fastapi_route",
-                "pluggy_hookimpl"
+                "pluggy_hookimpl",
+                "python_packaging_entry"
               ],
               "title": "Kind",
               "type": "string"
@@ -27945,6 +27946,17 @@
               ],
               "default": null,
               "title": "Symbol Id"
+            },
+            "target_symbol": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Symbol"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             },
             "unresolved_ids": {
               "items": {
@@ -30104,7 +30116,7 @@
         },
         "OverviewEntryPoint": {
           "additionalProperties": false,
-          "description": "One rule-supported Python or FastAPI entry candidate in an immutable snapshot.",
+          "description": "One rule-supported application entry candidate in an immutable snapshot.",
           "properties": {
             "declared_path": {
               "anyOf": [
@@ -30208,7 +30220,8 @@
                 "python_main_module",
                 "python_main_guard",
                 "fastapi_route",
-                "pluggy_hookimpl"
+                "pluggy_hookimpl",
+                "python_packaging_entry"
               ],
               "title": "Kind",
               "type": "string"
@@ -30250,6 +30263,17 @@
               "default": null,
               "title": "Symbol Id"
             },
+            "target_symbol": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Symbol"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
             "unresolved_ids": {
               "items": {
                 "maxLength": 200,
@@ -30287,7 +30311,8 @@
                 "python_main_module",
                 "python_main_guard",
                 "fastapi_route",
-                "pluggy_hookimpl"
+                "pluggy_hookimpl",
+                "python_packaging_entry"
               ],
               "title": "Kind",
               "type": "string"
@@ -43644,7 +43669,7 @@
         }
       },
       "additionalProperties": false,
-      "description": "One rule-supported Python or FastAPI entry candidate in an immutable snapshot.",
+      "description": "One rule-supported application entry candidate in an immutable snapshot.",
       "properties": {
         "declared_path": {
           "anyOf": [
@@ -43748,7 +43773,8 @@
             "python_main_module",
             "python_main_guard",
             "fastapi_route",
-            "pluggy_hookimpl"
+            "pluggy_hookimpl",
+            "python_packaging_entry"
           ],
           "title": "Kind",
           "type": "string"
@@ -43789,6 +43815,17 @@
           ],
           "default": null,
           "title": "Symbol Id"
+        },
+        "target_symbol": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Symbol"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "unresolved_ids": {
           "items": {
@@ -45584,7 +45621,7 @@
         },
         "OverviewEntryPoint": {
           "additionalProperties": false,
-          "description": "One rule-supported Python or FastAPI entry candidate in an immutable snapshot.",
+          "description": "One rule-supported application entry candidate in an immutable snapshot.",
           "properties": {
             "declared_path": {
               "anyOf": [
@@ -45688,7 +45725,8 @@
                 "python_main_module",
                 "python_main_guard",
                 "fastapi_route",
-                "pluggy_hookimpl"
+                "pluggy_hookimpl",
+                "python_packaging_entry"
               ],
               "title": "Kind",
               "type": "string"
@@ -45729,6 +45767,17 @@
               ],
               "default": null,
               "title": "Symbol Id"
+            },
+            "target_symbol": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Symbol"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
             },
             "unresolved_ids": {
               "items": {

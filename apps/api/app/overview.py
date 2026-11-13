@@ -8,7 +8,13 @@ import re
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from typing import Callable, Mapping
+from pathlib import PurePosixPath
+from typing import Callable, Iterator, Mapping
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10
+    import tomli as tomllib
 
 from .contracts import (
     CodeEdge,
@@ -45,7 +51,7 @@ from .relations import (
 )
 
 
-RULES_VERSION = "python-entry-v7+http-shape-v2+architecture-v1"
+RULES_VERSION = "python-entry-v8+http-shape-v2+architecture-v1"
 DEFAULT_MAX_DEPTH = 4
 DEFAULT_MAX_PATHS = 40
 DEFAULT_MAX_MODULES = 100
@@ -55,6 +61,7 @@ DEFAULT_MAX_SECONDS = 2.0
 DEFAULT_MAX_CLASSIFICATIONS = 200
 _MAX_EVIDENCE_LINES = 200
 _MAX_ENTRY_CANDIDATES = 200
+_MAX_PACKAGING_DECLARATIONS = 1_000
 _MAX_RELATION_EDGE_SAMPLES = 8
 _MAX_HTTP_ASSOCIATIONS = 100
 _MAX_CLASSIFICATION_ITEMS = 200
@@ -105,10 +112,13 @@ class _EntryCandidate:
     http_method: str | None = None
     declared_path: str | None = None
     handler_symbol: Symbol | None = None
+    identity_hint: str | None = None
 
     @property
     def entry_point_id(self) -> str:
         identity_parts = [RULES_VERSION, self.path, self.kind, self.rule_id]
+        if self.identity_hint is not None:
+            identity_parts.append(self.identity_hint)
         if self.kind == "fastapi_route":
             identity_parts.extend(
                 [
@@ -200,7 +210,9 @@ def build_project_overview(
     for references in unresolved_by_source.values():
         references.sort(key=lambda item: (item.start_line, item.end_line, item.unresolved_id))
 
-    candidates, entry_candidates_truncated = _find_entry_candidates(relation, deadline)
+    candidates, entry_candidates_truncated, packaging_unresolved_count = _find_entry_candidates(
+        relation, deadline
+    )
     entries: list[OverviewEntryPoint] = []
     paths: list[OverviewPath] = []
     reachable_symbol_ids: set[str] = set()
@@ -269,6 +281,11 @@ def build_project_overview(
                 http_method=candidate.http_method,  # type: ignore[arg-type]
                 declared_path=candidate.declared_path,
                 handler_symbol=candidate.handler_symbol,
+                target_symbol=(
+                    root
+                    if candidate.kind == "python_packaging_entry"
+                    else None
+                ),
                 evidence=evidence,
                 evidence_error=evidence_error,
                 direct_symbol_ids=[],
@@ -340,20 +357,24 @@ def build_project_overview(
     if not candidates and not _deadline_reached(deadline):
         notes = [
             "未识别入口；这不表示项目没有入口。",
-            "当前规则覆盖 __main__.py、顶层 __name__ == __main__ 条件、可静态确认的 FastAPI 路由，以及 pluggy hookimpl 标记或与快照内 hookspec 同名的插件钩子。",
+            "当前规则覆盖 __main__.py、顶层 __name__ == __main__ 条件、可静态确认的 FastAPI 路由、pluggy hookimpl，以及 pyproject.toml 中可解析到快照定义的 Python packaging entry points。",
         ]
     else:
         notes = [
-            "当前规则覆盖 __main__.py、顶层 __name__ == __main__ 条件、可静态确认的 FastAPI 路由，以及 pluggy hookimpl 标记或与快照内 hookspec 同名的插件钩子。",
+            "当前规则覆盖 __main__.py、顶层 __name__ == __main__ 条件、可静态确认的 FastAPI 路由、pluggy hookimpl，以及 pyproject.toml 中可解析到快照定义的 Python packaging entry points。",
             (
                 "FastAPI 入口显示声明路径；未解析 APIRouter、挂载前缀或动态注册，因此不能视为最终 URL。"
                 if has_fastapi_routes
                 else "FastAPI 入口仅接受已知 FastAPI 实例、字面量路径和静态方法；未识别路由不表示项目没有入口。"
             ),
-            "pluggy 钩子由运行时 pm.hook 分发，入口只表示可能被插件管理器调用；pyproject/setup.cfg/setup.py entry-points 元数据和运行时 register 尚未纳入入口规则。",
+            "pluggy 钩子由运行时 pm.hook 分发，入口只表示可能被插件管理器调用；静态 packaging 规则只读取 pyproject.toml，不覆盖 setup.cfg/setup.py 或运行时 register。",
         ]
     if cycle_skipped:
         notes.append("循环调用只保留首次有界路径，未继续展开循环。")
+    if packaging_unresolved_count:
+        notes.append(
+            f"{packaging_unresolved_count} 条 pyproject.toml entry point 声明未解析到快照内定义，未列为入口。"
+        )
     if relation.unresolved_truncated is None:
         notes.extend(unresolved_limitations)
 
@@ -1652,7 +1673,7 @@ def _source_directory_key(path: str) -> str:
 def _find_entry_candidates(
     relation: RelationIndex,
     deadline: float,
-) -> tuple[list[_EntryCandidate], bool]:
+) -> tuple[list[_EntryCandidate], bool, int]:
     candidates: list[_EntryCandidate] = []
     symbols_by_path = {
         symbol.path: symbol
@@ -1737,6 +1758,13 @@ def _find_entry_candidates(
                     guard=True,
                 )
             )
+    packaging_candidates, packaging_scan_truncated, packaging_unresolved_count = _find_packaging_entry_candidates(
+        relation.snapshot.files,
+        relation.symbols,
+        symbols_by_path,
+        deadline,
+    )
+    candidates.extend(packaging_candidates)
     candidates.sort(
         key=lambda item: (
             item.path,
@@ -1744,6 +1772,7 @@ def _find_entry_candidates(
             item.end_line,
             item.kind,
             item.rule_id,
+            item.identity_hint or "",
             item.http_method or "",
             item.declared_path or "",
             item.symbol_id,
@@ -1760,12 +1789,149 @@ def _find_entry_candidates(
             candidate.declared_path or "",
             candidate.handler_symbol.symbol_id if candidate.handler_symbol is not None else candidate.symbol_id,
             str(candidate.start_line),
+            candidate.identity_hint or "",
         )
         if key in seen:
             continue
         seen.add(key)
         unique_candidates.append(candidate)
-    return unique_candidates[:_MAX_ENTRY_CANDIDATES], len(unique_candidates) > _MAX_ENTRY_CANDIDATES
+    return (
+        unique_candidates[:_MAX_ENTRY_CANDIDATES],
+        packaging_scan_truncated or len(unique_candidates) > _MAX_ENTRY_CANDIDATES,
+        packaging_unresolved_count,
+    )
+
+
+def _find_packaging_entry_candidates(
+    snapshot_files: tuple[SnapshotFile, ...],
+    symbols: tuple[Symbol, ...],
+    modules_by_path: Mapping[str, Symbol],
+    deadline: float,
+) -> tuple[list[_EntryCandidate], bool, int]:
+    python_paths = {path for path in modules_by_path if path.lower().endswith(".py")}
+    symbols_by_path: dict[str, list[Symbol]] = defaultdict(list)
+    for symbol in symbols:
+        symbols_by_path[symbol.path].append(symbol)
+    candidates: list[_EntryCandidate] = []
+    declarations_seen = 0
+    unresolved_count = 0
+    for metadata in sorted(snapshot_files, key=lambda item: item.path):
+        if _deadline_reached(deadline):
+            return candidates, True, unresolved_count
+        if PurePosixPath(metadata.path).name != "pyproject.toml":
+            continue
+        try:
+            document = tomllib.loads(metadata.text)
+        except (tomllib.TOMLDecodeError, RecursionError, ValueError):
+            unresolved_count = min(_MAX_PACKAGING_DECLARATIONS, unresolved_count + 1)
+            continue
+        for section, entry_name, target_text, group_name in _packaging_entry_declarations(document):
+            if _deadline_reached(deadline):
+                return candidates, True, unresolved_count
+            declarations_seen += 1
+            if declarations_seen > _MAX_PACKAGING_DECLARATIONS:
+                return candidates, True, unresolved_count
+            if not isinstance(entry_name, str) or not isinstance(target_text, str):
+                unresolved_count = min(_MAX_PACKAGING_DECLARATIONS, unresolved_count + 1)
+                continue
+            parsed = _parse_packaging_target(target_text)
+            if parsed is None:
+                unresolved_count = min(_MAX_PACKAGING_DECLARATIONS, unresolved_count + 1)
+                continue
+            module_name, target_name = parsed
+            target_path = _resolve_packaging_module(metadata.path, module_name, python_paths)
+            module = modules_by_path.get(target_path or "")
+            if module is None:
+                unresolved_count = min(_MAX_PACKAGING_DECLARATIONS, unresolved_count + 1)
+                continue
+            prefix = f"{module.qualified_name}."
+            matching = [
+                symbol
+                for symbol in symbols_by_path.get(target_path, [])
+                if symbol.kind in {"function", "class"}
+                and symbol.qualified_name.startswith(prefix)
+                and symbol.qualified_name[len(prefix) :] == target_name
+            ]
+            if len(matching) != 1:
+                unresolved_count = min(_MAX_PACKAGING_DECLARATIONS, unresolved_count + 1)
+                continue
+            target = matching[0]
+            label = (
+                f"Python packaging entry {entry_name}"
+                + (f" ({group_name})" if group_name else "")
+                + f" ({metadata.path})"
+            )
+            if len(label) > 500:
+                continue
+            candidates.append(
+                _EntryCandidate(
+                    path=target.path,
+                    start_line=target.start_line,
+                    end_line=target.end_line,
+                    kind="python_packaging_entry",
+                    rule_id=section,
+                    label=label,
+                    symbol_id=target.symbol_id,
+                    guard=False,
+                    identity_hint=f"{metadata.path}:{group_name or ''}:{entry_name}",
+                )
+            )
+            if len(candidates) > _MAX_ENTRY_CANDIDATES:
+                return candidates, True, unresolved_count
+    return candidates, False, unresolved_count
+
+
+def _packaging_entry_declarations(
+    document: object,
+) -> Iterator[tuple[str, object, object, str | None]]:
+    if not isinstance(document, dict):
+        return
+    project = document.get("project")
+    tool = document.get("tool")
+    poetry = tool.get("poetry") if isinstance(tool, dict) else None
+    def add(section: str, table: object, group_name: str | None = None) -> Iterator[tuple[str, object, object, str | None]]:
+        if not isinstance(table, dict):
+            return
+        for name, target in table.items():
+            yield section, name, target, group_name
+
+    if isinstance(project, dict):
+        yield from add("python.packaging.project.scripts", project.get("scripts"))
+        yield from add("python.packaging.project.gui_scripts", project.get("gui-scripts"))
+        groups = project.get("entry-points")
+        if isinstance(groups, dict):
+            for group_name, table in groups.items():
+                if isinstance(group_name, str):
+                    yield from add("python.packaging.project.entry_points", table, group_name)
+    if isinstance(poetry, dict):
+        yield from add("python.packaging.poetry.scripts", poetry.get("scripts"))
+
+
+def _parse_packaging_target(value: str) -> tuple[str, str] | None:
+    target = re.sub(
+        r"\s+\[[A-Za-z0-9_.-]+(?:\s*,\s*[A-Za-z0-9_.-]+)*\]\s*$",
+        "",
+        value,
+    ).strip()
+    match = re.fullmatch(
+        r"([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*):([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)",
+        target,
+    )
+    return (match.group(1), match.group(2)) if match is not None else None
+
+
+def _resolve_packaging_module(
+    pyproject_path: str,
+    module_name: str,
+    python_paths: set[str],
+) -> str | None:
+    parent = list(PurePosixPath(pyproject_path).parent.parts)
+    module_parts = module_name.split(".")
+    base = "/".join((*parent, *module_parts))
+    src_base = "/".join((*parent, "src", *module_parts))
+    candidates = (f"{base}.py", f"{base}/__init__.py", f"{src_base}.py", f"{src_base}/__init__.py")
+    matches = list(dict.fromkeys(path for path in candidates if path in python_paths))
+    return matches[0] if len(matches) == 1 else None
 
 
 def _find_fastapi_route_candidates(

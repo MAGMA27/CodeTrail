@@ -664,13 +664,14 @@ export type OverviewEntryPoint = {
   entry_point_id: string;
   index_id: string;
   path: string;
-  kind: "python_main_module" | "python_main_guard" | "fastapi_route" | "pluggy_hookimpl";
+  kind: "python_main_module" | "python_main_guard" | "fastapi_route" | "pluggy_hookimpl" | "python_packaging_entry";
   rule_id: string;
   label: string;
   symbol_id: string | null;
   http_method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | "HEAD" | "TRACE" | null;
   declared_path?: string | null;
   handler_symbol?: SymbolRecord | null;
+  target_symbol?: SymbolRecord | null;
   evidence: Evidence | null;
   evidence_error: string | null;
   direct_symbol_ids: string[];
@@ -2411,15 +2412,27 @@ function isOverviewEntryPoint(value: unknown): value is OverviewEntryPoint {
       (value.declared_path === undefined || value.declared_path === null) &&
       (value.handler_symbol === undefined || value.handler_symbol === null)
     );
+  const packagingTargetValid = kind === "python_packaging_entry"
+    ? (
+      isSymbolRecord(value.target_symbol) &&
+      ["function", "class"].includes(value.target_symbol.kind) &&
+      value.target_symbol.index_id === value.index_id &&
+      value.target_symbol.path === value.path &&
+      value.target_symbol.symbol_id === value.symbol_id &&
+      value.target_symbol.start_line >= value.start_line &&
+      value.target_symbol.end_line <= value.end_line
+    )
+    : value.target_symbol === undefined || value.target_symbol === null;
   return (
     isString(value.entry_point_id) &&
     isString(value.index_id) &&
     isString(value.path) &&
-    ["python_main_module", "python_main_guard", "fastapi_route", "pluggy_hookimpl"].includes(kind) &&
+    ["python_main_module", "python_main_guard", "fastapi_route", "pluggy_hookimpl", "python_packaging_entry"].includes(kind) &&
     isString(value.rule_id) &&
     isString(value.label) &&
     (value.symbol_id === null || isString(value.symbol_id)) &&
     routeFieldsValid &&
+    packagingTargetValid &&
     (value.evidence === null || isEvidence(value.evidence)) &&
     (value.evidence_error === null || isString(value.evidence_error)) &&
     isStringArray(value.direct_symbol_ids) &&

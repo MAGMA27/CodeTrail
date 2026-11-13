@@ -685,7 +685,7 @@ def test_typescript_rule_upgrade_changes_index_identity_and_preserves_v1_snapsho
             ("source-v4+python-3.13+typescript-5.9.3+typescript-facts-v5+relations-v13", old_index_id),
         )
 
-    monkeypatch.setattr(service_module, "INDEX_BUILD_IDENTITY_VERSION", "relations-v18")
+    monkeypatch.setattr(service_module, "INDEX_BUILD_IDENTITY_VERSION", "relations-v19")
     status, upgraded = request(
         application,
         "POST",

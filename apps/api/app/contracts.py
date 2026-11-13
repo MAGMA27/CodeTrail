@@ -2012,7 +2012,13 @@ class RunImpactSummaryResponse(VersionedModel):
         return self
 
 
-OverviewEntryKind: TypeAlias = Literal["python_main_module", "python_main_guard", "fastapi_route", "pluggy_hookimpl"]
+OverviewEntryKind: TypeAlias = Literal[
+    "python_main_module",
+    "python_main_guard",
+    "fastapi_route",
+    "pluggy_hookimpl",
+    "python_packaging_entry",
+]
 OverviewHttpMethod: TypeAlias = Literal[
     "GET",
     "POST",
@@ -2127,7 +2133,7 @@ class OverviewClassification(ContractModel):
 
 
 class OverviewEntryPoint(LineRangeModel):
-    """One rule-supported Python or FastAPI entry candidate in an immutable snapshot."""
+    """One rule-supported application entry candidate in an immutable snapshot."""
 
     entry_point_id: Identifier
     index_id: Identifier
@@ -2139,6 +2145,7 @@ class OverviewEntryPoint(LineRangeModel):
     http_method: OverviewHttpMethod | None = None
     declared_path: str | None = Field(default=None, min_length=1, max_length=2_000)
     handler_symbol: Symbol | None = None
+    target_symbol: Symbol | None = None
     evidence: Evidence | None = None
     evidence_error: str | None = Field(default=None, max_length=1_000)
     direct_symbol_ids: list[Identifier] = Field(default_factory=list)
@@ -2161,6 +2168,8 @@ class OverviewEntryPoint(LineRangeModel):
         if self.kind == "fastapi_route":
             if self.http_method is None or self.declared_path is None or self.handler_symbol is None:
                 raise ValueError("FastAPI route entries must include method, declared path, and handler symbol")
+            if self.target_symbol is not None:
+                raise ValueError("FastAPI route entries cannot include a packaging target symbol")
             if not self.declared_path.startswith("/"):
                 raise ValueError("FastAPI route declared paths must start with '/'")
             if self.symbol_id != self.handler_symbol.symbol_id:
@@ -2173,8 +2182,27 @@ class OverviewEntryPoint(LineRangeModel):
                 or self.handler_symbol.end_line > self.end_line
             ):
                 raise ValueError("FastAPI route handler must belong to the entry source range")
-        elif self.http_method is not None or self.declared_path is not None or self.handler_symbol is not None:
-            raise ValueError("non-route overview entries cannot include FastAPI route fields")
+        elif self.kind == "python_packaging_entry":
+            target = self.target_symbol
+            if target is None or self.symbol_id != target.symbol_id:
+                raise ValueError("Python packaging entries must identify their resolved target symbol")
+            if (
+                target.index_id != self.index_id
+                or target.path != self.path
+                or target.kind not in {"function", "class"}
+                or target.start_line < self.start_line
+                or target.end_line > self.end_line
+            ):
+                raise ValueError("Python packaging target must belong to the entry source range")
+            if self.http_method is not None or self.declared_path is not None or self.handler_symbol is not None:
+                raise ValueError("Python packaging entries cannot include FastAPI route fields")
+        elif (
+            self.http_method is not None
+            or self.declared_path is not None
+            or self.handler_symbol is not None
+            or self.target_symbol is not None
+        ):
+            raise ValueError("non-route overview entries cannot include route or packaging target fields")
         if len(set(self.direct_symbol_ids)) != len(self.direct_symbol_ids):
             raise ValueError("overview entry direct symbols must be unique")
         if len(set(self.unresolved_ids)) != len(self.unresolved_ids):
