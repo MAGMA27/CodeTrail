@@ -1,12 +1,59 @@
 # CodeTrail
 
-理解项目结构，追踪代码关系，用源码证据调查 Issue。
+理解项目结构、追踪代码关系，并用源码证据调查 Issue。CodeTrail 为项目和 Session 提供共享索引、架构知识页及可展开的代码视图；调查结果会关联固定索引、源码证据和影响范围。
 
-CodeTrail 提供项目工作区和可展开的架构画布；Codex 可以通过 MCP 参与调查，结果实时显示在网页中。项目共享代码索引，不同 Session 各自保存问题、执行记录和结论。
+[![CI](https://github.com/MAGMA27/CodeTrail/actions/workflows/ci.yml/badge.svg)](https://github.com/MAGMA27/CodeTrail/actions/workflows/ci.yml) [![Documentation and contracts](https://github.com/MAGMA27/CodeTrail/actions/workflows/docs.yml/badge.svg)](https://github.com/MAGMA27/CodeTrail/actions/workflows/docs.yml)
 
 ## 快速开始
 
-需要 Node.js、pnpm、uv 和 Python 3.10–3.13。克隆仓库后，在仓库根目录执行以下命令（Windows PowerShell）：
+安装 Docker 和 Docker Compose 后，在仓库根目录运行：
+
+```sh
+docker compose up --build
+```
+
+打开 [http://localhost:3000](http://localhost:3000)。API 位于 `http://localhost:8000`。停止服务可按 `Ctrl+C`。
+
+Compose 默认网络为 `192.168.253.0/24`；启动前用 `ip route` 检查是否与现有路由重叠，如需更换，可在仓库根目录 `.env` 设置 `CODETRAIL_COMPOSE_SUBNET`。
+
+## 产品界面
+
+![项目知识页：固定快照状态、快照搜索、入口候选统计和项目功能](docs/design/workspace-ui-production/screenshots/desktop-knowledge-1440.png)
+
+项目知识页展示固定快照状态、快照搜索、入口候选统计和项目功能。
+
+![Session 页面：消息和输入框](docs/design/workspace-ui-production/screenshots/desktop-session-1440.png)
+
+Session 页面展示会话消息和输入框。
+
+![源码证据面板：文件、行号范围和源码](docs/design/workspace-ui-production/screenshots/desktop-evidence-1440.png)
+
+证据面板展示文件位置、行号范围和对应源码。
+
+## 能做什么
+
+- 为 Python、TypeScript 和 TSX 项目建立索引，浏览项目结构、符号及保守静态代码关系。
+- 在知识页查看职责和模块，按需展开代码并查看源码行号证据。
+- 保存项目 Session 与消息，通过 Codex MCP 发起 Issue 调查，查看执行过程、调查报告和证据。
+- 浏览报告候选关联的静态影响范围；静态可达不等于已确认影响，报告也不代替运行时复现。
+
+浏览层级：**项目 → 职责/目录 → 模块 → 符号 → 源码**。
+
+动态调用或无法解析的关系会保留为未知。CodeGraph 和 Archify 是设计参考，当前不是 CodeTrail 的集成依赖。
+
+## 运行模式
+
+Web 通过 HTTP 使用 FastAPI API；MCP server 是独立的 stdio 入口，并复用相同的应用服务。
+
+轻量模式不设置 `CODETRAIL_REDIS_URL`：API 使用 SQLite 保存任务状态，并由进程内线程执行后台任务；周期扫描器会重新调度排队任务，并处理租约过期的运行任务。进程退出期间没有 worker 执行任务，进程崩溃后的恢复不作保证。
+
+完整模式通过 `CODETRAIL_REDIS_URL` 连接 Redis，由 arq 队列分发任务。在 Compose 外，在 API 和 worker 环境中设置该变量，并运行 `codetrail worker`；仓库根目录的 Docker Compose 会启动 Redis、API、worker 和 Web。任务状态及项目数据保存在共享 SQLite 数据卷，Redis 队列使用启用 AOF 的持久卷；PostgreSQL 尚未接入。
+
+HTTP Real Run 默认关闭：在 `~/.config/codetrail/settings.json` 设置 `"real_run_enabled": true` 可启用；Compose 可在根目录 `.env` 设置 `CODETRAIL_REAL_RUN_ENABLED=1`。启用后，已保存的 Session 消息和有界源码证据会发送给配置的模型供应商，可能产生费用。
+
+## Windows 手动启动
+
+需要 Node.js、pnpm、uv 和 Python 3.10–3.13。在仓库根目录的 PowerShell 终端中运行：
 
 ```powershell
 pnpm install --frozen-lockfile
@@ -15,79 +62,37 @@ codetrail init
 codetrail api
 ```
 
-另开一个终端，在仓库根目录启动网页：
+另开一个终端启动网页：
 
 ```powershell
 pnpm web:dev
 ```
 
-打开 [localhost:3000](http://localhost:3000)。初始化会生成本地配置，已有配置和项目数据保持不变。若找不到 `codetrail` 命令，执行 `uv tool update-shell` 后重新打开终端。
+打开 [http://localhost:3000](http://localhost:3000)。若找不到 `codetrail` 命令，运行 `uv tool update-shell` 后重新打开终端。
 
-## 使用项目工作区
+## 调查流程
 
-### 导入项目
-
-点击左侧“+ 新建”，填写名称，选择本地目录或公开 GitHub 仓库。GitHub 导入默认开启；等待索引完成后打开项目。
-
-首次初始化默认允许导入当前目录。要导入其他本地目录，按[本地路径配置](apps/api/mcp.md)添加允许的目录。
-
-### 浏览架构
-
-打开项目知识页，从职责或目录总览开始：
-
-- 展开容器查看模块，折叠回整体视图。
-- 选中模块查看函数、类及局部关系。
-- 点击入口、公共 API 或扩展点的证据，查看源码与行号。
-
-浏览层级为 **项目 → 职责/目录 → 模块 → 符号 → 源码**。使用聚焦和过滤查看相关部分，避免一次展开整份代码库。
-
-### 用 Codex 调查 Issue
-
-先连接一次 MCP（需要 Codex CLI）：
+导入本地项目或公开 GitHub 仓库，等待索引完成后打开项目知识页。连接 Codex MCP（需要 Codex CLI）：
 
 ```powershell
 codetrail install
 ```
 
-重连 MCP 或重启 Codex 客户端后：
+首次初始化仅允许导入当前目录；要导入其他本地目录，按[本地路径配置](apps/api/mcp.md)添加允许路径。在工作台创建 Session 并保存 Issue，然后在 Codex 中发出调查请求，例如：
 
-1. 在工作台选择项目，新建 Session，输入并保存 Issue。
-2. 在 Codex 中要求调查该项目和 Session，例如：
+> 使用 CodeTrail MCP 调查“我的项目”中刚保存 Issue 的 Session。核对项目和固定索引，创建调查 Run，给出问题位置、源码证据和影响范围；证据不足时明确说明。
 
-   > 使用 CodeTrail MCP 调查“我的项目”中刚保存 Issue 的 Session。核对项目和固定索引，创建调查 Run，给出问题位置、源码证据和影响范围；证据不足时明确说明。
+调查不会因保存消息自动启动。CodeTrail MCP 复用工作区中的项目和固定索引，结果可在 Session 页面查看；此流程不需要额外配置模型供应商密钥。
 
-3. 保持 Session 页面打开，查看实时工具调用、调查报告和源码证据。
-4. 从候选位置打开影响范围，继续浏览相关代码。
+源码变化后，在索引管理中检查并显式更新索引；旧 Session 和报告仍关联原代码快照。项目、消息和报告会持久化，切换或刷新后可继续查看。
 
-网页保存消息不会自动启动 Codex；需要在 Codex 中发出调查请求。使用这条流程无需额外配置模型供应商密钥。其他分析模式见[运行说明](apps/api/execution.md)。
+## 文档与开发
 
-### 更新与继续调查
-
-源码变化后，在索引管理中点击“检查更新”，再显式更新索引。旧 Session 和报告继续保留原代码快照；分析新版本时创建新的 Session。
-
-项目、消息和报告会持久化，切换或刷新后可继续查看。停止服务时，在 API 和网页终端按 `Ctrl+C`。
-
-## 当前能力
-
-支持 Python、TypeScript/TSX 的定义、导入和保守静态调用分析，以及架构聚合、源码钻取和有证据的 Issue 调查。
-
-动态调用与无法解析的关系会保留为未知。静态可达不等于已确认影响，报告也不代替运行时复现。CodeGraph/Archify 是设计参考，当前并非完整复现。
-
-## 当前架构与演进规划
-
-当前 Web 工作台通过 HTTP 使用 FastAPI API，MCP server 作为独立 stdio 入口复用应用服务。GitHub 导入/重试/清理重试、GitHub 刷新与索引重建以后台 job 提交；默认轻量模式使用 SQLite 和 API 进程内线程执行，不提供进程崩溃恢复保证。完整模式设置 `CODETRAIL_REDIS_URL` 并启动 `codetrail worker`，或使用仓库根目录 `docker compose up --build` 启动 Redis、API、worker 和 Web；任务事实仍保存在共享 SQLite 数据卷。HTTP 真实模型 Run 默认关闭，可在 `~/.config/codetrail/settings.json` 设置 `"real_run_enabled": true` 并重启 `codetrail api`；Compose 使用根目录 `.env` 中的 `CODETRAIL_REAL_RUN_ENABLED=1` 开启。开启后会发送已保存的 Session 消息和有界源码证据给配置的模型供应商，可能产生费用。Compose 当前不包含 PostgreSQL，PR 3 再引入 PostgreSQL/Alembic。Redis 分布式协调与缓存仍属 PR 2；[后端基础设施演进提案](docs/decisions/2026-10-28-backend-infrastructure-evolution.md)保持 proposed，实施细节与验证状态见 API/Web 就近文档。
-
-### Docker Compose
-
-Compose 默认使用 `192.168.253.0/24` 作为私有网络，该不常见的高位 192.168 子网比常见家庭路由网段更少冲突；启动前仍应在宿主机运行 `ip route` 检查路由，并确保没有重叠。可在仓库根目录 `.env` 中设置 `CODETRAIL_COMPOSE_SUBNET` 覆盖它；同一值同时配置 Compose 网络和 API 本地写接口信任的客户端网段。`NEXT_PUBLIC_API_BASE_URL` 与 `NEXT_PUBLIC_GITHUB_REQUEST_TIMEOUT_MS` 在 Web 镜像构建时传入，后者默认 30000 毫秒，与源码默认值一致。
-
-## 配置与开发
-
-- [项目理解产品目标规范](docs/design/product-understanding-spec.md)：核心功能、MVP 边界与面向用户的通过标准；不代表当前全部实现。
-- [CLI、共享配置与 MCP](apps/api/mcp.md)：允许导入路径、编译器、GitHub token、模型配置和故障排查。
+- [CLI、共享配置与 MCP](apps/api/mcp.md)
+- [Run 执行与限制](apps/api/execution.md)
 - [工作台说明](apps/web/workbench.md) · [API 说明](apps/api/README.md)
-- [开发者联合操作流程](docs/mvp-operation.md) · [MVP 验收清单](docs/mvp-acceptance.md)
-- [样本与离线演示](fixtures/README.md) · [评测](evals/README.md)
-- [开发规范](AGENTS.md) · [设计决策](docs/decisions/README.md) · [子系统导航](docs/subsystems/README.md)
+- [产品目标规范](docs/design/product-understanding-spec.md) · [开发者操作流程](docs/mvp-operation.md) · [MVP 验收清单](docs/mvp-acceptance.md)
+- [样本与离线演示](fixtures/README.md) · [评测](evals/README.md) · [设计决策](docs/decisions/README.md)
+- [开发规范](AGENTS.md) · [子系统索引](docs/subsystems/README.md)
 
-修改源码后需要更新已安装的 API/MCP：`uv tool install --force ./apps/api`。开发环境初始化与检查命令见 [API](apps/api/README.md) 和 [Web](apps/web/README.md)。
+源码更新后，重装本地 API/MCP：`uv tool install --force ./apps/api`。
