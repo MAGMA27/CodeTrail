@@ -2414,6 +2414,8 @@ function isOverviewEntryPoint(value: unknown): value is OverviewEntryPoint {
     );
   const packagingTargetValid = kind === "python_packaging_entry"
     ? (
+      isNumber(value.start_line) &&
+      isNumber(value.end_line) &&
       isSymbolRecord(value.target_symbol) &&
       ["function", "class"].includes(value.target_symbol.kind) &&
       value.target_symbol.index_id === value.index_id &&
