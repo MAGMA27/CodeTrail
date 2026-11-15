@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 import hashlib
 import json
 import os
 import shutil
 import sqlite3
+import subprocess
+import sys
 from threading import Event
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -1221,6 +1224,161 @@ def test_restart_marks_active_local_import_interrupted_without_losing_latest(tmp
     status, project_status = request(reopened, "GET", f"/api/projects/{project_id}")
     assert status == 200
     assert project_status["latest_index_id"] == latest_index_id
+
+
+def test_pytest_collection_does_not_recover_environment_data(tmp_path: Path) -> None:
+    from app.storage import ManagementStore
+
+    data_root = tmp_path / "synthetic-legacy-data"
+    management_store = ManagementStore(data_root / "registry.sqlite3")
+    management_store.begin_project_update(
+        operation_id="collection-sentinel-update",
+        project_id="synthetic-legacy-project",
+        repository_id="synthetic-unconfigured-repository",
+        expected_latest_index_id=None,
+        owner_pid=None,
+    )
+    registry_path = data_root / "registry.sqlite3"
+    registry_before = registry_path.read_bytes()
+
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "CODETRAIL_DATA_DIR": str(data_root),
+            "CODETRAIL_REPOSITORIES": "{}",
+            "CODETRAIL_ALLOWED_IMPORT_ROOTS": "[]",
+            "CODETRAIL_REDIS_URL": "",
+            "CODETRAIL_GITHUB_IMPORT_ENABLED": "0",
+            "CODETRAIL_MCP_GITHUB_IMPORT_ENABLED": "0",
+            "CODETRAIL_GITHUB_TOKEN": "",
+            "GITHUB_TOKEN": "",
+            "CODETRAIL_SYNTHETIC": "1",
+        }
+    )
+    collected = subprocess.run(
+        [sys.executable, "-m", "pytest", "--collect-only", "tests/test_github.py", "-q"],
+        cwd=ROOT / "apps" / "api",
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+
+    assert collected.returncode == 0, collected.stdout + collected.stderr
+    assert "tests collected" in collected.stdout
+    assert registry_path.read_bytes() == registry_before
+
+
+def test_unavailable_project_update_recovery_retries_when_repository_is_configured(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = copy_fixture_named(tmp_path, "recovery-reconfigured-source")
+    data_root = tmp_path / "service-data"
+    roots = {"recovery-source": source}
+    initial = create_app(roots, data_root=data_root)
+    status, created_index = request(
+        initial,
+        "POST",
+        "/api/indexes",
+        {"repository_id": "recovery-source", "revision": "recovery-v1", "dirty": False},
+    )
+    assert status == 200
+    index = created_index["index"]
+    status, projects = request(initial, "GET", "/api/projects")
+    assert status == 200
+    project = next(item for item in projects["projects"] if item["repository_id"] == "recovery-source")
+    management_store = initial.state.registry.management_store
+    attempt = management_store.create_attempt(
+        attempt_id="recovery-reconfigured-attempt",
+        project_id=project["project_id"],
+        repository_id="recovery-source",
+        source_path=str(source),
+        normalized_source_path=str(source.resolve()),
+        name="Reconfigured source",
+        revision="recovery-v2",
+        dirty=False,
+        idempotency_key=None,
+        created_at=datetime.now(timezone.utc),
+    )
+    management_store.update_attempt(attempt.attempt_id, status="indexing", phase="indexing")
+    operation = management_store.begin_project_update(
+        operation_id="project-update-reconfiguration-retry",
+        project_id=project["project_id"],
+        repository_id="recovery-source",
+        expected_latest_index_id=index["index_id"],
+        owner_pid=None,
+    )
+    management_store.update_project_update(
+        operation.operation_id,
+        attempt_id=attempt.attempt_id,
+        candidate_index_id=index["index_id"],
+        content_hash=index["snapshot_hash"],
+        phase="latest_committed",
+    )
+
+    job_service_type = type(initial.state.workspace_service.jobs)
+    scheduled_jobs: list[str] = []
+    monkeypatch.setattr(
+        job_service_type,
+        "_submit_light",
+        lambda _service, job_id: scheduled_jobs.append(job_id),
+    )
+    unrelated_job = initial.state.workspace_service.jobs.store.create(
+        "project_index_refresh",
+        None,
+        {},
+        idempotency_key=None,
+        dedupe_key=None,
+        wait_seconds=3600,
+    )
+    assert initial.state.workspace_service.jobs.store.claim(
+        unrelated_job.job_id,
+        [
+            {
+                "attempt": 1,
+                "started_at": "2026-01-01T00:00:00+00:00",
+                "retry_count": 0,
+                "phase": "indexing",
+            }
+        ],
+        1,
+        1800,
+    )
+    with initial.state.workspace_service.jobs.store._connect() as db:
+        db.execute(
+            "UPDATE jobs SET lease_expires_at = '2000-01-01T00:00:00+00:00' WHERE job_id = ?",
+            (unrelated_job.job_id,),
+        )
+
+    unavailable = create_app({}, data_root=data_root)
+    pending = unavailable.state.registry.management_store.list_project_updates()
+    assert len(pending) == 1
+    assert pending[0].operation_id == operation.operation_id
+    assert pending[0].candidate_index_id == index["index_id"]
+    assert pending[0].attempt_id == attempt.attempt_id
+    assert pending[0].phase == "latest_committed"
+    assert pending[0].owner_pid is None
+    assert unavailable.state.registry.management_store.load_attempt(attempt.attempt_id).status == "indexing"
+    assert scheduled_jobs == [unrelated_job.job_id]
+    recovered_job = unavailable.state.workspace_service.jobs.store.get(unrelated_job.job_id)
+    assert recovered_job.status == "queued"
+    assert recovered_job.error_code == "worker_lost"
+
+    unavailable.state.workspace_service._recover_interrupted_builds()
+    still_pending = unavailable.state.registry.management_store.load_project_update(operation.operation_id)
+    assert still_pending.candidate_index_id == index["index_id"]
+    assert still_pending.attempt_id == attempt.attempt_id
+    assert unavailable.state.registry.management_store.load_attempt(attempt.attempt_id).status == "indexing"
+
+    configured = create_app(roots, data_root=data_root)
+    assert configured.state.registry.management_store.list_project_updates() == ()
+    recovered_attempt = configured.state.registry.management_store.load_attempt(attempt.attempt_id)
+    assert recovered_attempt.status == "ready"
+    assert recovered_attempt.index_id == index["index_id"]
+    status, recovered_project = request(configured, "GET", f"/api/projects/{project['project_id']}")
+    assert status == 200
+    assert recovered_project["latest_index_id"] == index["index_id"]
 
 
 def test_concurrent_duplicate_local_import_uses_one_project_and_attempt(tmp_path: Path) -> None:

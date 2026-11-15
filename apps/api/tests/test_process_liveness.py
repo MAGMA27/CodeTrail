@@ -138,6 +138,93 @@ def test_remote_pid_namespace_uses_owner_heartbeat_not_colliding_pid(
     assert WorkspaceService._project_update_owner_liveness(stale) == "exited"
 
 
+def test_namespace_free_current_owner_uses_active_operation_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    operation = _operation(pid=4242, operation_id="namespace-free-current-owner")
+    monkeypatch.setattr(service_module, "_current_pid_namespace", lambda: None)
+    monkeypatch.setattr(service_module.os, "getpid", lambda: 4242)
+    monkeypatch.setattr(
+        service_module,
+        "_process_liveness",
+        lambda _pid: pytest.fail("same-process recovery must use the active operation set"),
+    )
+
+    with service_module._ACTIVE_PROJECT_UPDATE_OPERATIONS_LOCK:
+        service_module._ACTIVE_PROJECT_UPDATE_OPERATIONS.add(operation.operation_id)
+    try:
+        assert WorkspaceService._project_update_owner_liveness(operation) == "alive"
+    finally:
+        with service_module._ACTIVE_PROJECT_UPDATE_OPERATIONS_LOCK:
+            service_module._ACTIVE_PROJECT_UPDATE_OPERATIONS.discard(operation.operation_id)
+
+    assert WorkspaceService._project_update_owner_liveness(operation) == "exited"
+
+
+def test_namespace_free_current_owner_is_excluded_from_recovery(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    operation = _operation(pid=4242, operation_id="namespace-free-active-owner")
+
+    class _ManagementStore:
+        def __init__(self) -> None:
+            self.claimed: list[str] = []
+            self.excluded_project_ids: tuple[str, ...] | None = None
+
+        def list_project_updates(self):
+            return (operation,)
+
+        def claim_project_update_recovery(self, operation_id: str, **_kwargs) -> bool:
+            self.claimed.append(operation_id)
+            return True
+
+        def mark_active_attempts_interrupted(self, *, exclude_project_ids):
+            self.excluded_project_ids = tuple(exclude_project_ids)
+
+    management_store = _ManagementStore()
+    registry = SimpleNamespace(management_store=management_store, repository_ids=())
+    workspace = WorkspaceService.__new__(WorkspaceService)
+    workspace.registry = registry
+    monkeypatch.setattr(workspace, "_ensure_managed_projects", lambda: None)
+    monkeypatch.setattr(service_module, "_current_pid_namespace", lambda: None)
+    monkeypatch.setattr(service_module.os, "getpid", lambda: 4242)
+    monkeypatch.setattr(
+        service_module,
+        "_process_liveness",
+        lambda _pid: pytest.fail("same-process recovery must not probe process liveness"),
+    )
+
+    with service_module._ACTIVE_PROJECT_UPDATE_OPERATIONS_LOCK:
+        service_module._ACTIVE_PROJECT_UPDATE_OPERATIONS.add(operation.operation_id)
+    try:
+        workspace._recover_interrupted_builds()
+    finally:
+        with service_module._ACTIVE_PROJECT_UPDATE_OPERATIONS_LOCK:
+            service_module._ACTIVE_PROJECT_UPDATE_OPERATIONS.discard(operation.operation_id)
+
+    assert management_store.claimed == []
+    assert management_store.excluded_project_ids == (operation.project_id,)
+
+
+@pytest.mark.parametrize("state", ["alive", "unknown"])
+def test_namespace_free_other_owner_keeps_conservative_process_state(
+    monkeypatch: pytest.MonkeyPatch,
+    state: service_module._ProcessLiveness,
+) -> None:
+    operation = _operation(pid=5252)
+    process_probes: list[int] = []
+    monkeypatch.setattr(service_module, "_current_pid_namespace", lambda: None)
+    monkeypatch.setattr(service_module.os, "getpid", lambda: 4242)
+    monkeypatch.setattr(
+        service_module,
+        "_process_liveness",
+        lambda pid: process_probes.append(pid) or state,
+    )
+
+    assert WorkspaceService._project_update_owner_liveness(operation) == state
+    assert process_probes == [operation.owner_pid]
+
+
 def test_unknown_owner_state_keeps_project_update_and_protects_active_attempts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
