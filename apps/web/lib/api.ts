@@ -858,6 +858,28 @@ export type JourneyCoverage = {
   limitations: string[];
 };
 
+export type NativeJourneySummary = {
+  journey_id: string;
+  index_id: string;
+  entry_kind: "api" | "cli";
+  entry_label: string;
+  entry_path: string;
+  entry_start_line: number;
+  symbol_id: string;
+  symbol_name: string;
+  http_method: OverviewHttpAssociation["method"] | null;
+  http_path: string | null;
+};
+
+export type NativeJourneyCoverage = {
+  entry_count: number;
+  journey_count: number;
+  unsupported_entry_count: number;
+  relation_truncated: boolean;
+  truncated: boolean;
+  limitations: string[];
+};
+
 export type ProjectJourneyCatalog = {
   schema_version: typeof SCHEMA_VERSION;
   project_id: string;
@@ -865,6 +887,8 @@ export type ProjectJourneyCatalog = {
   rules_version: string;
   journeys: JourneySummary[];
   coverage: JourneyCoverage;
+  native_journeys: NativeJourneySummary[];
+  native_coverage: NativeJourneyCoverage;
 };
 
 export type JourneyStep = {
@@ -889,6 +913,40 @@ export type ProjectJourney = {
   coverage: JourneyCoverage;
   markers: string[];
 };
+
+export type NativeSourceObservation = {
+  observation_id: string;
+  kind: "input_parameter" | "return" | "raise" | "output_call" | "state_assignment";
+  symbol_id: string;
+  description: string;
+  conditional: boolean;
+  evidence: Evidence;
+};
+
+export type NativeJourneyStep = {
+  step_id: string;
+  role: "entry" | "processing";
+  title: string;
+  certainty: "static";
+  symbol: SymbolRecord;
+  evidence: Evidence[];
+};
+
+export type NativeProjectJourney = {
+  schema_version: typeof SCHEMA_VERSION;
+  project_id: string;
+  index: IndexSnapshot;
+  rules_version: string;
+  journey_id: string;
+  summary: NativeJourneySummary;
+  action_label?: string;
+  steps: NativeJourneyStep[];
+  observations: NativeSourceObservation[];
+  coverage: NativeJourneyCoverage;
+  markers: string[];
+};
+
+export type AnyProjectJourney = ProjectJourney | NativeProjectJourney;
 
 export type FeatureGenerationMode = "fixture" | "real";
 export type FeatureSourceScope = "entry_reachable" | "visible_modules";
@@ -2772,6 +2830,21 @@ function isJourneyCoverage(value: unknown): value is JourneyCoverage {
   );
 }
 
+function isNativeJourneySummary(value: unknown, indexId: string): value is NativeJourneySummary {
+  return isRecord(value) && isString(value.journey_id) && value.index_id === indexId &&
+    (value.entry_kind === "api" || value.entry_kind === "cli") && isString(value.entry_label) &&
+    isString(value.entry_path) && isPositiveInteger(value.entry_start_line) && isString(value.symbol_id) &&
+    isString(value.symbol_name) &&
+    ((value.http_method === null && value.http_path === null) ||
+      (value.entry_kind === "api" && isString(value.http_method) && isString(value.http_path)));
+}
+
+function isNativeJourneyCoverage(value: unknown): value is NativeJourneyCoverage {
+  return isRecord(value) && isNonNegativeInteger(value.entry_count) && isNonNegativeInteger(value.journey_count) &&
+    isNonNegativeInteger(value.unsupported_entry_count) && typeof value.relation_truncated === "boolean" &&
+    typeof value.truncated === "boolean" && isStringArray(value.limitations);
+}
+
 export function isProjectJourneyCatalogResponse(value: unknown): value is ProjectJourneyCatalog {
   if (!isRecord(value) || value.schema_version !== SCHEMA_VERSION || !isIndexSnapshot(value.index)) {
     return false;
@@ -2784,7 +2857,11 @@ export function isProjectJourneyCatalogResponse(value: unknown): value is Projec
     value.journeys.length <= 40 &&
     value.journeys.every((item) => isJourneySummary(item, indexId)) &&
     isJourneyCoverage(value.coverage) &&
-    value.coverage.journey_count === value.journeys.length
+    value.coverage.journey_count === value.journeys.length &&
+    Array.isArray(value.native_journeys) && value.native_journeys.length <= 40 &&
+    value.native_journeys.every((item) => isNativeJourneySummary(item, indexId)) &&
+    isNativeJourneyCoverage(value.native_coverage) &&
+    value.native_coverage.journey_count === value.native_journeys.length
   );
 }
 
@@ -2804,7 +2881,7 @@ function isJourneyStep(value: unknown, indexId: string): value is JourneyStep {
   );
 }
 
-export function isProjectJourneyResponse(value: unknown): value is ProjectJourney {
+function isUiProjectJourneyResponse(value: unknown): value is ProjectJourney {
   if (!isRecord(value) || value.schema_version !== SCHEMA_VERSION || !isIndexSnapshot(value.index)) {
     return false;
   }
@@ -2820,6 +2897,28 @@ export function isProjectJourneyResponse(value: unknown): value is ProjectJourne
     isJourneyCoverage(value.coverage) &&
     isStringArray(value.markers)
   );
+}
+
+function isNativeProjectJourneyResponse(value: unknown): value is NativeProjectJourney {
+  if (!isRecord(value) || value.schema_version !== SCHEMA_VERSION || !isIndexSnapshot(value.index)) return false;
+  const indexId = value.index.index_id;
+  return isString(value.project_id) && isString(value.rules_version) && isString(value.journey_id) &&
+    isNativeJourneySummary(value.summary, indexId) && value.summary.journey_id === value.journey_id &&
+    Array.isArray(value.steps) && value.steps.length >= 1 && value.steps.length <= 8 &&
+    value.steps.every((step) => isRecord(step) && isString(step.step_id) &&
+      (step.role === "entry" || step.role === "processing") && isString(step.title) && step.certainty === "static" &&
+      isSymbolRecord(step.symbol) && step.symbol.index_id === indexId && Array.isArray(step.evidence) &&
+      step.evidence.length <= 2 && step.evidence.every((item) => isEvidence(item) && item.index_id === indexId)) &&
+    Array.isArray(value.observations) && value.observations.length <= 8 &&
+    value.observations.every((item) => isRecord(item) && isString(item.observation_id) &&
+      ["input_parameter", "return", "raise", "output_call", "state_assignment"].includes(String(item.kind)) &&
+      isString(item.symbol_id) && isString(item.description) && typeof item.conditional === "boolean" &&
+      isEvidence(item.evidence) && item.evidence.index_id === indexId) &&
+    isNativeJourneyCoverage(value.coverage) && isStringArray(value.markers);
+}
+
+export function isProjectJourneyResponse(value: unknown): value is AnyProjectJourney {
+  return isUiProjectJourneyResponse(value) || isNativeProjectJourneyResponse(value);
 }
 
 function isFeature(value: unknown, indexId: string): value is Feature {
@@ -4091,7 +4190,7 @@ export function getProjectJourney(
   indexId: string,
   journeyId: string,
   signal?: AbortSignal,
-): Promise<ProjectJourney> {
+): Promise<AnyProjectJourney> {
   return requestJson(
     `/api/projects/${encodeURIComponent(projectId)}/indexes/${encodeURIComponent(indexId)}/journeys/${encodeURIComponent(journeyId)}`,
     isProjectJourneyResponse,

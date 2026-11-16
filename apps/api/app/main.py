@@ -58,6 +58,7 @@ from .contracts import (
     OverviewSkeleton,
     OverviewClassificationKind,
     ProjectJourney,
+    NativeProjectJourney,
     ProjectJourneyCatalog,
     RefreshProjectIndexRequest,
     ReportResponse,
@@ -903,7 +904,7 @@ def create_app(
 
     @application.get(
         "/api/projects/{project_id}/indexes/{index_id}/journeys/{journey_id}",
-        response_model=ProjectJourney,
+        response_model=ProjectJourney | NativeProjectJourney,
         responses=_API_ERROR_RESPONSES,
     )
     async def get_project_journey(
@@ -911,7 +912,7 @@ def create_app(
         index_id: Identifier,
         journey_id: Identifier,
         detail: Literal["summary", "full"] = Query(default=shared.HTTP_DEFAULT_DETAIL),
-    ) -> ProjectJourney:
+    ) -> ProjectJourney | NativeProjectJourney:
         return await run_in_threadpool(
             workspace_service.get_journey,
             project_id,

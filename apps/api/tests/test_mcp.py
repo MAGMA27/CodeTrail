@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import shutil
 import sys
@@ -16,6 +17,8 @@ import pytest
 from pydantic import ValidationError
 
 from app.contracts import (
+    CreateProjectIndexRequest,
+    CreateProjectRequest,
     CreateRunRequest,
     FeatureGeneration,
     GetNeighborsParams,
@@ -67,6 +70,68 @@ def test_validation_failure_envelopes_never_invent_unknown_identifiers(
         assert invalid.structured_content["error"]["details"][0]["got"] == ""
 
     asyncio.run(exercise())
+
+
+def test_native_journey_http_matches_stdio_mcp_for_pinned_python_source(tmp_path: Path) -> None:
+    repository = tmp_path / "native-repo"
+    repository.mkdir()
+    (repository / "pyproject.toml").write_text('[project.scripts]\nsample = "sample:main"\n', encoding="utf-8")
+    (repository / "sample.py").write_text(
+        "def main():\n    value = parse_input()\n    print(render(value))\n    return 0\n"
+        "def parse_input():\n    return 'ok'\n"
+        "def render(value):\n    return value.upper()\n",
+        encoding="utf-8",
+    )
+    data_root = tmp_path / "data"
+    application = create_app({"native-repo": repository}, data_root=data_root)
+    service = application.state.workspace_service
+    project = service.create_project(CreateProjectRequest(name="Native journey", repository_id="native-repo"))
+    indexed = service.create_project_index(project.project_id, CreateProjectIndexRequest(revision="native-test"))
+    index_id = indexed.index.index_id
+    catalog = service.get_journey_catalog(project.project_id, index_id)
+    native = next(item for item in catalog.native_journeys if item.entry_kind == "cli")
+    detail_path = f"/api/projects/{project.project_id}/indexes/{index_id}/journeys/{native.journey_id}"
+    status, http_detail = request(application, "GET", f"{detail_path}?detail=summary")
+    assert status == 200 and http_detail["index"]["index_id"] == index_id
+    assert http_detail["summary"]["entry_kind"] == "cli"
+    assert any(item["kind"] == "output_call" for item in http_detail["observations"])
+    status, http_full = request(application, "GET", detail_path)
+    assert status == 200 and http_full["index"]["index_id"] == index_id
+    summary_observation = http_detail["observations"][0]["evidence"]
+    full_observation = http_full["observations"][0]["evidence"]
+    assert summary_observation["path"] == full_observation["path"] == "sample.py"
+    assert (summary_observation["start_line"], summary_observation["end_line"]) == (
+        full_observation["start_line"], full_observation["end_line"],
+    )
+    assert summary_observation["content_hash"] == full_observation["content_hash"] == hashlib.sha256(
+        (repository / "sample.py").read_bytes()
+    ).hexdigest()
+    assert full_observation["excerpt"]
+
+    parameters = StdioServerParameters(
+        command=sys.executable,
+        args=["-m", "app.mcp_server"],
+        cwd=API_ROOT,
+        env={
+            "CODETRAIL_REPOSITORIES": json.dumps({"native-repo": str(repository)}),
+            "CODETRAIL_DATA_DIR": str(data_root),
+            "CODETRAIL_WORKBENCH_URL": "http://localhost:3000",
+        },
+    )
+
+    async def exercise_stdio() -> None:
+        async with Client(parameters, read_timeout_seconds=10) as client:
+            result = await client.call_tool("get_journey", {
+                "project_id": project.project_id,
+                "index_id": index_id,
+                "journey_id": native.journey_id,
+            })
+            assert result.structured_content is not None
+            assert result.structured_content["ok"] is True
+            assert result.structured_content["journey"] == http_detail
+            assert result.structured_content["references"]
+
+    asyncio.run(exercise_stdio())
 
 
 async def _request(application, method: str, target: str, payload: dict | None = None) -> tuple[int, dict]:

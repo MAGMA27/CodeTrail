@@ -81,6 +81,7 @@ from .contracts import (
     OverviewModuleCard,
     ProjectOverview,
     ProjectJourney,
+    NativeProjectJourney,
     ProjectJourneyCatalog,
     RefreshProjectIndexRequest,
     ReportResponse,
@@ -1090,9 +1091,9 @@ def create_mcp_server(
         name="get_journey_catalog",
         title="List action journeys for an index",
         description=(
-            "Read lightweight UI action journey summaries from one immutable project index. "
-            "The bounded catalog uses same-snapshot JSX action anchors, static calls, and HTTP method/path shape matches; "
-            "it does not load source excerpts or claim runtime execution. Use get_journey for one selected journey's steps and evidence."
+            "Read lightweight UI action and direct Python API/console-script journey summaries from one immutable project index. "
+            "Native entries include only direct FastAPI handlers and direct project/Poetry console functions; GUI/plugin/dynamic or conditional targets remain uncovered. "
+            "No source excerpts are loaded and static syntax/calls do not claim runtime execution. Use get_journey for one selected journey."
         ),
         structured_output=True,
     )
@@ -1109,7 +1110,7 @@ def create_mcp_server(
         name="get_journey",
         title="Read one action journey",
         description=(
-            "Read at most eight responsibility steps for one exact journey_id from one immutable index. "
+            "Read at most eight steps for one exact UI or native Python journey_id from one immutable index. "
             "Default detail='summary' omits source excerpts but keeps evidence IDs and source ranges; "
             "detail='full' returns excerpts. "
             "Static calls, HTTP shape matches, and unconfirmed UI/result relationships remain separately labeled."
@@ -2172,13 +2173,15 @@ def _mcp_overview_response(result: ProjectOverview, base_url: str) -> McpOvervie
 
 
 def _mcp_journey_response(
-    result: ProjectJourney,
+    result: ProjectJourney | NativeProjectJourney,
     base_url: str,
 ) -> McpJourneyResponse:
     references: list[EvidenceReference] = []
     seen: set[str] = set()
-    for step in result.steps:
-        for evidence in step.evidence:
+    evidence_items = [evidence for step in result.steps for evidence in step.evidence]
+    if isinstance(result, NativeProjectJourney):
+        evidence_items.extend(item.evidence for item in result.observations)
+    for evidence in evidence_items:
             if evidence.evidence_id in seen:
                 continue
             seen.add(evidence.evidence_id)

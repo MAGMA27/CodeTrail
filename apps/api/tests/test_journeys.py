@@ -18,10 +18,17 @@ from app.contracts import (
     JourneyCoverage,
     IndexSnapshot,
     JourneySummary,
+    NativeJourneySummary,
 )
 from app.indexing import SnapshotFile, SourceSnapshot, extract_definitions
+from app import journeys as journeys_module
 from app.main import create_app
-from app.journeys import _extract_ui_facts, build_journey_catalog, build_project_journey
+from app.journeys import (
+    _extract_ui_facts,
+    build_journey_catalog,
+    build_native_project_journey,
+    build_project_journey,
+)
 from app.mcp_server import _mcp_journey_response
 from app.overview import build_project_overview
 from app.relations import HTTP_REQUEST_FACTS_INCOMPLETE_REASON, extract_relations
@@ -463,6 +470,276 @@ def test_python_only_project_has_no_actions_and_is_not_truncated() -> None:
     assert catalog.coverage.action_count == 0
     assert catalog.coverage.truncated is False
     assert catalog.coverage.relation_truncated is False
+    assert any("CLI 声明覆盖不确定" in item for item in catalog.native_coverage.limitations)
+
+
+def test_native_entry_journey_catalog_covers_direct_api_and_cli_targets(monkeypatch: pytest.MonkeyPatch) -> None:
+    long_parameter = "payload_" + "x" * 490
+    long_route = "/" + "route-" * 55
+    sources = {
+        "pyproject.toml": """
+[project.scripts]
+sample = "sample_cli:main"
+budget = "budget_cli:run"
+ambiguous = "ambiguous_cli:main"
+conditional = "conditional_cli:main"
+conditional-export = "conditional_package:main"
+missing = "missing_cli:main"
+[project.gui-scripts]
+gui = "sample_cli:main"
+[project.entry-points."sample.plugins"]
+plugin = "sample_cli:main"
+""",
+        "sample_api.py": f"""
+from fastapi import FastAPI
+app = FastAPI()
+@app.post('{long_route}')
+def parse({long_parameter}: str):
+    return process({long_parameter})
+def process(payload: str):
+    return {{'text': payload}}
+""",
+        "sample_cli.py": """
+def main():
+    print = lambda value: value
+    value = read_input()
+    if value:
+        print(format_value(value))
+        raise ValueError()
+    special()
+    annotated()
+    return 0
+def read_input():
+    return 'sample'
+def format_value(value):
+    return value.upper()
+def special():
+    try:
+        raise ValueError()
+    except ValueError:
+        return 'caught'
+    match 1:
+        case 1:
+            return 'matched'
+def annotated():
+    def inner():
+        return 'nested'
+    result: str
+    return None
+""",
+        "ambiguous_cli.py": "def main():\n    return 1\ndef main():\n    return 2\n",
+        "conditional_cli.py": "if condition:\n    def main():\n        return 1\nelse:\n    def main():\n        return 2\n",
+        "conditional_package/__init__.py": "try:\n    from ._native import main\nexcept ImportError:\n    def main():\n        return 0\n",
+        "conditional_package/_native.py": "def main():\n    return 1\n",
+        "budget_cli.py": (
+            "def run(\n        a,\n        b,\n        c,\n        d,\n        e,\n        f,\n        g,\n        h,\n        i,\n    ):\n"
+            "    result = process(\n"
+            "        a,\n        b,\n        c,\n        d,\n        e,\n        f,\n        g,\n        h,\n        i,\n"
+            "    )\n"
+            "    return result\n"
+            "def process(\n        a,\n        b,\n        c,\n        d,\n        e,\n        f,\n        g,\n        h,\n        i,\n    ):\n"
+            "    return a\n"
+        ),
+    }
+    files = []
+    for path, text in sources.items():
+        raw = text.encode()
+        files.append(SnapshotFile(path=path, size=len(raw), content_hash=hashlib.sha256(raw).hexdigest(), text=text))
+    index = IndexSnapshot(
+        index_id="native-entry-journey-test",
+        repository_id="native-entry-test",
+        revision="source-test",
+        dirty=True,
+        snapshot_hash=hashlib.sha256("".join(item.content_hash for item in files).encode()).hexdigest(),
+        status="ready",
+        rules_version="in-memory-source-test+relations-v15",
+    )
+    relation = extract_relations(extract_definitions(SourceSnapshot(index=index, files=tuple(files), issues=())))
+    file_by_path = {item.path: item for item in files}
+
+    def read_evidence(index_id: str, path: str, start_line: int, end_line: int) -> Evidence:
+        source = file_by_path[path]
+        return Evidence(
+            evidence_id=f"evidence-{hashlib.sha256(f'{index_id}:{path}:{start_line}:{end_line}'.encode()).hexdigest()[:32]}",
+            index_id=index_id,
+            path=path,
+            start_line=start_line,
+            end_line=end_line,
+            excerpt="\n".join(source.text.splitlines()[start_line - 1:end_line]),
+            content_hash=source.content_hash,
+            kind="source",
+        )
+
+    overview = build_project_overview("native-entry-test", relation, read_evidence)
+    assert any(item.kind == "python_packaging_entry" and item.path == "conditional_package/__init__.py"
+               for item in overview.entries)
+    catalog, _specs = build_journey_catalog("native-entry-test", relation, overview)
+
+    assert {item.entry_kind for item in catalog.native_journeys} == {"api", "cli"}
+    assert len(catalog.native_journeys) == 3
+    assert all("conditional_package" not in item.entry_path for item in catalog.native_journeys)
+    assert len(catalog.journeys) == catalog.coverage.journey_count
+    api_journey = next(item for item in catalog.native_journeys if item.entry_kind == "api")
+    cli_journey = next(item for item in catalog.native_journeys if item.entry_path == "sample_cli.py")
+    api_detail = build_native_project_journey("native-entry-test", relation, overview, api_journey.journey_id, read_evidence)
+    cli_detail = build_native_project_journey("native-entry-test", relation, overview, cli_journey.journey_id, read_evidence)
+    assert api_detail is not None and cli_detail is not None
+    assert api_journey.http_path == long_route
+    assert api_detail.summary.entry_label.startswith("POST ") and len(api_detail.summary.entry_label) > 300
+    assert len(api_detail.steps[0].title) == 300 and api_detail.steps[0].title.endswith("…")
+    parameter_observation = next(item for item in api_detail.observations if item.kind == "input_parameter")
+    assert len(parameter_observation.description) == 500 and parameter_observation.description.endswith("…")
+    assert api_detail.steps[0].symbol.qualified_name == "sample_api.parse"
+    assert api_detail.steps[0].evidence
+    assert [item.symbol.qualified_name for item in api_detail.steps] == ["sample_api.parse", "sample_api.process"]
+    assert {item.path for item in cli_detail.steps[0].evidence} == {"sample_cli.py"}
+    assert {item.kind for item in api_detail.observations} >= {"input_parameter", "return"}
+    assert {item.symbol.qualified_name for item in cli_detail.steps} == {
+        "sample_cli.main", "sample_cli.read_input", "sample_cli.format_value",
+        "sample_cli.special", "sample_cli.annotated",
+    }
+    assert {item.kind for item in cli_detail.observations} >= {"return", "output_call"}
+    assert any(item.kind == "raise" and item.conditional for item in cli_detail.observations)
+    cli_source_lines = file_by_path["sample_cli.py"].text.splitlines()
+    except_return_line = cli_source_lines.index("        return 'caught'") + 1
+    match_return_line = cli_source_lines.index("            return 'matched'") + 1
+    assert any(item.kind == "return" and item.evidence.start_line == except_return_line for item in cli_detail.observations)
+    assert any(item.kind == "return" and item.evidence.start_line == match_return_line for item in cli_detail.observations)
+    assert any("嵌套函数、类/方法体不覆盖" in item for item in cli_detail.coverage.limitations)
+    assert any(item.kind == "output_call" and "输出候选" in item.description for item in cli_detail.observations)
+    assert not any(item.kind == "state_assignment" and "result: str" in item.evidence.excerpt for item in cli_detail.observations)
+    assert not any(item.kind == "return" and "nested" in item.evidence.excerpt for item in cli_detail.observations)
+    assert not any(item.symbol_id not in {step.symbol.symbol_id for step in cli_detail.steps} for item in cli_detail.observations)
+    assert all(item.evidence.index_id == index.index_id for item in cli_detail.observations)
+    assert all(len(item.evidence.content_hash) == 64 and item.evidence.start_line <= item.evidence.end_line
+               for item in cli_detail.observations)
+    budget_journey = next(item for item in catalog.native_journeys if item.entry_path == "budget_cli.py")
+    parsed_paths: list[str] = []
+    original_parse = journeys_module.ast.parse
+
+    def count_parse(source: str, filename: str = "<unknown>", *args, **kwargs):
+        parsed_paths.append(filename)
+        return original_parse(source, filename=filename, *args, **kwargs)
+
+    monkeypatch.setattr(journeys_module.ast, "parse", count_parse)
+    budget_detail = build_native_project_journey(
+        "native-entry-test", relation, overview, budget_journey.journey_id, read_evidence,
+    )
+    assert budget_detail is not None and len(budget_detail.observations) == 8
+    assert [item.symbol.qualified_name for item in budget_detail.steps] == ["budget_cli.run", "budget_cli.process"]
+    assert any(item.kind == "return" and item.symbol_id == budget_detail.steps[1].symbol.symbol_id for item in budget_detail.observations)
+    assert any("语法观察省略" in item for item in budget_detail.markers)
+    assert len(parsed_paths) == len(set(parsed_paths)), "each candidate source file should be parsed once per detail build"
+    budgeted_relation = replace(relation, truncated=True, truncation_reason="edge budget reached")
+    budgeted_overview = build_project_overview("native-entry-test", budgeted_relation, read_evidence)
+    budgeted_catalog, _ = build_journey_catalog("native-entry-test", budgeted_relation, budgeted_overview)
+    budgeted_cli = next(item for item in budgeted_catalog.native_journeys if item.entry_kind == "cli")
+    budgeted_detail = build_native_project_journey(
+        "native-entry-test", budgeted_relation, budgeted_overview, budgeted_cli.journey_id, read_evidence,
+    )
+    assert budgeted_detail is not None and budgeted_detail.coverage.relation_truncated
+    assert any("truncated" in item.lower() or "截断" in item for item in budgeted_detail.markers)
+
+    def recursion_failure(*_args, **_kwargs):
+        raise RecursionError("synthetic parser depth failure")
+
+    monkeypatch.setattr(journeys_module.ast, "parse", recursion_failure)
+    failed_parse_catalog, _ = build_journey_catalog("native-entry-test", relation, overview)
+    assert failed_parse_catalog.native_journeys == []
+    assert failed_parse_catalog.native_coverage.unsupported_entry_count > 0
+
+
+def _native_detail_for_source(source_text: str):
+    pyproject = '[project.scripts]\nsample = "sample:main"\n'
+    files = []
+    for path, text in (("pyproject.toml", pyproject), ("sample.py", source_text)):
+        raw = text.encode()
+        files.append(SnapshotFile(path=path, size=len(raw), content_hash=hashlib.sha256(raw).hexdigest(), text=text))
+    index = IndexSnapshot(
+        index_id="native-syntax-test", repository_id="native-syntax-test", revision="source-test",
+        dirty=True, snapshot_hash=hashlib.sha256("".join(item.content_hash for item in files).encode()).hexdigest(),
+        status="ready", rules_version="in-memory-source-test",
+    )
+    relation = extract_relations(extract_definitions(SourceSnapshot(index=index, files=tuple(files), issues=())))
+    file_by_path = {item.path: item for item in files}
+
+    def read_evidence(index_id: str, path: str, start_line: int, end_line: int) -> Evidence:
+        file = file_by_path[path]
+        return Evidence(
+            evidence_id=f"evidence-{index_id}-{start_line}-{end_line}", index_id=index_id, path=path,
+            start_line=start_line, end_line=end_line,
+            excerpt="\n".join(file.text.splitlines()[start_line - 1:end_line]),
+            content_hash=file.content_hash, kind="source",
+        )
+
+    overview = build_project_overview("native-syntax-test", relation, read_evidence)
+    catalog, _ = build_journey_catalog("native-syntax-test", relation, overview)
+    journey = next(item for item in catalog.native_journeys if item.entry_kind == "cli")
+    detail = build_native_project_journey("native-syntax-test", relation, overview, journey.journey_id, read_evidence)
+    assert detail is not None
+    return detail
+
+
+def test_native_detail_visits_with_and_async_with_as_conditional_blocks() -> None:
+    detail = _native_detail_for_source(
+        "async def main():\n"
+        "    with manager():\n"
+        "        process()\n"
+        "    async with manager():\n"
+        "        return process()\n"
+        "def process():\n"
+        "    return 'done'\n"
+    )
+
+    assert detail.steps[0].symbol.qualified_name == "sample.main"
+    assert any(item.symbol.qualified_name == "sample.process" for item in detail.steps)
+    main_id = detail.steps[0].symbol.symbol_id
+    process_id = next(item.symbol.symbol_id for item in detail.steps if item.symbol.qualified_name == "sample.process")
+    assert any(item.kind == "return" and item.symbol_id == main_id and item.conditional for item in detail.observations)
+    assert any(item.kind == "return" and item.symbol_id == process_id and not item.conditional for item in detail.observations)
+
+
+def test_native_detail_omits_observation_without_snapshot_evidence(monkeypatch: pytest.MonkeyPatch) -> None:
+    original_read_evidence = journeys_module._read_evidence
+
+    def missing_return_evidence(read_evidence, index_id: str, path: str, start: int, end: int):
+        if path == "sample.py" and start == 3 and end == 3:
+            return None
+        return original_read_evidence(read_evidence, index_id, path, start, end)
+
+    monkeypatch.setattr(journeys_module, "_read_evidence", missing_return_evidence)
+    detail = _native_detail_for_source(
+        "def main():\n    process()\n    return 0\n"
+        "def process():\n    return 1\n"
+    )
+
+    assert [step.symbol.qualified_name for step in detail.steps] == ["sample.main", "sample.process"]
+    assert all(observation.evidence.excerpt for observation in detail.observations)
+    assert not any(observation.kind == "return" and observation.evidence.start_line == 3
+                   for observation in detail.observations)
+    assert any("语法观察候选没有可读取的固定快照证据" in marker for marker in detail.markers)
+
+
+def test_native_detail_tolerates_missing_optional_trystar_ast_node(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delattr(journeys_module.ast, "TryStar", raising=False)
+    detail = _native_detail_for_source("def main():\n    return process()\ndef process():\n    return 0\n")
+    assert any(item.kind == "return" for item in detail.observations)
+
+
+def test_native_summary_enforces_api_method_path_pairing() -> None:
+    base = {
+        "journey_id": "native-journey-test",
+        "index_id": "native-index-test",
+        "entry_label": "entry",
+        "entry_path": "app.py",
+        "entry_start_line": 1,
+        "symbol_id": "symbol-test",
+        "symbol_name": "app.main",
+    }
+    with pytest.raises(ValidationError):
+        NativeJourneySummary.model_validate({**base, "entry_kind": "api", "http_method": "GET"})
+    with pytest.raises(ValidationError):
+        NativeJourneySummary.model_validate({**base, "entry_kind": "cli", "http_path": "/path"})
 
 
 def test_relation_deadline_marks_http_request_facts_incomplete() -> None:
