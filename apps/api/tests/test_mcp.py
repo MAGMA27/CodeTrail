@@ -1870,6 +1870,31 @@ async def _exercise_stdio(
         assert skeleton["page"]["total"] > 0
         assert skeleton["sections"]
         assert any(item["section"] == "module_relations" and item["total"] > 0 for item in skeleton["sections"])
+        documented_summary = next(
+            module for module in skeleton["modules"]
+            if module["source_documentation_status"] == "documented"
+        )
+        assert documented_summary["source_documentation_reason"] is None
+        module_detail = await client.call_tool("get_module", {
+            "project_id": project_id,
+            "index_id": index_id,
+            "module_id": documented_summary["module_id"],
+        })
+        module_card = module_detail.structured_content["result"]["module"]
+        module_evidence = module_card["source_docstring_evidence"]
+        assert module_card["source_documentation_status"] == "documented"
+        assert module_card["source_docstring"]
+        assert module_evidence["index_id"] == index_id
+        assert module_evidence["path"] == documented_summary["path"]
+        assert module_evidence["kind"] == "source"
+        source_detail = await client.call_tool("read_source", {
+            "project_id": project_id,
+            "index_id": index_id,
+            "path": module_evidence["path"],
+            "start_line": module_evidence["start_line"],
+            "end_line": module_evidence["end_line"],
+        })
+        assert source_detail.structured_content["result"]["evidence"] == module_evidence
 
         invalid_summary_options = await client.call_tool("get_overview", {
             "project_id": project_id,
@@ -2000,7 +2025,15 @@ async def _exercise_stdio(
             for classification in http_overview["classifications"]
             for evidence in classification["evidence"]
         }
+        module_docstring_evidence_ids = {
+            module["source_docstring_evidence"]["evidence_id"]
+            for module in http_overview["modules"]
+            if module["source_docstring_evidence"] is not None
+        }
         assert classification_evidence_ids <= {
+            reference["evidence_id"] for reference in references
+        }
+        assert module_docstring_evidence_ids <= {
             reference["evidence_id"] for reference in references
         }
 

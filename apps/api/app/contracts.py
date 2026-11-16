@@ -2222,7 +2222,7 @@ class OverviewEntryPoint(LineRangeModel):
 
 
 class OverviewModule(ContractModel):
-    """A Python module classified by entry reachability, not by business meaning."""
+    """A module with deterministic structure and optional literal source documentation."""
 
     module_id: Identifier
     index_id: Identifier
@@ -2230,6 +2230,30 @@ class OverviewModule(ContractModel):
     entry_point_ids: list[Identifier] = Field(default_factory=list)
     entry_reachable: bool = False
     classification_counts: OverviewClassificationCounts = Field(default_factory=OverviewClassificationCounts)
+    source_documentation_status: Literal["documented", "not_documented", "unknown", "not_covered"]
+    source_documentation_reason: Literal[
+        "not_inspected",
+        "unsupported_language",
+        "source_unavailable",
+        "deadline_exceeded",
+        "source_size_limit",
+        "parse_failed",
+        "docstring_size_limit",
+        "evidence_read_failed",
+        "evidence_identity_mismatch",
+    ] | None = None
+    source_docstring: str | None = Field(default=None, min_length=1, max_length=2_000)
+    source_docstring_evidence: Evidence | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def default_legacy_module_as_uninspected(cls, value: object) -> object:
+        if isinstance(value, dict) and "source_documentation_status" not in value:
+            legacy_value = dict(value)
+            legacy_value.setdefault("source_documentation_status", "not_covered")
+            legacy_value.setdefault("source_documentation_reason", "not_inspected")
+            return legacy_value
+        return value
 
     @model_validator(mode="after")
     def validate_module_identity(self) -> OverviewModule:
@@ -2239,6 +2263,24 @@ class OverviewModule(ContractModel):
             raise ValueError("overview modules must reference module symbols")
         if len(set(self.entry_point_ids)) != len(self.entry_point_ids):
             raise ValueError("overview module entry IDs must be unique")
+        has_docstring = self.source_docstring is not None and self.source_docstring_evidence is not None
+        if (self.source_docstring is None) != (self.source_docstring_evidence is None):
+            raise ValueError("module source docstring and evidence must be present together")
+        if (self.source_documentation_status == "documented") != has_docstring:
+            raise ValueError("documented module status must match its source docstring and evidence")
+        if self.source_docstring is not None and not self.source_docstring.strip():
+            raise ValueError("documented module docstring must not be blank")
+        if self.source_documentation_status in {"documented", "not_documented"} and self.source_documentation_reason is not None:
+            raise ValueError("documented or undocumented module status cannot have an extraction reason")
+        if self.source_documentation_status in {"unknown", "not_covered"} and self.source_documentation_reason is None:
+            raise ValueError("unknown or not covered module status requires an extraction reason")
+        if self.source_docstring_evidence is not None and (
+            self.source_docstring_evidence.index_id != self.index_id
+            or self.source_docstring_evidence.path != self.symbol.path
+            or self.source_docstring_evidence.end_line < self.source_docstring_evidence.start_line
+            or self.source_docstring_evidence.kind != "source"
+        ):
+            raise ValueError("module source docstring evidence must use the same source path and index")
         return self
 
 
@@ -2898,6 +2940,18 @@ class OverviewGroupSummary(ContractModel):
 class OverviewModuleSummary(ContractModel):
     module_id: Identifier
     path: RelativePath
+    source_documentation_status: Literal["documented", "not_documented", "unknown", "not_covered"]
+    source_documentation_reason: Literal[
+        "not_inspected",
+        "unsupported_language",
+        "source_unavailable",
+        "deadline_exceeded",
+        "source_size_limit",
+        "parse_failed",
+        "docstring_size_limit",
+        "evidence_read_failed",
+        "evidence_identity_mismatch",
+    ] | None = None
     entry_reachable: bool = Field(default=False, exclude_if=lambda value: not value)
     classification_counts: dict[OverviewClassificationKind, PositiveInt] = Field(
         default_factory=dict,
@@ -3710,6 +3764,11 @@ class McpOverviewResponse(McpResultBase):
                 evidence.evidence_id
                 for item in self.overview.classifications
                 for evidence in item.evidence
+            )
+            evidence_ids.update(
+                module.source_docstring_evidence.evidence_id
+                for module in self.overview.modules
+                if module.source_docstring_evidence is not None
             )
             if self.overview.responsibility_evidence is not None:
                 evidence_ids.add(self.overview.responsibility_evidence.evidence_id)

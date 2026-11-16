@@ -28262,7 +28262,7 @@
         },
         "OverviewModule": {
           "additionalProperties": false,
-          "description": "A Python module classified by entry reachability, not by business meaning.",
+          "description": "A module with deterministic structure and optional literal source documentation.",
           "properties": {
             "classification_counts": {
               "$ref": "#/$defs/OverviewClassificationCounts"
@@ -28293,6 +28293,64 @@
               "title": "Module Id",
               "type": "string"
             },
+            "source_docstring": {
+              "anyOf": [
+                {
+                  "maxLength": 2000,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source Docstring"
+            },
+            "source_docstring_evidence": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Evidence"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "source_documentation_reason": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "not_inspected",
+                    "unsupported_language",
+                    "source_unavailable",
+                    "deadline_exceeded",
+                    "source_size_limit",
+                    "parse_failed",
+                    "docstring_size_limit",
+                    "evidence_read_failed",
+                    "evidence_identity_mismatch"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source Documentation Reason"
+            },
+            "source_documentation_status": {
+              "enum": [
+                "documented",
+                "not_documented",
+                "unknown",
+                "not_covered"
+              ],
+              "title": "Source Documentation Status",
+              "type": "string"
+            },
             "symbol": {
               "$ref": "#/$defs/Symbol"
             }
@@ -28300,7 +28358,8 @@
           "required": [
             "module_id",
             "index_id",
-            "symbol"
+            "symbol",
+            "source_documentation_status"
           ],
           "title": "OverviewModule",
           "type": "object"
@@ -28527,11 +28586,45 @@
               "minLength": 1,
               "title": "Path",
               "type": "string"
+            },
+            "source_documentation_reason": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "not_inspected",
+                    "unsupported_language",
+                    "source_unavailable",
+                    "deadline_exceeded",
+                    "source_size_limit",
+                    "parse_failed",
+                    "docstring_size_limit",
+                    "evidence_read_failed",
+                    "evidence_identity_mismatch"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source Documentation Reason"
+            },
+            "source_documentation_status": {
+              "enum": [
+                "documented",
+                "not_documented",
+                "unknown",
+                "not_covered"
+              ],
+              "title": "Source Documentation Status",
+              "type": "string"
             }
           },
           "required": [
             "module_id",
-            "path"
+            "path",
+            "source_documentation_status"
           ],
           "title": "OverviewModuleSummary",
           "type": "object"
@@ -28931,6 +29024,71 @@
           "title": "ErrorDetail",
           "type": "object"
         },
+        "Evidence": {
+          "additionalProperties": false,
+          "properties": {
+            "content_hash": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Content Hash",
+              "type": "string"
+            },
+            "end_line": {
+              "exclusiveMinimum": 0,
+              "title": "End Line",
+              "type": "integer"
+            },
+            "evidence_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Evidence Id",
+              "type": "string"
+            },
+            "excerpt": {
+              "maxLength": 50000,
+              "minLength": 1,
+              "title": "Excerpt",
+              "type": "string"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "source",
+                "stacktrace",
+                "metadata"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Start Line",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "start_line",
+            "end_line",
+            "evidence_id",
+            "index_id",
+            "path",
+            "excerpt",
+            "content_hash",
+            "kind"
+          ],
+          "title": "Evidence",
+          "type": "object"
+        },
         "McpError": {
           "additionalProperties": false,
           "description": "Domain failure returned inside a read-only MCP tool result.",
@@ -29075,7 +29233,7 @@
         },
         "OverviewModule": {
           "additionalProperties": false,
-          "description": "A Python module classified by entry reachability, not by business meaning.",
+          "description": "A module with deterministic structure and optional literal source documentation.",
           "properties": {
             "classification_counts": {
               "$ref": "#/$defs/OverviewClassificationCounts"
@@ -29106,6 +29264,64 @@
               "title": "Module Id",
               "type": "string"
             },
+            "source_docstring": {
+              "anyOf": [
+                {
+                  "maxLength": 2000,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source Docstring"
+            },
+            "source_docstring_evidence": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Evidence"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "source_documentation_reason": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "not_inspected",
+                    "unsupported_language",
+                    "source_unavailable",
+                    "deadline_exceeded",
+                    "source_size_limit",
+                    "parse_failed",
+                    "docstring_size_limit",
+                    "evidence_read_failed",
+                    "evidence_identity_mismatch"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source Documentation Reason"
+            },
+            "source_documentation_status": {
+              "enum": [
+                "documented",
+                "not_documented",
+                "unknown",
+                "not_covered"
+              ],
+              "title": "Source Documentation Status",
+              "type": "string"
+            },
             "symbol": {
               "$ref": "#/$defs/Symbol"
             }
@@ -29113,7 +29329,8 @@
           "required": [
             "module_id",
             "index_id",
-            "symbol"
+            "symbol",
+            "source_documentation_status"
           ],
           "title": "OverviewModule",
           "type": "object"
@@ -30630,7 +30847,7 @@
         },
         "OverviewModule": {
           "additionalProperties": false,
-          "description": "A Python module classified by entry reachability, not by business meaning.",
+          "description": "A module with deterministic structure and optional literal source documentation.",
           "properties": {
             "classification_counts": {
               "$ref": "#/$defs/OverviewClassificationCounts"
@@ -30661,6 +30878,64 @@
               "title": "Module Id",
               "type": "string"
             },
+            "source_docstring": {
+              "anyOf": [
+                {
+                  "maxLength": 2000,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source Docstring"
+            },
+            "source_docstring_evidence": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Evidence"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "source_documentation_reason": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "not_inspected",
+                    "unsupported_language",
+                    "source_unavailable",
+                    "deadline_exceeded",
+                    "source_size_limit",
+                    "parse_failed",
+                    "docstring_size_limit",
+                    "evidence_read_failed",
+                    "evidence_identity_mismatch"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source Documentation Reason"
+            },
+            "source_documentation_status": {
+              "enum": [
+                "documented",
+                "not_documented",
+                "unknown",
+                "not_covered"
+              ],
+              "title": "Source Documentation Status",
+              "type": "string"
+            },
             "symbol": {
               "$ref": "#/$defs/Symbol"
             }
@@ -30668,7 +30943,8 @@
           "required": [
             "module_id",
             "index_id",
-            "symbol"
+            "symbol",
+            "source_documentation_status"
           ],
           "title": "OverviewModule",
           "type": "object"
@@ -30844,11 +31120,45 @@
               "minLength": 1,
               "title": "Path",
               "type": "string"
+            },
+            "source_documentation_reason": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "not_inspected",
+                    "unsupported_language",
+                    "source_unavailable",
+                    "deadline_exceeded",
+                    "source_size_limit",
+                    "parse_failed",
+                    "docstring_size_limit",
+                    "evidence_read_failed",
+                    "evidence_identity_mismatch"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source Documentation Reason"
+            },
+            "source_documentation_status": {
+              "enum": [
+                "documented",
+                "not_documented",
+                "unknown",
+                "not_covered"
+              ],
+              "title": "Source Documentation Status",
+              "type": "string"
             }
           },
           "required": [
             "module_id",
-            "path"
+            "path",
+            "source_documentation_status"
           ],
           "title": "OverviewModuleSummary",
           "type": "object"
@@ -43870,6 +44180,71 @@
     },
     "OverviewModule": {
       "$defs": {
+        "Evidence": {
+          "additionalProperties": false,
+          "properties": {
+            "content_hash": {
+              "pattern": "^[0-9a-f]{64}$",
+              "title": "Content Hash",
+              "type": "string"
+            },
+            "end_line": {
+              "exclusiveMinimum": 0,
+              "title": "End Line",
+              "type": "integer"
+            },
+            "evidence_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Evidence Id",
+              "type": "string"
+            },
+            "excerpt": {
+              "maxLength": 50000,
+              "minLength": 1,
+              "title": "Excerpt",
+              "type": "string"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "source",
+                "stacktrace",
+                "metadata"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            },
+            "start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Start Line",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "start_line",
+            "end_line",
+            "evidence_id",
+            "index_id",
+            "path",
+            "excerpt",
+            "content_hash",
+            "kind"
+          ],
+          "title": "Evidence",
+          "type": "object"
+        },
         "OverviewClassificationCounts": {
           "additionalProperties": false,
           "properties": {
@@ -43964,7 +44339,7 @@
         }
       },
       "additionalProperties": false,
-      "description": "A Python module classified by entry reachability, not by business meaning.",
+      "description": "A module with deterministic structure and optional literal source documentation.",
       "properties": {
         "classification_counts": {
           "$ref": "#/$defs/OverviewClassificationCounts"
@@ -43995,6 +44370,64 @@
           "title": "Module Id",
           "type": "string"
         },
+        "source_docstring": {
+          "anyOf": [
+            {
+              "maxLength": 2000,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Docstring"
+        },
+        "source_docstring_evidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Evidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "source_documentation_reason": {
+          "anyOf": [
+            {
+              "enum": [
+                "not_inspected",
+                "unsupported_language",
+                "source_unavailable",
+                "deadline_exceeded",
+                "source_size_limit",
+                "parse_failed",
+                "docstring_size_limit",
+                "evidence_read_failed",
+                "evidence_identity_mismatch"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Documentation Reason"
+        },
+        "source_documentation_status": {
+          "enum": [
+            "documented",
+            "not_documented",
+            "unknown",
+            "not_covered"
+          ],
+          "title": "Source Documentation Status",
+          "type": "string"
+        },
         "symbol": {
           "$ref": "#/$defs/Symbol"
         }
@@ -44002,7 +44435,8 @@
       "required": [
         "module_id",
         "index_id",
-        "symbol"
+        "symbol",
+        "source_documentation_status"
       ],
       "title": "OverviewModule",
       "type": "object"
@@ -46058,7 +46492,7 @@
         },
         "OverviewModule": {
           "additionalProperties": false,
-          "description": "A Python module classified by entry reachability, not by business meaning.",
+          "description": "A module with deterministic structure and optional literal source documentation.",
           "properties": {
             "classification_counts": {
               "$ref": "#/$defs/OverviewClassificationCounts"
@@ -46089,6 +46523,64 @@
               "title": "Module Id",
               "type": "string"
             },
+            "source_docstring": {
+              "anyOf": [
+                {
+                  "maxLength": 2000,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source Docstring"
+            },
+            "source_docstring_evidence": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Evidence"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "source_documentation_reason": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "not_inspected",
+                    "unsupported_language",
+                    "source_unavailable",
+                    "deadline_exceeded",
+                    "source_size_limit",
+                    "parse_failed",
+                    "docstring_size_limit",
+                    "evidence_read_failed",
+                    "evidence_identity_mismatch"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Source Documentation Reason"
+            },
+            "source_documentation_status": {
+              "enum": [
+                "documented",
+                "not_documented",
+                "unknown",
+                "not_covered"
+              ],
+              "title": "Source Documentation Status",
+              "type": "string"
+            },
             "symbol": {
               "$ref": "#/$defs/Symbol"
             }
@@ -46096,7 +46588,8 @@
           "required": [
             "module_id",
             "index_id",
-            "symbol"
+            "symbol",
+            "source_documentation_status"
           ],
           "title": "OverviewModule",
           "type": "object"

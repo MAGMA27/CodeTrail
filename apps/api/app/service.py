@@ -4649,6 +4649,8 @@ class WorkspaceService:
             OverviewModuleSummary(
                 module_id=module.module_id,
                 path=module.symbol.path,
+                source_documentation_status=module.source_documentation_status,
+                source_documentation_reason=module.source_documentation_reason,
                 entry_reachable=module.entry_reachable,
                 classification_counts={
                     category: count
@@ -4807,6 +4809,8 @@ class WorkspaceService:
                 page_items = [OverviewModuleSummary(
                     module_id=item.module_id,
                     path=item.symbol.path,
+                    source_documentation_status=item.source_documentation_status,
+                    source_documentation_reason=item.source_documentation_reason,
                     entry_reachable=item.entry_reachable,
                     classification_counts={
                         category: count

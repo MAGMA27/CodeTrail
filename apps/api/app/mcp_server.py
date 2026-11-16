@@ -937,7 +937,7 @@ def create_mcp_server(
         name="get_overview",
         title="Get a project overview",
         description=(
-            "Build a deterministic entry-point, structural group, module, and evidence-backed architecture classification overview for one explicitly selected immutable index. "
+            "Build a deterministic entry-point, structural group, module, literal Python module-docstring fact, and evidence-backed architecture classification overview for one explicitly selected immutable index. "
             "Rules cover Python __main__.py, top-level __name__ == __main__ guards, and conservatively confirmed "
             "FastAPI routes with literal declared paths, public API names in static __all__, and top-level pluggy "
             "hookspec functions bound to a real HookspecMarker import. Classifications are independent from calls "
@@ -2129,6 +2129,7 @@ def _mcp_overview_response(result: ProjectOverview, base_url: str) -> McpOvervie
     seen_evidence_ids: set[str] = set()
     evidence_items = [entry.evidence for entry in result.entries]
     evidence_items.append(result.responsibility_evidence)
+    evidence_items.extend(module.source_docstring_evidence for module in result.modules)
     evidence_items.extend(
         evidence
         for classification in result.classifications

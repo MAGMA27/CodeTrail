@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import ast
 import hashlib
 import json
 import shutil
@@ -10,8 +11,9 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import app.service as service_module
-from app.contracts import CreateProjectIndexRequest, CreateProjectRequest
-from app.indexing import extract_definitions, index_configuration_hash
+import app.overview as overview_module
+from app.contracts import CreateProjectIndexRequest, CreateProjectRequest, Symbol
+from app.indexing import SnapshotFile, extract_definitions, index_configuration_hash
 from app.main import create_app
 
 
@@ -114,7 +116,7 @@ def test_overview_identifies_main_rules_paths_and_stays_on_snapshot(tmp_path: Pa
     )
     assert status == 200
     assert overview["entry_status"] == "identified"
-    assert overview["rules_version"] == "python-entry-v8+http-shape-v2+architecture-v1"
+    assert overview["rules_version"] == "python-entry-v8+http-shape-v2+architecture-v2"
     assert {entry["kind"] for entry in overview["entries"]} == {
         "python_main_module",
         "python_main_guard",
@@ -131,6 +133,25 @@ def test_overview_identifies_main_rules_paths_and_stays_on_snapshot(tmp_path: Pa
     assert any(item["reason"] == "dynamic_call_target" for item in overview["unresolved"])
     assert any(module["entry_reachable"] for module in overview["modules"])
     assert any(not module["entry_reachable"] for module in overview["modules"])
+    documented_modules = [module for module in overview["modules"] if module["source_documentation_status"] == "documented"]
+    assert documented_modules
+    documented = documented_modules[0]
+    evidence = documented["source_docstring_evidence"]
+    assert documented["source_docstring"]
+    assert evidence["index_id"] == index_id
+    assert evidence["path"] == documented["symbol"]["path"]
+    assert evidence["kind"] == "source"
+    assert evidence["excerpt"]
+    module_source = (repository / evidence["path"]).read_text(encoding="utf-8")
+    doc_node = ast.parse(module_source).body[0]
+    assert evidence["start_line"] == doc_node.lineno
+    assert evidence["end_line"] == doc_node.end_lineno
+    assert documented["source_docstring"] == ast.get_docstring(ast.parse(module_source), clean=True)
+    assert all(
+        module["source_documentation_status"] != "documented"
+        or (module["source_docstring"] is not None and module["source_docstring_evidence"]["index_id"] == index_id)
+        for module in overview["modules"]
+    )
     assert overview["coverage"]["total_groups"] >= overview["coverage"]["visible_groups"] > 0
     assert overview["coverage"]["total_module_relations"] >= overview["coverage"]["visible_module_relations"]
     assert any(group["group_kind"] == "source_directory" for group in overview["groups"])
@@ -159,6 +180,102 @@ def test_overview_identifies_main_rules_paths_and_stays_on_snapshot(tmp_path: Pa
     )
     assert status == 200
     assert old_snapshot == overview
+
+
+def test_overview_labels_modules_without_documentation_as_unknown(tmp_path: Path) -> None:
+    repository = _copy_fixture(tmp_path)
+    (repository / "timeout_demo" / "undocumented.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (repository / "timeout_demo" / "empty_docstring.py").write_text('"""\n"""\n', encoding="utf-8")
+    (repository / "timeout_demo" / "too_large_for_docstring.py").write_text(
+        "#" + ("x" * 250_000) + "\n",
+        encoding="utf-8",
+    )
+    application = create_app({"timeout-demo": repository})
+    project_id, index_id = _create_index(application)
+
+    status, overview = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/indexes/{index_id}/overview",
+    )
+
+    assert status == 200
+    module = next(item for item in overview["modules"] if item["symbol"]["path"] == "timeout_demo/undocumented.py")
+    assert module["source_documentation_status"] == "not_documented"
+    assert module["source_documentation_reason"] is None
+    assert module["source_docstring"] is None
+    assert module["source_docstring_evidence"] is None
+    empty = next(item for item in overview["modules"] if item["symbol"]["path"] == "timeout_demo/empty_docstring.py")
+    assert empty["source_documentation_status"] == "not_documented"
+    assert empty["source_documentation_reason"] is None
+    assert empty["source_docstring"] is None
+    oversized = next(item for item in overview["modules"] if item["symbol"]["path"] == "timeout_demo/too_large_for_docstring.py")
+    assert oversized["source_documentation_status"] == "not_covered"
+    assert oversized["source_documentation_reason"] == "source_size_limit"
+    assert oversized["source_docstring"] is None
+    assert oversized["source_docstring_evidence"] is None
+
+
+def test_module_docstring_extraction_honors_deadline_and_source_size_before_parsing(monkeypatch) -> None:
+    module = Symbol(
+        symbol_id="symbol-module",
+        index_id="index-one",
+        path="pkg/module.py",
+        qualified_name="pkg.module",
+        kind="module",
+        start_line=1,
+        end_line=1,
+    )
+    parse_calls = 0
+
+    def fail_if_parsed(*_args, **_kwargs):
+        nonlocal parse_calls
+        parse_calls += 1
+        raise AssertionError("bounded docstring extraction must not parse this source")
+
+    monkeypatch.setattr(overview_module.ast, "parse", fail_if_parsed)
+    expired = overview_module._read_module_docstring(
+        index_id="index-one",
+        module=module,
+        source_file=SnapshotFile("pkg/module.py", 20, "hash", '"""Purpose."""\n'),
+        parsed_tree=None,
+        read_evidence=lambda *_args: None,
+        deadline=0,
+    )
+    assert expired == ("not_covered", None, None, "deadline_exceeded")
+
+    oversized_text = '"""Purpose."""\n' + ("# padding\n" * 8_000)
+    oversized = overview_module._read_module_docstring(
+        index_id="index-one",
+        module=module,
+        source_file=SnapshotFile("pkg/module.py", len(oversized_text), "hash", oversized_text),
+        parsed_tree=None,
+        read_evidence=lambda *_args: None,
+        deadline=float("inf"),
+    )
+    assert oversized == ("not_covered", None, None, "source_size_limit")
+    assert parse_calls == 0
+
+
+def test_module_docstring_parse_failure_is_unknown_not_not_documented() -> None:
+    module = Symbol(
+        symbol_id="symbol-module",
+        index_id="index-one",
+        path="pkg/module.py",
+        qualified_name="pkg.module",
+        kind="module",
+        start_line=1,
+        end_line=2,
+    )
+    result = overview_module._read_module_docstring(
+        index_id="index-one",
+        module=module,
+        source_file=SnapshotFile("pkg/module.py", 14, "hash", '"""doc"""\n('),
+        parsed_tree=None,
+        read_evidence=lambda *_args: None,
+        deadline=float("inf"),
+    )
+    assert result == ("unknown", None, None, "parse_failed")
 
 
 def test_legacy_source_v4_relations_v18_overview_without_pyproject_stays_available(
@@ -204,7 +321,7 @@ def test_legacy_source_v4_relations_v18_overview_without_pyproject_stays_availab
     )
 
     assert status == 200
-    assert overview["rules_version"] == "python-entry-v8+http-shape-v2+architecture-v1"
+    assert overview["rules_version"] == "python-entry-v8+http-shape-v2+architecture-v2"
     assert all(entry["kind"] != "python_packaging_entry" for entry in overview["entries"])
     assert not any("pyproject.toml entry point 声明未解析" in note for note in overview["notes"])
     assert created.index.rules_version.startswith("source-v4+")
@@ -745,7 +862,7 @@ def test_overview_invalidates_skipped_bindings_without_cross_scope_pollution(tmp
         ("GET", "/outer"),
         ("GET", "/before-star"),
     }
-    assert overview["rules_version"] == "python-entry-v8+http-shape-v2+architecture-v1"
+    assert overview["rules_version"] == "python-entry-v8+http-shape-v2+architecture-v2"
     assert overview["http_association_coverage"]["analysis_status"] == "complete"
 
 

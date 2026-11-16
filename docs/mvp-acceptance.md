@@ -28,7 +28,7 @@
 
 | # | 准则 | 来源 | 状态 | 证据 |
 | --- | --- | --- | --- | --- |
-| 8 | 在固定索引上查看职责或目录容器和模块，并钻到同一快照的源码或局部静态关系图。`imports`/`calls` 保持 source → target。HTTP 方法/路径形状不混入静态调用边。`unresolved` 表示未知，不能当成没有依赖 | [MVP 操作说明](mvp-operation.md) | 部分验证 | pluggy 架构项为 NEEDS_FIX：PC 画布显示 9 个源码目录容器、36 个模块和 33 组模块关系，并从 `_manager.py` 钻到固定源码。`src/pluggy` 展开后的 13 个模块都未从已识别的 `__main__` 入口可达；职责 manifest 未配置。 |
+| 8 | 在固定索引上查看职责或目录容器和模块，并钻到同一快照的源码或局部静态关系图。`imports`/`calls` 保持 source → target。HTTP 方法/路径形状不混入静态调用边。`unresolved` 表示未知，不能当成没有依赖 | [MVP 操作说明](mvp-operation.md) | 部分验证 | pluggy 架构项为 NEEDS_FIX：PC 画布显示 9 个源码目录容器、36 个模块和 33 组模块关系，并从 `_manager.py` 钻到固定源码。`src/pluggy` 展开后的 13 个模块都未从已识别的 `__main__` 入口可达；职责 manifest 未配置。 [HTTPX 有界源码文档增量](notes/2026-11-16-evidence-backed-responsibilities.md) 另记录公开固定提交上的 HTTP/MCP 前后观察和同快照文档证据；该项部分验证，浏览器待验，不覆盖完整职责推断或 MVP 验收。 |
 | 9 | 概览列出可静态确认的 FastAPI 路由：方法、声明路径和处理函数。点击入口打开装饰器到函数结束的同快照源码，关系图以处理函数为根。路径是装饰器声明值，不解析 `APIRouter`、`include_router`、`mount`、动态路径和运行时注册 | [MVP 操作说明](mvp-operation.md) | 部分验证 | [共享运行决策](decisions/2026-09-14-shared-runtime-codex-demo.md) 记录浏览器核对过 `/api/health` 入口 evidence，以及 2 个节点、1 条边的处理函数关系图，规则版本是 `python-entry-v4`。2026-10 的指定结果没有重做这条入口闭环。操作说明中的不识别范围是行为描述，不是当次点击证据。 |
 | 10 | 规则入口覆盖无入口、静态路径、预算、项目隔离、HTTP/MCP 对照、证据引用和工作台联动 | [工作区决策](decisions/2026-09-11-project-workspace.md) 对 O1 的验收句 | 已验证 | 该句写明已用固定快照验证。没有另附结果文件。父决策仍为 proposed。 |
 | 11 | 保存功能版本的稳定分页和精确读取、同一快照上的 semantic/static 功能图、项目/index/generation 隔离，以及 HTTP/MCP 和工作台版本与图流程 | 同决策对 O3 的验收句 | 已验证 | 该句写明已验证。没有另附结果文件。 |
