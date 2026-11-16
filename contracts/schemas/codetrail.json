@@ -1749,7 +1749,7 @@
         },
         "NeighborCompleteness": {
           "additionalProperties": false,
-          "description": "Whether static neighbors may miss callers or callees.\n\nStatic analysis only resolves calls it can prove. ``possible_unresolved_caller_count``\ncounts unresolved calls anywhere in the index that name the root symbol (or list it\nas a possible target); it is computed for the root only. ``unresolved_outgoing_count``\ncounts unresolved calls made by the returned nodes.",
+          "description": "Whether static neighbors may miss callers, callees, or file references.\n\nStatic analysis only resolves calls it can prove. ``possible_unresolved_caller_count``\ncounts unresolved calls anywhere in the index that name the root symbol (or list it\nas a possible target); it is computed for the root only. ``unresolved_outgoing_count``\ncounts unresolved items attached to returned symbols in the existing symbol query\nshape. ``unresolved_outgoing_file_references`` marks\nbounded unresolved references from a queried module file; stored reasons can\noverlap between import and call analysis, so this signal does not classify them.\n``possible_incoming_file_references`` marks unresolved references that explicitly\nlist a symbol in the queried file as a possible target; these remain possibilities,\nnot confirmed edges, and their type may be unknown.\n``file_reference_scope_limited`` says a depth-limited file query traversed other\nfiles without scanning their unresolved references.",
           "properties": {
             "hint": {
               "anyOf": [
@@ -1785,11 +1785,14 @@
                   "unresolved_details_truncated",
                   "unresolved_coverage_unknown",
                   "possible_unresolved_callers",
-                  "unresolved_outgoing_calls"
+                  "unresolved_outgoing_calls",
+                  "unresolved_outgoing_file_references",
+                  "possible_incoming_file_references",
+                  "file_reference_scope_limited"
                 ],
                 "type": "string"
               },
-              "maxItems": 6,
+              "maxItems": 9,
               "title": "Reasons",
               "type": "array"
             },
@@ -4057,7 +4060,7 @@
         },
         "NeighborCompleteness": {
           "additionalProperties": false,
-          "description": "Whether static neighbors may miss callers or callees.\n\nStatic analysis only resolves calls it can prove. ``possible_unresolved_caller_count``\ncounts unresolved calls anywhere in the index that name the root symbol (or list it\nas a possible target); it is computed for the root only. ``unresolved_outgoing_count``\ncounts unresolved calls made by the returned nodes.",
+          "description": "Whether static neighbors may miss callers, callees, or file references.\n\nStatic analysis only resolves calls it can prove. ``possible_unresolved_caller_count``\ncounts unresolved calls anywhere in the index that name the root symbol (or list it\nas a possible target); it is computed for the root only. ``unresolved_outgoing_count``\ncounts unresolved items attached to returned symbols in the existing symbol query\nshape. ``unresolved_outgoing_file_references`` marks\nbounded unresolved references from a queried module file; stored reasons can\noverlap between import and call analysis, so this signal does not classify them.\n``possible_incoming_file_references`` marks unresolved references that explicitly\nlist a symbol in the queried file as a possible target; these remain possibilities,\nnot confirmed edges, and their type may be unknown.\n``file_reference_scope_limited`` says a depth-limited file query traversed other\nfiles without scanning their unresolved references.",
           "properties": {
             "hint": {
               "anyOf": [
@@ -4093,11 +4096,14 @@
                   "unresolved_details_truncated",
                   "unresolved_coverage_unknown",
                   "possible_unresolved_callers",
-                  "unresolved_outgoing_calls"
+                  "unresolved_outgoing_calls",
+                  "unresolved_outgoing_file_references",
+                  "possible_incoming_file_references",
+                  "file_reference_scope_limited"
                 ],
                 "type": "string"
               },
-              "maxItems": 6,
+              "maxItems": 9,
               "title": "Reasons",
               "type": "array"
             },
@@ -11419,7 +11425,7 @@
         },
         "NeighborCompleteness": {
           "additionalProperties": false,
-          "description": "Whether static neighbors may miss callers or callees.\n\nStatic analysis only resolves calls it can prove. ``possible_unresolved_caller_count``\ncounts unresolved calls anywhere in the index that name the root symbol (or list it\nas a possible target); it is computed for the root only. ``unresolved_outgoing_count``\ncounts unresolved calls made by the returned nodes.",
+          "description": "Whether static neighbors may miss callers, callees, or file references.\n\nStatic analysis only resolves calls it can prove. ``possible_unresolved_caller_count``\ncounts unresolved calls anywhere in the index that name the root symbol (or list it\nas a possible target); it is computed for the root only. ``unresolved_outgoing_count``\ncounts unresolved items attached to returned symbols in the existing symbol query\nshape. ``unresolved_outgoing_file_references`` marks\nbounded unresolved references from a queried module file; stored reasons can\noverlap between import and call analysis, so this signal does not classify them.\n``possible_incoming_file_references`` marks unresolved references that explicitly\nlist a symbol in the queried file as a possible target; these remain possibilities,\nnot confirmed edges, and their type may be unknown.\n``file_reference_scope_limited`` says a depth-limited file query traversed other\nfiles without scanning their unresolved references.",
           "properties": {
             "hint": {
               "anyOf": [
@@ -11455,11 +11461,14 @@
                   "unresolved_details_truncated",
                   "unresolved_coverage_unknown",
                   "possible_unresolved_callers",
-                  "unresolved_outgoing_calls"
+                  "unresolved_outgoing_calls",
+                  "unresolved_outgoing_file_references",
+                  "possible_incoming_file_references",
+                  "file_reference_scope_limited"
                 ],
                 "type": "string"
               },
-              "maxItems": 6,
+              "maxItems": 9,
               "title": "Reasons",
               "type": "array"
             },
@@ -26656,7 +26665,7 @@
         },
         "NeighborCompleteness": {
           "additionalProperties": false,
-          "description": "Whether static neighbors may miss callers or callees.\n\nStatic analysis only resolves calls it can prove. ``possible_unresolved_caller_count``\ncounts unresolved calls anywhere in the index that name the root symbol (or list it\nas a possible target); it is computed for the root only. ``unresolved_outgoing_count``\ncounts unresolved calls made by the returned nodes.",
+          "description": "Whether static neighbors may miss callers, callees, or file references.\n\nStatic analysis only resolves calls it can prove. ``possible_unresolved_caller_count``\ncounts unresolved calls anywhere in the index that name the root symbol (or list it\nas a possible target); it is computed for the root only. ``unresolved_outgoing_count``\ncounts unresolved items attached to returned symbols in the existing symbol query\nshape. ``unresolved_outgoing_file_references`` marks\nbounded unresolved references from a queried module file; stored reasons can\noverlap between import and call analysis, so this signal does not classify them.\n``possible_incoming_file_references`` marks unresolved references that explicitly\nlist a symbol in the queried file as a possible target; these remain possibilities,\nnot confirmed edges, and their type may be unknown.\n``file_reference_scope_limited`` says a depth-limited file query traversed other\nfiles without scanning their unresolved references.",
           "properties": {
             "hint": {
               "anyOf": [
@@ -26692,11 +26701,14 @@
                   "unresolved_details_truncated",
                   "unresolved_coverage_unknown",
                   "possible_unresolved_callers",
-                  "unresolved_outgoing_calls"
+                  "unresolved_outgoing_calls",
+                  "unresolved_outgoing_file_references",
+                  "possible_incoming_file_references",
+                  "file_reference_scope_limited"
                 ],
                 "type": "string"
               },
-              "maxItems": 6,
+              "maxItems": 9,
               "title": "Reasons",
               "type": "array"
             },
@@ -33638,7 +33650,7 @@
         },
         "NeighborCompleteness": {
           "additionalProperties": false,
-          "description": "Whether static neighbors may miss callers or callees.\n\nStatic analysis only resolves calls it can prove. ``possible_unresolved_caller_count``\ncounts unresolved calls anywhere in the index that name the root symbol (or list it\nas a possible target); it is computed for the root only. ``unresolved_outgoing_count``\ncounts unresolved calls made by the returned nodes.",
+          "description": "Whether static neighbors may miss callers, callees, or file references.\n\nStatic analysis only resolves calls it can prove. ``possible_unresolved_caller_count``\ncounts unresolved calls anywhere in the index that name the root symbol (or list it\nas a possible target); it is computed for the root only. ``unresolved_outgoing_count``\ncounts unresolved items attached to returned symbols in the existing symbol query\nshape. ``unresolved_outgoing_file_references`` marks\nbounded unresolved references from a queried module file; stored reasons can\noverlap between import and call analysis, so this signal does not classify them.\n``possible_incoming_file_references`` marks unresolved references that explicitly\nlist a symbol in the queried file as a possible target; these remain possibilities,\nnot confirmed edges, and their type may be unknown.\n``file_reference_scope_limited`` says a depth-limited file query traversed other\nfiles without scanning their unresolved references.",
           "properties": {
             "hint": {
               "anyOf": [
@@ -33674,11 +33686,14 @@
                   "unresolved_details_truncated",
                   "unresolved_coverage_unknown",
                   "possible_unresolved_callers",
-                  "unresolved_outgoing_calls"
+                  "unresolved_outgoing_calls",
+                  "unresolved_outgoing_file_references",
+                  "possible_incoming_file_references",
+                  "file_reference_scope_limited"
                 ],
                 "type": "string"
               },
-              "maxItems": 6,
+              "maxItems": 9,
               "title": "Reasons",
               "type": "array"
             },
@@ -39525,7 +39540,7 @@
         },
         "NeighborCompleteness": {
           "additionalProperties": false,
-          "description": "Whether static neighbors may miss callers or callees.\n\nStatic analysis only resolves calls it can prove. ``possible_unresolved_caller_count``\ncounts unresolved calls anywhere in the index that name the root symbol (or list it\nas a possible target); it is computed for the root only. ``unresolved_outgoing_count``\ncounts unresolved calls made by the returned nodes.",
+          "description": "Whether static neighbors may miss callers, callees, or file references.\n\nStatic analysis only resolves calls it can prove. ``possible_unresolved_caller_count``\ncounts unresolved calls anywhere in the index that name the root symbol (or list it\nas a possible target); it is computed for the root only. ``unresolved_outgoing_count``\ncounts unresolved items attached to returned symbols in the existing symbol query\nshape. ``unresolved_outgoing_file_references`` marks\nbounded unresolved references from a queried module file; stored reasons can\noverlap between import and call analysis, so this signal does not classify them.\n``possible_incoming_file_references`` marks unresolved references that explicitly\nlist a symbol in the queried file as a possible target; these remain possibilities,\nnot confirmed edges, and their type may be unknown.\n``file_reference_scope_limited`` says a depth-limited file query traversed other\nfiles without scanning their unresolved references.",
           "properties": {
             "hint": {
               "anyOf": [
@@ -39561,11 +39576,14 @@
                   "unresolved_details_truncated",
                   "unresolved_coverage_unknown",
                   "possible_unresolved_callers",
-                  "unresolved_outgoing_calls"
+                  "unresolved_outgoing_calls",
+                  "unresolved_outgoing_file_references",
+                  "possible_incoming_file_references",
+                  "file_reference_scope_limited"
                 ],
                 "type": "string"
               },
-              "maxItems": 6,
+              "maxItems": 9,
               "title": "Reasons",
               "type": "array"
             },
@@ -49260,7 +49278,7 @@
         },
         "NeighborCompleteness": {
           "additionalProperties": false,
-          "description": "Whether static neighbors may miss callers or callees.\n\nStatic analysis only resolves calls it can prove. ``possible_unresolved_caller_count``\ncounts unresolved calls anywhere in the index that name the root symbol (or list it\nas a possible target); it is computed for the root only. ``unresolved_outgoing_count``\ncounts unresolved calls made by the returned nodes.",
+          "description": "Whether static neighbors may miss callers, callees, or file references.\n\nStatic analysis only resolves calls it can prove. ``possible_unresolved_caller_count``\ncounts unresolved calls anywhere in the index that name the root symbol (or list it\nas a possible target); it is computed for the root only. ``unresolved_outgoing_count``\ncounts unresolved items attached to returned symbols in the existing symbol query\nshape. ``unresolved_outgoing_file_references`` marks\nbounded unresolved references from a queried module file; stored reasons can\noverlap between import and call analysis, so this signal does not classify them.\n``possible_incoming_file_references`` marks unresolved references that explicitly\nlist a symbol in the queried file as a possible target; these remain possibilities,\nnot confirmed edges, and their type may be unknown.\n``file_reference_scope_limited`` says a depth-limited file query traversed other\nfiles without scanning their unresolved references.",
           "properties": {
             "hint": {
               "anyOf": [
@@ -49296,11 +49314,14 @@
                   "unresolved_details_truncated",
                   "unresolved_coverage_unknown",
                   "possible_unresolved_callers",
-                  "unresolved_outgoing_calls"
+                  "unresolved_outgoing_calls",
+                  "unresolved_outgoing_file_references",
+                  "possible_incoming_file_references",
+                  "file_reference_scope_limited"
                 ],
                 "type": "string"
               },
-              "maxItems": 6,
+              "maxItems": 9,
               "title": "Reasons",
               "type": "array"
             },
@@ -53169,7 +53190,7 @@
         },
         "NeighborCompleteness": {
           "additionalProperties": false,
-          "description": "Whether static neighbors may miss callers or callees.\n\nStatic analysis only resolves calls it can prove. ``possible_unresolved_caller_count``\ncounts unresolved calls anywhere in the index that name the root symbol (or list it\nas a possible target); it is computed for the root only. ``unresolved_outgoing_count``\ncounts unresolved calls made by the returned nodes.",
+          "description": "Whether static neighbors may miss callers, callees, or file references.\n\nStatic analysis only resolves calls it can prove. ``possible_unresolved_caller_count``\ncounts unresolved calls anywhere in the index that name the root symbol (or list it\nas a possible target); it is computed for the root only. ``unresolved_outgoing_count``\ncounts unresolved items attached to returned symbols in the existing symbol query\nshape. ``unresolved_outgoing_file_references`` marks\nbounded unresolved references from a queried module file; stored reasons can\noverlap between import and call analysis, so this signal does not classify them.\n``possible_incoming_file_references`` marks unresolved references that explicitly\nlist a symbol in the queried file as a possible target; these remain possibilities,\nnot confirmed edges, and their type may be unknown.\n``file_reference_scope_limited`` says a depth-limited file query traversed other\nfiles without scanning their unresolved references.",
           "properties": {
             "hint": {
               "anyOf": [
@@ -53205,11 +53226,14 @@
                   "unresolved_details_truncated",
                   "unresolved_coverage_unknown",
                   "possible_unresolved_callers",
-                  "unresolved_outgoing_calls"
+                  "unresolved_outgoing_calls",
+                  "unresolved_outgoing_file_references",
+                  "possible_incoming_file_references",
+                  "file_reference_scope_limited"
                 ],
                 "type": "string"
               },
-              "maxItems": 6,
+              "maxItems": 9,
               "title": "Reasons",
               "type": "array"
             },
@@ -55458,7 +55482,7 @@
         },
         "NeighborCompleteness": {
           "additionalProperties": false,
-          "description": "Whether static neighbors may miss callers or callees.\n\nStatic analysis only resolves calls it can prove. ``possible_unresolved_caller_count``\ncounts unresolved calls anywhere in the index that name the root symbol (or list it\nas a possible target); it is computed for the root only. ``unresolved_outgoing_count``\ncounts unresolved calls made by the returned nodes.",
+          "description": "Whether static neighbors may miss callers, callees, or file references.\n\nStatic analysis only resolves calls it can prove. ``possible_unresolved_caller_count``\ncounts unresolved calls anywhere in the index that name the root symbol (or list it\nas a possible target); it is computed for the root only. ``unresolved_outgoing_count``\ncounts unresolved items attached to returned symbols in the existing symbol query\nshape. ``unresolved_outgoing_file_references`` marks\nbounded unresolved references from a queried module file; stored reasons can\noverlap between import and call analysis, so this signal does not classify them.\n``possible_incoming_file_references`` marks unresolved references that explicitly\nlist a symbol in the queried file as a possible target; these remain possibilities,\nnot confirmed edges, and their type may be unknown.\n``file_reference_scope_limited`` says a depth-limited file query traversed other\nfiles without scanning their unresolved references.",
           "properties": {
             "hint": {
               "anyOf": [
@@ -55494,11 +55518,14 @@
                   "unresolved_details_truncated",
                   "unresolved_coverage_unknown",
                   "possible_unresolved_callers",
-                  "unresolved_outgoing_calls"
+                  "unresolved_outgoing_calls",
+                  "unresolved_outgoing_file_references",
+                  "possible_incoming_file_references",
+                  "file_reference_scope_limited"
                 ],
                 "type": "string"
               },
-              "maxItems": 6,
+              "maxItems": 9,
               "title": "Reasons",
               "type": "array"
             },
@@ -57838,7 +57865,7 @@
         },
         "NeighborCompleteness": {
           "additionalProperties": false,
-          "description": "Whether static neighbors may miss callers or callees.\n\nStatic analysis only resolves calls it can prove. ``possible_unresolved_caller_count``\ncounts unresolved calls anywhere in the index that name the root symbol (or list it\nas a possible target); it is computed for the root only. ``unresolved_outgoing_count``\ncounts unresolved calls made by the returned nodes.",
+          "description": "Whether static neighbors may miss callers, callees, or file references.\n\nStatic analysis only resolves calls it can prove. ``possible_unresolved_caller_count``\ncounts unresolved calls anywhere in the index that name the root symbol (or list it\nas a possible target); it is computed for the root only. ``unresolved_outgoing_count``\ncounts unresolved items attached to returned symbols in the existing symbol query\nshape. ``unresolved_outgoing_file_references`` marks\nbounded unresolved references from a queried module file; stored reasons can\noverlap between import and call analysis, so this signal does not classify them.\n``possible_incoming_file_references`` marks unresolved references that explicitly\nlist a symbol in the queried file as a possible target; these remain possibilities,\nnot confirmed edges, and their type may be unknown.\n``file_reference_scope_limited`` says a depth-limited file query traversed other\nfiles without scanning their unresolved references.",
           "properties": {
             "hint": {
               "anyOf": [
@@ -57874,11 +57901,14 @@
                   "unresolved_details_truncated",
                   "unresolved_coverage_unknown",
                   "possible_unresolved_callers",
-                  "unresolved_outgoing_calls"
+                  "unresolved_outgoing_calls",
+                  "unresolved_outgoing_file_references",
+                  "possible_incoming_file_references",
+                  "file_reference_scope_limited"
                 ],
                 "type": "string"
               },
-              "maxItems": 6,
+              "maxItems": 9,
               "title": "Reasons",
               "type": "array"
             },

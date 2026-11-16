@@ -1384,21 +1384,32 @@ NeighborCompletenessReason: TypeAlias = Literal[
     "unresolved_coverage_unknown",
     "possible_unresolved_callers",
     "unresolved_outgoing_calls",
+    "unresolved_outgoing_file_references",
+    "possible_incoming_file_references",
+    "file_reference_scope_limited",
 ]
 NEIGHBOR_POSSIBLE_CALLER_SAMPLE_LIMIT = 10
 
 
 class NeighborCompleteness(ContractModel):
-    """Whether static neighbors may miss callers or callees.
+    """Whether static neighbors may miss callers, callees, or file references.
 
     Static analysis only resolves calls it can prove. ``possible_unresolved_caller_count``
     counts unresolved calls anywhere in the index that name the root symbol (or list it
     as a possible target); it is computed for the root only. ``unresolved_outgoing_count``
-    counts unresolved calls made by the returned nodes.
+    counts unresolved items attached to returned symbols in the existing symbol query
+    shape. ``unresolved_outgoing_file_references`` marks
+    bounded unresolved references from a queried module file; stored reasons can
+    overlap between import and call analysis, so this signal does not classify them.
+    ``possible_incoming_file_references`` marks unresolved references that explicitly
+    list a symbol in the queried file as a possible target; these remain possibilities,
+    not confirmed edges, and their type may be unknown.
+    ``file_reference_scope_limited`` says a depth-limited file query traversed other
+    files without scanning their unresolved references.
     """
 
     status: Literal["complete", "possibly_incomplete"]
-    reasons: list[NeighborCompletenessReason] = Field(default_factory=list, max_length=6)
+    reasons: list[NeighborCompletenessReason] = Field(default_factory=list, max_length=9)
     possible_unresolved_caller_count: int | None = Field(default=None, ge=0)
     unresolved_outgoing_count: int | None = Field(default=None, ge=0)
     hint: str | None = Field(default=None, max_length=1_000)

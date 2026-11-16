@@ -70,6 +70,7 @@ from .contracts import (
     LocalImportRequest,
     LocalImportResponse,
     ModelConfigSettingsResponse,
+    Neighbor,
     NeighborCompleteness,
     NeighborSummary,
     NeighborsIndexResponse,
@@ -4226,6 +4227,22 @@ class WorkspaceService:
             total=caller_count,
             sample=[summarize(item) for item in callers[:POSSIBLE_CALLER_SUMMARY_SAMPLE_LIMIT]],
         )
+
+        def orientation(item: Neighbor) -> Literal["outgoing", "incoming", "self"]:
+            if item.edge.source_id == item.edge.target_id:
+                return "self"
+            if item.edge.kind == "imports" and item.symbol.kind == "module":
+                source = nodes_by_id.get(item.edge.source_id)
+                target = nodes_by_id.get(item.edge.target_id)
+                if source is not None and target is not None:
+                    if source.path == target.path == item.symbol.path:
+                        return "self"
+                    if source.path == item.symbol.path and target.path != item.symbol.path:
+                        return "incoming"
+                    if target.path == item.symbol.path and source.path != item.symbol.path:
+                        return "outgoing"
+            return "incoming" if item.edge.source_id == item.symbol.symbol_id else "outgoing"
+
         return result.model_copy(update={
             "nodes": None,
             "neighbors": [
@@ -4234,13 +4251,9 @@ class WorkspaceService:
                     via=f"{item.edge.source_location.path}:{item.edge.source_location.start_line}",
                     depth=item.depth,
                     edge_kind=item.edge.kind,
-                    orientation=(
-                        "self" if item.edge.source_id == item.edge.target_id
-                        else "incoming" if item.edge.source_id == item.symbol.symbol_id
-                        else "outgoing"
-                    ),
+                    orientation=orientation(item),
                 )
-                for item in result.neighbors if hasattr(item, "symbol")
+                for item in result.neighbors if isinstance(item, Neighbor)
             ],
             "contextual_calls": [],
             "unresolved": None,
