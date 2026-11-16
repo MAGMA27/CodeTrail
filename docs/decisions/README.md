@@ -1,5 +1,7 @@
 # 决策记录
 
+- [固定快照内的 TypeScript path alias 解析（implemented）](2026-11-16-typescript-path-alias-resolution.md)
+
 - [后端基础设施分阶段演进提案（proposed）](2026-10-28-backend-infrastructure-evolution.md)
 
 - [开发中的思考和经验：异步任务队列](../notes/2026-10-29-async-jobs-design-qa.md)

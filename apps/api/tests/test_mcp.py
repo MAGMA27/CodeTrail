@@ -445,6 +445,119 @@ def test_real_stdio_client_matches_http_and_returns_evidence_link(tmp_path: Path
     )
 
 
+def test_typescript_path_alias_navigation_matches_http_and_mcp(tmp_path: Path) -> None:
+    repository = tmp_path / "synthetic-ts-alias"
+    (repository / "src").mkdir(parents=True)
+    (repository / "tsconfig.json").write_text(
+        '''{
+          // JSONC comments must not eat URL or comment-looking string content.
+          "compilerOptions": {
+            "paths": {
+              "@/*": ["./src/*",],
+              "configonlymarker/*": ["./src/*",],
+            },
+            "fixtureUrl": "https://example.test/a/* and escaped quote: \\\" // /* remains string content",
+          },
+        }''',
+        encoding="utf-8",
+    )
+    (repository / "src" / "entry.ts").write_text(
+        'import { run } from "@/service";\n'
+        "export function entry() { return run(); }\n",
+        encoding="utf-8",
+    )
+    (repository / "src" / "service.ts").write_text(
+        'export function run() { return "same snapshot source"; }\n', encoding="utf-8"
+    )
+    application = create_app({"synthetic-alias": repository}, data_root=tmp_path / "data")
+    status, project = request(
+        application,
+        "POST",
+        "/api/projects",
+        {"name": "Synthetic TS alias", "repository_id": "synthetic-alias"},
+    )
+    assert status == 200, project
+    project_id = project["project_id"]
+    status, created = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/indexes",
+        {"revision": "alias-e2e", "dirty": False},
+    )
+    assert status == 200, created
+    index_id = created["index"]["index_id"]
+    with application.state.registry.store_for_repository("synthetic-alias") as store:
+        relation = store.load_index(index_id)
+        entry = next(item for item in relation.symbols if item.path == "src/entry.ts" and item.kind == "function")
+        target = next(item for item in relation.symbols if item.path == "src/service.ts" and item.kind == "function")
+        entry_module = next(item for item in relation.symbols if item.path == "src/entry.ts" and item.kind == "module")
+        target_module = next(item for item in relation.symbols if item.path == "src/service.ts" and item.kind == "module")
+
+    status, forward = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/indexes/{index_id}/neighbors"
+        f"?symbol_id={entry.symbol_id}&direction=callees&depth=1&limit=20&edge_kinds=calls",
+    )
+    assert status == 200
+    assert [item["symbol"]["symbol_id"] for item in forward["neighbors"]] == [target.symbol_id]
+    assert forward["unresolved"] == []
+    status, reverse = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/indexes/{index_id}/neighbors"
+        f"?symbol_id={target.symbol_id}&direction=callers&depth=1&limit=20&edge_kinds=calls",
+    )
+    assert status == 200
+    assert [item["symbol"]["symbol_id"] for item in reverse["neighbors"]] == [entry.symbol_id]
+    status, imports = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/indexes/{index_id}/neighbors"
+        f"?symbol_id={entry_module.symbol_id}&direction=callees&depth=1&limit=20&edge_kinds=imports",
+    )
+    assert status == 200
+    assert [item["symbol"]["symbol_id"] for item in imports["neighbors"]] == [target_module.symbol_id]
+    status, config_search = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/indexes/{index_id}/search?query=configonlymarker",
+    )
+    assert status == 200
+    assert config_search["matches"] == []
+    status, source = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/indexes/{index_id}/source?path=src%2Fservice.ts&start_line=1&end_line=1",
+    )
+    assert status == 200
+    assert source["evidence"]["index_id"] == index_id
+    assert source["evidence"]["excerpt"].endswith('"same snapshot source"; }')
+
+    server = create_mcp_server(application.state.workspace_service)
+
+    async def exercise_mcp() -> tuple[dict, dict, dict]:
+        forward_result = await server.call_tool("get_neighbors", {
+            "project_id": project_id, "index_id": index_id, "symbol_id": entry.symbol_id,
+            "direction": "callees", "depth": 1, "limit": 20, "edge_kinds": ["calls"],
+        })
+        reverse_result = await server.call_tool("get_neighbors", {
+            "project_id": project_id, "index_id": index_id, "symbol_id": target.symbol_id,
+            "direction": "callers", "depth": 1, "limit": 20, "edge_kinds": ["calls"],
+        })
+        source_result = await server.call_tool("read_source", {
+            "project_id": project_id, "index_id": index_id, "path": "src/service.ts",
+            "start_line": 1, "end_line": 1,
+        })
+        return forward_result.structured_content, reverse_result.structured_content, source_result.structured_content
+
+    mcp_forward, mcp_reverse, mcp_source = asyncio.run(exercise_mcp())
+    assert mcp_forward["result"]["index_id"] == index_id
+    assert mcp_forward["result"]["neighbors"][0]["to"]["id"] == target.symbol_id
+    assert mcp_reverse["result"]["neighbors"][0]["to"]["id"] == entry.symbol_id
+    assert mcp_source["result"]["evidence"] == source["evidence"]
+
+
 def test_constructor_attribute_calls_match_http_and_cold_stdio(tmp_path: Path) -> None:
     repository = tmp_path / "constructor-mcp"
     package = repository / "sample"
