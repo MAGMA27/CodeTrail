@@ -268,6 +268,10 @@ class ServiceError(RuntimeError):
         self.details = details
 
 
+class _ProjectUpdateRepositoryUnavailable(RuntimeError):
+    """A persisted update cannot currently resolve its configured repository."""
+
+
 _ACTIVE_PROJECT_UPDATE_OPERATIONS: set[str] = set()
 _ACTIVE_PROJECT_UPDATE_OPERATIONS_LOCK = threading.Lock()
 
@@ -3322,6 +3326,12 @@ class WorkspaceService:
             _ACTIVE_PROJECT_UPDATE_OPERATIONS.discard(operation_id)
 
     def _current_project_latest_for_update(self, operation: ProjectUpdateRecord) -> str | None:
+        try:
+            self.registry.spec_for(operation.repository_id)
+        except ServiceError as exc:
+            if exc.code == "not_found":
+                raise _ProjectUpdateRepositoryUnavailable(operation.repository_id) from exc
+            raise
         with self.registry.store_for_repository(operation.repository_id) as store:
             project = store.load_project(operation.project_id)
             if project.repository_id != operation.repository_id:
@@ -3442,7 +3452,9 @@ class WorkspaceService:
             return
         self._recover_github_cleanup(operation.attempt_id)
 
-    def _claim_and_recover_project_update(self, operation: ProjectUpdateRecord) -> bool:
+    def _claim_and_recover_project_update(
+        self, operation: ProjectUpdateRecord
+    ) -> Literal["not_claimed", "recovery_attempted", "repository_unavailable"]:
         try:
             claimed = self.registry.management_store.claim_project_update_recovery(
                 operation.operation_id,
@@ -3453,15 +3465,32 @@ class WorkspaceService:
             )
         except StorageError:
             logger.warning("could not claim interrupted project update %s", operation.operation_id, exc_info=True)
-            return False
+            return "not_claimed"
         if not claimed:
-            return False
+            return "not_claimed"
         with _ACTIVE_PROJECT_UPDATE_OPERATIONS_LOCK:
             _ACTIVE_PROJECT_UPDATE_OPERATIONS.add(operation.operation_id)
         try:
-            self._recover_project_update(
-                self.registry.management_store.load_project_update(operation.operation_id)
-            )
+            try:
+                self._recover_project_update(
+                    self.registry.management_store.load_project_update(operation.operation_id)
+                )
+            except _ProjectUpdateRepositoryUnavailable as exc:
+                logger.warning(
+                    "leaving interrupted project update %s pending because its repository is unavailable: %s",
+                    operation.operation_id,
+                    exc,
+                )
+                try:
+                    self.registry.management_store.release_project_update_owner(operation.operation_id)
+                except StorageError:
+                    logger.warning(
+                        "could not release unavailable project update %s for a later recovery pass",
+                        operation.operation_id,
+                        exc_info=True,
+                    )
+                return "repository_unavailable"
+            return "recovery_attempted"
         finally:
             with _ACTIVE_PROJECT_UPDATE_OPERATIONS_LOCK:
                 _ACTIVE_PROJECT_UPDATE_OPERATIONS.discard(operation.operation_id)
@@ -3515,11 +3544,6 @@ class WorkspaceService:
             and current_namespace is not None
             and operation.owner_namespace != current_namespace
         ):
-            age = datetime.now(timezone.utc) - operation.updated_at
-            return "exited" if age.total_seconds() >= _project_update_owner_timeout(operation.owner_lease_seconds) else "alive"
-        if operation.owner_namespace is None and current_namespace is None:
-            if os.name == "nt":
-                return _process_liveness(operation.owner_pid)
             age = datetime.now(timezone.utc) - operation.updated_at
             return "exited" if age.total_seconds() >= _project_update_owner_timeout(operation.owner_lease_seconds) else "alive"
         if operation.owner_pid == os.getpid():
@@ -6240,10 +6264,13 @@ class WorkspaceService:
             operation.operation_id: self._project_update_owner_liveness(operation)
             for operation in updates
         }
+        unavailable_project_ids: set[str] = set()
         for operation in updates:
             owner_state = owner_states[operation.operation_id]
             if owner_state == "exited":
-                self._claim_and_recover_project_update(operation)
+                recovery_state = self._claim_and_recover_project_update(operation)
+                if recovery_state == "repository_unavailable":
+                    unavailable_project_ids.add(operation.project_id)
             elif owner_state == "unknown":
                 logger.warning(
                     "leaving project update %s in place because owner PID %s could not be verified",
@@ -6253,9 +6280,12 @@ class WorkspaceService:
 
         remaining_updates = self.registry.management_store.list_project_updates()
         protected_project_ids = tuple(
-            operation.project_id
-            for operation in remaining_updates
-            if self._project_update_owner_liveness(operation) != "exited"
+            {
+                operation.project_id
+                for operation in remaining_updates
+                if self._project_update_owner_liveness(operation) != "exited"
+            }
+            | unavailable_project_ids
         )
         self.registry.management_store.mark_active_attempts_interrupted(
             exclude_project_ids=protected_project_ids,

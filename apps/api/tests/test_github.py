@@ -1476,7 +1476,12 @@ def test_github_refresh_stale_historical_reuse_cannot_rewrite_source_identity(tm
     assert source.content_hash == updated.index.index.snapshot_hash  # type: ignore[union-attr]
 
 
-def test_github_project_update_recovers_source_commit_after_registry_failure(tmp_path: Path) -> None:
+def test_github_project_update_recovers_source_commit_after_registry_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Emulate Windows namespace discovery from operation creation onward so
+    # the persisted owner metadata and recovery process both have no namespace.
+    monkeypatch.setattr("app.service._current_pid_namespace", lambda: None)
     first = "a" * 40
     second = "b" * 40
     client = _FakeGitHubClient([first, second, second])
@@ -1509,11 +1514,14 @@ def test_github_project_update_recovers_source_commit_after_registry_failure(tmp
     assert len(pending) == 1
     operation = pending[0]
     assert operation.owner_pid is None
+    assert operation.owner_namespace is None
     assert operation.candidate_index_id is not None
     assert app.state.workspace_service.get_project(project_id).latest_index_id == operation.candidate_index_id
     assert management_store.load_source(repository_id).resolved_commit == first
     management_store.update_project_update(operation.operation_id, owner_pid=os.getpid())
-
+    persisted_owner = management_store.list_project_updates()[0]
+    assert persisted_owner.owner_pid == os.getpid()
+    assert persisted_owner.owner_namespace is None
     reopened = create_app({}, data_root=data_root, github_import_enabled=True, github_client=client)  # type: ignore[arg-type]
     assert reopened.state.registry.management_store.list_project_updates() == ()
     recovered_project = reopened.state.workspace_service.get_project(project_id)
