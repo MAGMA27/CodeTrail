@@ -937,13 +937,14 @@ def create_mcp_server(
         name="get_overview",
         title="Get a project overview",
         description=(
-            "Build a deterministic entry-point, structural group, module, literal Python module-docstring fact, and evidence-backed architecture classification overview for one explicitly selected immutable index. "
+            "Build a deterministic entry-point, structural group, module, and evidence-backed architecture classification overview for one explicitly selected immutable index. "
             "Rules cover Python __main__.py, top-level __name__ == __main__ guards, and conservatively confirmed "
             "FastAPI routes with literal declared paths, public API names in static __all__, and top-level pluggy "
             "hookspec functions bound to a real HookspecMarker import. Classifications are independent from calls "
             "paths; unknown does not mean unused or unreachable, TypeScript export facts are not persisted, and "
             "the result and source evidence are bounded. Default detail='summary' returns a compact skeleton; "
             "use detail='full' to return the complete ProjectOverview with evidence references and coverage. "
+            "Summary module rows stay compact and omit documentation status and docstrings; use get_module for the selected module's full documentation facts and same-index source evidence. "
             "Expand a summary with get_module and list_overview_items; round-trip cursors unchanged. "
             "classification_coverage.analysis_incomplete marks rule analysis that stopped early."
         ),

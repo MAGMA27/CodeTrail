@@ -14,7 +14,7 @@ GitHub freshness 契约在 `IndexFreshness` 中额外区分 `remote_status` 的 
 
 ## 接口与依赖
 
-Overview pagination uses `OverviewSkeleton`, `OverviewItemsPage`, and `OverviewModuleCard` for shared service results. MCP `get_overview` defaults to the skeleton envelope and selects the full `ProjectOverview` envelope with `detail="full"`; `list_overview_items` and `get_module` wrap the same page and card contracts used by HTTP.
+Overview pagination uses `OverviewSkeleton`, `OverviewItemsPage`, and `OverviewModuleCard` for shared service results. Compact module summaries retain the established module ID/path and structural counts shape; documentation status, docstrings, and their same-index evidence remain available in full `OverviewModule` records through the full overview and `get_module`. MCP `get_overview` defaults to the skeleton envelope and selects the full `ProjectOverview` envelope with `detail="full"`; `list_overview_items` and `get_module` wrap the same page and card contracts used by HTTP.
 
 Local and GitHub import request fields share `Annotated` aliases between `LocalImportRequest`/`GitHubImportRequest` and the MCP import tool parameters. Both transports publish the same required string bounds and field descriptions; transport shape remains HTTP JSON body versus flat MCP arguments. HTTP body validation suppresses submitted values; MCP uses the existing safe-value rules, which do not echo arbitrary local paths or URLs in `got`. Each adapter retains its existing validation message. Absolute path, allow-list, URL scheme/host, and feature-gate checks remain in the shared service and registry.
 

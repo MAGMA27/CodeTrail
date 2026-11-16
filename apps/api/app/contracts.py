@@ -2940,18 +2940,6 @@ class OverviewGroupSummary(ContractModel):
 class OverviewModuleSummary(ContractModel):
     module_id: Identifier
     path: RelativePath
-    source_documentation_status: Literal["documented", "not_documented", "unknown", "not_covered"]
-    source_documentation_reason: Literal[
-        "not_inspected",
-        "unsupported_language",
-        "source_unavailable",
-        "deadline_exceeded",
-        "source_size_limit",
-        "parse_failed",
-        "docstring_size_limit",
-        "evidence_read_failed",
-        "evidence_identity_mismatch",
-    ] | None = None
     entry_reachable: bool = Field(default=False, exclude_if=lambda value: not value)
     classification_counts: dict[OverviewClassificationKind, PositiveInt] = Field(
         default_factory=dict,

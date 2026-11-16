@@ -28586,45 +28586,11 @@
               "minLength": 1,
               "title": "Path",
               "type": "string"
-            },
-            "source_documentation_reason": {
-              "anyOf": [
-                {
-                  "enum": [
-                    "not_inspected",
-                    "unsupported_language",
-                    "source_unavailable",
-                    "deadline_exceeded",
-                    "source_size_limit",
-                    "parse_failed",
-                    "docstring_size_limit",
-                    "evidence_read_failed",
-                    "evidence_identity_mismatch"
-                  ],
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Source Documentation Reason"
-            },
-            "source_documentation_status": {
-              "enum": [
-                "documented",
-                "not_documented",
-                "unknown",
-                "not_covered"
-              ],
-              "title": "Source Documentation Status",
-              "type": "string"
             }
           },
           "required": [
             "module_id",
-            "path",
-            "source_documentation_status"
+            "path"
           ],
           "title": "OverviewModuleSummary",
           "type": "object"
@@ -31120,45 +31086,11 @@
               "minLength": 1,
               "title": "Path",
               "type": "string"
-            },
-            "source_documentation_reason": {
-              "anyOf": [
-                {
-                  "enum": [
-                    "not_inspected",
-                    "unsupported_language",
-                    "source_unavailable",
-                    "deadline_exceeded",
-                    "source_size_limit",
-                    "parse_failed",
-                    "docstring_size_limit",
-                    "evidence_read_failed",
-                    "evidence_identity_mismatch"
-                  ],
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "title": "Source Documentation Reason"
-            },
-            "source_documentation_status": {
-              "enum": [
-                "documented",
-                "not_documented",
-                "unknown",
-                "not_covered"
-              ],
-              "title": "Source Documentation Status",
-              "type": "string"
             }
           },
           "required": [
             "module_id",
-            "path",
-            "source_documentation_status"
+            "path"
           ],
           "title": "OverviewModuleSummary",
           "type": "object"

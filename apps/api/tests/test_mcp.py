@@ -1870,22 +1870,29 @@ async def _exercise_stdio(
         assert skeleton["page"]["total"] > 0
         assert skeleton["sections"]
         assert any(item["section"] == "module_relations" and item["total"] > 0 for item in skeleton["sections"])
-        documented_summary = next(
-            module for module in skeleton["modules"]
-            if module["source_documentation_status"] == "documented"
+        assert all(
+            "source_documentation_status" not in module
+            and "source_documentation_reason" not in module
+            and "source_docstring" not in module
+            for module in skeleton["modules"]
         )
-        assert documented_summary["source_documentation_reason"] is None
-        module_detail = await client.call_tool("get_module", {
-            "project_id": project_id,
-            "index_id": index_id,
-            "module_id": documented_summary["module_id"],
-        })
-        module_card = module_detail.structured_content["result"]["module"]
+        module_card = None
+        for summary in skeleton["modules"]:
+            module_detail = await client.call_tool("get_module", {
+                "project_id": project_id,
+                "index_id": index_id,
+                "module_id": summary["module_id"],
+            })
+            candidate = module_detail.structured_content["result"]["module"]
+            if candidate["source_documentation_status"] == "documented":
+                module_card = candidate
+                break
+        assert module_card is not None
         module_evidence = module_card["source_docstring_evidence"]
         assert module_card["source_documentation_status"] == "documented"
         assert module_card["source_docstring"]
         assert module_evidence["index_id"] == index_id
-        assert module_evidence["path"] == documented_summary["path"]
+        assert module_evidence["path"] == module_card["symbol"]["path"]
         assert module_evidence["kind"] == "source"
         source_detail = await client.call_tool("read_source", {
             "project_id": project_id,
