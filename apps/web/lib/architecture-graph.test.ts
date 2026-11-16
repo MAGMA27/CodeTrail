@@ -33,6 +33,10 @@ function moduleRecord(id: string, path: string, entryReachable = false, classifi
     entry_point_ids: [],
     entry_reachable: entryReachable,
     classification_counts: { application_entry: 0, public_api: 0, extension_point: 0, unknown: 0, ...classificationCounts },
+    source_documentation_status: "not_documented",
+    source_documentation_reason: null,
+    source_docstring: null,
+    source_docstring_evidence: null,
   };
 }
 

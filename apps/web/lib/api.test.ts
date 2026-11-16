@@ -273,6 +273,10 @@ function overview() {
         entry_point_ids: [entryId],
         entry_reachable: true,
         classification_counts: { application_entry: 0, public_api: 0, extension_point: 0, unknown: 0 },
+        source_documentation_status: "not_documented",
+        source_documentation_reason: null,
+        source_docstring: null,
+        source_docstring_evidence: null,
       },
     ],
     classifications: [],
@@ -340,6 +344,15 @@ function overview() {
 
 test("project overview validator accepts bounded snapshot-linked data", () => {
   assert.equal(isProjectOverviewResponse(overview()), true);
+});
+
+test("project overview rejects whitespace-only documented module text", () => {
+  const value = structuredClone(overview()) as any;
+  value.modules[0].source_documentation_status = "documented";
+  value.modules[0].source_documentation_reason = null;
+  value.modules[0].source_docstring = " \n  ";
+  value.modules[0].source_docstring_evidence = value.entries[0].evidence;
+  assert.equal(isProjectOverviewResponse(value), false);
 });
 
 test("project overview classification validator enforces snapshot evidence and coverage counts", () => {
@@ -469,6 +482,10 @@ test("project overview validator accepts aggregated module relations and rejects
     entry_point_ids: [],
     entry_reachable: false,
     classification_counts: { application_entry: 0, public_api: 0, extension_point: 0, unknown: 0 },
+    source_documentation_status: "not_covered",
+    source_documentation_reason: "source_size_limit",
+    source_docstring: null,
+    source_docstring_evidence: null,
   });
   value.coverage.total_modules = 2;
   value.coverage.visible_modules = 2;

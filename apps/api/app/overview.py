@@ -51,7 +51,7 @@ from .relations import (
 )
 
 
-RULES_VERSION = "python-entry-v8+http-shape-v2+architecture-v1"
+RULES_VERSION = "python-entry-v8+http-shape-v2+architecture-v2"
 DEFAULT_MAX_DEPTH = 4
 DEFAULT_MAX_PATHS = 40
 DEFAULT_MAX_MODULES = 100
@@ -60,6 +60,10 @@ DEFAULT_MAX_MODULE_RELATIONS = 200
 DEFAULT_MAX_SECONDS = 2.0
 DEFAULT_MAX_CLASSIFICATIONS = 200
 _MAX_EVIDENCE_LINES = 200
+_MAX_MODULE_DOCSTRING_LINES = 40
+_MAX_MODULE_DOCSTRING_SOURCE_CHARS = 10_000
+_MAX_MODULE_DOCSTRING_CHARS = 2_000
+_MAX_MODULE_DOCSTRING_PARSE_CHARS = 64_000
 _MAX_ENTRY_CANDIDATES = 200
 _MAX_PACKAGING_DECLARATIONS = 1_000
 _MAX_RELATION_EDGE_SAMPLES = 8
@@ -210,7 +214,7 @@ def build_project_overview(
     for references in unresolved_by_source.values():
         references.sort(key=lambda item: (item.start_line, item.end_line, item.unresolved_id))
 
-    candidates, entry_candidates_truncated, packaging_unresolved_count = _find_entry_candidates(
+    candidates, entry_candidates_truncated, packaging_unresolved_count, parsed_module_trees = _find_entry_candidates(
         relation, deadline
     )
     entries: list[OverviewEntryPoint] = []
@@ -459,8 +463,22 @@ def build_project_overview(
         visible_unresolved = visible_unresolved[:max_unresolved]
         reasons.append("max_unresolved reached")
 
-    module_models = [
-        OverviewModule(
+    source_files_by_path = {source_file.path: source_file for source_file in relation.snapshot.files}
+    module_models = []
+    for module in visible_modules:
+        source_file = source_files_by_path.get(module.path)
+        if module.path.endswith(".py") and _deadline_reached(deadline):
+            docstring_result = ("not_covered", None, None, "deadline_exceeded")
+        else:
+            docstring_result = _read_module_docstring(
+                index_id=index.index_id,
+                module=module,
+                source_file=source_file,
+                parsed_tree=parsed_module_trees.get(module.path),
+                read_evidence=read_evidence,
+                deadline=deadline,
+            )
+        module_models.append(OverviewModule(
             module_id=module.symbol_id,
             index_id=index.index_id,
             symbol=module,
@@ -469,9 +487,12 @@ def build_project_overview(
             classification_counts=classification_counts_by_module.get(
                 module.symbol_id, OverviewClassificationCounts()
             ),
-        )
-        for module in visible_modules
-    ]
+            source_documentation_status=docstring_result[0],
+            source_docstring=docstring_result[1],
+            source_docstring_evidence=docstring_result[2],
+            source_documentation_reason=docstring_result[3],
+        ))
+    del parsed_module_trees
     responsibility_status: str = "not_configured"
     responsibility_specs: tuple[SubsystemSpec, ...] = ()
     responsibility_evidence: Evidence | None = None
@@ -1578,6 +1599,66 @@ def _read_manifest_evidence(
     return read_evidence(index_id, SUBSYSTEM_MANIFEST_PATH, 1, selected_lines)
 
 
+def _read_module_docstring(
+    *,
+    index_id: str,
+    module: Symbol,
+    source_file: SnapshotFile | None,
+    parsed_tree: ast.Module | None,
+    read_evidence: EvidenceReader,
+    deadline: float,
+) -> tuple[str, str | None, Evidence | None, str | None]:
+    """Expose a bounded normalized docstring from the AST already parsed for entry rules."""
+
+    if not module.path.endswith(".py"):
+        return "not_covered", None, None, "unsupported_language"
+    if source_file is None:
+        return "unknown", None, None, "source_unavailable"
+    if _deadline_reached(deadline):
+        return "not_covered", None, None, "deadline_exceeded"
+    if len(source_file.text) > _MAX_MODULE_DOCSTRING_PARSE_CHARS:
+        return "not_covered", None, None, "source_size_limit"
+    if parsed_tree is None:
+        return "unknown", None, None, "parse_failed"
+    tree = parsed_tree
+    if not tree.body or not isinstance(tree.body[0], ast.Expr) or not isinstance(tree.body[0].value, ast.Constant):
+        return "not_documented", None, None, None
+    value = tree.body[0].value.value
+    if not isinstance(value, str):
+        return "not_documented", None, None, None
+    docstring = ast.get_docstring(tree, clean=True)
+    if docstring is None or not docstring.strip():
+        return "not_documented", None, None, None
+    node = tree.body[0]
+    start_line = getattr(node, "lineno", None)
+    end_line = getattr(node, "end_lineno", None)
+    if (
+        len(docstring) > _MAX_MODULE_DOCSTRING_CHARS
+        or not isinstance(start_line, int)
+        or not isinstance(end_line, int)
+        or end_line < start_line
+        or end_line - start_line + 1 > _MAX_MODULE_DOCSTRING_LINES
+    ):
+        return "not_covered", None, None, "docstring_size_limit"
+    source_excerpt = "\n".join(source_file.text.splitlines()[start_line - 1 : end_line])
+    if len(source_excerpt) > _MAX_MODULE_DOCSTRING_SOURCE_CHARS:
+        return "not_covered", None, None, "docstring_size_limit"
+    try:
+        evidence = read_evidence(index_id, module.path, start_line, end_line)
+    except Exception:
+        return "unknown", None, None, "evidence_read_failed"
+    if (
+        evidence is None
+        or evidence.index_id != index_id
+        or evidence.path != module.path
+        or evidence.start_line != start_line
+        or evidence.end_line != end_line
+        or evidence.kind != "source"
+    ):
+        return "unknown", None, None, "evidence_identity_mismatch"
+    return "documented", docstring, evidence, None
+
+
 def _build_module_relations(
     *,
     index_id: str,
@@ -1673,7 +1754,7 @@ def _source_directory_key(path: str) -> str:
 def _find_entry_candidates(
     relation: RelationIndex,
     deadline: float,
-) -> tuple[list[_EntryCandidate], bool, int]:
+) -> tuple[list[_EntryCandidate], bool, int, dict[str, ast.Module]]:
     candidates: list[_EntryCandidate] = []
     symbols_by_path = {
         symbol.path: symbol
@@ -1694,7 +1775,7 @@ def _find_entry_candidates(
             continue
         try:
             trees[source_file.path] = ast.parse(source_file.text, filename=source_file.path, type_comments=True)
-        except SyntaxError:
+        except Exception:
             continue
     hookimpl_markers = _hookimpl_marker_exports(trees, symbols_by_path, deadline)
     hookspec_names, hookspec_symbol_ids = _hookspec_names(trees, symbols_by_path, function_symbols_by_location, deadline)
@@ -1799,6 +1880,7 @@ def _find_entry_candidates(
         unique_candidates[:_MAX_ENTRY_CANDIDATES],
         packaging_scan_truncated or len(unique_candidates) > _MAX_ENTRY_CANDIDATES,
         packaging_unresolved_count,
+        trees,
     )
 
 

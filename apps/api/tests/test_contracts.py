@@ -11,6 +11,7 @@ from typing import get_args, get_origin
 import pytest
 from pydantic import ValidationError
 
+from app.export_schema import build_schema_document
 from app.contracts import (
     CodeEdge,
     CodeExplanation,
@@ -18,6 +19,7 @@ from app.contracts import (
     ApiErrorResponse,
     CreateRunRequest,
     ContextualCall,
+    Evidence,
     EvidenceReference,
     ExplanationStep,
     FixtureResponseSet,
@@ -32,6 +34,7 @@ from app.contracts import (
     McpError,
     ModuleSymbolsPageResponse,
     OverviewCompleteness,
+    OverviewModule,
     Neighbor,
     NeighborsIndexResponse,
     ReadSourceParams,
@@ -46,8 +49,47 @@ from app.contracts import (
     SseStreamEnd,
     SseStreamEndFrame,
 )
-from app.export_schema import build_schema_document
 
+
+def test_legacy_overview_module_defaults_to_conservative_uninspected_status() -> None:
+    symbol = Symbol(
+        symbol_id="symbol-legacy-module",
+        index_id="index-legacy",
+        path="pkg/module.py",
+        qualified_name="pkg.module",
+        kind="module",
+        start_line=1,
+        end_line=4,
+    )
+    payload = {
+        "module_id": symbol.symbol_id,
+        "index_id": symbol.index_id,
+        "symbol": symbol,
+    }
+    module = OverviewModule.model_validate(payload)
+    assert module.source_documentation_status == "not_covered"
+    assert module.source_documentation_reason == "not_inspected"
+    assert module.source_docstring is None
+    assert module.source_docstring_evidence is None
+
+    documented_payload = {
+        **payload,
+        "source_documentation_status": "documented",
+        "source_documentation_reason": None,
+        "source_docstring": " \n ",
+        "source_docstring_evidence": Evidence(
+            evidence_id="evidence-module-docstring",
+            index_id=symbol.index_id,
+            path=symbol.path,
+            start_line=1,
+            end_line=1,
+            excerpt='""" """',
+            content_hash="0" * 64,
+            kind="source",
+        ),
+    }
+    with pytest.raises(ValidationError, match="docstring must not be blank"):
+        OverviewModule.model_validate(documented_payload)
 
 ROOT = Path(__file__).resolve().parents[3]
 RESPONSES = ROOT / "fixtures" / "responses"

@@ -685,6 +685,10 @@ export type OverviewModule = {
   entry_point_ids: string[];
   entry_reachable: boolean;
   classification_counts: OverviewClassificationCounts;
+  source_documentation_status: "documented" | "not_documented" | "unknown" | "not_covered";
+  source_documentation_reason: "not_inspected" | "unsupported_language" | "source_unavailable" | "deadline_exceeded" | "source_size_limit" | "parse_failed" | "docstring_size_limit" | "evidence_read_failed" | "evidence_identity_mismatch" | null;
+  source_docstring: string | null;
+  source_docstring_evidence: Evidence | null;
 };
 
 export type OverviewClassificationCategory = "application_entry" | "public_api" | "extension_point" | "unknown";
@@ -2527,6 +2531,17 @@ function isOverviewClassificationCoverage(value: unknown, classifications: Overv
 }
 
 function isOverviewModule(value: unknown): value is OverviewModule {
+  if (!isRecord(value) || !isSymbolRecord(value.symbol)) return false;
+  const symbol = value.symbol;
+  const docEvidence = value.source_docstring_evidence;
+  const documented = value.source_documentation_status === "documented";
+  const validDocReason = ["not_inspected", "unsupported_language", "source_unavailable", "deadline_exceeded", "source_size_limit", "parse_failed", "docstring_size_limit", "evidence_read_failed", "evidence_identity_mismatch"];
+  const docstringValid = documented
+    ? isString(value.source_docstring) && value.source_docstring.trim().length > 0 && value.source_docstring.length <= 2_000 &&
+      isEvidence(docEvidence) && docEvidence.index_id === value.index_id && docEvidence.path === symbol.path && docEvidence.kind === "source" &&
+      value.source_documentation_reason === null
+    : (value.source_docstring === null && docEvidence === null && ["not_documented", "unknown", "not_covered"].includes(String(value.source_documentation_status)) &&
+      (value.source_documentation_status === "not_documented" ? value.source_documentation_reason === null : isString(value.source_documentation_reason) && validDocReason.includes(value.source_documentation_reason)));
   return (
     isRecord(value) &&
     isString(value.module_id) &&
@@ -2537,7 +2552,8 @@ function isOverviewModule(value: unknown): value is OverviewModule {
     value.symbol.kind === "module" &&
     isStringArray(value.entry_point_ids) &&
     typeof value.entry_reachable === "boolean" &&
-    isOverviewClassificationCounts(value.classification_counts)
+    isOverviewClassificationCounts(value.classification_counts) &&
+    docstringValid
   );
 }
 

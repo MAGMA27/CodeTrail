@@ -944,6 +944,7 @@ def create_mcp_server(
             "paths; unknown does not mean unused or unreachable, TypeScript export facts are not persisted, and "
             "the result and source evidence are bounded. Default detail='summary' returns a compact skeleton; "
             "use detail='full' to return the complete ProjectOverview with evidence references and coverage. "
+            "Summary module rows stay compact and omit documentation status and docstrings; use get_module for the selected module's full documentation facts and same-index source evidence. "
             "Expand a summary with get_module and list_overview_items; round-trip cursors unchanged. "
             "classification_coverage.analysis_incomplete marks rule analysis that stopped early."
         ),
@@ -2129,6 +2130,7 @@ def _mcp_overview_response(result: ProjectOverview, base_url: str) -> McpOvervie
     seen_evidence_ids: set[str] = set()
     evidence_items = [entry.evidence for entry in result.entries]
     evidence_items.append(result.responsibility_evidence)
+    evidence_items.extend(module.source_docstring_evidence for module in result.modules)
     evidence_items.extend(
         evidence
         for classification in result.classifications

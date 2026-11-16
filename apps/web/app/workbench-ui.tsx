@@ -2327,9 +2327,37 @@ function shortModuleName(qualifiedName: string): string {
 }
 
 function OverviewModuleRow({ module, knowledge }: { module: OverviewModule; knowledge: KnowledgeUi }) {
+  const docStatus = module.source_documentation_status;
+  const reasonLabel: Record<NonNullable<OverviewModule["source_documentation_reason"]>, string> = {
+    not_inspected: "旧模块记录未检查文档",
+    unsupported_language: "本次只检查 Python 模块",
+    source_unavailable: "固定索引中没有该模块源码",
+    deadline_exceeded: "达到概览时间预算",
+    source_size_limit: "源码超过提取大小上限",
+    parse_failed: "模块源码无法解析",
+    docstring_size_limit: "文档字符串超过展示上限",
+    evidence_read_failed: "无法读取源码证据",
+    evidence_identity_mismatch: "源码证据与模块位置不匹配",
+  };
+  const docStatusLabel = docStatus === "not_documented"
+    ? "未知 · 已检查的 Python 模块没有非空文档字符串"
+    : docStatus === "unknown"
+      ? `未知 · ${module.source_documentation_reason ? reasonLabel[module.source_documentation_reason] : "源码文档检查失败"}`
+      : docStatus === "not_covered"
+        ? `未覆盖 · ${module.source_documentation_reason ? reasonLabel[module.source_documentation_reason] : "范围限制"}`
+        : null;
   return (
     <article className="ct-structure-module-row">
-      <div><strong>{shortModuleName(module.symbol.qualified_name)}</strong><code>{module.symbol.path}</code></div>
+      <div>
+        <strong>{shortModuleName(module.symbol.qualified_name)}</strong><code>{module.symbol.path}</code>
+        {module.source_documentation_status === "documented" && module.source_docstring_evidence ? <>
+          <small>源码记录的意图 · Python 模块文档（AST clean=True 规范化值，不代表运行时/完整业务职责）</small>
+          <blockquote>{module.source_docstring}</blockquote>
+          <button type="button" className="ct-link-button" onClick={() => knowledge.onOpenArchitectureSource({ indexId: module.index_id, path: module.source_docstring_evidence!.path, startLine: module.source_docstring_evidence!.start_line, endLine: module.source_docstring_evidence!.end_line, expectedContentHash: module.source_docstring_evidence!.content_hash })}>
+            核对同一 index 源码 · {module.source_docstring_evidence.path}:L{module.source_docstring_evidence.start_line}–L{module.source_docstring_evidence.end_line}
+          </button>
+        </> : <small>{docStatusLabel}</small>}
+      </div>
       <button type="button" className="ct-link-button" onClick={() => knowledge.onOpenOverviewModule(module)} title={`打开 ${module.symbol.path} 的固定索引定义`}>进入定义</button>
     </article>
   );
@@ -2457,6 +2485,10 @@ function OverviewSections({ overview, knowledge, onFocusEntry, tabSelection, onS
     ? overview.module_relations.filter((relation) => selectedGroup.module_ids.includes(relation.source_module_id) || selectedGroup.module_ids.includes(relation.target_module_id))
     : overview.module_relations;
   const relatedEdgeCount = relatedRelations.reduce((count, relation) => count + relation.edge_count, 0);
+  const documentedModuleCount = selectedModules.filter((module) => module.source_documentation_status === "documented").length;
+  const undocumentedModuleCount = selectedModules.filter((module) => module.source_documentation_status === "not_documented").length;
+  const unknownModuleCount = selectedModules.filter((module) => module.source_documentation_status === "unknown").length;
+  const notCoveredModuleCount = selectedModules.filter((module) => module.source_documentation_status === "not_covered").length;
   if (!selectedGroup) return null;
   return (
     <div className="ct-structure-details">
@@ -2470,6 +2502,8 @@ function OverviewSections({ overview, knowledge, onFocusEntry, tabSelection, onS
       </div>
       <div className="ct-structure-tab-panel" aria-label="模块详情" hidden={activeTab !== "modules"}>
         <div className="ct-structure-tab-summary"><strong>当前组模块</strong><span>{selectedModules.length}/{selectedGroup.module_ids.length} 个已返回</span></div>
+        {selectedGroup.group_kind === "source_directory" ? <p className="ct-muted">这是按源码路径形成的分组，不代表已确认的业务职责。</p> : null}
+        {selectedGroup.group_kind !== "http_path" && selectedModules.length > 0 ? <p className="ct-muted">同一固定 index 的当前组返回范围：{documentedModuleCount} 个有文档记录，{undocumentedModuleCount} 个已检查但无文档字符串，{unknownModuleCount} 个检查结果未知，{notCoveredModuleCount} 个未覆盖。未返回模块 {selectedGroup.module_ids.length - selectedModules.length} 个；本组统计不代表全索引覆盖。</p> : null}
         {selectedGroup.group_kind !== "http_path" && selectedModules.length > 0 ? <div className="ct-structure-module-list">{selectedModules.map((module) => <OverviewModuleRow module={module} knowledge={knowledge} key={module.module_id} />)}</div> : <p className="ct-muted">{selectedGroup.group_kind === "responsibility" && selectedGroup.module_ids.length === 0 ? "该职责的 owner 路径未匹配到已索引模块。" : selectedGroup.module_ids.length > selectedModules.length ? `当前概览模块预算省略了 ${selectedGroup.module_ids.length - selectedModules.length} 个模块。` : selectedGroup.group_kind === "http_path" ? "HTTP 路径组不属于源码模块详情。" : "该源码目录没有可见模块。"}</p>}
       </div>
       <div className="ct-structure-tab-panel" aria-label="入口详情" hidden={activeTab !== "entries"}>
