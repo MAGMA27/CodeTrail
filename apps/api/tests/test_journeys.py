@@ -101,7 +101,7 @@ def _codetrail_source_relation():
         dirty=True,
         snapshot_hash=snapshot_hash,
         status="ready",
-        rules_version="in-memory-source-test+typescript-facts-v5+relations-v14",
+        rules_version="in-memory-source-test+typescript-facts-v5+relations-v15",
     )
     snapshot = SourceSnapshot(index=index, files=tuple(files), issues=())
     relation = extract_relations(extract_definitions(snapshot), max_seconds=8)
@@ -174,7 +174,7 @@ def _preferences_source_relation(
         dirty=True,
         snapshot_hash=snapshot_hash,
         status="ready",
-        rules_version="in-memory-source-test+typescript-facts-v5+relations-v14",
+        rules_version="in-memory-source-test+typescript-facts-v5+relations-v15",
     )
     snapshot = SourceSnapshot(index=index, files=tuple(files), issues=())
     definitions = extract_definitions(snapshot)
@@ -277,7 +277,7 @@ def get_profile():
         dirty=True,
         snapshot_hash=snapshot_hash,
         status="ready",
-        rules_version="in-memory-source-test+typescript-facts-v5+relations-v14",
+        rules_version="in-memory-source-test+typescript-facts-v5+relations-v15",
     )
     relation = extract_relations(
         extract_definitions(SourceSnapshot(index=index, files=tuple(files), issues=())),

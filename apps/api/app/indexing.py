@@ -40,6 +40,8 @@ SUBSYSTEM_MANIFEST_MAX_BYTES = 64 * 1024
 SUBSYSTEM_MANIFEST_MAX_GROUPS = 80
 SUBSYSTEM_MANIFEST_MAX_OWNERS = 400
 SUBSYSTEM_MANIFEST_MAX_PATH_LENGTH = 500
+TSCONFIG_MAX_BYTES = 64 * 1024
+TSCONFIG_MAX_FILES = 100
 _SUBSYSTEM_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")
 DEFAULT_INDEX_MAX_TOTAL_BYTES = 50 * 1024 * 1024
 
@@ -567,7 +569,7 @@ def build_source_snapshot(
     return SourceSnapshot(index, tuple(snapshot_files), tuple(issues))
 
 
-SOURCE_CAPTURE_RULES_VERSION = "source-v5"
+SOURCE_CAPTURE_RULES_VERSION = "source-v6"
 DEFINITION_EXTRACTION_RULES_VERSION = "python-definitions-v1"
 TYPESCRIPT_COMPILER_VERSION = "5.9.3"
 TYPESCRIPT_FACT_RULES_VERSION = "typescript-facts-v5"
@@ -650,6 +652,7 @@ def scan_source_manifest(
     scanned_bytes = 0
     scanned_source_files = 0
     scanned_pyproject_files = 0
+    scanned_tsconfig_files = 0
     scanned_source_bytes = 0
     scanned_metadata_bytes = 0
     scan_complete = True
@@ -682,7 +685,7 @@ def scan_source_manifest(
 
     def visit(directory: Path) -> None:
         nonlocal scanned_files, scanned_bytes, scanned_source_files, scanned_source_bytes
-        nonlocal scanned_pyproject_files, scanned_metadata_bytes, scan_complete
+        nonlocal scanned_pyproject_files, scanned_tsconfig_files, scanned_metadata_bytes, scan_complete
         if scan_truncated or not check_time():
             return
         try:
@@ -694,6 +697,8 @@ def scan_source_manifest(
                     and entry.name.casefold() == SUBSYSTEM_MANIFEST_PATH.casefold()
                     else 0
                     if entry.name.casefold() == "pyproject.toml"
+                    else 0
+                    if entry.name == "tsconfig.json"
                     else 1,
                     entry.name.casefold(),
                 ),
@@ -718,6 +723,7 @@ def scan_source_manifest(
             is_subsystem_manifest = relative == SUBSYSTEM_MANIFEST_PATH
             pyproject_candidate = entry.name.casefold() == "pyproject.toml"
             is_pyproject_metadata = pyproject_candidate and entry.name == "pyproject.toml"
+            is_tsconfig_metadata = entry.name == "tsconfig.json"
 
             def manifest_invalid(code: str, size: int | None = None) -> None:
                 issues.append(SnapshotIssue(relative, "manifest_invalid", f"manifest invalid: {code}", size=size))
@@ -770,17 +776,22 @@ def scan_source_manifest(
                 continue
             if pyproject_candidate and not is_pyproject_metadata:
                 continue
-            if not (is_subsystem_manifest or is_pyproject_metadata) and not is_source_code_path(relative):
+            if not (is_subsystem_manifest or is_pyproject_metadata or is_tsconfig_metadata) and not is_source_code_path(relative):
                 continue
-            if not (is_subsystem_manifest or is_pyproject_metadata) and scanned_source_files >= max_files:
+            if not (is_subsystem_manifest or is_pyproject_metadata or is_tsconfig_metadata) and scanned_source_files >= max_files:
                 truncate("max_files", measured_count=scanned_source_files + 1)
                 return
             if is_pyproject_metadata and scanned_pyproject_files >= max_files:
                 truncate("max_pyproject_files", measured_count=scanned_pyproject_files + 1)
                 return
+            if is_tsconfig_metadata and scanned_tsconfig_files >= TSCONFIG_MAX_FILES:
+                truncate("max_tsconfig_files", measured_count=scanned_tsconfig_files + 1)
+                return
             scanned_files += 1
             if is_pyproject_metadata:
                 scanned_pyproject_files += 1
+            elif is_tsconfig_metadata:
+                scanned_tsconfig_files += 1
             elif not is_subsystem_manifest:
                 scanned_source_files += 1
             try:
@@ -801,7 +812,11 @@ def scan_source_manifest(
                     issues.append(SnapshotIssue(relative, "read_error", f"could not stat source: {exc}"))
                     scan_complete = False
                 continue
-            file_byte_limit = SUBSYSTEM_MANIFEST_MAX_BYTES if is_subsystem_manifest else max_file_bytes
+            file_byte_limit = (
+                SUBSYSTEM_MANIFEST_MAX_BYTES if is_subsystem_manifest
+                else TSCONFIG_MAX_BYTES if is_tsconfig_metadata
+                else max_file_bytes
+            )
             if before.st_size > file_byte_limit:
                 if is_subsystem_manifest:
                     manifest_invalid("file_too_large", before.st_size)
@@ -810,7 +825,7 @@ def scan_source_manifest(
                     SnapshotIssue(
                         relative,
                         "file_too_large",
-                        f"source file is {before.st_size} bytes; limit is {max_file_bytes}",
+                        f"captured file is {before.st_size} bytes; limit is {file_byte_limit}",
                         size=before.st_size,
                     )
                 )
@@ -836,7 +851,7 @@ def scan_source_manifest(
                     scan_complete = False
                 continue
             scanned_bytes += len(raw)
-            if is_pyproject_metadata:
+            if is_pyproject_metadata or is_tsconfig_metadata:
                 scanned_metadata_bytes += len(raw)
             elif not is_subsystem_manifest:
                 scanned_source_bytes += len(raw)
@@ -869,7 +884,7 @@ def scan_source_manifest(
                     SnapshotIssue(
                         relative,
                         "file_too_large",
-                        f"source file exceeds the {max_file_bytes}-byte limit",
+                        f"captured file exceeds the {file_byte_limit}-byte limit",
                         size=len(raw),
                     )
                 )

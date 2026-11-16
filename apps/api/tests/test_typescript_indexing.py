@@ -14,7 +14,14 @@ from urllib.parse import urlsplit
 import pytest
 
 import app.indexing as indexing
-from app.indexing import IndexingAborted, IndexingControl, SnapshotFile, build_source_snapshot, extract_definitions
+from app.indexing import (
+    IndexingAborted,
+    IndexingControl,
+    SnapshotFile,
+    build_source_snapshot,
+    extract_definitions,
+    is_source_code_path,
+)
 from app.main import create_app
 from app.relations import extract_relations
 
@@ -154,6 +161,48 @@ def _create_index(application) -> tuple[str, str]:
     return project["project_id"], result["index"]["index_id"]
 
 
+def test_tsconfig_only_change_marks_freshness_and_creates_new_snapshot_identity(tmp_path: Path) -> None:
+    (tmp_path / "tsconfig.json").write_text(
+        json.dumps({"compilerOptions": {"baseUrl": ".", "paths": {"@/*": ["src/*"]}}}),
+        encoding="utf-8",
+    )
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "entry.ts").write_text('import "@/target";\n', encoding="utf-8")
+    (tmp_path / "src" / "target.ts").write_text("export const target = 1;\n", encoding="utf-8")
+    (tmp_path / "alternate").mkdir()
+    (tmp_path / "alternate" / "target.ts").write_text("export const target = 2;\n", encoding="utf-8")
+    application = create_app({"ts": tmp_path}, data_root=tmp_path / "service-data")
+    project_id, old_index_id = _create_index(application)
+
+    (tmp_path / "tsconfig.json").write_text(
+        json.dumps({"compilerOptions": {"baseUrl": ".", "paths": {"@/*": ["alternate/*"]}}}),
+        encoding="utf-8",
+    )
+    status, freshness = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/indexes/{old_index_id}/freshness",
+    )
+    assert status == 200
+    assert freshness["status"] == "changed"
+    status, rebuilt = request(
+        application,
+        "POST",
+        f"/api/projects/{project_id}/indexes",
+        {"revision": "test", "dirty": True},
+    )
+    assert status == 200, rebuilt
+    new_index_id = rebuilt["index"]["index_id"]
+    assert new_index_id != old_index_id
+    with application.state.registry.store_for_repository("ts") as store:
+        old_snapshot = store.load_index(old_index_id).snapshot
+        new_snapshot = store.load_index(new_index_id).snapshot
+        old_config = next(item for item in old_snapshot.files if item.path == "tsconfig.json")
+        new_config = next(item for item in new_snapshot.files if item.path == "tsconfig.json")
+        assert old_snapshot.index.snapshot_hash != new_snapshot.index.snapshot_hash
+        assert old_config.content_hash != new_config.content_hash
+
+
 def test_typescript_facts_use_locked_ast_and_keep_languages_and_generated_dirs_separate(tmp_path: Path) -> None:
     (tmp_path / "foo.py").write_text("def python_fn(): pass\n", encoding="utf-8")
     (tmp_path / "foo.ts").write_text('import { x } from "./other"; export function tsFn() { return x; }\n', encoding="utf-8")
@@ -251,6 +300,180 @@ def test_unresolved_capacity_does_not_hide_later_typescript_import_edges(tmp_pat
         ("caller.ts", next(symbol.symbol_id for symbol in result.symbols if symbol.path == "right.ts" and symbol.kind == "module")),
     }
     assert result.unresolved_truncated is True
+
+
+def test_typescript_alias_resolution_uses_nearest_snapshot_config_and_preserves_ambiguity(tmp_path: Path) -> None:
+    (tmp_path / "tsconfig.json").write_text(
+        json.dumps({"compilerOptions": {"paths": {"@/*": ["./root/*"]}}}),
+        encoding="utf-8",
+    )
+    (tmp_path / "root").mkdir()
+    (tmp_path / "root" / "service.ts").write_text("export function rootService() {}\n", encoding="utf-8")
+    (tmp_path / "root" / "entry.ts").write_text('import "@/service";\n', encoding="utf-8")
+    app = tmp_path / "packages" / "app"
+    (app / "src" / "collision" / "thing").mkdir(parents=True)
+    (app / "tsconfig.json").write_text(
+        json.dumps({
+            "compilerOptions": {
+                "paths": {
+                    "@/*": ["./src/*"],
+                    "@special": ["./src/special.ts"],
+                    "@special*": ["./src/collision/*"],
+                    "@collision/*": ["./src/collision/*"],
+                    "@missing/*": ["./src/not-present/*"],
+                    "@outside/*": ["../../../outside/*"],
+                },
+            }
+        }),
+        encoding="utf-8",
+    )
+    (app / "src" / "service.ts").write_text("export function appService() {}\n", encoding="utf-8")
+    (app / "src" / "special.ts").write_text("export function exactTarget() {}\n", encoding="utf-8")
+    (app / "src" / "collision" / "thing.ts").write_text("export function collisionOne() {}\n", encoding="utf-8")
+    (app / "src" / "collision" / "thing" / "index.ts").write_text("export function collisionTwo() {}\n", encoding="utf-8")
+    (app / "src" / "collision" / "index.ts").write_text("export function wildcardOnly() {}\n", encoding="utf-8")
+    (app / "src" / "main.ts").write_text(
+        'import { appService } from "@/service";\n'
+        'import { exactTarget } from "@special";\n'
+        'import { collisionOne } from "@collision/thing";\n'
+        'import { missing } from "@missing/item";\n'
+        'import { outside } from "@outside/target";\n'
+        'export function entry() { appService(); exactTarget(); collisionOne(); missing(); }\n',
+        encoding="utf-8",
+    )
+    baseurl = tmp_path / "packages" / "baseurl"
+    (baseurl / "lib").mkdir(parents=True)
+    (baseurl / "tsconfig.json").write_text(
+        json.dumps({"compilerOptions": {"baseUrl": "lib"}}), encoding="utf-8"
+    )
+    (baseurl / "lib" / "service.ts").write_text("export function baseUrlService() {}\n", encoding="utf-8")
+    (baseurl / "main.ts").write_text('import "service";\n', encoding="utf-8")
+    snapshot = build_source_snapshot(tmp_path, repository_id="ts", revision="nested-config")
+    assert {"tsconfig.json", "packages/app/tsconfig.json"} <= {item.path for item in snapshot.files}
+    assert sum(is_source_code_path(item.path) for item in snapshot.files) == 10
+    definitions = extract_definitions(snapshot)
+    assert all(symbol.path not in {"tsconfig.json", "packages/app/tsconfig.json"} for symbol in definitions.symbols)
+    # The relation build must use captured config text, even after the live files change.
+    (tmp_path / "tsconfig.json").write_text("{}", encoding="utf-8")
+    (app / "tsconfig.json").write_text("{ invalid", encoding="utf-8")
+    result = extract_relations(definitions)
+    symbols = {symbol.symbol_id: symbol for symbol in result.symbols}
+    imported_targets = {
+        symbols[edge.target_id].path
+        for edge in result.edges
+        if edge.kind == "imports" and edge.source_location.path == "packages/app/src/main.ts"
+    }
+    assert imported_targets == {"packages/app/src/service.ts", "packages/app/src/special.ts"}
+    root_import = next(
+        edge for edge in result.edges
+        if edge.kind == "imports" and edge.source_location.path == "root/entry.ts"
+    )
+    assert symbols[root_import.target_id].path == "root/service.ts"
+    baseurl_import = next(
+        edge for edge in result.edges
+        if edge.kind == "imports" and edge.source_location.path == "packages/baseurl/main.ts"
+    )
+    assert symbols[baseurl_import.target_id].path == "packages/baseurl/lib/service.ts"
+    unresolved = {(item.expression, item.reason) for item in result.unresolved}
+    assert ("@collision/thing", "ambiguous_relative_import") in unresolved
+    assert ("@missing/item", "missing_tsconfig_path_target") in unresolved
+    assert ("@outside/target", "relative_import_outside_snapshot") in unresolved
+    resolved_calls = {
+        symbols[edge.target_id].qualified_name
+        for edge in result.edges
+        if edge.kind == "calls" and symbols[edge.source_id].qualified_name == "packages.app.src.main.entry"
+    }
+    assert resolved_calls == {"packages.app.src.service.appService", "packages.app.src.special.exactTarget"}
+
+
+def test_typescript_alias_config_failure_modes_remain_unresolved(tmp_path: Path) -> None:
+    (tmp_path / "tsconfig.json").write_text(
+        json.dumps({"compilerOptions": {"paths": {"@/*": ["./packages/extends/src/*"]}}}),
+        encoding="utf-8",
+    )
+    (tmp_path / "packages" / "extends" / "src").mkdir(parents=True)
+    (tmp_path / "packages" / "invalid" / "src").mkdir(parents=True)
+    (tmp_path / "packages" / "extends" / "tsconfig.json").write_text(
+        json.dumps({"extends": "../../base", "compilerOptions": {"paths": {"@/*": ["src/*"]}}}),
+        encoding="utf-8",
+    )
+    (tmp_path / "packages" / "invalid" / "tsconfig.json").write_text(
+        '{\n // comments and trailing commas are allowed, but this comment is unfinished\n'
+        ' "compilerOptions": { "paths": { "@/*": ["./src/*",], }, },\n'
+        ' /* unterminated',
+        encoding="utf-8",
+    )
+    (tmp_path / "packages" / "extends" / "src" / "entry.ts").write_text(
+        'import { target } from "@/target";\n', encoding="utf-8"
+    )
+    (tmp_path / "packages" / "extends" / "src" / "target.ts").write_text(
+        "export function target() {}\n", encoding="utf-8"
+    )
+    (tmp_path / "packages" / "invalid" / "src" / "entry.ts").write_text(
+        'import { target } from "@/target";\n', encoding="utf-8"
+    )
+    (tmp_path / "packages" / "invalid" / "src" / "target.ts").write_text(
+        "export function target() {}\n", encoding="utf-8"
+    )
+    definitions = extract_definitions(build_source_snapshot(tmp_path, repository_id="ts", revision="bad-configs"))
+    result = extract_relations(definitions)
+    assert {item.reason for item in result.unresolved} == {"unsupported_tsconfig_extends", "invalid_tsconfig"}
+    assert not [edge for edge in result.edges if edge.kind == "imports"]
+
+
+@pytest.mark.parametrize(
+    "extra_config_value",
+    [
+        "[" * 10_000 + "0" + "]" * 10_000,
+        "9" * 5_000,
+    ],
+    ids=("deep-json", "oversized-integer"),
+)
+def test_adversarial_captured_tsconfig_is_unresolved_without_raising(
+    tmp_path: Path,
+    extra_config_value: str,
+) -> None:
+    (tmp_path / "tsconfig.json").write_text(
+        '{"compilerOptions":{"paths":{"@/*":["./src/*"]}},"extra":'
+        + extra_config_value
+        + "}",
+        encoding="utf-8",
+    )
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "entry.ts").write_text('import "@/target";\n', encoding="utf-8")
+    (tmp_path / "src" / "target.ts").write_text("export const target = 1;\n", encoding="utf-8")
+
+    snapshot = build_source_snapshot(tmp_path, repository_id="ts", revision="adversarial-config")
+    assert snapshot.index.status == "ready"
+    relation = extract_relations(extract_definitions(snapshot))
+    assert any(item.reason == "invalid_tsconfig" for item in relation.unresolved)
+    assert not [edge for edge in relation.edges if edge.kind == "imports"]
+
+
+@pytest.mark.parametrize(
+    "malformed_value",
+    ["{,}", "[,]", "NaN", "Infinity", "-Infinity"],
+    ids=("empty-object-comma", "empty-array-comma", "nan", "infinity", "negative-infinity"),
+)
+def test_malformed_irrelevant_tsconfig_value_blocks_valid_alias_mapping(
+    tmp_path: Path,
+    malformed_value: str,
+) -> None:
+    (tmp_path / "tsconfig.json").write_text(
+        '{"compilerOptions":{"paths":{"@/*":["./src/*"]}},"bad":'
+        + malformed_value
+        + "}",
+        encoding="utf-8",
+    )
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "entry.ts").write_text('import "@/target";\n', encoding="utf-8")
+    (tmp_path / "src" / "target.ts").write_text("export const target = 1;\n", encoding="utf-8")
+
+    relation = extract_relations(
+        extract_definitions(build_source_snapshot(tmp_path, repository_id="malformed-tsconfig"))
+    )
+    assert any(item.reason == "invalid_tsconfig" for item in relation.unresolved)
+    assert not [edge for edge in relation.edges if edge.kind == "imports"]
 
 
 def test_typescript_calls_resolve_proven_bindings_and_keep_ambiguous_calls_unresolved(tmp_path: Path) -> None:
@@ -685,7 +908,7 @@ def test_typescript_rule_upgrade_changes_index_identity_and_preserves_v1_snapsho
             ("source-v4+python-3.13+typescript-5.9.3+typescript-facts-v5+relations-v13", old_index_id),
         )
 
-    monkeypatch.setattr(service_module, "INDEX_BUILD_IDENTITY_VERSION", "relations-v19")
+    monkeypatch.setattr(service_module, "INDEX_BUILD_IDENTITY_VERSION", "relations-v20")
     status, upgraded = request(
         application,
         "POST",
@@ -707,7 +930,7 @@ def test_typescript_rule_upgrade_changes_index_identity_and_preserves_v1_snapsho
         assert preserved["snapshot_hash"] == old_hash
         assert preserved["rules_version"].endswith("+relations-v13")
         assert "typescript-facts-v5" in preserved["rules_version"]
-        assert current["rules_version"].endswith("+relations-v14")
+        assert current["rules_version"].endswith("+relations-v15")
         assert "typescript-facts-v5" in current["rules_version"]
         assert store.read_evidence(old_index_id, "web/api.ts", 1, 1).excerpt.startswith("const apiBaseUrl")
 

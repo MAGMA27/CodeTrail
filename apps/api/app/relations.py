@@ -30,7 +30,7 @@ RelationKind = Literal["imports", "calls"]
 BindingKind = Literal["module", "symbol"]
 RelationScopeKind = Literal["module", "class", "function"]
 # The semantic version changes when the graph/unresolved meaning changes.
-RELATION_SEMANTICS_VERSION = "relations-v14"
+RELATION_SEMANTICS_VERSION = "relations-v15"
 # HTTP request facts are retained even when later graph work hits its edge budget.
 HTTP_REQUEST_FACTS_COMPLETE_FROM_RELATION_VERSION = 13
 # This version only governs the persisted, index-independent facts payload.
@@ -38,7 +38,7 @@ RELATION_FACT_EXTRACTION_RULES_VERSION = "python-relation-facts-v6"
 _RELATION_FACTS_FORMAT_VERSION = "relation-facts-v6"
 # This namespace is part of generated immutable index IDs. Bump it when source
 # boundaries or build rules can change an index with the same content hash.
-INDEX_BUILD_IDENTITY_VERSION = "relations-v19"
+INDEX_BUILD_IDENTITY_VERSION = "relations-v20"
 HTTP_REQUEST_FACTS_INCOMPLETE_REASON = "HTTP request facts incomplete"
 
 # Relation budgets. Defaults come from measured full extractions (see
@@ -482,12 +482,255 @@ def _resolve_typescript_module_target(
     path: str,
     specifier: str,
     target_files: set[str],
+    snapshot_configs: Mapping[str, object] | None = None,
 ) -> tuple[str | None, str | None, list[str]]:
-    if not specifier.startswith("."):
-        return None, "external_import_or_path_alias", []
     if any(mark in specifier for mark in ("\\", "?", "#", "%")):
         return None, "unsupported_relative_import_shape", []
-    normalized = posixpath.normpath(posixpath.join(posixpath.dirname(path), specifier))
+    if specifier.startswith("."):
+        normalized = posixpath.normpath(posixpath.join(posixpath.dirname(path), specifier))
+        return _resolve_typescript_target_path(normalized, target_files)
+    configs = snapshot_configs or {}
+    config = _nearest_typescript_config(path, configs)
+    if config is None:
+        return None, "external_import_or_path_alias", []
+    config_path, parsed = config
+    if parsed is None:
+        return None, "invalid_tsconfig", []
+    if not isinstance(parsed, dict):
+        return None, "invalid_tsconfig", []
+    # Extending configs would require merging captured files and package lookup.
+    # Decline the whole nearest config so partial paths cannot invent an edge.
+    if "extends" in parsed:
+        return None, "unsupported_tsconfig_extends", []
+    options = parsed.get("compilerOptions", {})
+    if not isinstance(options, dict):
+        return None, "invalid_tsconfig", []
+    paths = options.get("paths", {})
+    if not isinstance(paths, dict):
+        return None, "invalid_tsconfig", []
+    config_dir = posixpath.dirname(config_path)
+    base_url_explicit = "baseUrl" in options
+    base_url = options.get("baseUrl", ".")
+    if not isinstance(base_url, str) or base_url.startswith(("/", "\\")) or "\\" in base_url:
+        return None, "invalid_tsconfig", []
+    base_dir = posixpath.normpath(posixpath.join(config_dir, base_url))
+    if base_dir == ".." or base_dir.startswith("../") or base_dir.startswith("/"):
+        return None, "invalid_tsconfig", []
+    if not paths:
+        if base_url_explicit:
+            target_path, reason, candidates = _resolve_typescript_target_path(
+                posixpath.normpath(posixpath.join(base_dir, specifier)), target_files
+            )
+            if target_path is not None or reason in {"ambiguous_relative_import", "relative_import_outside_snapshot"}:
+                return target_path, reason, candidates
+            return None, "missing_tsconfig_baseurl_target", []
+        return None, "external_import_or_path_alias", []
+
+    matching: list[tuple[int, str, str | None]] = []
+    for key, targets in paths.items():
+        if not isinstance(key, str) or not isinstance(targets, list) or not targets or not all(
+            isinstance(target, str) for target in targets
+        ):
+            return None, "invalid_tsconfig", []
+        if key.count("*") > 1:
+            return None, "unsupported_tsconfig_paths", []
+        if any(target.count("*") > 1 for target in targets):
+            return None, "unsupported_tsconfig_paths", []
+        if key.count("*") == 0:
+            if key == specifier:
+                matching.append((10**9, key, None))
+        elif key.count("*") == 1:
+            prefix, suffix = key.split("*")
+            if specifier.startswith(prefix) and specifier.endswith(suffix) and len(specifier) >= len(prefix) + len(suffix):
+                matching.append((len(prefix), key, specifier[len(prefix):len(specifier) - len(suffix) if suffix else None]))
+    if not matching:
+        if base_url_explicit:
+            target_path, reason, candidates = _resolve_typescript_target_path(
+                posixpath.normpath(posixpath.join(base_dir, specifier)), target_files
+            )
+            if target_path is not None or reason in {"ambiguous_relative_import", "relative_import_outside_snapshot"}:
+                return target_path, reason, candidates
+            return None, "missing_tsconfig_baseurl_target", []
+        return None, "external_import_or_path_alias", []
+    best_prefix = max(item[0] for item in matching)
+    best = [item for item in matching if item[0] == best_prefix]
+    if len({item[1] for item in best}) > 1:
+        return None, "ambiguous_tsconfig_path_mapping", []
+    _specificity, key, wildcard_value = best[0]
+    targets = paths[key]
+    resolved: set[str] = set()
+    unsupported_target = False
+    for target in targets:
+        if target.count("*") > 1 or ("*" in target) != (wildcard_value is not None):
+            unsupported_target = True
+            continue
+        mapped = target.replace("*", wildcard_value or "")
+        if mapped.startswith(("/", "\\")) or "\\" in mapped or any(mark in mapped for mark in ("?", "#", "%")):
+            unsupported_target = True
+            continue
+        normalized = posixpath.normpath(posixpath.join(base_dir, mapped))
+        target_path, reason, candidates = _resolve_typescript_target_path(normalized, target_files)
+        if target_path is not None:
+            resolved.add(target_path)
+        elif reason == "ambiguous_relative_import":
+            return None, reason, candidates
+        elif reason == "relative_import_outside_snapshot":
+            return None, reason, []
+    if unsupported_target:
+        return None, "unsupported_tsconfig_path_target", []
+    if len(resolved) == 1:
+        return next(iter(resolved)), None, []
+    if len(resolved) > 1:
+        return None, "ambiguous_tsconfig_path_target", sorted(resolved)
+    return None, "missing_tsconfig_path_target", []
+
+
+def _nearest_typescript_config(
+    path: str,
+    configs: Mapping[str, object],
+) -> tuple[str, object] | None:
+    directory = posixpath.dirname(path)
+    while True:
+        candidate = posixpath.join(directory, "tsconfig.json") if directory else "tsconfig.json"
+        if candidate in configs:
+            return candidate, configs[candidate]
+        if not directory:
+            return None
+        parent = posixpath.dirname(directory)
+        if parent == directory:
+            return None
+        directory = parent
+
+
+def _parse_typescript_configs(snapshot_files: tuple[SnapshotFile, ...]) -> dict[str, object]:
+    """Parse captured JSONC configs once; malformed input stays unresolved by path."""
+
+    configs: dict[str, object] = {}
+    for item in snapshot_files:
+        if posixpath.basename(item.path) != "tsconfig.json":
+            continue
+        try:
+            configs[item.path] = json.loads(
+                _strip_jsonc_comments_and_trailing_commas(item.text),
+                object_pairs_hook=_unique_json_object,
+                parse_constant=_reject_json_constant,
+            )
+        except (json.JSONDecodeError, TypeError, ValueError, RecursionError):
+            configs[item.path] = None
+    return configs
+
+
+def _unique_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    """Reject duplicate config keys instead of depending on parser overwrite order."""
+
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON object key")
+        result[key] = value
+    return result
+
+
+def _reject_json_constant(value: str) -> object:
+    """Python's JSON decoder accepts NaN/Infinity unless explicitly rejected."""
+
+    raise ValueError(f"non-standard JSON constant: {value}")
+
+
+def _strip_jsonc_comments_and_trailing_commas(text: str) -> str:
+    """Convert JSONC's comments and trailing commas without changing strings."""
+
+    comment_free: list[str] = []
+    index = 0
+    in_string = False
+    escaped = False
+    while index < len(text):
+        char = text[index]
+        if in_string:
+            comment_free.append(char)
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            index += 1
+            continue
+        if char == '"':
+            in_string = True
+            comment_free.append(char)
+            index += 1
+            continue
+        if char == "/" and index + 1 < len(text) and text[index + 1] in {"/", "*"}:
+            marker = text[index + 1]
+            comment_free.extend((" ", " "))
+            index += 2
+            if marker == "/":
+                while index < len(text) and text[index] not in "\r\n":
+                    comment_free.append(" ")
+                    index += 1
+            else:
+                while index < len(text):
+                    if text[index] == "*" and index + 1 < len(text) and text[index + 1] == "/":
+                        comment_free.extend((" ", " "))
+                        index += 2
+                        break
+                    comment_free.append(text[index] if text[index] in "\r\n" else " ")
+                    index += 1
+                else:
+                    raise ValueError("unterminated JSONC block comment")
+            continue
+        comment_free.append(char)
+        index += 1
+
+    if in_string:
+        raise ValueError("unterminated JSON string")
+
+    source = "".join(comment_free)
+    normalized: list[str] = []
+    index = 0
+    in_string = False
+    escaped = False
+    while index < len(source):
+        char = source[index]
+        if in_string:
+            normalized.append(char)
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            index += 1
+            continue
+        if char == '"':
+            in_string = True
+            normalized.append(char)
+            index += 1
+            continue
+        if char == ",":
+            lookahead = index + 1
+            while lookahead < len(source) and source[lookahead].isspace():
+                lookahead += 1
+            if lookahead < len(source) and source[lookahead] in "]}":
+                previous = index - 1
+                while previous >= 0 and source[previous].isspace():
+                    previous -= 1
+                # A trailing comma follows a value. Stripping commas directly
+                # after an opener would incorrectly accept empty containers
+                # such as `{,}` and `[,]`.
+                if previous >= 0 and source[previous] not in "[{":
+                    index += 1
+                    continue
+        normalized.append(char)
+        index += 1
+    return "".join(normalized)
+
+
+def _resolve_typescript_target_path(
+    normalized: str,
+    target_files: set[str],
+) -> tuple[str | None, str | None, list[str]]:
     if normalized in {".", ".."} or normalized.startswith("../") or normalized.startswith("/"):
         return None, "relative_import_outside_snapshot", []
     suffix = posixpath.splitext(normalized)[1].lower()
@@ -536,6 +779,7 @@ def extract_relations(
         raise ValueError("relation budgets must be positive")
 
     snapshot = definitions.snapshot
+    typescript_configs = _parse_typescript_configs(snapshot.files)
     maps = _DefinitionMaps(
         definitions.symbols,
         package_init_paths=tuple(
@@ -693,6 +937,7 @@ def extract_relations(
                 path,
                 fact.specifier,
                 target_files,
+                typescript_configs,
             )
         if target_path is not None:
             if not budget.reserve("edges"):
@@ -839,6 +1084,7 @@ def extract_relations(
                 path,
                 fact.import_specifier,
                 target_files,
+                typescript_configs,
             )
             if target_path is not None:
                 exports = sorted(set(export_targets.get((target_path, fact.imported_name), [])))

@@ -13,6 +13,8 @@ from app.indexing import (
     SnapshotBoundaryError,
     SUBSYSTEM_MANIFEST_MAX_BYTES,
     SUBSYSTEM_MANIFEST_PATH,
+    TSCONFIG_MAX_BYTES,
+    TSCONFIG_MAX_FILES,
     SubsystemManifestError,
     build_source_snapshot,
     extract_definitions,
@@ -210,6 +212,55 @@ def test_pyproject_metadata_is_captured_but_not_parsed_as_source(tmp_path: Path)
     changed = build_source_snapshot(tmp_path, repository_id="pyproject-metadata")
     assert changed.index.snapshot_hash != snapshot.index.snapshot_hash
     assert changed.index.index_id != snapshot.index.index_id
+
+
+def test_tsconfig_capture_limits_fail_closed_for_oversize_and_too_many_configs(tmp_path: Path) -> None:
+    (tmp_path / "tsconfig.json").write_text(
+        json.dumps({"compilerOptions": {"paths": {"@/*": ["./packages/app/src/*"]}}}),
+        encoding="utf-8",
+    )
+    app = tmp_path / "packages" / "app"
+    (app / "src").mkdir(parents=True)
+    (app / "src" / "entry.ts").write_text('import "@/target";\n', encoding="utf-8")
+    (app / "src" / "target.ts").write_text("export const target = 1;\n", encoding="utf-8")
+    (app / "tsconfig.json").write_bytes(b"{" + b" " * TSCONFIG_MAX_BYTES)
+
+    oversized = build_source_snapshot(tmp_path, repository_id="oversized-tsconfig")
+    assert oversized.index.status == "failed"
+    assert all(item.path != "packages/app/tsconfig.json" for item in oversized.files)
+    oversized_issue = next(item for item in oversized.issues if item.path == "packages/app/tsconfig.json")
+    assert oversized_issue.kind == "file_too_large"
+    assert oversized_issue.size == TSCONFIG_MAX_BYTES + 1
+
+    (app / "tsconfig.json").unlink()
+    for index in range(TSCONFIG_MAX_FILES + 1):
+        directory = tmp_path / f"nested-{index:03d}"
+        directory.mkdir()
+        (directory / "tsconfig.json").write_text("{}", encoding="utf-8")
+    too_many = build_source_snapshot(tmp_path, repository_id="too-many-tsconfigs")
+    assert too_many.index.status == "failed"
+    assert any(
+        issue.kind == "capture_incomplete" and "max_tsconfig_files" in issue.message
+        for issue in too_many.issues
+    )
+
+
+def test_tsconfig_symlink_outside_repository_is_not_captured(tmp_path: Path) -> None:
+    outside = tmp_path.parent / f"{tmp_path.name}-outside-tsconfig.json"
+    outside.write_text(
+        '{"compilerOptions":{"paths":{"@/*":["./must-not-be-read/*"]}}}', encoding="utf-8"
+    )
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "entry.ts").write_text('import "@/target";\n', encoding="utf-8")
+    (tmp_path / "tsconfig.json").symlink_to(outside)
+    try:
+        snapshot = build_source_snapshot(tmp_path, repository_id="symlink-tsconfig")
+    finally:
+        outside.unlink()
+
+    assert snapshot.index.status == "failed"
+    assert all(item.path != "tsconfig.json" for item in snapshot.files)
+    assert any(issue.path == "tsconfig.json" and issue.kind == "symlink" for issue in snapshot.issues)
 
 
 def test_relation_rule_identity_separates_same_source_snapshot(tmp_path: Path) -> None:
