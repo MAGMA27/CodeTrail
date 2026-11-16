@@ -85,6 +85,7 @@ _FEATURE_HISTORY_SCAN_LIMIT = 200
 _RUN_HISTORY_SCAN_LIMIT = 200
 _RUN_EVENT_PAGE_SIZE = 100
 _RUN_TOOL_RESULT_PAGE_SIZE = 40
+_NEIGHBOR_FILE_REFERENCE_LIMIT = 10
 logger = logging.getLogger(__name__)
 _EVENT_ADAPTER = TypeAdapter(Event)
 _TOOL_RESULT_ADAPTER = TypeAdapter(ToolResult)
@@ -289,6 +290,9 @@ def _neighbor_completeness(
     index_unresolved_truncated: bool | None,
     possible_caller_count: int | None,
     unresolved_outgoing_count: int | None,
+    unresolved_outgoing_file_reference_count: int | None,
+    possible_incoming_file_reference_count: int | None,
+    file_reference_scope_limited: bool,
 ) -> NeighborCompleteness:
     reasons: list[str] = []
     hints: list[str] = []
@@ -306,6 +310,26 @@ def _neighbor_completeness(
         hints.append(
             f"{unresolved_outgoing_count} call(s) made by the returned nodes were not resolved "
             "(see unresolved), so callees may be missing."
+        )
+    if unresolved_outgoing_file_reference_count:
+        reasons.append("unresolved_outgoing_file_references")
+        hints.append(
+            "Unresolved references from this file are shown in `unresolved` when the response budget permits. "
+            "Stored reasons do not always distinguish imports from calls, so file navigation may be incomplete. "
+            f"Expand with list_unresolved(module_id='{root.symbol_id}', direction='outgoing')."
+        )
+    if possible_incoming_file_reference_count:
+        reasons.append("possible_incoming_file_references")
+        hints.append(
+            "Unresolved references explicitly list symbols in this file as possible targets; they are not "
+            "confirmed imports or calls. Inspect `unresolved_summary.by_source` or the full `unresolved` "
+            "items, then use list_unresolved(symbol_id='<source_symbol_id>', direction='outgoing') for details."
+        )
+    if file_reference_scope_limited:
+        reasons.append("file_reference_scope_limited")
+        hints.append(
+            "Unresolved file references were checked only for the root file. Other returned file neighbors "
+            "were not scanned; query each module separately to inspect its references."
         )
     if truncated:
         reasons.append("query_truncated")
@@ -702,6 +726,11 @@ CREATE TABLE IF NOT EXISTS static_edges (
     FOREIGN KEY (index_id, target_id) REFERENCES symbols(index_id, symbol_id) ON DELETE CASCADE
 );
 
+CREATE INDEX IF NOT EXISTS static_edges_source_neighbors
+    ON static_edges(index_id, source_id, target_id, kind, edge_id);
+CREATE INDEX IF NOT EXISTS static_edges_target_neighbors
+    ON static_edges(index_id, target_id, source_id, kind, edge_id);
+
 CREATE TABLE IF NOT EXISTS contextual_calls (
     context_id TEXT PRIMARY KEY,
     index_id TEXT NOT NULL,
@@ -746,6 +775,9 @@ CREATE TABLE IF NOT EXISTS unresolved_references (
     FOREIGN KEY (index_id, source_symbol_id) REFERENCES symbols(index_id, symbol_id) ON DELETE CASCADE
 );
 
+CREATE INDEX IF NOT EXISTS unresolved_references_file_reason
+    ON unresolved_references(index_id, path, reason, start_line, unresolved_id);
+
 CREATE TABLE IF NOT EXISTS unresolved_targets (
     index_id TEXT NOT NULL,
     unresolved_id TEXT NOT NULL,
@@ -754,6 +786,9 @@ CREATE TABLE IF NOT EXISTS unresolved_targets (
     FOREIGN KEY (index_id, unresolved_id) REFERENCES unresolved_references(index_id, unresolved_id) ON DELETE CASCADE,
     FOREIGN KEY (index_id, target_symbol_id) REFERENCES symbols(index_id, symbol_id) ON DELETE CASCADE
 );
+
+CREATE INDEX IF NOT EXISTS unresolved_targets_target
+    ON unresolved_targets(index_id, target_symbol_id, unresolved_id);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS symbol_fts USING fts5(
     index_id UNINDEXED,
@@ -4848,6 +4883,13 @@ class IndexStore:
         contextual_calls: list[ContextualCall] = []
         seen_edge_ids: set[str] = set()
         seen_context_ids: set[str] = set()
+        module_ids_by_path: dict[str, str | None] = {root.path: root.symbol_id} if root.kind == "module" else {}
+
+        def module_id_for_path(path: str) -> str | None:
+            if path not in module_ids_by_path:
+                module_ids_by_path[path] = self._module_symbol_id_for_path(index_id, path)
+            return module_ids_by_path[path]
+
         deadline = time.monotonic() + max_seconds
         truncated = False
         truncation_reason: str | None = None
@@ -4860,6 +4902,8 @@ class IndexStore:
 
         def stop(reason: str) -> None:
             nonlocal truncated, truncation_reason
+            if truncated:
+                return
             truncated = True
             truncation_reason = reason
 
@@ -4872,15 +4916,37 @@ class IndexStore:
                 current_id, current_depth = queue.popleft()
                 if current_depth >= params.depth:
                     continue
+                current_symbol = nodes[current_id]
+                file_imports = current_symbol.kind == "module" and "imports" in edge_kinds
                 if direction == "callers":
-                    relation_clause = "target_id = ?"
+                    relation_clause = "e.target_id = ?"
                     relation_parameters: tuple[object, ...] = (current_id,)
+                    if file_imports:
+                        relation_clause = (
+                            "((e.kind = 'imports' AND target_symbol.path = ?) "
+                            "OR (e.kind != 'imports' AND e.target_id = ?))"
+                        )
+                        relation_parameters = (current_symbol.path, current_id)
                 elif direction == "callees":
-                    relation_clause = "source_id = ?"
+                    relation_clause = "e.source_id = ?"
                     relation_parameters = (current_id,)
+                    if file_imports:
+                        relation_clause = (
+                            "((e.kind = 'imports' AND source_symbol.path = ?) "
+                            "OR (e.kind != 'imports' AND e.source_id = ?))"
+                        )
+                        relation_parameters = (current_symbol.path, current_id)
                 else:
-                    relation_clause = "(source_id = ? OR target_id = ?)"
+                    relation_clause = "(e.source_id = ? OR e.target_id = ?)"
                     relation_parameters = (current_id, current_id)
+                    if file_imports:
+                        relation_clause = (
+                            "((e.kind = 'imports' AND (source_symbol.path = ? OR target_symbol.path = ?)) "
+                            "OR (e.kind != 'imports' AND (e.source_id = ? OR e.target_id = ?)))"
+                        )
+                        relation_parameters = (
+                            current_symbol.path, current_symbol.path, current_id, current_id,
+                        )
                 edge_placeholders = ",".join("?" for _ in edge_kinds)
                 seen_clause = ""
                 seen_parameters: tuple[str, ...] = ()
@@ -4889,19 +4955,92 @@ class IndexStore:
                     seen_parameters = tuple(sorted(seen_edge_ids))
                 remaining_edges = max_edges - len(neighbors) - len(contextual_calls)
                 try:
-                    rows = self._connection.execute(
-                        "SELECT edge_id, source_id, target_id, kind, extraction_method, source_path, "
-                        "start_line, end_line FROM static_edges WHERE index_id = ? "
-                        f"AND kind IN ({edge_placeholders}) AND {relation_clause}{seen_clause} "
-                        "ORDER BY source_id COLLATE BINARY, target_id COLLATE BINARY, kind, edge_id LIMIT ?",
-                        (
+                    if file_imports:
+                        arms: list[str] = []
+                        query_parameters: list[object] = []
+
+                        def add_file_import_arm(file_side: Literal["source", "target"]) -> None:
+                            if file_side == "source":
+                                path_symbol = "source_symbol"
+                                duplicate_guard = ""
+                            else:
+                                path_symbol = "target_symbol"
+                                duplicate_guard = (
+                                    f" AND source_symbol.path != ?" if direction == "both" else ""
+                                )
+                            arms.append(
+                                "SELECT e.edge_id, e.source_id, e.target_id, e.kind, e.extraction_method, "
+                                "e.source_path, e.start_line, e.end_line, source_symbol.path AS source_symbol_path, "
+                                "target_symbol.path AS target_symbol_path "
+                                "FROM symbols path_symbol INDEXED BY symbols_module_page "
+                                f"CROSS JOIN static_edges e INDEXED BY static_edges_{file_side}_neighbors "
+                                "JOIN symbols source_symbol ON source_symbol.index_id = e.index_id "
+                                "AND source_symbol.symbol_id = e.source_id "
+                                "JOIN symbols target_symbol ON target_symbol.index_id = e.index_id "
+                                "AND target_symbol.symbol_id = e.target_id "
+                                "WHERE path_symbol.index_id = ? AND path_symbol.path = ? "
+                                "AND e.index_id = path_symbol.index_id "
+                                f"AND e.{file_side}_id = path_symbol.symbol_id AND e.kind = 'imports' "
+                                f"{duplicate_guard}"
+                            )
+                            query_parameters.extend((index_id, current_symbol.path))
+                            if duplicate_guard:
+                                query_parameters.append(current_symbol.path)
+
+                        if direction in {"callees", "both"}:
+                            add_file_import_arm("source")
+                        if direction in {"callers", "both"}:
+                            add_file_import_arm("target")
+
+                        other_edge_kinds = tuple(kind for kind in edge_kinds if kind != "imports")
+                        if other_edge_kinds:
+                            if direction == "callees":
+                                exact_sides = (("source_id", ""),)
+                            elif direction == "callers":
+                                exact_sides = (("target_id", ""),)
+                            else:
+                                exact_sides = (("source_id", ""), ("target_id", "source_id != ?"))
+                            for exact_side in exact_sides:
+                                side, self_guard = exact_side
+                                edge_placeholders = ",".join("?" for _ in other_edge_kinds)
+                                arms.append(
+                                    "SELECT e.edge_id, e.source_id, e.target_id, e.kind, e.extraction_method, "
+                                    "e.source_path, e.start_line, e.end_line, NULL AS source_symbol_path, "
+                                    "NULL AS target_symbol_path FROM static_edges e "
+                                    "WHERE e.index_id = ? "
+                                    f"AND e.kind IN ({edge_placeholders}) AND e.{side} = ?"
+                                    f"{' AND ' + self_guard if self_guard else ''}"
+                                )
+                                query_parameters.extend((index_id, *other_edge_kinds, current_id))
+                                if self_guard:
+                                    query_parameters.append(current_id)
+
+                        edge_source = "(" + " UNION ALL ".join(arms) + ") AS candidates"
+                        query_sql = (
+                            f"SELECT * FROM {edge_source} "
+                            f"WHERE 1=1{seen_clause} "
+                            "ORDER BY source_id COLLATE BINARY, target_id COLLATE BINARY, kind, edge_id LIMIT ?"
+                        )
+                        query_parameters.extend((*seen_parameters, remaining_edges + 1))
+                    else:
+                        edge_source = (
+                            "SELECT e.edge_id, e.source_id, e.target_id, e.kind, e.extraction_method, "
+                            "e.source_path, e.start_line, e.end_line, NULL AS source_symbol_path, "
+                            "NULL AS target_symbol_path FROM static_edges e "
+                        )
+                        query_sql = (
+                            f"{edge_source} WHERE e.index_id = ? "
+                            f"AND e.kind IN ({edge_placeholders}) AND {relation_clause}{seen_clause} "
+                            "ORDER BY e.source_id COLLATE BINARY, e.target_id COLLATE BINARY, e.kind, e.edge_id LIMIT ?"
+                        )
+                        query_parameters = [
                             index_id,
                             *edge_kinds,
                             *relation_parameters,
                             *seen_parameters,
                             remaining_edges + 1,
-                        ),
-                    )
+                        ]
+                    rows = self._connection.execute(query_sql, tuple(query_parameters))
                     for row in rows:
                         if time.monotonic() >= deadline:
                             stop("max_seconds exceeded")
@@ -4910,33 +5049,58 @@ class IndexStore:
                             stop("max_edges reached")
                             break
                         edge = _edge_from_row(index_id, row)
-                        if direction == "callers":
-                            neighbor_id = row["source_id"]
-                        elif direction == "callees":
-                            neighbor_id = row["target_id"]
-                        elif row["source_id"] == current_id:
-                            neighbor_id = row["target_id"]
+                        projected_import = file_imports and edge.kind == "imports"
+                        if projected_import:
+                            source_path = row["source_symbol_path"]
+                            target_path = row["target_symbol_path"]
+                            if direction == "callers":
+                                neighbor_path = source_path
+                            elif direction == "callees":
+                                neighbor_path = target_path
+                            elif source_path == current_symbol.path:
+                                neighbor_path = target_path
+                            else:
+                                neighbor_path = source_path
+                            neighbor_id = module_id_for_path(neighbor_path)
+                            if neighbor_id is None:
+                                # An edge without a module root cannot support file navigation.
+                                continue
+                            required_ids = tuple(dict.fromkeys((row["source_id"], row["target_id"], neighbor_id)))
+                            additions = {
+                                required_id: self._load_symbol(index_id, required_id)
+                                for required_id in required_ids
+                                if required_id not in nodes
+                            }
+                            loaded_neighbor = nodes.get(neighbor_id) or additions[neighbor_id]
                         else:
-                            neighbor_id = row["source_id"]
-                        neighbor = nodes.get(neighbor_id)
-                        loaded_neighbor = neighbor
-                        if neighbor is None:
-                            if len(nodes) >= params.limit:
-                                stop("max_nodes reached")
-                                break
-                            loaded_neighbor = self._load_symbol(index_id, neighbor_id)
+                            if direction == "callers":
+                                neighbor_id = row["source_id"]
+                            elif direction == "callees":
+                                neighbor_id = row["target_id"]
+                            elif row["source_id"] == current_id:
+                                neighbor_id = row["target_id"]
+                            else:
+                                neighbor_id = row["source_id"]
+                            neighbor = nodes.get(neighbor_id)
+                            additions = {} if neighbor is not None else {
+                                neighbor_id: self._load_symbol(index_id, neighbor_id)
+                            }
+                            loaded_neighbor = nodes.get(neighbor_id) or additions[neighbor_id]
+                        if len(nodes) + len(additions) > params.limit:
+                            stop("max_nodes reached")
+                            break
                         candidate = Neighbor(
                             symbol=loaded_neighbor, edge=edge, depth=current_depth + 1
                         )
                         candidate_size = _model_size(candidate)
-                        if neighbor is None:
-                            candidate_size += _model_size(loaded_neighbor)
+                        candidate_size += sum(_model_size(symbol) for symbol in additions.values())
                         if output_bytes + candidate_size > max_output_bytes:
                             stop("max_output_bytes reached")
                             break
                         seen_edge_ids.add(row["edge_id"])
-                        if neighbor is None:
-                            nodes[neighbor_id] = loaded_neighbor
+                        was_new_neighbor = neighbor_id not in nodes
+                        nodes.update(additions)
+                        if was_new_neighbor:
                             if current_depth + 1 < params.depth:
                                 queue.append((neighbor_id, current_depth + 1))
                         neighbors.append(candidate)
@@ -4981,15 +5145,112 @@ class IndexStore:
         finally:
             self._connection.set_progress_handler(None, 0)
 
-        # Outgoing unresolved calls only answer "what else might these nodes call";
-        # a callers query must not be padded with them.
-        unresolved = (
-            () if direction == "callers" else self._load_unresolved(index_id, tuple(nodes))
+        file_import_query = root.kind == "module" and "imports" in edge_kinds
+        # Module/import queries use the bounded root-path collector below. Preserve
+        # the existing symbol-query behavior without loading support-node references
+        # before that bounded collector runs.
+        unresolved_items = (
+            [] if file_import_query or direction == "callers"
+            else list(self._load_unresolved(index_id, tuple(nodes)))
+        )
+        unresolved_ids = {item.unresolved_id for item in unresolved_items}
+        outgoing_file_reference_count: int | None = None
+        incoming_file_reference_count: int | None = None
+        if file_import_query and direction != "callers":
+            try:
+                self._connection.set_progress_handler(check_deadline, _NEIGHBOR_PROGRESS_OPS)
+                file_references, file_references_truncated = self._load_module_file_references(
+                    index_id, root.path, _NEIGHBOR_FILE_REFERENCE_LIMIT
+                )
+            except sqlite3.OperationalError as exc:
+                if time.monotonic() >= deadline:
+                    file_references = ()
+                    file_references_truncated = False
+                    stop("max_seconds exceeded while collecting unresolved file references")
+                else:
+                    raise StorageError(f"unresolved file reference query failed: {exc}") from exc
+            finally:
+                self._connection.set_progress_handler(None, 0)
+            outgoing_file_reference_ids = {item.unresolved_id for item in file_references}
+            for reference in file_references:
+                if time.monotonic() >= deadline:
+                    stop("max_seconds exceeded while collecting unresolved file references")
+                    break
+                source_symbol = nodes.get(reference.source_symbol_id)
+                source_size = 0
+                if source_symbol is None:
+                    if len(nodes) >= params.limit:
+                        stop("max_nodes reached while collecting unresolved file references")
+                        break
+                    source_symbol = self._load_symbol(index_id, reference.source_symbol_id)
+                    source_size = _model_size(source_symbol)
+                reference_size = _model_size(reference) if reference.unresolved_id not in unresolved_ids else 0
+                if output_bytes + source_size + reference_size > max_output_bytes:
+                    stop("max_output_bytes reached while collecting unresolved file references")
+                    break
+                if source_symbol.symbol_id not in nodes:
+                    nodes[source_symbol.symbol_id] = source_symbol
+                    output_bytes += source_size
+                if reference.unresolved_id not in unresolved_ids:
+                    unresolved_items.append(reference)
+                    unresolved_ids.add(reference.unresolved_id)
+                    output_bytes += reference_size
+            outgoing_file_reference_count = len(outgoing_file_reference_ids)
+            if file_references_truncated:
+                stop("max_file_references reached")
+        if file_import_query and direction != "callees":
+            try:
+                self._connection.set_progress_handler(check_deadline, _NEIGHBOR_PROGRESS_OPS)
+                candidate_references, candidate_references_truncated = self._load_module_file_candidates(
+                    index_id, root.path, _NEIGHBOR_FILE_REFERENCE_LIMIT
+                )
+            except sqlite3.OperationalError as exc:
+                if time.monotonic() >= deadline:
+                    candidate_references = ()
+                    candidate_references_truncated = False
+                    stop("max_seconds exceeded while collecting possible incoming file references")
+                else:
+                    raise StorageError(f"possible incoming file reference query failed: {exc}") from exc
+            finally:
+                self._connection.set_progress_handler(None, 0)
+            incoming_file_reference_ids = {item.unresolved_id for item in candidate_references}
+            for reference in candidate_references:
+                if time.monotonic() >= deadline:
+                    stop("max_seconds exceeded while collecting possible incoming file references")
+                    break
+                source_symbol = nodes.get(reference.source_symbol_id)
+                source_size = 0
+                if source_symbol is None:
+                    if len(nodes) >= params.limit:
+                        stop("max_nodes reached while collecting possible incoming file references")
+                        break
+                    source_symbol = self._load_symbol(index_id, reference.source_symbol_id)
+                    source_size = _model_size(source_symbol)
+                reference_size = _model_size(reference) if reference.unresolved_id not in unresolved_ids else 0
+                if output_bytes + source_size + reference_size > max_output_bytes:
+                    stop("max_output_bytes reached while collecting possible incoming file references")
+                    break
+                if source_symbol.symbol_id not in nodes:
+                    nodes[source_symbol.symbol_id] = source_symbol
+                    output_bytes += source_size
+                if reference.unresolved_id not in unresolved_ids:
+                    unresolved_items.append(reference)
+                    unresolved_ids.add(reference.unresolved_id)
+                    output_bytes += reference_size
+            incoming_file_reference_count = len(incoming_file_reference_ids)
+            if candidate_references_truncated:
+                stop("max_possible_incoming_file_references reached")
+        unresolved = tuple(unresolved_items)
+        unresolved_outgoing_call_count = (
+            None if direction == "callers" or file_import_query else len(unresolved)
         )
         possible_caller_count: int | None = None
         possible_callers: tuple[UnresolvedReference, ...] = ()
         if direction != "callees" and "calls" in edge_kinds:
             possible_caller_count, possible_callers = self._possible_unresolved_callers(index_id, root)
+        file_reference_scope_limited = file_import_query and params.depth > 1 and any(
+            item.symbol.kind == "module" and item.depth < params.depth for item in neighbors
+        )
         completeness = _neighbor_completeness(
             root=root,
             truncated=truncated,
@@ -4998,7 +5259,10 @@ class IndexStore:
             index_truncation_reason=index_truncation_reason,
             index_unresolved_truncated=index_unresolved_truncated,
             possible_caller_count=possible_caller_count,
-            unresolved_outgoing_count=None if direction == "callers" else len(unresolved),
+            unresolved_outgoing_count=unresolved_outgoing_call_count,
+            unresolved_outgoing_file_reference_count=outgoing_file_reference_count,
+            possible_incoming_file_reference_count=incoming_file_reference_count,
+            file_reference_scope_limited=file_reference_scope_limited,
         )
         return NeighborQueryResult(
             index_id=index_id,
@@ -5325,6 +5589,44 @@ class IndexStore:
         ).fetchall()
         return self._unresolved_from_rows(index_id, unresolved_rows)
 
+    def _load_module_file_references(
+        self,
+        index_id: str,
+        path: str,
+        limit: int,
+    ) -> tuple[tuple[UnresolvedReference, ...], bool]:
+        """Read a bounded sample of open-ended unresolved references in one file."""
+
+        rows = self._connection.execute(
+            "SELECT unresolved_id, source_symbol_id, path, expression, reason, start_line, end_line "
+            "FROM unresolved_references WHERE index_id = ? AND path = ? "
+            "ORDER BY start_line, unresolved_id LIMIT ?",
+            (index_id, path, limit + 1),
+        ).fetchall()
+        has_more = len(rows) > limit
+        return self._unresolved_from_rows(index_id, rows[:limit]), has_more
+
+    def _load_module_file_candidates(
+        self,
+        index_id: str,
+        path: str,
+        limit: int,
+    ) -> tuple[tuple[UnresolvedReference, ...], bool]:
+        """Read unresolved references whose explicit candidate target is in one file."""
+
+        rows = self._connection.execute(
+            "SELECT DISTINCT r.unresolved_id, r.source_symbol_id, r.path, r.expression, r.reason, "
+            "r.start_line, r.end_line FROM symbols candidate INDEXED BY symbols_module_page "
+            "CROSS JOIN unresolved_targets t INDEXED BY unresolved_targets_target "
+            "JOIN unresolved_references r ON r.index_id = t.index_id AND r.unresolved_id = t.unresolved_id "
+            "WHERE candidate.index_id = ? AND candidate.path = ? "
+            "AND t.index_id = candidate.index_id AND t.target_symbol_id = candidate.symbol_id "
+            "ORDER BY r.start_line, r.unresolved_id LIMIT ?",
+            (index_id, path, limit + 1),
+        ).fetchall()
+        has_more = len(rows) > limit
+        return self._unresolved_from_rows(index_id, rows[:limit]), has_more
+
     def _unresolved_from_rows(
         self,
         index_id: str,
@@ -5549,6 +5851,14 @@ class IndexStore:
                 f"symbol {symbol_id!r} was not found in index {index_id!r}"
             )
         return _symbol_from_row(index_id, row)
+
+    def _module_symbol_id_for_path(self, index_id: str, path: str) -> str | None:
+        row = self._connection.execute(
+            "SELECT symbol_id FROM symbols WHERE index_id = ? AND path = ? AND kind = 'module' "
+            "ORDER BY start_line, symbol_id LIMIT 1",
+            (index_id, path),
+        ).fetchone()
+        return str(row["symbol_id"]) if row is not None else None
 
     def _validate_relation(self, relation: RelationIndex) -> None:
         index = relation.snapshot.index
