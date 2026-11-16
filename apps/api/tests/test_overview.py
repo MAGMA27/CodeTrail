@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 
 import app.service as service_module
 from app.contracts import CreateProjectIndexRequest, CreateProjectRequest
-from app.indexing import extract_definitions
+from app.indexing import extract_definitions, index_configuration_hash
 from app.main import create_app
 
 
@@ -168,9 +168,21 @@ def test_legacy_source_v4_relations_v18_overview_without_pyproject_stays_availab
     application = create_app({"timeout-demo": repository})
     workspace = application.state.workspace_service
     index_service = application.state.index_service
-    index_service.rules_version = index_service.rules_version.replace(
-        "source-v5", "source-v4"
-    ).replace("+relations-v19", "+relations-v18")
+    legacy_identity_version = "relations-v18"
+    current_rules_version = index_service.rules_version
+    assert current_rules_version.startswith("source-v6+")
+    assert current_rules_version.endswith("+relations-v15")
+    legacy_rules_version = (
+        current_rules_version.replace("source-v6+", "source-v4+", 1)
+        .removesuffix("+relations-v15")
+        + "+relations-v14"
+    )
+    index_service.rules_version = legacy_rules_version
+    index_service.configuration_hash = index_configuration_hash(
+        max_file_bytes=index_service.max_file_bytes,
+        identity_version=legacy_identity_version,
+        rules_version=legacy_rules_version,
+    )
     project = workspace.create_project(
         CreateProjectRequest(name="Legacy overview", repository_id="timeout-demo")
     )
@@ -178,7 +190,7 @@ def test_legacy_source_v4_relations_v18_overview_without_pyproject_stays_availab
         project.project_id,
         CreateProjectIndexRequest(revision="legacy-v4-v18", dirty=True),
         expected_latest_index_id=None,
-        identity_version="relations-v18",
+        identity_version=legacy_identity_version,
     )
     (repository / "pyproject.toml").write_text(
         '[project.scripts]\ncodetrail = "timeout_demo.__main__:main"\n',
@@ -196,7 +208,10 @@ def test_legacy_source_v4_relations_v18_overview_without_pyproject_stays_availab
     assert all(entry["kind"] != "python_packaging_entry" for entry in overview["entries"])
     assert not any("pyproject.toml entry point 声明未解析" in note for note in overview["notes"])
     assert created.index.rules_version.startswith("source-v4+")
-    assert "relations-v18" in created.index.index_id
+    assert created.index.rules_version.endswith("+relations-v14")
+    assert created.index.rules_version == legacy_rules_version
+    assert f"-{legacy_identity_version}-" in created.index.index_id
+    assert created.index.configuration_hash == index_service.configuration_hash
 
 
 def test_overview_cache_is_bounded_keyed_and_scoped(tmp_path: Path, monkeypatch) -> None:
