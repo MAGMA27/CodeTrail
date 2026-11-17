@@ -172,7 +172,7 @@ import {
   shouldClearSubmittedSessionDraft,
   type SessionDraftSubmission,
 } from "../lib/session-draft";
-import { readWorkbenchRoute, resolveWorkbenchProject, workbenchLocation } from "../lib/workbench-navigation";
+import { readWorkbenchRoute, readWorkbenchViewState, resolveWorkbenchProject, resolveWorkbenchRouteState, sessionIndexMatches, workbenchLocation, workbenchScopeMatches, workbenchStateLocation, type WorkbenchKnowledgeView } from "../lib/workbench-navigation";
 import { ImpactScopeMismatchError, impactErrorView, impactScopeMismatch, type ImpactErrorView } from "../lib/impact-layers";
 import WorkbenchUi from "./workbench-ui";
 
@@ -515,30 +515,18 @@ type EvidenceLink = {
 };
 
 function readEvidenceLink(): { link: EvidenceLink | null; error: string | null } {
-  const params = new URLSearchParams(window.location.search);
-  const keys = ["project_id", "index_id", "path", "start_line", "end_line", "content_hash", "evidence_id"];
-  const values = Object.fromEntries(keys.map((key) => [key, params.get(key)]));
-  const hasEvidenceValue = keys.slice(1).some((key) => params.get(key) !== null);
-  if (!hasEvidenceValue) {
-    return { link: null, error: null };
-  }
-  if (Object.values(values).some((value) => !value)) {
-    return { link: null, error: "工作台引用缺少必要的项目、索引或证据参数。" };
-  }
-  const startLine = Number(values.start_line);
-  const endLine = Number(values.end_line);
-  if (!Number.isInteger(startLine) || !Number.isInteger(endLine) || startLine < 1 || endLine < startLine) {
-    return { link: null, error: "工作台引用的源码行号无效。" };
-  }
+  const state = readWorkbenchViewState(window.location.search);
+  if (!state.evidence) return { link: null, error: state.error };
+  const route = readWorkbenchRoute(window.location.search);
   return {
     link: {
-      projectId: values.project_id as string,
-      indexId: values.index_id as string,
-      path: values.path as string,
-      startLine,
-      endLine,
-      contentHash: values.content_hash as string,
-      evidenceId: values.evidence_id as string,
+      projectId: state.projectId ?? route.projectId ?? "",
+      indexId: state.indexId ?? "",
+      path: state.evidence.path,
+      startLine: state.evidence.startLine,
+      endLine: state.evidence.endLine,
+      contentHash: state.evidence.contentHash,
+      evidenceId: state.evidence.evidenceId,
     },
     error: null,
   };
@@ -611,6 +599,7 @@ export default function Workbench() {
   const [graphIndexId, setGraphIndexId] = useState<string | null>(null);
   const [contextualCalls, setContextualCalls] = useState<ContextualCall[]>([]);
   const [viewMode, setViewMode] = useState<WorkbenchView>("overview");
+  const [knowledgeView, setKnowledgeView] = useState<WorkbenchKnowledgeView>("architecture");
   const [panelMode, setPanelMode] = useState<WorkbenchPanel>("none");
   const [architectureGraphRootId, setArchitectureGraphRootId] = useState<string | null>(null);
   const [overviewStatus, setOverviewStatus] = useState<AsyncStatus>("idle");
@@ -814,8 +803,32 @@ export default function Workbench() {
   const knownGroupKeys = useRef<Set<string>>(new Set());
   const evidenceLink = useRef<EvidenceLink | null>(null);
   const evidenceLinkApplied = useRef(false);
+  const requestedJourneyId = useRef<string | null>(null);
+  const requestedViewIndexId = useRef<string | null>(null);
   const sessionLink = useRef<SessionLink | null>(null);
   const sessionLinkApplied = useRef(false);
+  const sessionsRef = useRef(sessions);
+  sessionsRef.current = sessions;
+  const knowledgeRouteState = useRef({
+    projectId: selectedProjectId,
+    indexId: indexResponse?.index.index_id ?? null,
+    view: knowledgeView,
+    journeyId: selectedJourneyId,
+    journeyIndexId: journey?.index.index_id ?? (requestedJourneyId.current ? requestedViewIndexId.current : null),
+    sourceResponse,
+    sessionId: selectedSessionId,
+    viewMode,
+  });
+  knowledgeRouteState.current = {
+    projectId: selectedProjectId,
+    indexId: indexResponse?.index.index_id ?? null,
+    view: knowledgeView,
+    journeyId: selectedJourneyId,
+    journeyIndexId: journey?.index.index_id ?? (requestedJourneyId.current ? requestedViewIndexId.current : null),
+    sourceResponse,
+    sessionId: selectedSessionId,
+    viewMode,
+  };
 
   const invalidateImportNavigation = useCallback(() => {
     importNavigationId.current += 1;
@@ -823,16 +836,80 @@ export default function Workbench() {
   const replaceWorkbenchLocation = useCallback((projectId: string, sessionId?: string) => {
     window.history.replaceState(null, "", workbenchLocation(window.location.href, projectId, sessionId));
   }, []);
+  const persistKnowledgeRoute = useCallback((overrides: {
+    view?: WorkbenchKnowledgeView;
+    journeyId?: string | null;
+    evidence?: ReturnType<typeof readWorkbenchViewState>["evidence"];
+    indexId?: string | null;
+    scope?: { projectId: string; indexId?: string | null };
+    sessionId?: string | null;
+  } = {}) => {
+    const current = knowledgeRouteState.current;
+    const activeSession = current.sessionId
+      ? sessionsRef.current.find((session) => session.project_id === current.projectId && session.session_id === current.sessionId)
+      : null;
+    const sourceEvidence = overrides.evidence === null ? null : current.sourceResponse ? {
+      path: current.sourceResponse.evidence.path,
+      startLine: current.sourceResponse.evidence.start_line,
+      endLine: current.sourceResponse.evidence.end_line,
+      contentHash: current.sourceResponse.evidence.content_hash,
+      evidenceId: current.sourceResponse.evidence.evidence_id,
+    } : evidenceLink.current?.projectId === current.projectId ? {
+      path: evidenceLink.current.path,
+      startLine: evidenceLink.current.startLine,
+      endLine: evidenceLink.current.endLine,
+      contentHash: evidenceLink.current.contentHash,
+      evidenceId: evidenceLink.current.evidenceId,
+    } : null;
+    const explicitEvidenceIndexId = overrides.evidence ? overrides.indexId ?? overrides.scope?.indexId ?? null : null;
+    const sourceIndexId = explicitEvidenceIndexId ?? current.sourceResponse?.index_id ?? (
+      evidenceLink.current?.projectId === current.projectId ? evidenceLink.current.indexId : null
+    );
+    const sessionIndexId = activeSession?.index.index_id ?? null;
+    const allowedIndexId = explicitEvidenceIndexId ?? (current.viewMode === "session" ? sessionIndexId : current.indexId);
+    if (!current.projectId || overrides.scope && (
+      overrides.scope.projectId !== current.projectId ||
+      !workbenchScopeMatches(allowedIndexId, overrides.scope.indexId, explicitEvidenceIndexId)
+    )) return;
+    const evidence = overrides.evidence === undefined ? sourceEvidence : overrides.evidence;
+    const linkedSessionId = sessionLink.current?.projectId === current.projectId ? sessionLink.current.sessionId : null;
+    const routeState = resolveWorkbenchRouteState({
+      view: overrides.view ?? current.view,
+      journeyId: overrides.journeyId === undefined ? current.journeyId ?? requestedJourneyId.current : overrides.journeyId,
+      projectId: current.projectId,
+      indexId: overrides.indexId === undefined ? current.indexId : overrides.indexId,
+      evidence,
+      sessionId: overrides.sessionId === undefined
+        ? current.viewMode === "session" || linkedSessionId
+          ? current.sessionId ?? linkedSessionId
+          : null
+        : overrides.sessionId,
+    }, {
+      ...(overrides.view === undefined ? {} : { view: overrides.view }),
+      ...(overrides.journeyId === undefined ? {} : { journeyId: overrides.journeyId }),
+      ...(overrides.indexId === undefined ? {} : { indexId: overrides.indexId }),
+      ...(overrides.evidence === undefined ? {} : { evidence: overrides.evidence }),
+    }, {
+      sourceIndexId,
+      sessionIndexId,
+      sessionActive: current.viewMode === "session",
+      journeyIndexId: current.journeyIndexId,
+    });
+    window.history.replaceState(null, "", workbenchStateLocation(window.location.href, routeState));
+  }, []);
   const changeWorkbenchView = useCallback((mode: WorkbenchView) => {
     setViewMode(mode);
     if (mode === "overview") {
       sessionLink.current = null;
       sessionLinkApplied.current = true;
-      if (selectedProjectId) {
-        replaceWorkbenchLocation(selectedProjectId);
-      }
+      persistKnowledgeRoute({ sessionId: null });
     }
-  }, [replaceWorkbenchLocation, selectedProjectId]);
+  }, [persistKnowledgeRoute]);
+
+  const changeKnowledgeView = useCallback((mode: WorkbenchKnowledgeView) => {
+    setKnowledgeView(mode);
+    persistKnowledgeRoute({ view: mode });
+  }, [persistKnowledgeRoute]);
 
   const resetModuleSymbolSource = useCallback(() => {
     sourceController.current?.abort();
@@ -846,7 +923,21 @@ export default function Workbench() {
     setPanelMode("none");
   }, []);
 
-  const resetModuleSymbols = useCallback(() => {
+  const dismissActiveEvidence = useCallback(() => {
+    sourceController.current?.abort();
+    sourceRequestId.current += 1;
+    persistKnowledgeRoute({ evidence: null });
+    evidenceLink.current = null;
+    evidenceLinkApplied.current = true;
+    setLinkedSymbol(null);
+    setSelectedId(null);
+    setSourceResponse(null);
+    setSourceStatus("idle");
+    setSourceError(null);
+    setSourceGenerationId(null);
+  }, [persistKnowledgeRoute]);
+
+  const resetModuleSymbolListState = useCallback(() => {
     moduleSymbolsController.current?.abort();
     moduleSymbolsRequestId.current += 1;
     setModuleSymbolsRoot(null);
@@ -854,8 +945,12 @@ export default function Workbench() {
     setModuleSymbolsStatus("idle");
     setModuleSymbolsError(null);
     setModuleSymbolsRetry(null);
+  }, []);
+
+  const resetModuleSymbols = useCallback(() => {
+    resetModuleSymbolListState();
     resetModuleSymbolSource();
-  }, [resetModuleSymbolSource]);
+  }, [resetModuleSymbolListState, resetModuleSymbolSource]);
 
   const closeRunEventStream = useCallback(() => {
     runStreamRequestId.current += 1;
@@ -976,26 +1071,28 @@ export default function Workbench() {
       }
       const parsedEvidenceLink = readEvidenceLink();
       const route = readWorkbenchRoute(window.location.search);
+      const savedViewState = readWorkbenchViewState(window.location.search);
       evidenceLink.current = parsedEvidenceLink.link;
       evidenceLinkApplied.current = false;
+      requestedJourneyId.current = savedViewState.journeyId;
+      requestedViewIndexId.current = savedViewState.indexId;
+      setKnowledgeView(savedViewState.view);
+      setSelectedJourneyId(savedViewState.journeyId);
       sessionLink.current = route.error || parsedEvidenceLink.error || !route.projectId || !route.sessionId
         ? null
         : { projectId: route.projectId, sessionId: route.sessionId };
       sessionLinkApplied.current = sessionLink.current === null;
-      const linkError = parsedEvidenceLink.error ?? route.error;
-      const conflictingLinks = parsedEvidenceLink.link && route.sessionId !== null;
+      const linkError = savedViewState.error ?? parsedEvidenceLink.error ?? route.error;
       const resolution = resolveWorkbenchProject(
         route,
         parsedEvidenceLink.link?.projectId ?? null,
         response.projects.map((project) => project.project_id),
         window.localStorage.getItem("codetrail.selectedProjectId"),
       );
-      if (conflictingLinks) {
-        setProjectError("工作台链接同时包含源码证据和会话引用，已拒绝打开。请只保留一种引用。");
-      } else if (linkError) {
+      if (linkError) {
         setProjectError(linkError);
       }
-      const nextProject = linkError || conflictingLinks
+      const nextProject = linkError
         ? null
         : response.projects.find((project) => project.project_id === resolution.projectId) ?? null;
       if (resolution.requestedProjectId && !nextProject) {
@@ -1196,6 +1293,10 @@ export default function Workbench() {
         }
         setSourceResponse(source);
         setSourceStatus("success");
+        persistKnowledgeRoute({ scope: { projectId: link.projectId, indexId: link.indexId }, indexId: link.indexId, evidence: {
+          path: evidence.path, startLine: evidence.start_line, endLine: evidence.end_line,
+          contentHash: evidence.content_hash, evidenceId: evidence.evidence_id,
+        } });
       } catch (error) {
         if (isAbortError(error) || !isLatestRequest(requestId, sourceRequestId.current)) {
           return;
@@ -1205,12 +1306,12 @@ export default function Workbench() {
         setSourceError(errorMessage(error));
       }
     },
-    [],
+    [persistKnowledgeRoute],
   );
 
   const loadOverview = useCallback(async (projectId: string, indexId: string) => {
     overviewController.current?.abort();
-    resetModuleSymbols();
+    resetModuleSymbolListState();
     const controller = new AbortController();
     overviewController.current = controller;
     const requestId = ++overviewRequestId.current;
@@ -1233,7 +1334,7 @@ export default function Workbench() {
       setOverviewStatus("error");
       setOverviewError(errorMessage(error));
     }
-  }, [resetModuleSymbols]);
+  }, [resetModuleSymbolListState]);
 
   const loadJourneyCatalog = useCallback(async (projectId: string, indexId: string) => {
     journeyCatalogController.current?.abort();
@@ -1245,7 +1346,6 @@ export default function Workbench() {
     setJourneyCatalogStatus("loading");
     setJourneyCatalogError(null);
     setJourneyCatalog(null);
-    setSelectedJourneyId(null);
     setJourney(null);
     setJourneyStatus("idle");
     setJourneyError(null);
@@ -1274,6 +1374,11 @@ export default function Workbench() {
     journeyController.current = controller;
     const requestId = ++journeyRequestId.current;
     setSelectedJourneyId(journeyId);
+    requestedJourneyId.current = null;
+    persistKnowledgeRoute({
+      view: "features", journeyId, indexId: indexResponse.index.index_id,
+      scope: { projectId: selectedProjectId, indexId: indexResponse.index.index_id },
+    });
     setJourney(null);
     setJourneyStatus("loading");
     setJourneyError(null);
@@ -1289,7 +1394,22 @@ export default function Workbench() {
       setJourneyStatus("error");
       setJourneyError(errorMessage(error));
     }
-  }, [indexResponse, journey, journeyCatalog, journeyStatus, selectedJourneyId, selectedProjectId]);
+  }, [indexResponse, journey, journeyCatalog, journeyStatus, persistKnowledgeRoute, selectedJourneyId, selectedProjectId]);
+
+  useEffect(() => {
+    const requested = requestedJourneyId.current;
+    if (!requested || !["success", "empty"].includes(journeyCatalogStatus) || !journeyCatalog) return;
+    const found = journeyCatalog.journeys.some((item) => item.journey_id === requested) ||
+      journeyCatalog.native_journeys.some((item) => item.journey_id === requested);
+    requestedJourneyId.current = null;
+    if (!found) {
+      setSelectedJourneyId(null);
+      setJourneyStatus("error");
+      setJourneyError("链接中的 journey_id 不属于当前固定索引，已拒绝恢复该旅程。");
+      return;
+    }
+    void selectJourney(requested);
+  }, [journeyCatalog, journeyCatalogStatus, selectJourney]);
 
   const loadModuleSymbolsPage = useCallback(
     async (module: SymbolRecord, cursor: string | null = null, append = false) => {
@@ -2213,7 +2333,7 @@ export default function Workbench() {
   }, [loadRunDetails, loadRunHistory, runHistory, runStatusResponse, selectedProjectId, selectedRunId, selectedSessionId]);
 
   const openSession = useCallback(
-    async (projectId: string, sessionId: string, knownSession?: Session): Promise<boolean> => {
+    async (projectId: string, sessionId: string, knownSession?: Session, preserveLinkedRoute = false): Promise<boolean> => {
       sessionWriteController.current?.abort();
       sessionWriteRequestId.current += 1;
       runController.current?.abort();
@@ -2245,17 +2365,36 @@ export default function Workbench() {
         if (!session || session.project_id !== projectId || session.session_id !== sessionId) {
           throw new Error("返回的会话不属于请求的项目，已拒绝打开。");
         }
+        const linkedIndexId = evidenceLink.current?.projectId === projectId
+          ? evidenceLink.current.indexId
+          : requestedViewIndexId.current;
+        if (preserveLinkedRoute && !sessionIndexMatches(session.index.index_id, linkedIndexId)) {
+          throw new Error("Session 固定索引与链接中的 index_id/源码证据不一致，已拒绝组合恢复。");
+        }
         setSessions((previous) => [
           session!,
           ...previous.filter((candidate) => candidate.session_id !== sessionId),
         ]);
         setSelectedSessionId(sessionId);
         setViewMode("session");
-        setPanelMode("none");
+        const linkedEvidence = preserveLinkedRoute && readWorkbenchViewState(window.location.search).evidence;
+        setPanelMode(linkedEvidence ? "source" : "none");
         setSessionWriteStatus("idle");
         setSessionWriteError(null);
         sessionMessageRequest.current = null;
-        replaceWorkbenchLocation(projectId, sessionId);
+        if (preserveLinkedRoute) {
+          const linkedView = readWorkbenchViewState(window.location.search);
+          window.history.replaceState(null, "", workbenchStateLocation(window.location.href, {
+            view: linkedView.view,
+            projectId,
+            indexId: linkedIndexId ?? session.index.index_id,
+            journeyId: linkedView.journeyId,
+            evidence: linkedView.evidence,
+            sessionId,
+          }));
+        } else {
+          replaceWorkbenchLocation(projectId, sessionId);
+        }
         sessionLink.current = { projectId, sessionId };
         sessionLinkApplied.current = true;
         setSessionMessages([]);
@@ -2632,10 +2771,16 @@ export default function Workbench() {
           !evidenceLinkApplied.current && evidenceLink.current?.projectId === projectId
             ? evidenceLink.current
             : null;
-        const requestedIndexId = requestedLink?.indexId ?? projectIndexResponse.latest_index_id;
+        const routeIndexId = requestedViewIndexId.current;
+        const requestedIndexId = requestedLink?.indexId ?? routeIndexId ?? projectIndexResponse.latest_index_id;
         if (requestedLink && !projectIndexResponse.indexes.some((index) => index.index_id === requestedLink.indexId)) {
           setIndexStatus("error");
           setIndexError("引用的 index_id 不属于当前 project_id，已拒绝打开。");
+          return;
+        }
+        if (!requestedLink && routeIndexId && !projectIndexResponse.indexes.some((index) => index.index_id === routeIndexId)) {
+          setIndexStatus("error");
+          setIndexError("链接中的 index_id 已不可用，已拒绝回退到最新索引。");
           return;
         }
         if (!requestedIndexId) {
@@ -2689,7 +2834,7 @@ export default function Workbench() {
     }
     sessionLinkApplied.current = true;
     const knownSession = sessions.find((session) => session.session_id === requested);
-    void openSession(selectedProjectId, requested, knownSession);
+    void openSession(selectedProjectId, requested, knownSession, true);
   }, [indexResponse?.index.index_id, openSession, selectedProjectId, selectedSessionId, sessionStatus, sessions]);
 
   useEffect(() => {
@@ -2768,12 +2913,17 @@ export default function Workbench() {
       setProjectStatus("success");
     }
     if (mayNavigate && index) {
+      clearExploration();
       sessionLink.current = null;
       sessionLinkApplied.current = true;
       evidenceLink.current = null;
       evidenceLinkApplied.current = false;
       resetSessions();
       setViewMode("overview");
+      setKnowledgeView("architecture");
+      setSelectedJourneyId(null);
+      requestedJourneyId.current = null;
+      requestedViewIndexId.current = null;
       replaceWorkbenchLocation(project.project_id);
     }
     if (mayNavigate && index) {
@@ -2788,7 +2938,7 @@ export default function Workbench() {
         setPanelMode(panelMode);
       }
     }
-  }, [applyIndexResponse, panelMode, replaceWorkbenchLocation, resetSessions, selectedProjectId]);
+  }, [applyIndexResponse, clearExploration, panelMode, replaceWorkbenchLocation, resetSessions, selectedProjectId]);
 
   const applyImportResponse = useCallback((response: LocalImportResponse, navigationId: number) => {
     setImportAttempt(response.attempt);
@@ -3325,6 +3475,12 @@ export default function Workbench() {
       if (!indexId) {
         return;
       }
+      clearExploration();
+      evidenceLink.current = null;
+      evidenceLinkApplied.current = true;
+      setSelectedJourneyId(null);
+      requestedJourneyId.current = null;
+      requestedViewIndexId.current = null;
       indexController.current?.abort();
       const controller = new AbortController();
       indexController.current = controller;
@@ -3337,6 +3493,10 @@ export default function Workbench() {
           return;
         }
         applyIndexResponse(response);
+        setKnowledgeView("architecture");
+        window.history.replaceState(null, "", workbenchStateLocation(window.location.href, {
+          view: "architecture", projectId: selectedProjectId, indexId: response.index.index_id,
+        }));
       } catch (error) {
         if (isAbortError(error) || !isLatestRequest(requestId, indexRequestId.current)) {
           return;
@@ -3345,7 +3505,7 @@ export default function Workbench() {
         setIndexError(errorMessage(error));
       }
     },
-    [applyIndexResponse, selectedProjectId],
+    [applyIndexResponse, clearExploration, selectedProjectId],
   );
 
   const checkCurrentIndexFreshness = useCallback(async () => {
@@ -3536,6 +3696,10 @@ export default function Workbench() {
         }
         setSourceResponse(response);
         setSourceStatus("success");
+        persistKnowledgeRoute({ scope: { projectId: selectedProjectId, indexId: response.index_id }, indexId: response.index_id, evidence: {
+          path: response.evidence.path, startLine: response.evidence.start_line, endLine: response.evidence.end_line,
+          contentHash: response.evidence.content_hash, evidenceId: response.evidence.evidence_id,
+        } });
       } catch (error) {
         if (isAbortError(error) || !isLatestRequest(requestId, sourceRequestId.current)) {
           return;
@@ -3545,7 +3709,7 @@ export default function Workbench() {
         setSourceError(errorMessage(error));
       }
     },
-    [selectedProjectId],
+    [persistKnowledgeRoute, selectedProjectId],
   );
 
   const selectSymbol = useCallback(
@@ -3615,6 +3779,10 @@ export default function Workbench() {
         }
         setSourceResponse(response);
         setSourceStatus("success");
+        persistKnowledgeRoute({ scope: { projectId: selectedProjectId, indexId }, indexId, evidence: {
+          path: response.evidence.path, startLine: response.evidence.start_line, endLine: response.evidence.end_line,
+          contentHash: response.evidence.content_hash, evidenceId: response.evidence.evidence_id,
+        } });
       } catch (error) {
         if (isAbortError(error) || !isLatestRequest(requestId, sourceRequestId.current)) {
           return;
@@ -3624,7 +3792,7 @@ export default function Workbench() {
         setSourceError(errorMessage(error));
       }
     },
-    [selectedProjectId],
+    [persistKnowledgeRoute, selectedProjectId],
   );
 
   const loadNeighborhood = useCallback(
@@ -3918,10 +4086,11 @@ export default function Workbench() {
       : fallbackId && graph.symbols.some((symbol) => symbol.symbol_id === fallbackId)
         ? fallbackId
         : null;
+    dismissActiveEvidence();
     if (restoreSelectionId) setSelectedId(restoreSelectionId);
     setEntryTrace((previous) => previous ? { ...previous, sourceReturnSelectionId: null } : previous);
     setPanelMode("graph");
-  }, [entryTrace, graph.symbols, httpEntryChain, overviewEntryCallChain]);
+  }, [dismissActiveEvidence, entryTrace, graph.symbols, httpEntryChain, overviewEntryCallChain]);
 
   const onEntryTraceViewportRestored = useCallback((revision: number) => {
     setEntryTrace((previous) => previous?.viewportRestore?.revision === revision
@@ -4859,6 +5028,8 @@ export default function Workbench() {
         onRestoreSession: handleRestoreSession,
         onSelectProject: (projectId) => {
           if (projectId === selectedProjectId) return;
+          clearExploration();
+          resetSessions();
           graphController.current?.abort();
           graphRequestId.current += 1;
           setHttpEntryChain(null);
@@ -4871,6 +5042,10 @@ export default function Workbench() {
           evidenceLinkApplied.current = true;
           setSelectedSessionId(null);
           setViewMode("overview");
+          setKnowledgeView("architecture");
+          setSelectedJourneyId(null);
+          requestedJourneyId.current = null;
+          requestedViewIndexId.current = null;
           setPanelMode("none");
           setArchitectureGraphRootId(null);
           setSelectedProjectId(projectId);
@@ -5126,6 +5301,7 @@ export default function Workbench() {
         },
         onExpandRelation: () => {
           if (selectedSymbol && selectedSymbol.kind !== "file") {
+            dismissActiveEvidence();
             setViewMode("overview");
             setPanelMode("graph");
             void loadNeighborhood(selectedSymbol.index_id, selectedSymbol.symbol_id, false);
@@ -5133,6 +5309,7 @@ export default function Workbench() {
         },
         onReturnEntryChain: returnFromEntryTraceEvidence,
         onClose: () => {
+          dismissActiveEvidence();
           if (httpEntryChain || overviewEntryCallChain) {
             exitEntryChain();
           } else {
@@ -5272,6 +5449,8 @@ export default function Workbench() {
         },
       }}
       viewMode={viewMode}
+      knowledgeView={knowledgeView}
+      onKnowledgeViewChange={changeKnowledgeView}
       onViewModeChange={changeWorkbenchView}
       onImportFlowLeave={invalidateImportNavigation}
       panelMode={panelMode}

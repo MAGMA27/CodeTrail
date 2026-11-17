@@ -3,7 +3,7 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import ts from "typescript";
 
-import { canShowKnowledgeInspector, readWorkbenchRoute, resolveGraphReturnPanel, resolveWorkbenchProject, workbenchLocation } from "./workbench-navigation.ts";
+import { canShowKnowledgeInspector, mergeWorkbenchRouteState, readWorkbenchRoute, readWorkbenchViewState, resolveGraphReturnPanel, resolveWorkbenchProject, resolveWorkbenchRouteState, sessionIndexMatches, workbenchLocation, workbenchScopeMatches, workbenchStateLocation, type WorkbenchRouteState } from "./workbench-navigation.ts";
 import { clampSidebarWidth, normalizeSidebarWidth, readSidebarWidth, resolveSidebarWidthRange } from "./sidebar-width.ts";
 import { clampStructureDetailWidth, normalizeStructureDetailWidth, readStructureDetailWidth, resolveStructureDetailWidthRange } from "./structure-detail-width.ts";
 
@@ -84,6 +84,202 @@ test("returning to architecture replaces the session URL while preserving the ha
     workbenchLocation("https://codetrail.local/?project_id=project-a#overview", "project-a", "session-a"),
     "/?project_id=project-a&session_id=session-a#overview",
   );
+});
+
+test("refresh route retains each supported journey ID and the pinned citation", () => {
+  for (const journeyId of ["tsx-cli-journey", "native-api-journey"]) {
+    const url = workbenchStateLocation("https://codetrail.local/?project_id=p&index_id=old#source", {
+      view: "features", journeyId, projectId: "p", indexId: "old",
+      evidence: { path: "apps/api/app/main.py", startLine: 12, endLine: 18, contentHash: "sha256:old", evidenceId: "evidence-old" },
+    });
+    const state = readWorkbenchViewState(new URL(url, "https://codetrail.local").search);
+    assert.equal(state.view, "features");
+    assert.equal(state.journeyId, journeyId);
+    assert.equal(state.indexId, "old");
+    assert.deepEqual(state.evidence, {
+      path: "apps/api/app/main.py", startLine: 12, endLine: 18, contentHash: "sha256:old", evidenceId: "evidence-old",
+    });
+  }
+});
+
+test("Session and citation links preserve the Features subview and reject a different fixed index", () => {
+  const url = workbenchStateLocation("https://codetrail.local/", {
+    view: "features", journeyId: "tsx-cli-journey", projectId: "p", indexId: "old",
+    sessionId: "session-old",
+    evidence: { path: "src/cli.tsx", startLine: 4, endLine: 8, contentHash: "hash-old", evidenceId: "e-old" },
+  });
+  const params = new URL(url, "https://codetrail.local").searchParams;
+  assert.equal(params.get("session_id"), "session-old");
+  assert.equal(params.get("view"), "features");
+  assert.equal(readWorkbenchViewState(url.split("?")[1]).indexId, "old");
+  assert.equal(sessionIndexMatches("index-old", "index-old"), true);
+  assert.equal(sessionIndexMatches("index-old", "index-new"), false, "an old Session is never silently retargeted to the new citation index");
+  assert.equal(sessionIndexMatches("index-old", null), true, "a Session-only link needs no extra citation-index comparison");
+  const source = readFileSync(new URL("../app/workbench.tsx", import.meta.url), "utf8");
+  assert.match(source, /sessionIndexMatches\(session\.index\.index_id, linkedIndexId\)/);
+  assert.match(source, /Session 固定索引与链接中的 index_id\/源码证据不一致/);
+  assert.match(source, /routeIndexId && !projectIndexResponse\.indexes\.some\(\(index\) => index\.index_id === routeIndexId\)[\s\S]*?已不可用，已拒绝回退到最新索引/);
+});
+
+test("source and journey restore updates preserve each other's URL fields in either completion order", () => {
+  const initial: WorkbenchRouteState = {
+    view: "architecture",
+    journeyId: null,
+    projectId: "p",
+    indexId: "old",
+    evidence: null,
+    sessionId: "session-old",
+  };
+  const citation = { path: "src/main.tsx", startLine: 11, endLine: 16, contentHash: "hash-old", evidenceId: "e-old" };
+  const restoreEvidence = (state: WorkbenchRouteState) => mergeWorkbenchRouteState(state, { evidence: citation, indexId: "old" });
+  const restoreJourney = (state: WorkbenchRouteState) => mergeWorkbenchRouteState(state, { view: "features", journeyId: "tsx-cli-journey", indexId: "old" });
+  for (const state of [restoreJourney(restoreEvidence(initial)), restoreEvidence(restoreJourney(initial))]) {
+    const url = workbenchStateLocation("https://codetrail.local/", state);
+    const restored = readWorkbenchViewState(new URL(url, "https://codetrail.local").search);
+    const params = new URL(url, "https://codetrail.local").searchParams;
+    assert.equal(restored.view, "features");
+    assert.equal(restored.journeyId, "tsx-cli-journey");
+    assert.equal(restored.indexId, "old");
+    assert.deepEqual(restored.evidence, citation);
+    assert.equal(params.get("session_id"), "session-old");
+  }
+});
+
+test("restore callback wiring keeps source and journey route fields across either completion order", () => {
+  const source = readFileSync(new URL("../app/workbench.tsx", import.meta.url), "utf8");
+  const routeWriter = source.match(/const persistKnowledgeRoute = useCallback\(([\s\S]*?)\n  \}, \[\]\);/);
+  assert.ok(routeWriter, "route persistence must have a stable callback identity");
+  assert.match(routeWriter[1], /knowledgeRouteState\.current/);
+  assert.match(routeWriter[1], /resolveWorkbenchRouteState/);
+  assert.match(routeWriter[1], /sourceIndexId/);
+  assert.match(routeWriter[1], /sessionActive: current\.viewMode === "session"/);
+  assert.match(routeWriter[1], /current\.journeyIndexId/);
+  assert.match(routeWriter[1], /requestedJourneyId\.current/);
+  assert.match(routeWriter[1], /overrides\.scope\.projectId !== current\.projectId/);
+  assert.match(source, /const loadLinkedEvidence = useCallback\([\s\S]*?\[persistKnowledgeRoute\],\n  \);/);
+  assert.match(source, /const loadSelectedProject = useCallback\([\s\S]*?\[applyIndexResponse, clearExploration, loadLinkedEvidence\],\n  \);/);
+  assert.match(source, /void selectJourney\(requested\)/);
+  const journeyStart = source.indexOf("const selectJourney = useCallback");
+  const journeyEnd = source.indexOf("const loadModuleSymbolsPage", journeyStart);
+  assert.ok(journeyStart >= 0 && journeyEnd > journeyStart);
+  assert.doesNotMatch(source.slice(journeyStart, journeyEnd), /evidence:\s*null/);
+  assert.doesNotMatch(routeWriter[1], /selectedSessionId \?\? sessionLink\.current\.sessionId/);
+});
+
+test("the stable source restore writer ignores responses from old project or index scopes", () => {
+  const source = readFileSync(new URL("../app/workbench.tsx", import.meta.url), "utf8");
+  assert.match(source, /scope: \{ projectId: link\.projectId, indexId: link\.indexId \}/);
+  assert.match(source, /scope: \{ projectId: selectedProjectId, indexId: response\.index_id \}/);
+  assert.match(source, /scope: \{ projectId: selectedProjectId, indexId \}/);
+  assert.match(source, /workbenchScopeMatches\(allowedIndexId, overrides\.scope\.indexId, explicitEvidenceIndexId\)/);
+});
+
+test("invalid and incomplete deep link state is reported instead of retargeted", () => {
+  assert.match(readWorkbenchViewState("?project_id=p&view=unknown").error ?? "", /view/);
+  assert.match(readWorkbenchViewState("?project_id=p&view=session").error ?? "", /session_id/);
+  assert.match(readWorkbenchViewState("?project_id=p&journey_id=j").error ?? "", /index/);
+  assert.match(readWorkbenchViewState("?project_id=p&index_id=old&evidence_id=e").error ?? "", /证据/);
+  assert.match(readWorkbenchViewState("?project_id=p&index_id=").error ?? "", /index_id/);
+  assert.match(readWorkbenchViewState("?project_id=p&journey_id=j&index_id=").error ?? "", /index_id/);
+  assert.match(readWorkbenchViewState("?project_id=p&journey_id=&index_id=old").error ?? "", /journey_id/);
+  assert.equal(readWorkbenchViewState("?project_id=p").error, null, "omitted IDs retain their default behavior");
+});
+
+test("an old Session citation pins route serialization across view changes, then dismissal restores knowledge scope", () => {
+  const citation = { path: "src/old.tsx", startLine: 7, endLine: 10, contentHash: "hash-old", evidenceId: "e-old" };
+  const current: WorkbenchRouteState = {
+    view: "features", journeyId: "journey-new", projectId: "p", indexId: "index-new",
+    evidence: citation, sessionId: null,
+  };
+  const switchedView = resolveWorkbenchRouteState(current, { view: "architecture" }, {
+    sourceIndexId: "index-old", sessionIndexId: "index-old", sessionActive: false,
+    journeyIndexId: "index-new",
+  });
+  assert.equal(switchedView.indexId, "index-old", "an active citation keeps its own immutable index");
+  assert.equal(switchedView.journeyId, null, "a journey from the newer knowledge index is not paired with old evidence");
+  const citationUrl = workbenchStateLocation("https://codetrail.local/", switchedView);
+  const citationState = readWorkbenchViewState(new URL(citationUrl, "https://codetrail.local").search);
+  assert.equal(citationState.indexId, "index-old");
+  assert.deepEqual(citationState.evidence, citation);
+  assert.equal(citationState.journeyId, null);
+
+  const dismissed = resolveWorkbenchRouteState(switchedView, { evidence: null }, {
+    sourceIndexId: "index-old", sessionIndexId: "index-old", sessionActive: false,
+    journeyIndexId: "index-new",
+  });
+  assert.equal(dismissed.indexId, "index-old", "dismissing evidence preserves the cited fixed index");
+  assert.equal(dismissed.evidence, null);
+  assert.equal(dismissed.journeyId, null, "a journey from another index remains cleared after dismissal");
+  const dismissedState = readWorkbenchViewState(new URL(workbenchStateLocation("https://codetrail.local/", dismissed), "https://codetrail.local").search);
+  assert.equal(dismissedState.evidence, null);
+  assert.equal(dismissedState.indexId, "index-old");
+});
+
+test("explicit journey and citation intent wins over stale cached scope in the serialized URL", () => {
+  const empty: WorkbenchRouteState = {
+    view: "architecture", journeyId: null, projectId: "p", indexId: null, evidence: null, sessionId: null,
+  };
+  const selectedJourney = resolveWorkbenchRouteState(empty, {
+    view: "features", journeyId: "journey-new", indexId: "index-new",
+  }, {
+    sourceIndexId: null, sessionIndexId: null, sessionActive: false, journeyIndexId: null,
+  });
+  const journeyUrl = workbenchStateLocation("https://codetrail.local/", selectedJourney);
+  const journeyState = readWorkbenchViewState(new URL(journeyUrl, "https://codetrail.local").search);
+  assert.equal(journeyState.journeyId, "journey-new");
+  assert.equal(journeyState.indexId, "index-new");
+
+  const oldCitation = { path: "src/old.tsx", startLine: 7, endLine: 10, contentHash: "hash-old", evidenceId: "e-old" };
+  const newCitation = { path: "src/new.tsx", startLine: 3, endLine: 5, contentHash: "hash-new", evidenceId: "e-new" };
+  const oldSource: WorkbenchRouteState = {
+    view: "architecture", journeyId: null, projectId: "p", indexId: "index-old", evidence: oldCitation, sessionId: null,
+  };
+  const loadedNewCitation = resolveWorkbenchRouteState(oldSource, {
+    evidence: newCitation, indexId: "index-new",
+  }, {
+    sourceIndexId: "index-old", sessionIndexId: null, sessionActive: false, journeyIndexId: null,
+  });
+  const citationUrl = workbenchStateLocation("https://codetrail.local/", loadedNewCitation);
+  const citationState = readWorkbenchViewState(new URL(citationUrl, "https://codetrail.local").search);
+  assert.equal(citationState.indexId, "index-new");
+  assert.deepEqual(citationState.evidence, newCitation);
+
+  const tabChange = resolveWorkbenchRouteState(oldSource, { view: "features" }, {
+    sourceIndexId: "index-old", sessionIndexId: null, sessionActive: false, journeyIndexId: null,
+  });
+  assert.equal(tabChange.indexId, "index-old", "a tab change keeps the already pinned citation index");
+  assert.equal(workbenchScopeMatches("index-new", "index-old", null), false, "a late old-index response cannot rewrite a manually switched scope");
+  assert.equal(workbenchScopeMatches("index-new", "index-new", null), true);
+  assert.equal(workbenchScopeMatches("index-new", "index-old", "index-old"), true, "an explicit new citation may target its validated fixed index");
+});
+
+test("source dismissal clears cached evidence and aborts before leaving the source panel", () => {
+  const source = readFileSync(new URL("../app/workbench.tsx", import.meta.url), "utf8");
+  const dismissal = source.match(/const dismissActiveEvidence = useCallback\(\(\) => \{([\s\S]*?)\n  \}, \[persistKnowledgeRoute\]\);/);
+  assert.ok(dismissal);
+  assert.match(dismissal[1], /sourceController\.current\?\.abort\(\)/);
+  assert.match(dismissal[1], /evidenceLink\.current = null/);
+  assert.match(dismissal[1], /setSourceResponse\(null\)/);
+  assert.match(dismissal[1], /persistKnowledgeRoute\(\{ evidence: null \}\)/);
+  assert.match(source, /onExpandRelation: \(\) => \{[\s\S]*?dismissActiveEvidence\(\);[\s\S]*?loadNeighborhood/);
+  assert.match(source, /onClose: \(\) => \{\n          dismissActiveEvidence\(\);\n          if \(httpEntryChain \|\| overviewEntryCallChain\)/);
+  const indexSwitchStart = source.indexOf("const openExistingIndex = useCallback(");
+  const indexSwitchEnd = source.indexOf("\n  );", indexSwitchStart);
+  assert.ok(indexSwitchStart >= 0 && indexSwitchEnd > indexSwitchStart);
+  assert.match(source.slice(indexSwitchStart, indexSwitchEnd), /evidenceLink\.current = null/);
+});
+
+test("project switch writes a fresh scope and cannot carry the previous project's citation", () => {
+  const previous = workbenchStateLocation("https://codetrail.local/?project_id=old", {
+    view: "features", projectId: "old", indexId: "old-index", journeyId: "old-journey",
+    evidence: { path: "src/old.tsx", startLine: 2, endLine: 4, contentHash: "hash-old", evidenceId: "e-old" },
+  });
+  const switched = workbenchStateLocation(`https://codetrail.local${previous}`, { view: "architecture", projectId: "new" });
+  const state = readWorkbenchViewState(new URL(switched, "https://codetrail.local").search);
+  assert.equal(state.projectId, "new");
+  assert.equal(state.indexId, null);
+  assert.equal(state.journeyId, null);
+  assert.equal(state.evidence, null);
 });
 
 test("graph evidence returns to the same panel and scope changes clear that return", () => {

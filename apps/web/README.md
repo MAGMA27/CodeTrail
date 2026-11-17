@@ -7,6 +7,7 @@
 ## 入口与目录导航
 
 - [workbench.md](workbench.md)：当前实现、生命周期、限制与验收入口。
+- [source-panel-fix.md](source-panel-fix.md)：源码面板恢复回归测试与验证范围。
 
 - [app/page.tsx](app/page.tsx)：挂载生产工作台。
 - [app/workbench.tsx](app/workbench.tsx)：项目、索引、Session、Run、概览和证据请求编排。

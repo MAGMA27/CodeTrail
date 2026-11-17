@@ -39,11 +39,12 @@ def test_mcp_workbench_urls_match_web_query_readers_and_routes() -> None:
     workbench_source = (WEB_APP / "workbench.tsx").read_text(encoding="utf-8")
     navigation_source = (ROOT / "apps" / "web" / "lib" / "workbench-navigation.ts").read_text(encoding="utf-8")
 
-    evidence_keys_match = re.search(r'const keys = \[([^\]]+)\];', workbench_source)
-    assert evidence_keys_match is not None, "workbench evidence URL keys must remain explicitly declared"
-    evidence_keys = set(re.findall(r'"([a-z_]+)"', evidence_keys_match.group(1)))
+    citation_keys_match = re.search(r'const citationKeys = \[([^\]]+)\] as const;', navigation_source)
+    assert citation_keys_match is not None, "canonical citation query keys must remain explicit at the route parser boundary"
+    citation_keys = set(re.findall(r'"([a-z_]+)"', citation_keys_match.group(1)))
+    assert citation_keys == {"path", "start_line", "end_line", "content_hash", "evidence_id"}
     route_keys = set(re.findall(r'params\.(?:get|has)\("([a-z_]+)"\)', navigation_source))
-    web_query_keys = evidence_keys | route_keys
+    web_query_keys = citation_keys | route_keys
 
     emitted_query_keys = set().union(*(set(parse_qs(url.query)) for url in urls))
     assert emitted_query_keys <= web_query_keys

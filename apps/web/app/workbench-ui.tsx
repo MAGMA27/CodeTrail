@@ -430,6 +430,8 @@ export type WorkbenchUiProps = {
   evidence: EvidenceUi;
   graph: GraphUi;
   viewMode: "overview" | "session";
+  knowledgeView: "architecture" | "features";
+  onKnowledgeViewChange: (mode: "architecture" | "features") => void;
   onViewModeChange: (mode: "overview" | "session") => void;
   onImportFlowLeave: Action;
   panelMode: UiPanelMode;
@@ -1216,6 +1218,8 @@ function KnowledgeView({
   graph,
   panelMode,
   onPanelModeChange,
+  view,
+  onViewChange,
   onOpenOperation,
 }: {
   project: ProjectUi;
@@ -1224,10 +1228,11 @@ function KnowledgeView({
   graph: GraphUi;
   panelMode: UiPanelMode;
   onPanelModeChange: (mode: UiPanelMode) => void;
+  view: "architecture" | "features";
+  onViewChange: (mode: "architecture" | "features") => void;
   onOpenOperation: OpenOperation;
 }) {
   const overview = knowledge.overview;
-  const [view, setView] = useState<"architecture" | "features">("architecture");
   const [detailRequest, setDetailRequest] = useState(0);
   const [detail, setDetail] = useState<"search" | "http" | "coverage" | null>(null);
   useEffect(() => {
@@ -1270,13 +1275,13 @@ function KnowledgeView({
             <>
               <div className="ct-knowledge-toolbar" aria-label="项目知识视图">
                 <div className="ct-panel-switch" role="tablist" aria-label="项目知识">
-                  <button type="button" role="tab" aria-selected={view === "architecture"} className={view === "architecture" ? "is-active" : ""} onClick={() => setView("architecture")}>架构</button>
-                  <button type="button" role="tab" aria-selected={view === "features"} className={view === "features" ? "is-active" : ""} onClick={() => setView("features")}>功能</button>
+                  <button type="button" role="tab" aria-selected={view === "architecture"} className={view === "architecture" ? "is-active" : ""} onClick={() => onViewChange("architecture")}>架构</button>
+                  <button type="button" role="tab" aria-selected={view === "features"} className={view === "features" ? "is-active" : ""} onClick={() => onViewChange("features")}>功能</button>
                 </div>
                 <span title={`index ${overview.index.index_id} · snapshot ${overview.index.snapshot_hash}`} className="ct-knowledge-revision">固定版本 · {shortHash(overview.index.snapshot_hash)}</span>
-                <button type="button" className="ct-link-button" onClick={() => { setView("architecture"); setDetailRequest((current) => current + 1); setDetail("search"); }}>搜索符号</button>
-                <button type="button" className="ct-link-button" onClick={() => { setView("architecture"); setDetailRequest((current) => current + 1); setDetail("http"); }}>HTTP 关联 · {overview.http_associations.length}</button>
-                <button type="button" className="ct-link-button" onClick={() => { setView("architecture"); setDetailRequest((current) => current + 1); setDetail("coverage"); }}>版本与覆盖{overview.truncated || classificationCoverageLimited(overview.classification_coverage) || overview.http_association_coverage.analysis_status === "incomplete" ? " · 部分分析" : ""}</button>
+                <button type="button" className="ct-link-button" onClick={() => { onViewChange("architecture"); setDetailRequest((current) => current + 1); setDetail("search"); }}>搜索符号</button>
+                <button type="button" className="ct-link-button" onClick={() => { onViewChange("architecture"); setDetailRequest((current) => current + 1); setDetail("http"); }}>HTTP 关联 · {overview.http_associations.length}</button>
+                <button type="button" className="ct-link-button" onClick={() => { onViewChange("architecture"); setDetailRequest((current) => current + 1); setDetail("coverage"); }}>版本与覆盖{overview.truncated || classificationCoverageLimited(overview.classification_coverage) || overview.http_association_coverage.analysis_status === "incomplete" ? " · 部分分析" : ""}</button>
               </div>
               <div className="ct-knowledge-architecture" hidden={view !== "architecture"}>
                 <ArchitectureSection overview={overview} knowledge={knowledge} graph={graph} panelMode={panelMode} onPanelModeChange={onPanelModeChange} detail={detail} detailRequest={detailRequest} active={view === "architecture"} onDetailChange={setDetail} />
@@ -3563,7 +3568,7 @@ export default function WorkbenchUi(props: WorkbenchUiProps) {
         <section className="ct-center-column" aria-label={props.viewMode === "session" ? "项目会话" : "项目知识页"}>
           <ContextHeader project={props.project} index={props.index} viewMode={props.viewMode} />
           {alert ? <div className="ct-global-alert" role="alert"><span>{alert}</span>{props.project.status === "error" && props.project.projects.length > 0 && props.connection.state !== "error" ? <button type="button" className="ct-link-button" onClick={() => void props.project.onReload()}>重试项目列表</button> : null}{props.connection.state === "error" ? <button type="button" className="ct-link-button" onClick={() => void props.connection.onCheck()}>重新检查</button> : null}</div> : null}
-          {operationPanel ? <OperationPanel mode={operationPanel.mode} initialTab={operationPanel.tab} onClose={closeOperation} project={props.project} localImport={props.localImport} githubImport={props.githubImport} index={props.index} /> : props.viewMode === "session" ? <SessionView session={props.session} onBack={openKnowledge} /> : <KnowledgeView key={graphScopeKey} project={props.project} index={props.index} knowledge={props.knowledge} graph={props.graph} panelMode={props.panelMode} onPanelModeChange={props.onPanelModeChange} onOpenOperation={openOperation} />}
+          {operationPanel ? <OperationPanel mode={operationPanel.mode} initialTab={operationPanel.tab} onClose={closeOperation} project={props.project} localImport={props.localImport} githubImport={props.githubImport} index={props.index} /> : props.viewMode === "session" ? <SessionView session={props.session} onBack={openKnowledge} /> : <KnowledgeView key={graphScopeKey} project={props.project} index={props.index} knowledge={props.knowledge} graph={props.graph} panelMode={props.panelMode} onPanelModeChange={props.onPanelModeChange} view={props.knowledgeView} onViewChange={props.onKnowledgeViewChange} onOpenOperation={openOperation} />}
         </section>
         {props.panelMode === "source" ? <EvidencePanel evidence={props.evidence} returnPanel={returnPanel} onReturnToPanel={() => props.evidence.entryChainLabel ? props.evidence.onReturnEntryChain() : props.onPanelModeChange(returnPanel ?? "graph")} /> : showSideGraphPanel ? <GraphPanel graph={props.graph} /> : null}
       </div>
