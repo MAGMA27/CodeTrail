@@ -937,7 +937,7 @@ export default function Workbench() {
     setSourceGenerationId(null);
   }, [persistKnowledgeRoute]);
 
-  const resetModuleSymbols = useCallback(() => {
+  const resetModuleSymbolListState = useCallback(() => {
     moduleSymbolsController.current?.abort();
     moduleSymbolsRequestId.current += 1;
     setModuleSymbolsRoot(null);
@@ -945,8 +945,12 @@ export default function Workbench() {
     setModuleSymbolsStatus("idle");
     setModuleSymbolsError(null);
     setModuleSymbolsRetry(null);
+  }, []);
+
+  const resetModuleSymbols = useCallback(() => {
+    resetModuleSymbolListState();
     resetModuleSymbolSource();
-  }, [resetModuleSymbolSource]);
+  }, [resetModuleSymbolListState, resetModuleSymbolSource]);
 
   const closeRunEventStream = useCallback(() => {
     runStreamRequestId.current += 1;
@@ -1307,7 +1311,7 @@ export default function Workbench() {
 
   const loadOverview = useCallback(async (projectId: string, indexId: string) => {
     overviewController.current?.abort();
-    resetModuleSymbols();
+    resetModuleSymbolListState();
     const controller = new AbortController();
     overviewController.current = controller;
     const requestId = ++overviewRequestId.current;
@@ -1330,7 +1334,7 @@ export default function Workbench() {
       setOverviewStatus("error");
       setOverviewError(errorMessage(error));
     }
-  }, [resetModuleSymbols]);
+  }, [resetModuleSymbolListState]);
 
   const loadJourneyCatalog = useCallback(async (projectId: string, indexId: string) => {
     journeyCatalogController.current?.abort();
