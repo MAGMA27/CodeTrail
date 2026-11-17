@@ -1264,6 +1264,11 @@ def test_overview_keeps_cycles_bounded_without_inventing_edges(tmp_path: Path) -
 
 def test_overview_resolves_packaging_entry_points_from_nested_pyprojects(tmp_path: Path) -> None:
     repository = tmp_path / "packaging-demo"
+    (repository / "src").mkdir(parents=True)
+    (repository / "pyproject.toml").write_text(
+        '[project.scripts]\nroot-worker = "rootworker:main"\n', encoding="utf-8"
+    )
+    (repository / "src" / "rootworker.py").write_text("def main():\n    return 0\n", encoding="utf-8")
     project = repository / "services" / "sample"
     package = project / "app"
     src_package = project / "src" / "app"
@@ -1276,6 +1281,10 @@ def test_overview_resolves_packaging_entry_points_from_nested_pyprojects(tmp_pat
         encoding="utf-8",
     )
     (src_package / "gui.py").write_text("def launch():\n    return None\n", encoding="utf-8")
+    worker_package = project / "src" / "worker"
+    worker_package.mkdir(parents=True)
+    (worker_package / "__init__.py").write_text("", encoding="utf-8")
+    (worker_package / "cli.py").write_text("def main():\n    return 0\n", encoding="utf-8")
     (package / "plugin.py").write_text(
         "class Plugin:\n    def start(self):\n        return None\n",
         encoding="utf-8",
@@ -1294,6 +1303,7 @@ def test_overview_resolves_packaging_entry_points_from_nested_pyprojects(tmp_pat
         'sample-plugin = "app.plugin:Plugin.start"\n'
         "[tool.poetry.scripts]\n"
         'legacy = "app.legacy:main"\n'
+        'worker = "worker.cli:main"\n'
         'missing-module = "app.missing:main"\n'
         'missing-attr = "app.cli:not_here"\n'
         'malformed = "not a target"\n',
@@ -1320,6 +1330,8 @@ def test_overview_resolves_packaging_entry_points_from_nested_pyprojects(tmp_pat
         "Python packaging entry sample-gui (services/sample/pyproject.toml)",
         "Python packaging entry sample-plugin (codetrail.plugins) (services/sample/pyproject.toml)",
         "Python packaging entry legacy (services/sample/pyproject.toml)",
+        "Python packaging entry worker (services/sample/pyproject.toml)",
+        "Python packaging entry root-worker (pyproject.toml)",
     }
     targets = {entry["label"]: entry for entry in packaging_entries}
     assert targets["Python packaging entry codetrail (services/sample/pyproject.toml)"]["path"] == "services/sample/app/cli.py"
@@ -1327,6 +1339,14 @@ def test_overview_resolves_packaging_entry_points_from_nested_pyprojects(tmp_pat
         "services.sample.app.cli.main"
     )
     assert targets["Python packaging entry sample-gui (services/sample/pyproject.toml)"]["path"] == "services/sample/src/app/gui.py"
+    assert targets["Python packaging entry worker (services/sample/pyproject.toml)"]["target_symbol"]["qualified_name"] == (
+        "services.sample.src.worker.cli.main"
+    )
+    assert any(
+        entry["label"] == "Python packaging entry root-worker (pyproject.toml)"
+        and entry["target_symbol"]["qualified_name"] == "src.rootworker.main"
+        for entry in packaging_entries
+    )
     assert targets["Python packaging entry sample-plugin (codetrail.plugins) (services/sample/pyproject.toml)"]["evidence"]["excerpt"] == (
         "    def start(self):\n        return None"
     )
@@ -1354,6 +1374,7 @@ def test_overview_resolves_packaging_entry_points_from_nested_pyprojects(tmp_pat
         )
     journeys = workspace.get_journey_catalog(project_id, index_id)
     assert journeys.index.index_id == index_id
+    assert any(item.entry_kind == "cli" and item.entry_path == "services/sample/src/worker/cli.py" for item in journeys.native_journeys)
     assert all(not journey.action_path.endswith("pyproject.toml") for journey in journeys.journeys)
 
 

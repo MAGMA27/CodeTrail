@@ -2527,6 +2527,118 @@ class JourneyCoverage(ContractModel):
         return self
 
 
+class NativeJourneySummary(ContractModel):
+    """A direct Python API or console-script entry anchored in one index."""
+
+    journey_id: Identifier
+    index_id: Identifier
+    entry_kind: Literal["api", "cli"]
+    entry_label: str = Field(min_length=1, max_length=500)
+    entry_path: RelativePath
+    entry_start_line: PositiveInt
+    symbol_id: Identifier
+    symbol_name: str = Field(min_length=1, max_length=500)
+    http_method: OverviewHttpMethod | None = None
+    http_path: str | None = Field(default=None, min_length=1, max_length=2_000)
+
+    @model_validator(mode="after")
+    def validate_entry_kind(self) -> NativeJourneySummary:
+        if self.entry_kind == "api" and (self.http_method is None or self.http_path is None):
+            raise ValueError("native API journey summaries require both HTTP method and path")
+        if self.entry_kind == "cli" and (self.http_method is not None or self.http_path is not None):
+            raise ValueError("native CLI journey summaries cannot include HTTP method or path")
+        return self
+
+
+class NativeJourneyCoverage(ContractModel):
+    """Independent bounded coverage for native Python entry journeys."""
+
+    entry_count: NonNegativeInt = 0
+    journey_count: NonNegativeInt = 0
+    unsupported_entry_count: NonNegativeInt = 0
+    relation_truncated: bool = False
+    truncated: bool = False
+    limitations: list[str] = Field(default_factory=list, max_length=20)
+
+
+class NativeJourneyStep(ContractModel):
+    """One entry or same-index static call hop with its source justification."""
+
+    step_id: Identifier
+    role: Literal["entry", "processing"]
+    title: str = Field(min_length=1, max_length=300)
+    certainty: Literal["static"] = "static"
+    symbol: Symbol | SymbolRef
+    evidence: list[Evidence | JourneyEvidenceRef] = Field(default_factory=list, max_length=2)
+
+
+class NativeSourceObservation(ContractModel):
+    """Direct syntax observed in a linked function; never a runtime/dataflow claim."""
+
+    observation_id: Identifier
+    kind: Literal["input_parameter", "return", "raise", "output_call", "state_assignment"]
+    symbol_id: Identifier
+    description: str = Field(min_length=1, max_length=500)
+    conditional: bool = False
+    evidence: Evidence | JourneyEvidenceRef
+
+
+class NativeProjectJourney(VersionedModel):
+    """Bounded static view of one direct Python API or CLI entry."""
+
+    project_id: Identifier
+    index: IndexSnapshot
+    rules_version: Identifier
+    journey_id: Identifier
+    summary: NativeJourneySummary
+    action_label: str | None = Field(default=None, min_length=1, max_length=500, exclude_if=lambda value: value is None)
+    steps: list[NativeJourneyStep] = Field(min_length=1, max_length=8)
+    observations: list[NativeSourceObservation] = Field(default_factory=list, max_length=8)
+    coverage: NativeJourneyCoverage
+    markers: list[str] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="after")
+    def validate_native_journey(self) -> NativeProjectJourney:
+        if self.summary.journey_id != self.journey_id or self.summary.index_id != self.index.index_id:
+            raise ValueError("native journey summary must match its response identity and snapshot")
+        if any(isinstance(step.symbol, Symbol) and step.symbol.index_id != self.index.index_id for step in self.steps):
+            raise ValueError("native journey symbols must belong to the same index")
+        if any(
+            isinstance(evidence, Evidence) and evidence.index_id != self.index.index_id
+            for step in self.steps for evidence in step.evidence
+        ):
+            raise ValueError("native journey step evidence must belong to the same snapshot")
+        if any(
+            isinstance(item.evidence, Evidence) and item.evidence.index_id != self.index.index_id
+            for item in self.observations
+        ):
+            raise ValueError("native observations must belong to the same snapshot")
+        if len({step.step_id for step in self.steps}) != len(self.steps):
+            raise ValueError("native journey step IDs must be unique")
+        summary_only = self.action_label is not None
+        if summary_only and (
+            any(isinstance(step.symbol, Symbol) for step in self.steps)
+            or any(isinstance(evidence, Evidence) for step in self.steps for evidence in step.evidence)
+            or any(isinstance(item.evidence, Evidence) for item in self.observations)
+        ):
+            raise ValueError("native summary journeys must use symbol/evidence references")
+        if summary_only and self.action_label != self.summary.entry_label:
+            raise ValueError("native journey summary label must match its entry")
+        if not summary_only and (
+            any(isinstance(step.symbol, SymbolRef) for step in self.steps)
+            or any(not isinstance(evidence, Evidence) for step in self.steps for evidence in step.evidence)
+            or any(not isinstance(item.evidence, Evidence) for item in self.observations)
+        ):
+            raise ValueError("full native journeys must use full symbols and evidence")
+        returned_symbol_ids = {
+            step.symbol.symbol_id if isinstance(step.symbol, Symbol) else step.symbol.id
+            for step in self.steps
+        }
+        if any(item.symbol_id not in returned_symbol_ids for item in self.observations):
+            raise ValueError("native observations must belong to a returned journey step")
+        return self
+
+
 class ProjectJourneyCatalog(VersionedModel):
     """Lightweight action journey summaries for one immutable project index."""
 
@@ -2535,6 +2647,8 @@ class ProjectJourneyCatalog(VersionedModel):
     rules_version: Identifier
     journeys: list[JourneySummary] = Field(default_factory=list, max_length=40)
     coverage: JourneyCoverage
+    native_journeys: list[NativeJourneySummary] = Field(default_factory=list, max_length=40)
+    native_coverage: NativeJourneyCoverage = Field(default_factory=NativeJourneyCoverage)
 
     @model_validator(mode="after")
     def validate_catalog(self) -> ProjectJourneyCatalog:
@@ -2544,6 +2658,12 @@ class ProjectJourneyCatalog(VersionedModel):
             raise ValueError("journey summary IDs must be unique")
         if self.coverage.journey_count != len(self.journeys):
             raise ValueError("visible journey count must match journey summaries")
+        if any(item.index_id != self.index.index_id for item in self.native_journeys):
+            raise ValueError("native journey summary belongs to a different index_id")
+        if len({item.journey_id for item in self.native_journeys}) != len(self.native_journeys):
+            raise ValueError("native journey summary IDs must be unique")
+        if self.native_coverage.journey_count != len(self.native_journeys):
+            raise ValueError("visible native journey count must match native summaries")
         return self
 
 
@@ -2621,6 +2741,7 @@ class JourneyEvidenceRef(ContractModel):
 
 
 JourneyStep.model_rebuild()
+NativeProjectJourney.model_rebuild()
 RunImpactResult: TypeAlias = RunImpactResponse | RunImpactSummaryResponse
 
 
@@ -3810,7 +3931,7 @@ class McpJourneyCatalogResponse(McpResultBase):
 class McpJourneyResponse(McpResultBase):
     """Read-only MCP envelope for one action journey with source citations."""
 
-    journey: ProjectJourney | None = None
+    journey: ProjectJourney | NativeProjectJourney | None = None
     references: list[EvidenceReference] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -3819,6 +3940,8 @@ class McpJourneyResponse(McpResultBase):
             if self.journey is None:
                 raise ValueError("successful journey results require a journey")
             evidence_ids = {evidence.evidence_id for step in self.journey.steps for evidence in step.evidence}
+            if isinstance(self.journey, NativeProjectJourney):
+                evidence_ids.update(item.evidence.evidence_id for item in self.journey.observations)
             if any(
                 reference.index_id != self.journey.index.index_id
                 or reference.evidence_id not in evidence_ids

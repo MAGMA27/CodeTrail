@@ -24,7 +24,7 @@ Project `get_neighbors` shares `NeighborsIndexResponse` between HTTP and MCP. HT
 
 `FeatureGeneration` 和 `FeatureGenerationSummary` 以 `source=server|external` 区分内置生成与宿主提交，以 `source_scope=external_run` 标记外部结果；外部结果使用 `mode=real` 表示宿主 AI 结果，但模型名是自报信息，不代表服务端供应商。新外部结果会在 generation 和摘要中保留 `external_run_id` 与 `external_session_id`，用于回到来源 Run；旧外部记录可两字段均为空并显示来源未记录，单边缺失无效。服务端结果两字段为空。契约要求 external 结果的服务端 `model_calls`/`repair_calls` 为 0，逐次模型字符数组为空，token 为 null。MCP `submit_project_features` 使用同一 `FeatureModelOutput` 输入和 `McpFeatureGenerationResponse` 输出，应用服务从关联 external understanding Run 的已保存工具结果恢复 evidence，不接受客户端自行构造 evidence 实体。
 
-`ProjectJourneyCatalog` 返回同一 project/index 的轻量动作摘要和 `JourneyCoverage`；`ProjectJourney` 返回最多 8 个职责步骤、coverage 与明确 markers。步骤关系分别标记为 `ui_action`、`ui_callback`、`calls`、`http_shape`、`result_display` 或 `unresolved`，certainty 区分源码绑定、接口形状和未确认关系。`McpJourneyCatalogResponse` 与 `McpJourneyResponse` 包装相同业务结果，detail references 只引用返回的 source evidence。细节以 `contracts.py` 与生成的 Schema 为准。
+`ProjectJourneyCatalog` 返回保持原字段的 UI action 摘要，并以独立的 `native_journeys`/`native_coverage` 列出 Python API/CLI 入口；两类各有最多 40 个 summary。`ProjectJourney` 与 `NativeProjectJourney` 共用原详情 endpoint/tool。Native entries 只接受直接 FastAPI route handler 或唯一顶层 console-script 函数，native detail 最多 8 步/8 条 source observation。Observation 仅表示同快照源码中的参数、return、raise、标准输出调用或属性/下标赋值，不证明运行时执行、数据流、持久化或分支。HTTP full 与 MCP summary 的 evidence 展开语义保持一致；`McpJourneyCatalogResponse`/`McpJourneyResponse` 共用服务结果，references 只引用随详情返回的 source evidence。精确字段以 `contracts.py` 与生成的 Schema 为准。
 
 Run 的公共边界包括 `Run`、`RunInput`、`RunBudget`、`EventSequence` 中的连续事件、`ToolResult`、`Report`、`CreateRunRequest/Response`、Run history/events/tool-results/report/impact 响应及取消响应。`Run.analysis_kind` 区分 Issue 调查和代码理解；代码理解报告使用 `CodeUnderstandingFinal`、`CodeExplanation` 和最多 12 个有序 `ExplanationStep`，`complete/partial`、confirmed/inferred/unknown 及证据约束由契约校验。external MCP 另使用 `McpExternalToolResponse` 和 `McpExternalCompleteResponse`，分别只允许实际工具结果或成功 Run/report 进入 `ok` envelope。邻接 HTTP/MCP 结果的 `truncated`/`truncation_reason` 表示本次查询预算，`index_truncated`/`index_truncation_reason` 表示固定关系扫描覆盖，`index_unresolved_truncated`/`index_unresolved_truncation_reason` 表示 unresolved 详情覆盖；后者允许 NULL 表示旧索引未知，三组字段分别校验，不能交叉推断。Index 响应也保留同样的扫描与 unresolved 覆盖拆分。`RunImpactResponse` 要求恰好一个来自已保存报告的 candidate/finding ID，固定 `index_id`，明确 callers/callees 方向、最大深度、节点/边/路径/unresolved 上限、mapped/unmapped 状态和固定索引覆盖事实；路径只能解释同快照 `calls` 边。`layers` 固定为报告锚点、直接静态可达、间接静态可达和未知边界四层，成员必须与最短 `calls` 路径和 unresolved 列表一致，不能把同一符号同时放入两个静态层。`SseEventFrame` 的 `id` 固定为 `{run_id}:{sequence}`，`SseStreamEndFrame` 只作为终态游标续接的非持久化完成标记；两者的 `event`/`data` 必须匹配，均保留 `schema_version`。MCP 的 Run 读/写 envelope 只允许对应 `ok` 状态携带 result/report；所有请求/响应保留 `schema_version`。精确字段以声明和生成 Schema 为准，不在文档中复制完整字段表。
 
@@ -49,6 +49,7 @@ Index freshness 结果绑定 `project_id`/`baseline_index_id`，检查时间、�
 ## 相关决策
 
 - [从固定索引事实组装功能旅程](../docs/decisions/2026-10-09-feature-journeys.md)
+- [Python API 与 CLI 原生入口旅程](../docs/decisions/2026-11-17-native-entry-journeys.md)
 - [Run 执行决策](../docs/decisions/2026-09-12-run-execution.md)
 - [P2-R2 模型驱动 Issue 分析决策](../docs/decisions/2026-09-12-run-model-analysis.md)
 - [Run SSE 决策](../docs/decisions/2026-09-12-run-sse.md)

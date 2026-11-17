@@ -64,6 +64,9 @@ from .contracts import (
     IndexSnapshot,
     ProjectJourney,
     ProjectJourneyCatalog,
+    NativeProjectJourney,
+    Symbol,
+    SymbolRef,
     JourneyStep,
     JourneyEvidenceRef,
     IssueModelFinal,
@@ -215,7 +218,7 @@ from .relations import (
     relation_coverage_limitations,
 )
 from .overview import RULES_VERSION, build_project_overview
-from .journeys import build_journey_catalog, build_project_journey
+from .journeys import build_journey_catalog, build_native_project_journey, build_project_journey
 from .feature_generation import (
     FeatureGenerationEngine,
     FeatureModelAdapter,
@@ -4918,8 +4921,8 @@ class WorkspaceService:
         journey_id: str,
         *,
         detail: Literal["summary", "full"] = HTTP_DEFAULT_DETAIL,
-    ) -> ProjectJourney:
-        """Read one bounded action journey and its same-snapshot source evidence."""
+    ) -> ProjectJourney | NativeProjectJourney:
+        """Read one bounded UI-action or native Python entry journey."""
 
         self._require_project_index(project_id, index_id)
         overview = self.get_overview(
@@ -4942,10 +4945,42 @@ class WorkspaceService:
                     journey_id,
                     store.read_evidence,
                 )
+                if journey is None:
+                    journey = build_native_project_journey(
+                        project_id,
+                        relation,
+                        overview,
+                        journey_id,
+                        store.read_evidence,
+                    )
             if journey is None:
                 raise ServiceError("not_found", 404, "journey was not found in the selected index")
             if detail == "full":
                 return journey
+            if isinstance(journey, NativeProjectJourney):
+                return NativeProjectJourney(
+                    project_id=journey.project_id,
+                    index=journey.index,
+                    rules_version=journey.rules_version,
+                    journey_id=journey.journey_id,
+                    summary=journey.summary,
+                    action_label=journey.summary.entry_label,
+                    steps=[step.model_copy(update={
+                        "symbol": self._symbol_ref(step.symbol) if isinstance(step.symbol, Symbol) else step.symbol,
+                        "evidence": [JourneyEvidenceRef(
+                            evidence_id=item.evidence_id, content_hash=item.content_hash, path=item.path,
+                            start_line=item.start_line, end_line=item.end_line,
+                        ) if isinstance(item, Evidence) else item for item in step.evidence],
+                    }) for step in journey.steps],
+                    observations=[item.model_copy(update={
+                        "evidence": JourneyEvidenceRef(
+                            evidence_id=item.evidence.evidence_id, content_hash=item.evidence.content_hash,
+                            path=item.evidence.path, start_line=item.evidence.start_line, end_line=item.evidence.end_line,
+                        ) if isinstance(item.evidence, Evidence) else item.evidence,
+                    }) for item in journey.observations],
+                    coverage=journey.coverage,
+                    markers=journey.markers,
+                )
             return ProjectJourney(
                 project_id=journey.project_id,
                 index=journey.index,

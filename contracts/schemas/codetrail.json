@@ -24948,6 +24948,153 @@
           "title": "McpError",
           "type": "object"
         },
+        "NativeJourneyCoverage": {
+          "additionalProperties": false,
+          "description": "Independent bounded coverage for native Python entry journeys.",
+          "properties": {
+            "entry_count": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Entry Count",
+              "type": "integer"
+            },
+            "journey_count": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Journey Count",
+              "type": "integer"
+            },
+            "limitations": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 20,
+              "title": "Limitations",
+              "type": "array"
+            },
+            "relation_truncated": {
+              "default": false,
+              "title": "Relation Truncated",
+              "type": "boolean"
+            },
+            "truncated": {
+              "default": false,
+              "title": "Truncated",
+              "type": "boolean"
+            },
+            "unsupported_entry_count": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Unsupported Entry Count",
+              "type": "integer"
+            }
+          },
+          "title": "NativeJourneyCoverage",
+          "type": "object"
+        },
+        "NativeJourneySummary": {
+          "additionalProperties": false,
+          "description": "A direct Python API or console-script entry anchored in one index.",
+          "properties": {
+            "entry_kind": {
+              "enum": [
+                "api",
+                "cli"
+              ],
+              "title": "Entry Kind",
+              "type": "string"
+            },
+            "entry_label": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Entry Label",
+              "type": "string"
+            },
+            "entry_path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Entry Path",
+              "type": "string"
+            },
+            "entry_start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Entry Start Line",
+              "type": "integer"
+            },
+            "http_method": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "GET",
+                    "POST",
+                    "PUT",
+                    "PATCH",
+                    "DELETE",
+                    "OPTIONS",
+                    "HEAD",
+                    "TRACE"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Http Method"
+            },
+            "http_path": {
+              "anyOf": [
+                {
+                  "maxLength": 2000,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Http Path"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "journey_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Journey Id",
+              "type": "string"
+            },
+            "symbol_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Symbol Id",
+              "type": "string"
+            },
+            "symbol_name": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Symbol Name",
+              "type": "string"
+            }
+          },
+          "required": [
+            "journey_id",
+            "index_id",
+            "entry_kind",
+            "entry_label",
+            "entry_path",
+            "entry_start_line",
+            "symbol_id",
+            "symbol_name"
+          ],
+          "title": "NativeJourneySummary",
+          "type": "object"
+        },
         "ProjectJourneyCatalog": {
           "additionalProperties": false,
           "description": "Lightweight action journey summaries for one immutable project index.",
@@ -24964,6 +25111,17 @@
               },
               "maxItems": 40,
               "title": "Journeys",
+              "type": "array"
+            },
+            "native_coverage": {
+              "$ref": "#/$defs/NativeJourneyCoverage"
+            },
+            "native_journeys": {
+              "items": {
+                "$ref": "#/$defs/NativeJourneySummary"
+              },
+              "maxItems": 40,
+              "title": "Native Journeys",
               "type": "array"
             },
             "project_id": {
@@ -25738,6 +25896,368 @@
           "title": "McpError",
           "type": "object"
         },
+        "NativeJourneyCoverage": {
+          "additionalProperties": false,
+          "description": "Independent bounded coverage for native Python entry journeys.",
+          "properties": {
+            "entry_count": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Entry Count",
+              "type": "integer"
+            },
+            "journey_count": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Journey Count",
+              "type": "integer"
+            },
+            "limitations": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 20,
+              "title": "Limitations",
+              "type": "array"
+            },
+            "relation_truncated": {
+              "default": false,
+              "title": "Relation Truncated",
+              "type": "boolean"
+            },
+            "truncated": {
+              "default": false,
+              "title": "Truncated",
+              "type": "boolean"
+            },
+            "unsupported_entry_count": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Unsupported Entry Count",
+              "type": "integer"
+            }
+          },
+          "title": "NativeJourneyCoverage",
+          "type": "object"
+        },
+        "NativeJourneyStep": {
+          "additionalProperties": false,
+          "description": "One entry or same-index static call hop with its source justification.",
+          "properties": {
+            "certainty": {
+              "const": "static",
+              "default": "static",
+              "title": "Certainty",
+              "type": "string"
+            },
+            "evidence": {
+              "items": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/Evidence"
+                  },
+                  {
+                    "$ref": "#/$defs/JourneyEvidenceRef"
+                  }
+                ]
+              },
+              "maxItems": 2,
+              "title": "Evidence",
+              "type": "array"
+            },
+            "role": {
+              "enum": [
+                "entry",
+                "processing"
+              ],
+              "title": "Role",
+              "type": "string"
+            },
+            "step_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Step Id",
+              "type": "string"
+            },
+            "symbol": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Symbol"
+                },
+                {
+                  "$ref": "#/$defs/SymbolRef"
+                }
+              ],
+              "title": "Symbol"
+            },
+            "title": {
+              "maxLength": 300,
+              "minLength": 1,
+              "title": "Title",
+              "type": "string"
+            }
+          },
+          "required": [
+            "step_id",
+            "role",
+            "title",
+            "symbol"
+          ],
+          "title": "NativeJourneyStep",
+          "type": "object"
+        },
+        "NativeJourneySummary": {
+          "additionalProperties": false,
+          "description": "A direct Python API or console-script entry anchored in one index.",
+          "properties": {
+            "entry_kind": {
+              "enum": [
+                "api",
+                "cli"
+              ],
+              "title": "Entry Kind",
+              "type": "string"
+            },
+            "entry_label": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Entry Label",
+              "type": "string"
+            },
+            "entry_path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Entry Path",
+              "type": "string"
+            },
+            "entry_start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Entry Start Line",
+              "type": "integer"
+            },
+            "http_method": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "GET",
+                    "POST",
+                    "PUT",
+                    "PATCH",
+                    "DELETE",
+                    "OPTIONS",
+                    "HEAD",
+                    "TRACE"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Http Method"
+            },
+            "http_path": {
+              "anyOf": [
+                {
+                  "maxLength": 2000,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Http Path"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "journey_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Journey Id",
+              "type": "string"
+            },
+            "symbol_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Symbol Id",
+              "type": "string"
+            },
+            "symbol_name": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Symbol Name",
+              "type": "string"
+            }
+          },
+          "required": [
+            "journey_id",
+            "index_id",
+            "entry_kind",
+            "entry_label",
+            "entry_path",
+            "entry_start_line",
+            "symbol_id",
+            "symbol_name"
+          ],
+          "title": "NativeJourneySummary",
+          "type": "object"
+        },
+        "NativeProjectJourney": {
+          "additionalProperties": false,
+          "description": "Bounded static view of one direct Python API or CLI entry.",
+          "properties": {
+            "action_label": {
+              "anyOf": [
+                {
+                  "maxLength": 500,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Action Label"
+            },
+            "coverage": {
+              "$ref": "#/$defs/NativeJourneyCoverage"
+            },
+            "index": {
+              "$ref": "#/$defs/IndexSnapshot"
+            },
+            "journey_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Journey Id",
+              "type": "string"
+            },
+            "markers": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 20,
+              "title": "Markers",
+              "type": "array"
+            },
+            "observations": {
+              "items": {
+                "$ref": "#/$defs/NativeSourceObservation"
+              },
+              "maxItems": 8,
+              "title": "Observations",
+              "type": "array"
+            },
+            "project_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Project Id",
+              "type": "string"
+            },
+            "rules_version": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Rules Version",
+              "type": "string"
+            },
+            "schema_version": {
+              "const": "0.1.0",
+              "default": "0.1.0",
+              "title": "Schema Version",
+              "type": "string"
+            },
+            "steps": {
+              "items": {
+                "$ref": "#/$defs/NativeJourneyStep"
+              },
+              "maxItems": 8,
+              "minItems": 1,
+              "title": "Steps",
+              "type": "array"
+            },
+            "summary": {
+              "$ref": "#/$defs/NativeJourneySummary"
+            }
+          },
+          "required": [
+            "project_id",
+            "index",
+            "rules_version",
+            "journey_id",
+            "summary",
+            "steps",
+            "coverage"
+          ],
+          "title": "NativeProjectJourney",
+          "type": "object"
+        },
+        "NativeSourceObservation": {
+          "additionalProperties": false,
+          "description": "Direct syntax observed in a linked function; never a runtime/dataflow claim.",
+          "properties": {
+            "conditional": {
+              "default": false,
+              "title": "Conditional",
+              "type": "boolean"
+            },
+            "description": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Description",
+              "type": "string"
+            },
+            "evidence": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Evidence"
+                },
+                {
+                  "$ref": "#/$defs/JourneyEvidenceRef"
+                }
+              ],
+              "title": "Evidence"
+            },
+            "kind": {
+              "enum": [
+                "input_parameter",
+                "return",
+                "raise",
+                "output_call",
+                "state_assignment"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "observation_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Observation Id",
+              "type": "string"
+            },
+            "symbol_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Symbol Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "observation_id",
+            "kind",
+            "symbol_id",
+            "description",
+            "evidence"
+          ],
+          "title": "NativeSourceObservation",
+          "type": "object"
+        },
         "ProjectJourney": {
           "additionalProperties": false,
           "description": "Full or summary view of one action journey from an immutable index.",
@@ -25958,10 +26478,14 @@
               "$ref": "#/$defs/ProjectJourney"
             },
             {
+              "$ref": "#/$defs/NativeProjectJourney"
+            },
+            {
               "type": "null"
             }
           ],
-          "default": null
+          "default": null,
+          "title": "Journey"
         },
         "ok": {
           "title": "Ok",
@@ -45482,6 +46006,153 @@
           ],
           "title": "JourneySummary",
           "type": "object"
+        },
+        "NativeJourneyCoverage": {
+          "additionalProperties": false,
+          "description": "Independent bounded coverage for native Python entry journeys.",
+          "properties": {
+            "entry_count": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Entry Count",
+              "type": "integer"
+            },
+            "journey_count": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Journey Count",
+              "type": "integer"
+            },
+            "limitations": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 20,
+              "title": "Limitations",
+              "type": "array"
+            },
+            "relation_truncated": {
+              "default": false,
+              "title": "Relation Truncated",
+              "type": "boolean"
+            },
+            "truncated": {
+              "default": false,
+              "title": "Truncated",
+              "type": "boolean"
+            },
+            "unsupported_entry_count": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Unsupported Entry Count",
+              "type": "integer"
+            }
+          },
+          "title": "NativeJourneyCoverage",
+          "type": "object"
+        },
+        "NativeJourneySummary": {
+          "additionalProperties": false,
+          "description": "A direct Python API or console-script entry anchored in one index.",
+          "properties": {
+            "entry_kind": {
+              "enum": [
+                "api",
+                "cli"
+              ],
+              "title": "Entry Kind",
+              "type": "string"
+            },
+            "entry_label": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Entry Label",
+              "type": "string"
+            },
+            "entry_path": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Entry Path",
+              "type": "string"
+            },
+            "entry_start_line": {
+              "exclusiveMinimum": 0,
+              "title": "Entry Start Line",
+              "type": "integer"
+            },
+            "http_method": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "GET",
+                    "POST",
+                    "PUT",
+                    "PATCH",
+                    "DELETE",
+                    "OPTIONS",
+                    "HEAD",
+                    "TRACE"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Http Method"
+            },
+            "http_path": {
+              "anyOf": [
+                {
+                  "maxLength": 2000,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Http Path"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "journey_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Journey Id",
+              "type": "string"
+            },
+            "symbol_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Symbol Id",
+              "type": "string"
+            },
+            "symbol_name": {
+              "maxLength": 500,
+              "minLength": 1,
+              "title": "Symbol Name",
+              "type": "string"
+            }
+          },
+          "required": [
+            "journey_id",
+            "index_id",
+            "entry_kind",
+            "entry_label",
+            "entry_path",
+            "entry_start_line",
+            "symbol_id",
+            "symbol_name"
+          ],
+          "title": "NativeJourneySummary",
+          "type": "object"
         }
       },
       "additionalProperties": false,
@@ -45499,6 +46170,17 @@
           },
           "maxItems": 40,
           "title": "Journeys",
+          "type": "array"
+        },
+        "native_coverage": {
+          "$ref": "#/$defs/NativeJourneyCoverage"
+        },
+        "native_journeys": {
+          "items": {
+            "$ref": "#/$defs/NativeJourneySummary"
+          },
+          "maxItems": 40,
+          "title": "Native Journeys",
           "type": "array"
         },
         "project_id": {

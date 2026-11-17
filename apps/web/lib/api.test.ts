@@ -108,6 +108,15 @@ function journeyFixture() {
       rules_version: "feature-journey-v1",
       journeys: [summary],
       coverage,
+    native_journeys: [],
+    native_coverage: {
+      entry_count: 0,
+      journey_count: 0,
+      unsupported_entry_count: 0,
+      relation_truncated: false,
+      truncated: false,
+      limitations: [],
+    },
     },
     detail: {
       schema_version: SCHEMA_VERSION,
@@ -168,6 +177,57 @@ test("journey response validators bind steps to one index and cap details at eig
     ...fixture.detail,
     coverage: { ...fixture.coverage, action_facts_omitted_count: -1 },
   }), false);
+});
+
+test("native journey validators require same-index direct-entry source observations", () => {
+  const { index } = journeyFixture();
+  const summary = {
+    journey_id: "native-journey-cli",
+    index_id: index.index_id,
+    entry_kind: "cli",
+    entry_label: "console script sample",
+    entry_path: "src/sample.py",
+    entry_start_line: 1,
+    symbol_id: "native-main",
+    symbol_name: "sample.main",
+    http_method: null,
+    http_path: null,
+  };
+  const evidence = {
+    evidence_id: "native-evidence",
+    index_id: index.index_id,
+    path: "src/sample.py",
+    start_line: 1,
+    end_line: 2,
+    excerpt: "def main():\n    return 0",
+    content_hash: "a".repeat(64),
+    kind: "source",
+  };
+  const detail = {
+    schema_version: SCHEMA_VERSION,
+    project_id: "journey-project",
+    index,
+    rules_version: "native-python-entry-v1",
+    journey_id: summary.journey_id,
+    summary,
+    steps: [{ step_id: "native-step-0", role: "entry", title: "console script sample", certainty: "static", symbol: {
+      symbol_id: summary.symbol_id,
+      index_id: index.index_id,
+      path: summary.entry_path,
+      qualified_name: summary.symbol_name,
+      kind: "function",
+      start_line: 1,
+      end_line: 2,
+    }, evidence: [evidence] }],
+    observations: [{ observation_id: "observation-return", kind: "return", symbol_id: summary.symbol_id,
+      description: "Source return syntax", conditional: false, evidence }],
+    coverage: { entry_count: 1, journey_count: 1, unsupported_entry_count: 0, relation_truncated: false,
+      truncated: false, limitations: [] },
+    markers: [],
+  };
+  assert.equal(isProjectJourneyResponse(detail), true);
+  assert.equal(isProjectJourneyResponse({ ...detail, observations: [{ ...detail.observations[0], evidence: { ...evidence, index_id: "other-index" } }] }), false);
+  assert.equal(isProjectJourneyResponse({ ...detail, steps: Array.from({ length: 9 }, (_unused, i) => ({ ...detail.steps[0], step_id: `s-${i}` })) }), false);
 });
 
 test("module symbol page validator enforces fixed module scope and cursor consistency", () => {

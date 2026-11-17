@@ -45,6 +45,8 @@ import type {
   OverviewModule,
   OverviewModuleRelation,
   ProjectJourneyCatalog,
+  AnyProjectJourney,
+  NativeProjectJourney,
   ProjectJourney,
   ProjectOverview,
   ProjectRecord,
@@ -265,7 +267,7 @@ type KnowledgeUi = {
   journeyCatalogStatus: UiAsyncStatus;
   journeyCatalogError: string | null;
   selectedJourneyId: string | null;
-  journey: ProjectJourney | null;
+  journey: AnyProjectJourney | null;
   journeyStatus: UiAsyncStatus;
   journeyError: string | null;
   onLoadJourneyCatalog: Action;
@@ -2126,20 +2128,37 @@ function FeatureSection({ knowledge }: { knowledge: KnowledgeUi }) {
 function FeatureJourneySection({ knowledge }: { knowledge: KnowledgeUi }) {
   const catalog = knowledge.journeyCatalog;
   const selected = knowledge.journey;
+  const selectedNative = selected && "entry_kind" in selected.summary ? selected as NativeProjectJourney : null;
+  const selectedUi = selected && !("entry_kind" in selected.summary) ? selected as ProjectJourney : null;
   return (
     <section className="ct-journey-section" aria-label="用户操作旅程">
       <div className="ct-journey-heading">
         <div><p className="ct-overline">从操作到结果</p><h4>功能旅程</h4></div>
-        <span className="ct-count-label">{catalog ? `${catalog.journeys.length} 条` : "—"}</span>
+        <span className="ct-count-label">{catalog ? `${catalog.journeys.length + catalog.native_journeys.length} 条` : "—"}</span>
       </div>
       <p className="ct-card-note">从界面操作开始，按同一固定索引查看前端处理、HTTP 形状与结果状态。步骤说明是规则摘要；源码链接提供定位证据，静态调用不代表实际运行过程。</p>
       {knowledge.journeyCatalogStatus === "loading" ? <LoadingNote>正在读取当前固定索引中的操作摘要…</LoadingNote> : null}
       {knowledge.journeyCatalogStatus === "error" ? (
         <div className="ct-error-block compact" role="alert"><span>{knowledge.journeyCatalogError ?? "操作旅程读取失败。"}</span><button type="button" className="ct-link-button" onClick={() => void knowledge.onRetryJourneyCatalog()}>重试</button></div>
       ) : null}
-      {catalog && catalog.journeys.length > 0 ? (
+      {catalog && (catalog.journeys.length > 0 || catalog.native_journeys.length > 0) ? (
         <div className="ct-journey-layout">
           <div className="ct-journey-list" aria-label="可读功能旅程">
+            {catalog.native_journeys.length > 0 ? <strong className="ct-card-note">Python API / CLI 入口 · {catalog.native_journeys.length}</strong> : null}
+            {catalog.native_journeys.map((item) => (
+              <button
+                type="button"
+                key={item.journey_id}
+                className={`ct-journey-choice${knowledge.selectedJourneyId === item.journey_id ? " is-selected" : ""}`}
+                onClick={() => knowledge.onSelectJourney(item.journey_id)}
+                aria-pressed={knowledge.selectedJourneyId === item.journey_id}
+              >
+                <strong>{item.entry_label}</strong>
+                <span className="ct-journey-target">{item.entry_kind === "api" ? `${item.http_method} ${item.http_path} · FastAPI 声明` : "console script · 静态入口"}</span>
+                <small>{item.symbol_name} · {item.entry_path}:L{item.entry_start_line}</small>
+              </button>
+            ))}
+            {catalog.journeys.length > 0 ? <strong className="ct-card-note">界面操作 · {catalog.journeys.length}</strong> : null}
             {catalog.journeys.map((item) => (
               <button
                 type="button"
@@ -2157,15 +2176,15 @@ function FeatureJourneySection({ knowledge }: { knowledge: KnowledgeUi }) {
           <div className="ct-journey-detail" aria-live="polite">
             {knowledge.journeyStatus === "loading" ? <LoadingNote>正在展开这条旅程的职责步骤和源码…</LoadingNote> : null}
             {knowledge.journeyStatus === "error" ? <div className="ct-error-block compact" role="alert"><span>{knowledge.journeyError ?? "旅程详情读取失败。"}</span></div> : null}
-            {selected ? (
+            {selectedNative ? <NativeJourneyDetail selected={selectedNative} knowledge={knowledge} /> : selectedUi ? (
               <>
                 <div className="ct-journey-route">
-                  <strong>{journeyTargetLabel(selected.summary)}</strong>
-                  {!selected.summary.method || !selected.summary.path ? <small>当前静态旅程未识别服务端 method/path；这不表示没有网络请求或功能。</small> : null}
+                  <strong>{journeyTargetLabel(selectedUi.summary)}</strong>
+                  {!selectedUi.summary.method || !selectedUi.summary.path ? <small>当前静态旅程未识别服务端 method/path；这不表示没有网络请求或功能。</small> : null}
                 </div>
                 {knowledge.explainDraftError ? <p className="ct-inline-error" role="alert">创建理解会话失败 · {knowledge.explainDraftError}</p> : null}
                 <ol className="ct-journey-steps">
-                  {selected.steps.map((step, index) => (
+                  {selectedUi.steps.map((step, index) => (
                     <li className="ct-journey-step" key={step.step_id}>
                       <span className="ct-journey-step-index">{String(index + 1).padStart(2, "0")}</span>
                       <div className="ct-journey-step-copy">
@@ -2194,7 +2213,7 @@ function FeatureJourneySection({ knowledge }: { knowledge: KnowledgeUi }) {
                                 <span className="ct-journey-symbol">{symbol.qualified_name} · {symbol.path}:L{symbol.start_line}</span>
                                 <div className="ct-journey-symbol-actions">
                                   <button type="button" className="ct-link-button" onClick={() => knowledge.onOpenSymbolCalls(symbol)}>继续追踪</button>
-                                  <button type="button" className="ct-link-button" onClick={() => void knowledge.onExplainCode(symbol, journeyStepContext(selected.summary, step))} disabled={knowledge.explainDraftStatus === "loading"}>{knowledge.explainDraftStatus === "loading" ? "准备会话…" : "解释这条功能"}</button>
+                                  <button type="button" className="ct-link-button" onClick={() => void knowledge.onExplainCode(symbol, journeyStepContext(selectedUi.summary, step))} disabled={knowledge.explainDraftStatus === "loading"}>{knowledge.explainDraftStatus === "loading" ? "准备会话…" : "解释这条功能"}</button>
                                 </div>
                               </div>
                             ))}
@@ -2204,18 +2223,18 @@ function FeatureJourneySection({ knowledge }: { knowledge: KnowledgeUi }) {
                     </li>
                   ))}
                 </ol>
-                {selected.markers.length > 0 ? (
+                {selectedUi.markers.length > 0 ? (
                   <details className="ct-journey-markers">
-                    <summary>旅程断点 · {selected.markers.length}</summary>
-                    {selected.markers.map((marker) => <p key={marker}>{marker}</p>)}
+                    <summary>旅程断点 · {selectedUi.markers.length}</summary>
+                    {selectedUi.markers.map((marker) => <p key={marker}>{marker}</p>)}
                   </details>
                 ) : null}
               </>
-            ) : knowledge.journeyStatus !== "loading" ? <p className="ct-muted">选择一条操作旅程查看步骤；源码会在展开时按需读取。</p> : null}
+            ) : knowledge.journeyStatus !== "loading" ? <p className="ct-muted">选择一条功能旅程查看步骤；源码会在展开时按需读取。</p> : null}
           </div>
         </div>
       ) : catalog && knowledge.journeyCatalogStatus === "empty" ? (
-        <p className="ct-muted">没有识别的界面动作。当前规则可能无法确认动态绑定或服务端关联；这不表示应用没有功能或网络请求。</p>
+        <p className="ct-muted">当前规则没有识别到 UI action 或受支持的 Python API/CLI 入口；未识别不表示项目没有功能。</p>
       ) : null}
       {catalog && (catalog.coverage.unsupported_action_count > 0 || catalog.coverage.truncated || catalog.coverage.limitations.length > 0) ? (
         <details className="ct-journey-coverage">
@@ -2227,6 +2246,14 @@ function FeatureJourneySection({ knowledge }: { knowledge: KnowledgeUi }) {
           {catalog.coverage.limitations.map((limitation) => <p key={limitation}>{limitation}</p>)}
         </details>
       ) : null}
+      {catalog && (catalog.native_coverage.unsupported_entry_count > 0 || catalog.native_coverage.truncated || catalog.native_coverage.limitations.length > 0) ? (
+        <details className="ct-journey-coverage">
+          <summary>Python API / CLI 覆盖范围 · {catalog.native_coverage.journey_count}/{catalog.native_coverage.entry_count}</summary>
+          {catalog.native_coverage.unsupported_entry_count > 0 ? <p>{catalog.native_coverage.unsupported_entry_count} 个入口未满足当前直接入口规则；动态、歧义或未覆盖声明不能视为不存在。</p> : null}
+          {catalog.native_coverage.truncated || catalog.native_coverage.relation_truncated ? <p>索引或目录达到覆盖边界；未显示部分不代表不存在。</p> : null}
+          {catalog.native_coverage.limitations.map((limitation) => <p key={limitation}>{limitation}</p>)}
+        </details>
+      ) : null}
     </section>
   );
 }
@@ -2235,6 +2262,61 @@ function journeyCertaintyLabel(certainty: "static" | "shape" | "unconfirmed"): s
   if (certainty === "static") return "源码关系明确";
   if (certainty === "shape") return "仅形状匹配";
   return "未确认";
+}
+
+function NativeJourneyDetail({ selected, knowledge }: { selected: NativeProjectJourney; knowledge: KnowledgeUi }) {
+  const symbolNameById = new Map(selected.steps.map((step) => [step.symbol.symbol_id, step.symbol.qualified_name]));
+  return (
+    <>
+      <div className="ct-journey-route">
+        <strong>{selected.summary.entry_kind === "api" ? `${selected.summary.http_method} ${selected.summary.http_path}` : selected.summary.entry_label}</strong>
+        <small>{selected.summary.symbol_name} · {selected.summary.entry_path}:L{selected.summary.entry_start_line} · 固定索引 {selected.index.index_id}</small>
+        <small>以下是有界静态调用样本；并列调用不表示执行顺序。语法观察不证明运行时执行、数据流、持久化或分支执行。</small>
+      </div>
+      <ol className="ct-journey-steps">
+        {selected.steps.map((step, index) => (
+          <li className="ct-journey-step" key={step.step_id}>
+            <span className="ct-journey-step-index">{String(index + 1).padStart(2, "0")}</span>
+            <div className="ct-journey-step-copy">
+              <div className="ct-journey-step-heading"><strong>{step.title}</strong><span className="ct-journey-certainty is-static">{step.role === "entry" ? "静态入口" : "同快照 calls 边"}</span></div>
+              <div className="ct-journey-symbol-row">
+                <span className="ct-journey-symbol">{step.symbol.qualified_name} · {step.symbol.path}:L{step.symbol.start_line}</span>
+                <div className="ct-journey-symbol-actions"><button type="button" className="ct-link-button" onClick={() => knowledge.onOpenSymbolCalls(step.symbol)}>继续追踪</button></div>
+              </div>
+              {step.evidence.map((evidence) => <button type="button" className="ct-link-button" key={evidence.evidence_id} onClick={() => knowledge.onSelectJourneyEvidence(evidence)}>查看调用/入口源码 · {evidence.path}:L{evidence.start_line}–L{evidence.end_line}</button>)}
+            </div>
+          </li>
+        ))}
+      </ol>
+      {selected.observations.length > 0 ? (
+        <details className="ct-journey-sources" open>
+          <summary>源码语法观察 · {selected.observations.length}</summary>
+          {selected.observations.map((item) => (
+            <div className="ct-native-observation" key={item.observation_id}>
+              <span className="ct-kind-chip">{nativeObservationLabel(item.kind)} · {symbolNameById.get(item.symbol_id) ?? "未列出的函数"}{item.conditional ? " · 条件内语法" : ""}</span>
+              <p>{item.description}</p>
+              <button type="button" className="ct-link-button" onClick={() => knowledge.onSelectJourneyEvidence(item.evidence)}>{item.evidence.path}:L{item.evidence.start_line}–L{item.evidence.end_line} · 核对源码</button>
+            </div>
+          ))}
+        </details>
+      ) : <p className="ct-muted">当前有界语法观察没有返回输入/结果/输出/赋值语句样本。</p>}
+      {selected.markers.length > 0 || selected.coverage.limitations.length > 0 ? (
+        <details className="ct-journey-markers"><summary>覆盖与断点 · {selected.markers.length + selected.coverage.limitations.length}</summary>
+          {[...selected.markers, ...selected.coverage.limitations].map((item, index) => <p key={`${index}:${item}`}>{item}</p>)}
+        </details>
+      ) : null}
+    </>
+  );
+}
+
+function nativeObservationLabel(kind: NativeProjectJourney["observations"][number]["kind"]): string {
+  return {
+    input_parameter: "函数参数",
+    return: "return 语句",
+    raise: "raise 语句",
+    output_call: "输出调用",
+    state_assignment: "属性/下标赋值",
+  }[kind];
 }
 
 function journeyTargetLabel(summary: ProjectJourney["summary"]): string {

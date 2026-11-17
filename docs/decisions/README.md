@@ -1,5 +1,7 @@
 # 决策记录
 
+- [Python API 与 CLI 原生入口旅程（proposed）](2026-11-17-native-entry-journeys.md)
+
 - [固定快照内的 TypeScript path alias 解析（implemented）](2026-11-16-typescript-path-alias-resolution.md)
 
 - [后端基础设施分阶段演进提案（proposed）](2026-10-28-backend-infrastructure-evolution.md)

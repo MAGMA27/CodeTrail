@@ -100,6 +100,7 @@ import {
   type OverviewEntryPoint,
   type ProjectJourneyCatalog,
   type ProjectJourney,
+  type AnyProjectJourney,
   type OverviewHttpAssociation,
   type OverviewGroup,
   type OverviewModule,
@@ -619,7 +620,7 @@ export default function Workbench() {
   const [journeyCatalogStatus, setJourneyCatalogStatus] = useState<AsyncStatus>("idle");
   const [journeyCatalogError, setJourneyCatalogError] = useState<string | null>(null);
   const [selectedJourneyId, setSelectedJourneyId] = useState<string | null>(null);
-  const [journey, setJourney] = useState<ProjectJourney | null>(null);
+  const [journey, setJourney] = useState<AnyProjectJourney | null>(null);
   const [journeyStatus, setJourneyStatus] = useState<AsyncStatus>("idle");
   const [journeyError, setJourneyError] = useState<string | null>(null);
   const [moduleSymbolsRoot, setModuleSymbolsRoot] = useState<SymbolRecord | null>(null);
@@ -1252,7 +1253,7 @@ export default function Workbench() {
       const response = await getProjectJourneyCatalog(projectId, indexId, controller.signal);
       if (!isLatestRequest(requestId, journeyCatalogRequestId.current)) return;
       setJourneyCatalog(response);
-      setJourneyCatalogStatus(response.journeys.length > 0 ? "success" : "empty");
+      setJourneyCatalogStatus(response.journeys.length + response.native_journeys.length > 0 ? "success" : "empty");
     } catch (error) {
       if (isAbortError(error) || !isLatestRequest(requestId, journeyCatalogRequestId.current)) return;
       setJourneyCatalog(null);
@@ -1265,7 +1266,8 @@ export default function Workbench() {
     if (!selectedProjectId || !indexResponse ||
       journeyCatalog?.project_id !== selectedProjectId ||
       journeyCatalog.index.index_id !== indexResponse.index.index_id ||
-      !journeyCatalog.journeys.some((item) => item.journey_id === journeyId)) return;
+      (!journeyCatalog.journeys.some((item) => item.journey_id === journeyId) &&
+        !journeyCatalog.native_journeys.some((item) => item.journey_id === journeyId))) return;
     if (selectedJourneyId === journeyId && journey?.journey_id === journeyId && journeyStatus === "success") return;
     journeyController.current?.abort();
     const controller = new AbortController();

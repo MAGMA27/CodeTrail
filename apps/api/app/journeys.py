@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import ast
 import json
 import os
 import re
 import shutil
 import subprocess
+import time
 from collections import defaultdict, deque
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -19,6 +21,11 @@ from .contracts import (
     JourneyCoverage,
     JourneyStep,
     JourneySummary,
+    NativeJourneyCoverage,
+    NativeJourneyStep,
+    NativeJourneySummary,
+    NativeProjectJourney,
+    NativeSourceObservation,
     OverviewEntryPoint,
     OverviewHttpAssociation,
     ProjectJourney,
@@ -30,7 +37,7 @@ from .indexing import SnapshotFile
 from .relations import RelationIndex, relation_coverage_limitations
 
 
-RULES_VERSION = "ui-action-v2+local-state-v1+static-calls-v1+http-shape-v2"
+RULES_VERSION = "ui-action-v2+local-state-v1+static-calls-v1+http-shape-v2+native-python-entry-v1"
 _MAX_FILES = 100
 _MAX_INPUT_BYTES = 5_000_000
 _MAX_ACTIONS = 1_000
@@ -38,6 +45,12 @@ _MAX_BINDINGS = 2_000
 _MAX_JOURNEYS = 40
 _MAX_CALL_DEPTH = 8
 _MAX_SOURCE_LINES = 24
+_MAX_NATIVE_JOURNEYS = 40
+_MAX_NATIVE_HOPS = 7
+_MAX_NATIVE_OBSERVATIONS = 8
+_MAX_NATIVE_PARSE_SECONDS = 2.0
+_NATIVE_STEP_TITLE_LIMIT = 300
+_NATIVE_OBSERVATION_DESCRIPTION_LIMIT = 500
 
 
 @dataclass(frozen=True)
@@ -290,14 +303,393 @@ def build_journey_catalog(
         journey_count=len(summaries),
         unsupported_action_count=max(0, len(actions) - len(covered_action_keys)),
     )
+    native_summaries, native_coverage = _native_entry_summaries(relation, overview)
     catalog = ProjectJourneyCatalog(
         project_id=project_id,
         index=relation.snapshot.index,
         rules_version=RULES_VERSION,
         journeys=summaries,
         coverage=catalog_coverage,
+        native_journeys=native_summaries,
+        native_coverage=native_coverage,
     )
     return catalog, specs
+
+
+def _native_entry_summaries(
+    relation: RelationIndex,
+    overview: ProjectOverview,
+    *,
+    tree_cache: dict[str, ast.Module | None] | None = None,
+    parse_deadline: float | None = None,
+) -> tuple[list[NativeJourneySummary], NativeJourneyCoverage]:
+    """Select direct route/console function entries from already captured overview facts."""
+
+    entry_candidates = [entry for entry in overview.entries if entry.kind == "fastapi_route" or (
+        entry.kind == "python_packaging_entry" and entry.rule_id in {
+            "python.packaging.project.scripts", "python.packaging.poetry.scripts"
+        }
+    )]
+    candidate_paths = {entry.path for entry in entry_candidates}
+    file_candidates = sorted(
+        (item for item in relation.snapshot.files if item.path in candidate_paths and item.path.endswith(".py")),
+        key=lambda item: item.path,
+    )
+    files: dict[str, SnapshotFile] = {}
+    scanned_bytes = 0
+    omitted_paths: set[str] = set()
+    for source in file_candidates:
+        if len(files) >= _MAX_FILES or scanned_bytes + source.size > _MAX_INPUT_BYTES:
+            omitted_paths.add(source.path)
+            continue
+        files[source.path] = source
+        scanned_bytes += source.size
+    native_scan_truncated = bool(omitted_paths)
+    parse_time_truncated = False
+    symbol_by_function_start = {
+        (symbol.path, symbol.start_line, symbol.qualified_name.rsplit(".", 1)[-1]): symbol
+        for symbol in relation.symbols if symbol.kind == "function"
+    }
+    top_level_functions: dict[tuple[str, int, str], Symbol] = {}
+    parse_failed_paths: set[str] = set()
+    cache = tree_cache if tree_cache is not None else {}
+    deadline = parse_deadline if parse_deadline is not None else time.monotonic() + _MAX_NATIVE_PARSE_SECONDS
+    for path, source in files.items():
+        if time.monotonic() >= deadline:
+            omitted_paths.update(candidate for candidate in files if candidate not in cache)
+            native_scan_truncated = True
+            parse_time_truncated = True
+            break
+        tree = _native_parse_tree(path, source, cache)
+        if tree is None:
+            parse_failed_paths.add(path)
+            continue
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if (symbol := symbol_by_function_start.get((path, node.lineno, node.name))) is not None:
+                    top_level_functions[(path, node.lineno, node.name)] = symbol
+
+    candidates: list[tuple[Any, Symbol, str]] = []
+    unsupported = 0
+    for entry in entry_candidates:
+        if entry.path in omitted_paths:
+            unsupported += 1
+            continue
+        if entry.kind == "fastapi_route":
+            symbol = entry.handler_symbol
+            if symbol is None or (symbol.path, symbol.start_line, symbol.qualified_name.rsplit(".", 1)[-1]) not in top_level_functions:
+                unsupported += 1
+                continue
+            candidates.append((entry, symbol, "api"))
+        elif entry.kind == "python_packaging_entry" and entry.rule_id in {
+            "python.packaging.project.scripts",
+            "python.packaging.poetry.scripts",
+        }:
+            symbol = entry.target_symbol
+            if symbol is None or (symbol.path, symbol.start_line, symbol.qualified_name.rsplit(".", 1)[-1]) not in top_level_functions:
+                unsupported += 1
+                continue
+            candidates.append((entry, symbol, "cli"))
+
+    summaries: list[NativeJourneySummary] = []
+    for entry, symbol, entry_kind in candidates[:_MAX_NATIVE_JOURNEYS]:
+        identity = "\0".join((relation.snapshot.index.index_id, entry.entry_point_id, entry_kind, symbol.symbol_id))
+        journey_id = f"native-journey-{hashlib.sha256(identity.encode()).hexdigest()[:32]}"
+        summaries.append(NativeJourneySummary(
+            journey_id=journey_id,
+            index_id=relation.snapshot.index.index_id,
+            entry_kind=entry_kind,
+            entry_label=entry.label,
+            entry_path=entry.path,
+            entry_start_line=entry.start_line,
+            symbol_id=symbol.symbol_id,
+            symbol_name=symbol.qualified_name,
+            http_method=entry.http_method if entry_kind == "api" else None,
+            http_path=entry.declared_path if entry_kind == "api" else None,
+        ))
+    entry_section = next((item for item in overview.section_coverage if item.section == "entries"), None)
+    entry_incomplete = entry_section is None or entry_section.truncated
+    entry_count = entry_section.total if entry_section is not None and entry_section.total is not None else len(overview.entries)
+    limitations = [
+        "只纳入直接 FastAPI route handler 与 project.scripts/Poetry scripts 指向的顶层函数；GUI、plugin group、动态注册和间接/条件 re-export 不确认。",
+        "仅观察直接函数体中的语法；嵌套函数、类/方法体不覆盖。print/sys.stdout.write 只标为语法形状匹配的输出候选，名称可能被遮蔽。",
+        "输入、return、raise、属性/下标赋值只表示源码语法；不证明运行、值传播、持久化或分支执行。",
+    ]
+    if not any(item.path.rsplit("/", 1)[-1] in {"pyproject.toml", "setup.cfg", "setup.py"} for item in relation.snapshot.files):
+        limitations.append("固定快照未包含可识别的 packaging declaration metadata；CLI 声明覆盖不确定，未识别入口不能作为不存在的证明。")
+    if entry_incomplete:
+        limitations.append("入口概览覆盖不完整；未列入口不能视为不存在。")
+    limitations.extend(note for note in overview.notes if "entry point" in note or "入口声明" in note)
+    if unsupported:
+        limitations.append(f"{unsupported} 个候选入口未确认直接顶层函数；可能为目标条件不符或源码解析失败。")
+    if parse_failed_paths:
+        limitations.append(f"{len(parse_failed_paths)} 个入口源码因语法错误或解析递归/内存边界无法分析；对应覆盖不完整。")
+    if omitted_paths and not parse_time_truncated:
+        limitations.append(f"Native entry source parsing omitted {len(omitted_paths)} files at the existing {_MAX_FILES}-file/{_MAX_INPUT_BYTES}-byte budget.")
+    if parse_time_truncated:
+        limitations.append(f"{len(omitted_paths)} 个候选入口源码未能纳入 {_MAX_NATIVE_PARSE_SECONDS:g} 秒/每次组装的解析时间预算；相关入口支持情况未覆盖。")
+    if len(candidates) > _MAX_NATIVE_JOURNEYS:
+        limitations.append(f"native journey summary limit of {_MAX_NATIVE_JOURNEYS} reached; additional supported entries omitted.")
+    limitations.extend(relation_coverage_limitations(
+        truncated=relation.truncated,
+        truncation_reason=relation.truncation_reason,
+        unresolved_truncated=relation.unresolved_truncated,
+        unresolved_truncation_reason=relation.unresolved_truncation_reason,
+    ))
+    return summaries, NativeJourneyCoverage(
+        entry_count=max(entry_count, len(overview.entries)),
+        journey_count=len(summaries),
+        unsupported_entry_count=max(0, max(entry_count, len(overview.entries)) - len(summaries)),
+        relation_truncated=relation.truncated or relation.unresolved_truncated is True,
+        truncated=len(candidates) > _MAX_NATIVE_JOURNEYS or entry_incomplete or native_scan_truncated or bool(parse_failed_paths),
+        limitations=limitations[:20],
+    )
+
+
+def build_native_project_journey(
+    project_id: str,
+    relation: RelationIndex,
+    overview: ProjectOverview,
+    journey_id: str,
+    read_evidence: Callable[[str, str, int, int], Evidence],
+) -> NativeProjectJourney | None:
+    """Expand one selected direct Python entry using only same-index calls and source."""
+
+    tree_cache: dict[str, ast.Module | None] = {}
+    parse_deadline = time.monotonic() + _MAX_NATIVE_PARSE_SECONDS
+    summaries, coverage = _native_entry_summaries(
+        relation, overview, tree_cache=tree_cache, parse_deadline=parse_deadline,
+    )
+    summary = next((item for item in summaries if item.journey_id == journey_id), None)
+    if summary is None:
+        return None
+    symbol_by_id = {item.symbol_id: item for item in relation.symbols}
+    root = symbol_by_id.get(summary.symbol_id)
+    if root is None:
+        return None
+    entry_fact = next(
+        (entry for entry in overview.entries if entry.label == summary.entry_label and (
+            (entry.handler_symbol is not None and entry.handler_symbol.symbol_id == root.symbol_id)
+            or (entry.target_symbol is not None and entry.target_symbol.symbol_id == root.symbol_id)
+        )),
+        None,
+    )
+    source_files = {item.path: item for item in relation.snapshot.files}
+    edges = _reachable_call_edges(relation, root.symbol_id, depth=3, limit=_MAX_NATIVE_HOPS)
+    call_hops: list[tuple[Any, Symbol]] = []
+    markers: list[str] = []
+    for edge in edges:
+        target = symbol_by_id.get(edge.target_id)
+        if target is None:
+            markers.append("静态 calls 边目标没有对应的固定索引符号；未生成处理步骤。")
+        elif edge.source_location is None:
+            markers.append("静态 calls 边缺少来源位置；未生成处理步骤。")
+        else:
+            call_hops.append((edge, target))
+    steps: list[NativeJourneyStep] = []
+    observation_candidates: list[NativeSourceObservation] = []
+    parsed_paths = set(tree_cache)
+    parsed_bytes = sum(source_files[path].size for path in parsed_paths if path in source_files)
+    skipped_observation_paths: set[str] = set()
+    for position, (edge, symbol) in enumerate([(None, root), *call_hops[:_MAX_NATIVE_HOPS]]):
+        evidence: list[Evidence] = []
+        if position == 0:
+            if entry_fact is not None and entry_fact.evidence is not None:
+                evidence.append(entry_fact.evidence)
+            try:
+                source_evidence = _read_evidence(read_evidence, relation.snapshot.index.index_id, symbol.path, symbol.start_line, min(symbol.end_line, symbol.start_line + _MAX_SOURCE_LINES - 1))
+                if source_evidence is not None and source_evidence.evidence_id not in {item.evidence_id for item in evidence} and len(evidence) < 2:
+                    evidence.append(source_evidence)
+                elif source_evidence is None:
+                    markers.append("入口函数源码证据无法从所选索引读取。")
+            except Exception:
+                markers.append("入口函数源码证据无法从所选索引读取。")
+        elif edge is not None:
+            caller = symbol_by_id.get(edge.source_id)
+            caller_name = caller.qualified_name if caller is not None else "同快照调用方"
+            location = edge.source_location
+            try:
+                source_evidence = _read_evidence(read_evidence, relation.snapshot.index.index_id, location.path, location.start_line, min(location.end_line, location.start_line + _MAX_SOURCE_LINES - 1))
+                if source_evidence is not None:
+                    evidence.append(source_evidence)
+                else:
+                    markers.append("部分调用边源码证据无法从所选索引读取。")
+            except Exception:
+                markers.append("部分调用边源码证据无法从所选索引读取。")
+        title = summary.entry_label if position == 0 else f"静态调用：{caller_name} → {symbol.qualified_name}"
+        if len(title) > _NATIVE_STEP_TITLE_LIMIT:
+            title = title[:_NATIVE_STEP_TITLE_LIMIT - 1] + "…"
+            markers.append("步骤显示标题已截短；完整入口标签与符号标识保留在摘要/符号字段中。")
+        steps.append(NativeJourneyStep(
+            step_id=f"native-step-{position}",
+            role="entry" if position == 0 else "processing",
+            title=title,
+            symbol=symbol,
+            evidence=evidence,
+        ))
+        source_file = source_files.get(symbol.path)
+        if source_file is None:
+            markers.append("函数源码未包含在固定快照中；保留符号与调用边，语法观察未覆盖。")
+            continue
+        if symbol.path not in tree_cache:
+            if (time.monotonic() >= parse_deadline or len(parsed_paths) >= _MAX_FILES
+                    or parsed_bytes + source_file.size > _MAX_INPUT_BYTES):
+                skipped_observation_paths.add(symbol.path)
+                continue
+            parsed_paths.add(symbol.path)
+            parsed_bytes += source_file.size
+            _native_parse_tree(symbol.path, source_file, tree_cache)
+        observed, observation_truncated, observation_note = _observe_function_source(
+            symbol, source_files, relation.snapshot.index.index_id, read_evidence,
+            tree=tree_cache.get(symbol.path),
+        )
+        observation_candidates.extend(observed)
+        if observation_note:
+            markers.append(observation_note)
+        if observation_truncated:
+            markers.append("部分语法观察候选没有可读取的固定快照证据；不代表对应语法不存在。")
+    observations = _select_native_observations(observation_candidates)
+    omitted_observations = max(0, len(observation_candidates) - len(observations))
+    if omitted_observations:
+        markers.append(f"语法观察省略 {omitted_observations} 项（候选 {len(observation_candidates)}，显示上限 {_MAX_NATIVE_OBSERVATIONS}）；边界处未显示语法不代表不存在。")
+    if skipped_observation_paths:
+        markers.append(f"累计语法解析预算达到 {_MAX_NATIVE_PARSE_SECONDS:g} 秒/{_MAX_FILES} 个文件/{_MAX_INPUT_BYTES} 字节；{len(skipped_observation_paths)} 个后续源码文件的语法观察未覆盖。")
+    markers.append("调用详情最多沿深度 3 采样；并列 BFS 调用样本不是执行顺序，深度边界外的处理未覆盖。")
+    if len(edges) >= _MAX_NATIVE_HOPS:
+        markers.append("调用边样本达到 7 项上限；未展示部分不代表不存在。")
+    visible_step_ids = {step.symbol.symbol_id for step in steps if isinstance(step.symbol, Symbol)}
+    unresolved = [item for item in relation.unresolved if item.source_symbol_id in visible_step_ids]
+    if unresolved:
+        reasons = sorted({item.reason for item in unresolved})[:4]
+        markers.append(f"{len(unresolved)} 个可见函数调用/引用未解析（{', '.join(reasons)}）；未将其补造成处理步骤。")
+    elif not edges:
+        markers.append("当前入口没有确认到本次有界查询中的本地 calls 边；这不排除动态或外部调用。")
+    if relation.truncated or relation.unresolved_truncated:
+        if relation.truncated:
+            markers.append(f"关系扫描已截断（{relation.truncation_reason or '原因未记录'}）；未显示调用边不能视为不存在。")
+        if relation.unresolved_truncated:
+            markers.append(f"unresolved 详情已截断（{relation.unresolved_truncation_reason or '原因未记录'}）；未显示调用不能视为不存在。")
+    return NativeProjectJourney(
+        project_id=project_id,
+        index=relation.snapshot.index,
+        rules_version=RULES_VERSION,
+        journey_id=journey_id,
+        summary=summary,
+        steps=steps,
+        observations=observations,
+        coverage=coverage,
+        markers=list(dict.fromkeys(markers))[:20],
+    )
+
+
+def _native_parse_tree(path: str, source: SnapshotFile, cache: dict[str, ast.Module | None]) -> ast.Module | None:
+    if path not in cache:
+        try:
+            cache[path] = ast.parse(source.text, filename=path)
+        except (SyntaxError, ValueError, RecursionError, MemoryError):
+            cache[path] = None
+    return cache[path]
+
+
+def _observe_function_source(symbol: Symbol, files: dict[str, SnapshotFile], index_id: str,
+                             read_evidence: Callable[[str, str, int, int], Evidence], *,
+                             tree: ast.Module | None
+                             ) -> tuple[list[NativeSourceObservation], bool, str | None]:
+    source = files.get(symbol.path)
+    if source is None:
+        return [], False, "源码文件未包含在所选快照中；语法观察未覆盖。"
+    if tree is None:
+        return [], False, "函数源码无法按当前 Python 语法规则解析；未生成源码观察。"
+    function = next((node for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                     and node.lineno == symbol.start_line), None)
+    if function is None:
+        return [], False, "无法在固定快照中定位直接函数体；未生成源码观察。"
+    found: list[tuple[str, ast.AST, str, bool]] = []
+    try_star_type = getattr(ast, "TryStar", ())
+    parameters = [*function.args.posonlyargs, *function.args.args, *function.args.kwonlyargs]
+    if function.args.vararg:
+        parameters.append(function.args.vararg)
+    if function.args.kwarg:
+        parameters.append(function.args.kwarg)
+    for argument in parameters:
+        found.append(("input_parameter", argument, f"函数签名声明参数 {argument.arg}。", False))
+
+    def visit(statements: list[ast.stmt], conditional: bool = False) -> None:
+        for node in statements:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+                continue
+            if isinstance(node, ast.Return):
+                found.append(("return", node, "源码包含 return 语句；不表示运行时返回值或调用方数据流。", conditional))
+            elif isinstance(node, ast.Raise):
+                found.append(("raise", node, "源码包含 raise 语句；不表示异常分支实际执行。", conditional))
+            elif isinstance(node, ast.Assign) and any(isinstance(target, (ast.Attribute, ast.Subscript)) for target in node.targets):
+                found.append(("state_assignment", node, "源码包含属性/下标赋值；不证明持久化或状态生命周期。", conditional))
+            elif isinstance(node, ast.AnnAssign) and node.value is not None and isinstance(node.target, (ast.Attribute, ast.Subscript)):
+                found.append(("state_assignment", node, "源码包含属性/下标赋值；不证明持久化或状态生命周期。", conditional))
+            elif isinstance(node, ast.Expr) and isinstance(node.value, ast.Call) and _is_output_call(node.value):
+                found.append(("output_call", node.value, "源码形状匹配 print/sys.stdout.write；名称可能被遮蔽，仅为输出候选，不证明标准输出或实际输出。", conditional))
+            if isinstance(node, (ast.If, ast.For, ast.AsyncFor, ast.While)):
+                visit(node.body, True)
+                visit(node.orelse, True)
+            elif isinstance(node, (ast.With, ast.AsyncWith)):
+                visit(node.body, True)
+            elif isinstance(node, ast.Try):
+                visit(node.body, True)
+                for handler in node.handlers:
+                    visit(handler.body, True)
+                visit(node.orelse, True)
+                visit(node.finalbody, conditional)
+            elif isinstance(node, (ast.Match,)):
+                for case in node.cases:
+                    visit(case.body, True)
+            elif isinstance(node, try_star_type):
+                visit(node.body, True)
+                for handler in node.handlers:
+                    visit(handler.body, True)
+                visit(node.orelse, True)
+                visit(node.finalbody, conditional)
+
+    visit(function.body)
+    result: list[NativeSourceObservation] = []
+    seen: set[tuple[str, int, int]] = set()
+    for kind, node, description, conditional in found:
+        start = getattr(node, "lineno", None)
+        end = getattr(node, "end_lineno", start)
+        if not isinstance(start, int) or not isinstance(end, int) or (kind, start, end) in seen:
+            continue
+        seen.add((kind, start, end))
+        end = min(end, start + _MAX_SOURCE_LINES - 1)
+        try:
+            evidence = _read_evidence(read_evidence, index_id, symbol.path, start, end)
+        except Exception:
+            continue
+        if evidence is None:
+            continue
+        identity = f"{index_id}\0{symbol.symbol_id}\0{kind}\0{start}\0{end}"
+        if len(description) > _NATIVE_OBSERVATION_DESCRIPTION_LIMIT:
+            description = description[:_NATIVE_OBSERVATION_DESCRIPTION_LIMIT - 1] + "…"
+        result.append(NativeSourceObservation(
+            observation_id=f"native-observation-{hashlib.sha256(identity.encode()).hexdigest()[:24]}",
+            kind=kind, symbol_id=symbol.symbol_id, description=description,
+            conditional=conditional, evidence=evidence,
+        ))
+    return result, len(found) > len(result), None
+
+
+def _select_native_observations(candidates: list[NativeSourceObservation]) -> list[NativeSourceObservation]:
+    """Select bounded observations across source categories, favoring result/output facts."""
+    priority = {"return": 0, "output_call": 1, "raise": 2, "state_assignment": 3, "input_parameter": 4}
+    ranked = sorted(enumerate(candidates), key=lambda item: (priority.get(item[1].kind, 9), item[0]))
+    return [item for _, item in ranked[:_MAX_NATIVE_OBSERVATIONS]]
+
+
+def _is_output_call(node: ast.Call) -> bool:
+    function = node.func
+    if isinstance(function, ast.Name):
+        return function.id == "print"
+    return (isinstance(function, ast.Attribute) and function.attr == "write"
+            and isinstance(function.value, ast.Attribute) and function.value.attr == "stdout"
+            and isinstance(function.value.value, ast.Name) and function.value.value.id == "sys")
 
 
 def build_project_journey(

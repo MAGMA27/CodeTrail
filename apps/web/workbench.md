@@ -62,7 +62,7 @@ Neighbors 查询返回的 `contextual_calls` 在代码关系面板单独列出�
 
 本轮验收以当前 PC 的 MVP 阅读流程为准，不要求固定分辨率矩阵；此前尺寸证据保留为历史。搜索、定义分页、固定快照源码校验、HTTP 链路和功能请求仍复用原编排与服务；后端概览没有改为按展开动作加载，也没有新增运行时数据流分析。
 
-功能页按需读取当前固定 index 的轻量 action journey catalog；选中一条后再请求最多 8 个职责步骤和来源 evidence。目录为每个已配对请求显示 HTTP method/path 形状，同一界面动作的不同请求可据此区分；无配对 method/path 的本地或未知动作显示“本地操作 · 未连接到服务端”，只表示当前静态事实没有确认服务端关联，不表示没有网络请求或功能。空目录提示“没有识别的界面动作”。步骤标题分别标明界面动作、回调、静态调用、HTTP 形状、结果展示或未解析关系，并区分静态源码关系、接口形状和未确认状态；规则说明与来源 evidence 分开呈现。每个符号可继续调用既有 `onOpenSymbolCalls` 同快照关系查询，或通过 G1 代码理解入口创建只带未保存草稿的 Session，不自动调用模型。动态按钮文字保留候选文本；跨组件 prop handler 和结果界面更新在静态规则无法确认时以断点说明，不将 `calls` 解释成执行或数据流。Coverage limitations 默认折叠。旧 TypeScript facts index 会说明可能缺少 HTTP request facts，显式刷新后才应用新 wrapper 识别规则。
+功能页按需读取当前固定 index 的轻量 journey catalog，分开列出 UI actions 与 Python API/CLI 原生入口；每类使用独立的 40 项上限。native 入口只包括直接 FastAPI route handler 和 `project.scripts`/Poetry scripts 指向的唯一顶层函数，GUI/plugin/dynamic/歧义/条件 re-export 保持未确认。选中一条后再请求最多 8 个步骤和最多 8 条语法观察；调用最多展示深度 3、7 条边，BFS 并列样本不是执行顺序。参数、return、raise、可能受名称遮蔽的输出调用候选及属性/下标赋值均可打开同快照源码，观察标出所属函数。每个处理 hop 来自同一固定 index 的真实 calls 边并显示调用点，用户可继续打开已有符号调用关系；嵌套函数与类/方法体不覆盖。静态调用和源码语法不表示运行、值传播、持久化或分支执行。UI action 的 method/path 仍表示唯一 shape association，不表示网络实际发送。覆盖限制按需展开；旧索引只基于已保存快照生成，没有 packaging metadata 的旧快照不能证明不存在 CLI 声明。
 
 ## 数据与生命周期
 
