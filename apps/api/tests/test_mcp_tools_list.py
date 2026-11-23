@@ -44,10 +44,70 @@ def _refs(schema: object) -> set[str]:
 
 
 def _validate_refs(schema: dict) -> None:
-    for ref in _refs(schema):
+    refs = _refs(schema)
+
+    def collect_discriminator_refs(value: object) -> None:
+        if isinstance(value, dict):
+            discriminator = value.get("discriminator")
+            mapping = discriminator.get("mapping") if isinstance(discriminator, dict) else None
+            if isinstance(mapping, dict):
+                refs.update(
+                    ref for ref in mapping.values()
+                    if isinstance(ref, str) and ref.startswith("#/$defs/")
+                )
+            for child in value.values():
+                collect_discriminator_refs(child)
+        elif isinstance(value, list):
+            for child in value:
+                collect_discriminator_refs(child)
+
+    collect_discriminator_refs(schema)
+    for ref in refs:
         assert ref.startswith("#/$defs/"), f"Unexpected output schema ref: {ref}"
         name = ref.removeprefix("#/$defs/")
         assert name in schema.get("$defs", {}), f"Unresolved output schema ref: {ref}"
+
+
+def test_slim_schema_rewrites_discriminator_mapping_after_definition_dedup() -> None:
+    choice = {
+        "type": "object",
+        "properties": {"kind": {"const": "choice"}, "value": {"type": "string"}},
+        "required": ["kind", "value"],
+        "additionalProperties": False,
+    }
+    original = {
+        "type": "object",
+        "properties": {
+            "value": {
+                "oneOf": [{"$ref": "#/$defs/Choice"}],
+                "discriminator": {
+                    "propertyName": "kind",
+                    "mapping": {"choice": "#/$defs/ChoiceAlias"},
+                },
+            },
+        },
+        "$defs": {"Choice": choice, "ChoiceAlias": choice},
+        "required": ["value"],
+        "additionalProperties": False,
+    }
+
+    compact = _slim_output_schema(original)
+    union = compact["properties"]["value"]
+    assert union["discriminator"]["propertyName"] == "kind"
+    assert union["discriminator"]["mapping"]["choice"] == union["oneOf"][0]["$ref"]
+    assert union["discriminator"]["mapping"]["choice"] in {
+        f"#/$defs/{name}" for name in compact["$defs"]
+    }
+    _validate_refs(compact)
+
+    original_validator = Draft202012Validator(original)
+    compact_validator = Draft202012Validator(compact)
+    for instance in (
+        {"value": {"kind": "choice", "value": "accepted"}},
+        {"value": {"kind": "other", "value": "rejected"}},
+        {"value": {"kind": "choice", "value": 17}},
+    ):
+        assert original_validator.is_valid(instance) == compact_validator.is_valid(instance)
 
 
 def _schema_metadata_keys(schema: object) -> set[str]:

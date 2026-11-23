@@ -147,6 +147,14 @@ def _slim_output_schema(schema: dict[str, Any]) -> dict[str, Any]:
     def has_schema_children(value: dict[str, Any]) -> bool:
         return any(schema_child(key, child) for key, child in value.items())
 
+    def rewrite_discriminator_refs(value: dict[str, Any], rename: Any) -> None:
+        discriminator = value.get("discriminator")
+        mapping = discriminator.get("mapping") if isinstance(discriminator, dict) else None
+        if isinstance(mapping, dict):
+            for key, ref in mapping.items():
+                if isinstance(ref, str) and ref.startswith("#/$defs/"):
+                    mapping[key] = rename(ref.removeprefix("#/$defs/"))
+
     def clean(value: Any, *, schema_node: bool = True) -> Any:
         if isinstance(value, list):
             return [clean(item, schema_node=schema_node) for item in value]
@@ -236,6 +244,10 @@ def _slim_output_schema(schema: dict[str, Any]) -> dict[str, Any]:
                 while name in replacements:
                     name = replacements[name]
                 rewritten["$ref"] = f"#/$defs/{name}"
+            rewrite_discriminator_refs(
+                rewritten,
+                lambda name: f"#/$defs/{replacements.get(name, name)}",
+            )
             return rewritten
         if isinstance(value, list):
             return [rewrite_refs(item) for item in value]
@@ -311,6 +323,15 @@ def _slim_output_schema(schema: dict[str, Any]) -> dict[str, Any]:
                 if name not in reachable and name in definitions:
                     reachable.add(name)
                     visit(definitions[name])
+            discriminator = value.get("discriminator")
+            mapping = discriminator.get("mapping") if isinstance(discriminator, dict) else None
+            if isinstance(mapping, dict):
+                for mapped_ref in mapping.values():
+                    if isinstance(mapped_ref, str) and mapped_ref.startswith("#/$defs/"):
+                        name = mapped_ref.removeprefix("#/$defs/")
+                        if name not in reachable and name in definitions:
+                            reachable.add(name)
+                            visit(definitions[name])
             map_schema_children(value, visit)
         elif isinstance(value, list):
             for item in value:
@@ -350,6 +371,10 @@ def _slim_output_schema(schema: dict[str, Any]) -> dict[str, Any]:
                 if isinstance(ref, str) and ref.startswith("#/$defs/"):
                     name = ref.removeprefix("#/$defs/")
                     renamed["$ref"] = f"#/$defs/{short_names.get(name, name)}"
+                rewrite_discriminator_refs(
+                    renamed,
+                    lambda name: f"#/$defs/{short_names.get(name, name)}",
+                )
                 return renamed
             if isinstance(value, list):
                 return [rename_definition_refs(item) for item in value]
