@@ -702,6 +702,25 @@ class RepositoryRegistry:
 
 T = TypeVar("T")
 
+
+def _same_external_tool_params(previous: ToolParams, current: ToolParams) -> bool:
+    """Treat legacy and Run full-neighbor params as the same saved request."""
+    if previous == current:
+        return True
+    if isinstance(previous, GetNeighborsParams) and isinstance(current, RunGetNeighborsParams):
+        legacy, run = previous, current
+    elif isinstance(previous, RunGetNeighborsParams) and isinstance(current, GetNeighborsParams):
+        legacy, run = current, previous
+    else:
+        return False
+    return (
+        run.detail == "full"
+        and legacy.symbol_id == run.symbol_id
+        and legacy.direction == run.direction
+        and legacy.depth == run.depth
+        and legacy.limit == run.limit
+    )
+
 logger = logging.getLogger(__name__)
 
 _FRESHNESS_MAX_FILES = 2_000
@@ -2476,7 +2495,11 @@ class WorkspaceService:
                 existing = store.load_run_tool_result(run_id, request_id)
                 if existing is not None:
                     previous_request = store.load_run_tool_request(run_id, request_id)
-                    if previous_request is None or previous_request.params != params or previous_request.index_id != index_id:
+                    if (
+                        previous_request is None
+                        or not _same_external_tool_params(previous_request.params, params)
+                        or previous_request.index_id != index_id
+                    ):
                         raise ServiceError(
                             "conflict",
                             409,
@@ -2486,7 +2509,8 @@ class WorkspaceService:
 
                 previous_request = store.load_run_tool_request(run_id, request_id)
                 if previous_request is not None and (
-                    previous_request.params != params or previous_request.index_id != index_id
+                    not _same_external_tool_params(previous_request.params, params)
+                    or previous_request.index_id != index_id
                 ):
                     raise ServiceError(
                         "conflict",

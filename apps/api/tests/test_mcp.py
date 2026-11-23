@@ -3175,6 +3175,101 @@ def test_external_run_neighbor_summary_and_metered_unresolved_page(tmp_path: Pat
     assert workspace.get_run(project_id, session_id, run.run_id).run.budget.model_dump() == before_replay
 
 
+def test_cold_mcp_replays_legacy_full_neighbor_request_idempotently(tmp_path: Path) -> None:
+    repository = copy_fixture(tmp_path)
+    data_root = tmp_path / "data"
+    application = create_app(
+        {"timeout-demo": repository}, data_root=data_root, mcp_external_run_enabled=True,
+    )
+    status, project = request(
+        application, "POST", "/api/projects",
+        {"name": "Legacy Run neighbor replay", "repository_id": "timeout-demo"},
+    )
+    assert status == 200
+    project_id = project["project_id"]
+    status, created_index = request(
+        application, "POST", f"/api/projects/{project_id}/indexes",
+        {"revision": "legacy-run-neighbor-replay", "dirty": False},
+    )
+    assert status == 200
+    index_id = created_index["index"]["index_id"]
+    status, session = request(
+        application, "POST", f"/api/projects/{project_id}/sessions",
+        {"topic": "Legacy neighbor replay", "index_id": index_id},
+    )
+    assert status == 200
+    session_id = session["session"]["session_id"]
+    status, _ = request(
+        application, "POST", f"/api/projects/{project_id}/sessions/{session_id}/messages",
+        {"source": "human", "content": "Check historical full neighbor replay."},
+    )
+    assert status == 200
+    search = application.state.index_service.search(index_id, "load_settings", 10)
+    symbol_id = next(
+        match.symbol.symbol_id for match in search.matches
+        if match.symbol.qualified_name == "timeout_demo.config.load_settings"
+    )
+    workspace = application.state.workspace_service
+    run = workspace.create_run(
+        project_id, session_id,
+        CreateRunRequest(
+            index_id=index_id,
+            issue=Issue(id="legacy-neighbor", title="Legacy neighbor", body="Inspect neighbors."),
+            mode="external", execution_source="codex", execution_version="run-external-codex-v1",
+        ),
+        via_mcp=True,
+    )
+    request_id = "historical-neighbor-request"
+    legacy_params = GetNeighborsParams(
+        symbol_id=symbol_id, direction="callers", depth=1, limit=40,
+    )
+    legacy_result = workspace.execute_external_tool(
+        project_id, session_id, run.run_id, request_id, index_id, legacy_params,
+    )
+    assert isinstance(legacy_result, GetNeighborsSuccess)
+    before_budget = workspace.get_run(project_id, session_id, run.run_id).run.budget.model_dump()
+    before_results = workspace.list_run_tool_results(project_id, session_id, run.run_id).results
+    assert before_results == [legacy_result]
+
+    parameters = StdioServerParameters(
+        command=sys.executable,
+        args=["-m", "app.mcp_server"],
+        cwd=API_ROOT,
+        env={
+            "CODETRAIL_REPOSITORIES": json.dumps({"timeout-demo": str(repository)}),
+            "CODETRAIL_DATA_DIR": str(data_root),
+            "CODETRAIL_MCP_EXTERNAL_RUN_ENABLED": "1",
+        },
+    )
+
+    async def replay_through_cold_mcp() -> None:
+        async with Client(parameters, read_timeout_seconds=10) as client:
+            common = {
+                "project_id": project_id,
+                "session_id": session_id,
+                "run_id": run.run_id,
+                "index_id": index_id,
+                "request_id": request_id,
+                "symbol_id": symbol_id,
+                "direction": "callers",
+                "depth": 1,
+                "limit": 40,
+            }
+            missing_detail = await client.call_tool("run_get_neighbors", common)
+            explicit_full = await client.call_tool(
+                "run_get_neighbors", {**common, "detail": "full"},
+            )
+            assert missing_detail.structured_content["ok"] is True
+            assert explicit_full.structured_content["ok"] is True
+            expected = legacy_result.model_dump(mode="json")
+            assert missing_detail.structured_content["result"] == expected
+            assert explicit_full.structured_content["result"] == expected
+
+    asyncio.run(replay_through_cold_mcp())
+    assert workspace.get_run(project_id, session_id, run.run_id).run.budget.model_dump() == before_budget
+    assert workspace.list_run_tool_results(project_id, session_id, run.run_id).results == before_results
+
+
 def test_external_run_pages_all_indexed_unresolved_beyond_legacy_limit_over_cold_stdio_mcp(tmp_path: Path) -> None:
     repository = tmp_path / "many-unresolved"
     source = repository / "src" / "neighbors.py"
@@ -3237,6 +3332,7 @@ def test_external_run_pages_all_indexed_unresolved_beyond_legacy_limit_over_cold
                 "project_id": project_id, "session_id": session_id, "index_id": index_id,
                 "issue_id": "unresolved-pagination", "title": "Unresolved pagination",
                 "body": "Inspect unresolved calls.", "idempotency_key": "unresolved-pagination-start",
+                "max_tool_calls": 12,
             })
             assert started.structured_content["ok"] is True
             run_id = started.structured_content["result"]["run_id"]
@@ -3370,6 +3466,36 @@ def test_external_run_pages_all_indexed_unresolved_beyond_legacy_limit_over_cold
             })
             assert cancelled_alternate.structured_content["ok"] is True
 
+            # Fill the shared Run call budget through the supported paging tool.
+            for call_number in range(7, 12):
+                extra_page = await client.call_tool("run_list_unresolved", {
+                    "project_id": project_id, "session_id": session_id, "run_id": run_id,
+                    "index_id": index_id, "request_id": f"unresolved-page-{call_number}",
+                    "neighbor_request_id": summary_result["request_id"], "limit": 1,
+                })
+                assert extra_page.structured_content["ok"] is True, extra_page.structured_content
+            at_limit = await client.call_tool("get_session_run", {
+                "project_id": project_id, "session_id": session_id, "run_id": run_id,
+            })
+            assert at_limit.structured_content["result"]["run"]["budget"]["tool_calls_used"] == 11
+            twelfth = await client.call_tool("run_list_unresolved", {
+                "project_id": project_id, "session_id": session_id, "run_id": run_id,
+                "index_id": index_id, "request_id": "unresolved-page-12",
+                "neighbor_request_id": summary_result["request_id"], "limit": 1,
+            })
+            assert twelfth.structured_content["ok"] is True
+            thirteenth = await client.call_tool("run_list_unresolved", {
+                "project_id": project_id, "session_id": session_id, "run_id": run_id,
+                "index_id": index_id, "request_id": "unresolved-page-13",
+                "neighbor_request_id": summary_result["request_id"], "limit": 1,
+            })
+            assert thirteenth.structured_content["ok"] is False
+            assert thirteenth.structured_content["error"]["code"] == "budget_exceeded"
+            after_limit = await client.call_tool("get_session_run", {
+                "project_id": project_id, "session_id": session_id, "run_id": run_id,
+            })
+            assert after_limit.structured_content["result"]["run"]["budget"]["tool_calls_used"] == 12
+
             budget_started = await client.call_tool("start_external_run", {
                 "project_id": project_id, "session_id": budget_session_id, "index_id": index_id,
                 "issue_id": "unresolved-page-budget", "title": "Unresolved page budget",
@@ -3391,6 +3517,9 @@ def test_external_run_pages_all_indexed_unresolved_beyond_legacy_limit_over_cold
             before_events = await client.call_tool("list_run_events", {
                 "project_id": project_id, "session_id": budget_session_id, "run_id": budget_run_id,
             })
+            before_budget_results = await client.call_tool("list_run_tool_results", {
+                "project_id": project_id, "session_id": budget_session_id, "run_id": budget_run_id,
+            })
             refused_page = await client.call_tool("run_list_unresolved", {
                 "project_id": project_id, "session_id": budget_session_id, "run_id": budget_run_id,
                 "index_id": index_id, "request_id": "budget-page-refused",
@@ -3404,8 +3533,12 @@ def test_external_run_pages_all_indexed_unresolved_beyond_legacy_limit_over_cold
             after_events = await client.call_tool("list_run_events", {
                 "project_id": project_id, "session_id": budget_session_id, "run_id": budget_run_id,
             })
+            after_budget_results = await client.call_tool("list_run_tool_results", {
+                "project_id": project_id, "session_id": budget_session_id, "run_id": budget_run_id,
+            })
             assert after_budget.structured_content["result"]["run"]["budget"] == before_budget.structured_content["result"]["run"]["budget"]
             assert after_events.structured_content["result"]["events"] == before_events.structured_content["result"]["events"]
+            assert after_budget_results.structured_content["result"]["results"] == before_budget_results.structured_content["result"]["results"]
             return run_id
 
     run_id = asyncio.run(exercise())
@@ -3417,7 +3550,7 @@ def test_external_run_pages_all_indexed_unresolved_beyond_legacy_limit_over_cold
     assert status == 200
     history_kinds = {result["kind"] for result in history["results"]}
     assert {"get_neighbors.succeeded", "get_neighbors.summary_succeeded", "run_list_unresolved.succeeded"} <= history_kinds
-    assert sum(result["kind"] == "run_list_unresolved.succeeded" for result in history["results"]) == 3
+    assert sum(result["kind"] == "run_list_unresolved.succeeded" for result in history["results"]) == 9
 
 
 def test_mcp_external_first_completion_with_multiple_evidence_is_idempotent(tmp_path: Path) -> None:
