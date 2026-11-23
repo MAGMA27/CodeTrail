@@ -23,7 +23,11 @@ from app.contracts import (
     FeatureGeneration,
     GetNeighborsParams,
     GetNeighborsSuccess,
+    GetNeighborsSummarySuccess,
     Issue,
+    RunListUnresolvedParams,
+    RunListUnresolvedSuccess,
+    RunGetNeighborsParams,
     RunBudget,
     SearchCodeParams,
     UnresolvedReference,
@@ -2523,6 +2527,7 @@ def test_mcp_external_run_persists_actual_tools_and_report(tmp_path: Path) -> No
                 "run_read_source",
                 "run_get_neighbors",
                 "submit_external_run",
+                "run_list_unresolved",
                 "cancel_external_run",
             } <= tools
             start_description = next(
@@ -2657,15 +2662,63 @@ def test_mcp_external_run_persists_actual_tools_and_report(tmp_path: Path) -> No
                     "session_id": session_id,
                     "run_id": run_id,
                     "index_id": index_id,
-                    "request_id": "external-neighbors-1",
+                    "request_id": "external-neighbors-summary",
+                    "symbol_id": symbol_id,
+                    "direction": "callers",
+                    "depth": 1,
+                    "limit": 40,
+                    "detail": "summary",
+                },
+            )
+            assert neighbors.structured_content["ok"] is True
+            summary_result = neighbors.structured_content["result"]
+            assert summary_result["run_id"] == run_id
+            assert summary_result["kind"] == "get_neighbors.summary_succeeded"
+            assert summary_result["unresolved"] is None
+            assert summary_result["unresolved_summary"]["detail_state"] in {"empty", "omitted"}
+            assert summary_result["unresolved_summary"]["node_ids"]
+
+            full_neighbors = await client.call_tool(
+                "run_get_neighbors",
+                {
+                    "project_id": project_id,
+                    "session_id": session_id,
+                    "run_id": run_id,
+                    "index_id": index_id,
+                    "request_id": "external-neighbors-default-full",
                     "symbol_id": symbol_id,
                     "direction": "callers",
                     "depth": 1,
                     "limit": 40,
                 },
             )
-            assert neighbors.structured_content["ok"] is True
-            assert neighbors.structured_content["result"]["run_id"] == run_id
+            assert full_neighbors.structured_content["ok"] is True
+            full_result = full_neighbors.structured_content["result"]
+            assert full_result["kind"] == "get_neighbors.succeeded"
+            for field in ("root", "nodes", "neighbors", "contextual_calls", "index_truncated", "index_unresolved_truncated"):
+                assert summary_result[field] == full_result[field]
+            full_chars = len(json.dumps(full_result, ensure_ascii=False, separators=(",", ":")))
+            summary_chars = len(json.dumps(summary_result, ensure_ascii=False, separators=(",", ":")))
+            print(f"actual MCP Run result JSON chars: full={full_chars}, summary={summary_chars}")
+
+            unresolved_page = await client.call_tool(
+                "run_list_unresolved",
+                {
+                    "project_id": project_id,
+                    "session_id": session_id,
+                    "run_id": run_id,
+                    "index_id": index_id,
+                    "request_id": "external-neighbors-page-1",
+                    "neighbor_request_id": summary_result["request_id"],
+                    "limit": 100,
+                },
+            )
+            assert unresolved_page.structured_content["ok"] is True
+            page_result = unresolved_page.structured_content["result"]
+            assert page_result["page"]["total"] == summary_result["unresolved_summary"]["total_indexed_in_scope"]
+            assert page_result["items"] == sorted(
+                page_result["items"], key=lambda item: (item["path"], item["start_line"], item["unresolved_id"])
+            )
 
             rejected = await client.call_tool(
                 "submit_external_run",
@@ -2716,7 +2769,8 @@ def test_mcp_external_run_persists_actual_tools_and_report(tmp_path: Path) -> No
             assert completed.structured_content["ok"] is True
             report = completed.structured_content["report"]
             assert report["fixture_mode"] is False
-            assert report["limitations"] == ["Static calls are not confirmed runtime impact."]
+            assert report["limitations"][0] == "Static calls are not confirmed runtime impact."
+            assert any("external-neighbors-summary" in item and "scope: 4" in item for item in report["limitations"])
             assert completed.structured_content["references"][0]["project_id"] == project_id
 
             repeated_completion = await client.call_tool(
@@ -2758,8 +2812,8 @@ def test_mcp_external_run_persists_actual_tools_and_report(tmp_path: Path) -> No
             )
             event_types = [event["type"] for event in events.structured_content["result"]["events"]]
             assert event_types[0] == "run.started"
-            assert event_types.count("tool.started") == 3
-            assert event_types.count("tool.completed") == 3
+            assert event_types.count("tool.started") == 5
+            assert event_types.count("tool.completed") == 5
             assert event_types.count("graph.updated") == 1
             assert event_types.count("run.completed") == 1
 
@@ -3035,6 +3089,335 @@ def test_external_neighbors_bounds_large_unresolved_result(tmp_path: Path, monke
         run_response.run_id,
     )
     assert persisted.results == [result]
+
+
+def test_external_run_neighbor_summary_and_metered_unresolved_page(tmp_path: Path) -> None:
+    repository = copy_fixture(tmp_path)
+    application = create_app(
+        {"timeout-demo": repository},
+        data_root=tmp_path / "data",
+        mcp_external_run_enabled=True,
+    )
+    status, project = request(
+        application, "POST", "/api/projects",
+        {"name": "Run neighbor summary", "repository_id": "timeout-demo"},
+    )
+    assert status == 200
+    project_id = project["project_id"]
+    status, created_index = request(
+        application, "POST", f"/api/projects/{project_id}/indexes",
+        {"revision": "run-neighbor-summary", "dirty": False},
+    )
+    assert status == 200
+    index_id = created_index["index"]["index_id"]
+    status, session = request(
+        application, "POST", f"/api/projects/{project_id}/sessions",
+        {"topic": "Neighbor summary", "index_id": index_id},
+    )
+    assert status == 200
+    session_id = session["session"]["session_id"]
+    status, _ = request(
+        application, "POST", f"/api/projects/{project_id}/sessions/{session_id}/messages",
+        {"source": "human", "content": "Inspect the timeout configuration call graph."},
+    )
+    assert status == 200
+    search = application.state.index_service.search(index_id, "load_settings", 10)
+    symbol_id = next(
+        match.symbol.symbol_id for match in search.matches
+        if match.symbol.qualified_name == "timeout_demo.config.load_settings"
+    )
+    run = application.state.workspace_service.create_run(
+        project_id, session_id,
+        CreateRunRequest(
+            index_id=index_id,
+            issue=Issue(id="neighbor-summary", title="Neighbor summary", body="Inspect neighbors."),
+            mode="external", execution_source="codex", execution_version="run-external-codex-v1",
+        ),
+        via_mcp=True,
+    )
+    workspace = application.state.workspace_service
+    common = dict(symbol_id=symbol_id, direction="callers", depth=1, limit=40)
+    full = workspace.execute_external_tool(
+        project_id, session_id, run.run_id, "neighbor-full", index_id, GetNeighborsParams(**common)
+    )
+    summary = workspace.execute_external_tool(
+        project_id, session_id, run.run_id, "neighbor-summary", index_id,
+        RunGetNeighborsParams(**common, detail="summary"),
+    )
+    assert isinstance(full, GetNeighborsSuccess)
+    assert isinstance(summary, GetNeighborsSummarySuccess)
+    assert summary.root == full.root
+    assert summary.nodes == full.nodes
+    assert summary.neighbors == full.neighbors
+    assert summary.contextual_calls == full.contextual_calls
+    assert summary.unresolved is None
+    assert summary.unresolved_summary.node_ids == [full.root.symbol_id, *[
+        node.symbol_id for node in full.nodes if node.symbol_id != full.root.symbol_id
+    ]]
+    assert summary.index_truncated == full.index_truncated
+    assert summary.index_unresolved_truncated == full.index_unresolved_truncated
+
+    page = workspace.execute_external_tool(
+        project_id, session_id, run.run_id, "neighbor-unresolved-1", index_id,
+        RunListUnresolvedParams(
+            neighbor_request_id=summary.request_id, limit=100,
+        ),
+    )
+    assert isinstance(page, RunListUnresolvedSuccess)
+    assert page.page.total == summary.unresolved_summary.total_indexed_in_scope
+    assert page.items == sorted(page.items, key=lambda item: (item.path, item.start_line, item.unresolved_id))
+    before_replay = workspace.get_run(project_id, session_id, run.run_id).run.budget.model_dump()
+    replay = workspace.execute_external_tool(
+        project_id, session_id, run.run_id, "neighbor-unresolved-1", index_id,
+        RunListUnresolvedParams(neighbor_request_id=summary.request_id, limit=100),
+    )
+    assert replay == page
+    assert workspace.get_run(project_id, session_id, run.run_id).run.budget.model_dump() == before_replay
+
+
+def test_external_run_pages_all_indexed_unresolved_beyond_legacy_limit_over_cold_stdio_mcp(tmp_path: Path) -> None:
+    repository = tmp_path / "many-unresolved"
+    source = repository / "src" / "neighbors.py"
+    source.parent.mkdir(parents=True)
+    calls = "\n".join(f"    unknown_target_{number:02d}()" for number in range(54))
+    source.write_text(f"def entry():\n{calls}\n", encoding="utf-8")
+    data_root = tmp_path / "data"
+    application = create_app(
+        {"many-unresolved": repository}, data_root=data_root, mcp_external_run_enabled=True,
+    )
+    status, project = request(
+        application, "POST", "/api/projects",
+        {"name": "Many unresolved", "repository_id": "many-unresolved"},
+    )
+    assert status == 200
+    project_id = project["project_id"]
+    status, created_index = request(
+        application, "POST", f"/api/projects/{project_id}/indexes",
+        {"revision": "run-neighbor-summary-54", "dirty": False},
+    )
+    assert status == 200
+    index_id = created_index["index"]["index_id"]
+    status, session = request(
+        application, "POST", f"/api/projects/{project_id}/sessions",
+        {"topic": "Unresolved pagination", "index_id": index_id},
+    )
+    assert status == 200
+    session_id = session["session"]["session_id"]
+    status, _ = request(
+        application, "POST", f"/api/projects/{project_id}/sessions/{session_id}/messages",
+        {"source": "human", "content": "Inspect unresolved calls."},
+    )
+    assert status == 200
+    status, budget_session = request(
+        application, "POST", f"/api/projects/{project_id}/sessions",
+        {"topic": "Unresolved output budget", "index_id": index_id},
+    )
+    assert status == 200
+    budget_session_id = budget_session["session"]["session_id"]
+    status, _ = request(
+        application, "POST", f"/api/projects/{project_id}/sessions/{budget_session_id}/messages",
+        {"source": "human", "content": "Check the bounded unresolved page."},
+    )
+    assert status == 200
+
+    environment = {
+        "CODETRAIL_REPOSITORIES": json.dumps({"many-unresolved": str(repository)}),
+        "CODETRAIL_DATA_DIR": str(data_root),
+        "CODETRAIL_MCP_EXTERNAL_RUN_ENABLED": "1",
+    }
+    parameters = StdioServerParameters(
+        command=sys.executable, args=["-m", "app.mcp_server"], env=environment, cwd=API_ROOT,
+    )
+
+    async def exercise() -> str:
+        async with Client(parameters, read_timeout_seconds=10) as client:
+            names = {tool.name for tool in (await client.list_tools()).tools}
+            assert {"run_get_neighbors", "run_list_unresolved"} <= names
+            started = await client.call_tool("start_external_run", {
+                "project_id": project_id, "session_id": session_id, "index_id": index_id,
+                "issue_id": "unresolved-pagination", "title": "Unresolved pagination",
+                "body": "Inspect unresolved calls.", "idempotency_key": "unresolved-pagination-start",
+            })
+            assert started.structured_content["ok"] is True
+            run_id = started.structured_content["result"]["run_id"]
+            searched = await client.call_tool("run_search_code", {
+                "project_id": project_id, "session_id": session_id, "run_id": run_id,
+                "index_id": index_id, "request_id": "unresolved-search", "query": "entry", "limit": 10,
+            })
+            assert searched.structured_content["ok"] is True
+            root_id = next(
+                match["symbol"]["symbol_id"] for match in searched.structured_content["result"]["matches"]
+                if match["symbol"]["qualified_name"].endswith(".entry")
+            )
+            common = {
+                "project_id": project_id, "session_id": session_id, "run_id": run_id,
+                "index_id": index_id, "symbol_id": root_id, "direction": "callees", "depth": 1, "limit": 40,
+            }
+            full_response = await client.call_tool("run_get_neighbors", {
+                **common, "request_id": "unresolved-full-default",
+            })
+            summary_response = await client.call_tool("run_get_neighbors", {
+                **common, "request_id": "unresolved-summary", "detail": "summary",
+            })
+            assert full_response.structured_content["ok"] is True
+            assert summary_response.structured_content["ok"] is True
+            full_result = full_response.structured_content["result"]
+            summary_result = summary_response.structured_content["result"]
+            assert full_result["kind"] == "get_neighbors.succeeded"
+            assert len(full_result["unresolved"]) == 40
+            assert full_result["truncated"] is True
+            assert summary_result["kind"] == "get_neighbors.summary_succeeded"
+            assert summary_result["unresolved"] is None
+            assert summary_result["unresolved_summary"]["total_indexed_in_scope"] == 54
+            assert summary_result["unresolved_summary"]["items_in_legacy_full_result"] == 40
+            for field in ("root", "nodes", "neighbors", "contextual_calls", "index_truncated", "index_unresolved_truncated"):
+                assert summary_result[field] == full_result[field]
+            full_chars = len(json.dumps(full_result, ensure_ascii=False, separators=(",", ":")))
+            summary_chars = len(json.dumps(summary_result, ensure_ascii=False, separators=(",", ":")))
+            assert summary_chars < full_chars
+            print(f"actual MCP Run result JSON chars: full={full_chars}, summary={summary_chars}")
+
+            ids: list[str] = []
+            items = []
+            cursors: list[str | None] = []
+            cursor: str | None = None
+            for page_number in range(3):
+                args = {
+                    "project_id": project_id, "session_id": session_id, "run_id": run_id,
+                    "index_id": index_id, "request_id": f"unresolved-page-{page_number + 1}",
+                    "neighbor_request_id": summary_result["request_id"], "limit": 20,
+                }
+                if cursor is not None:
+                    args["cursor"] = cursor
+                page = await client.call_tool("run_list_unresolved", args)
+                assert page.structured_content["ok"] is True
+                result = page.structured_content["result"]
+                assert result["page"]["total"] == 54
+                ids.extend(item["unresolved_id"] for item in result["items"])
+                items.extend(result["items"])
+                cursors.append(result["page"]["next_cursor"])
+                cursor = result["page"]["next_cursor"]
+            assert [len(ids[:20]), len(ids[20:40]), len(ids[40:])] == [20, 20, 14]
+            assert len(set(ids)) == 54
+            assert cursors[0] is not None and cursors[1] is not None and cursors[2] is None
+            assert items == sorted(items, key=lambda item: (item["path"], item["start_line"], item["unresolved_id"]))
+
+            before = await client.call_tool("list_run_tool_results", {
+                "project_id": project_id, "session_id": session_id, "run_id": run_id,
+            })
+            persisted_before = len(before.structured_content["result"]["results"])
+            replay = await client.call_tool("run_list_unresolved", {
+                "project_id": project_id, "session_id": session_id, "run_id": run_id,
+                "index_id": index_id, "request_id": "unresolved-page-1",
+                "neighbor_request_id": summary_result["request_id"], "limit": 20,
+            })
+            assert replay.structured_content["result"] == (
+                await client.call_tool("list_run_tool_results", {
+                    "project_id": project_id, "session_id": session_id, "run_id": run_id,
+                })
+            ).structured_content["result"]["results"][3]
+            after = await client.call_tool("list_run_tool_results", {
+                "project_id": project_id, "session_id": session_id, "run_id": run_id,
+            })
+            assert len(after.structured_content["result"]["results"]) == persisted_before
+
+            invalid = await client.call_tool("run_list_unresolved", {
+                "project_id": project_id, "session_id": session_id, "run_id": run_id,
+                "index_id": index_id, "request_id": "unresolved-page-bad-cursor",
+                "neighbor_request_id": summary_result["request_id"], "cursor": "c1.rnu.20.12345678",
+                "limit": 20,
+            })
+            assert invalid.structured_content["ok"] is False
+            assert invalid.structured_content["error"]["code"] == "invalid_input"
+            after_invalid = await client.call_tool("list_run_tool_results", {
+                "project_id": project_id, "session_id": session_id, "run_id": run_id,
+            })
+            assert len(after_invalid.structured_content["result"]["results"]) == persisted_before
+
+            alternate_started = await client.call_tool("start_external_run", {
+                "project_id": project_id, "session_id": budget_session_id, "index_id": index_id,
+                "issue_id": "unresolved-pagination-other-run", "title": "Other Run",
+                "body": "Check Run scope binding.", "idempotency_key": "unresolved-pagination-other-run-start",
+            })
+            assert alternate_started.structured_content["ok"] is True
+            alternate_run_id = alternate_started.structured_content["result"]["run_id"]
+            invalid_scopes = [
+                {"project_id": "missing-project"},
+                {"session_id": "missing-session"},
+                {"index_id": "wrong-index"},
+                {"run_id": alternate_run_id},
+                {"neighbor_request_id": "missing-neighbor-request"},
+                {"neighbor_request_id": full_result["request_id"], "cursor": cursors[0]},
+                {"limit": 101},
+            ]
+            for number, overrides in enumerate(invalid_scopes):
+                args = {
+                    "project_id": project_id, "session_id": session_id, "run_id": run_id,
+                    "index_id": index_id, "request_id": f"unresolved-page-invalid-scope-{number}",
+                    "neighbor_request_id": summary_result["request_id"], "limit": 20,
+                }
+                args.update(overrides)
+                rejected = await client.call_tool("run_list_unresolved", args)
+                assert rejected.structured_content["ok"] is False
+                assert rejected.structured_content["error"]["message"]
+            after_invalid_scopes = await client.call_tool("list_run_tool_results", {
+                "project_id": project_id, "session_id": session_id, "run_id": run_id,
+            })
+            assert len(after_invalid_scopes.structured_content["result"]["results"]) == persisted_before
+            cancelled_alternate = await client.call_tool("cancel_external_run", {
+                "project_id": project_id, "session_id": budget_session_id,
+                "run_id": alternate_run_id, "reason": "scope regression complete",
+            })
+            assert cancelled_alternate.structured_content["ok"] is True
+
+            budget_started = await client.call_tool("start_external_run", {
+                "project_id": project_id, "session_id": budget_session_id, "index_id": index_id,
+                "issue_id": "unresolved-page-budget", "title": "Unresolved page budget",
+                "body": "Check the bounded unresolved page.", "idempotency_key": "unresolved-page-budget-start",
+                "max_output_chars": 5000, "max_model_output_chars": 5000,
+            })
+            assert budget_started.structured_content["ok"] is True
+            budget_run_id = budget_started.structured_content["result"]["run_id"]
+            budget_summary = await client.call_tool("run_get_neighbors", {
+                "project_id": project_id, "session_id": budget_session_id, "run_id": budget_run_id,
+                "index_id": index_id, "request_id": "budget-neighbor-summary", "symbol_id": root_id,
+                "direction": "callees", "depth": 1, "limit": 40, "detail": "summary",
+            })
+            assert budget_summary.structured_content["ok"] is True
+            summary_receipt = budget_summary.structured_content["result"]
+            before_budget = await client.call_tool("get_session_run", {
+                "project_id": project_id, "session_id": budget_session_id, "run_id": budget_run_id,
+            })
+            before_events = await client.call_tool("list_run_events", {
+                "project_id": project_id, "session_id": budget_session_id, "run_id": budget_run_id,
+            })
+            refused_page = await client.call_tool("run_list_unresolved", {
+                "project_id": project_id, "session_id": budget_session_id, "run_id": budget_run_id,
+                "index_id": index_id, "request_id": "budget-page-refused",
+                "neighbor_request_id": summary_receipt["request_id"], "limit": 100,
+            })
+            assert refused_page.structured_content["ok"] is False
+            assert refused_page.structured_content["error"]["code"] == "budget_exceeded"
+            after_budget = await client.call_tool("get_session_run", {
+                "project_id": project_id, "session_id": budget_session_id, "run_id": budget_run_id,
+            })
+            after_events = await client.call_tool("list_run_events", {
+                "project_id": project_id, "session_id": budget_session_id, "run_id": budget_run_id,
+            })
+            assert after_budget.structured_content["result"]["run"]["budget"] == before_budget.structured_content["result"]["run"]["budget"]
+            assert after_events.structured_content["result"]["events"] == before_events.structured_content["result"]["events"]
+            return run_id
+
+    run_id = asyncio.run(exercise())
+    status, history = request(
+        application,
+        "GET",
+        f"/api/projects/{project_id}/sessions/{session_id}/runs/{run_id}/tool-results",
+    )
+    assert status == 200
+    history_kinds = {result["kind"] for result in history["results"]}
+    assert {"get_neighbors.succeeded", "get_neighbors.summary_succeeded", "run_list_unresolved.succeeded"} <= history_kinds
+    assert sum(result["kind"] == "run_list_unresolved.succeeded" for result in history["results"]) == 3
 
 
 def test_mcp_external_first_completion_with_multiple_evidence_is_idempotent(tmp_path: Path) -> None:

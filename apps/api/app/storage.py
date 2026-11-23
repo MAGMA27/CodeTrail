@@ -3808,13 +3808,24 @@ class IndexStore:
                 pass
             raise StorageError(f"could not append Run event: {exc}") from exc
 
-    def append_run_tool_result(self, event: Event, result: ToolResult) -> int:
+    def append_run_tool_result(
+        self, event: Event, result: ToolResult, *, started_event: Event | None = None
+    ) -> int:
         """Append a tool completion event and result atomically."""
 
         if event.type not in {"tool.completed", "tool.failed"}:
             raise StorageInputError("tool result requires a tool completion event")
         if event.run_id != result.run_id or event.sequence != result.completed_sequence:
             raise StorageInputError("tool result does not match its completion event")
+        event_count = 1
+        if started_event is not None:
+            if (
+                started_event.type != "tool.started" or started_event.run_id != event.run_id
+                or started_event.sequence + 1 != event.sequence
+                or started_event.payload.request.request_id != result.request_id
+            ):
+                raise StorageInputError("tool start event does not match its completion event")
+            event_count = 2
         payload_result = getattr(event.payload, "result", None)
         if payload_result is None or payload_result.request_id != result.request_id:
             raise StorageInputError("tool completion event does not match its result")
@@ -3824,9 +3835,12 @@ class IndexStore:
             if record.run.status not in {"queued", "running"}:
                 raise StorageConflictError("Run is already terminal")
             next_sequence = self._next_run_sequence(event.run_id)
-            if event.sequence != next_sequence:
+            expected_sequence = next_sequence + (1 if started_event is not None else 0)
+            if event.sequence != expected_sequence:
                 raise StorageInputError("Run tool event sequence is invalid")
             budget = record.run.budget
+            if started_event is not None and started_event.sequence != next_sequence:
+                raise StorageInputError("Run tool start sequence is invalid")
             source_lines = 0
             if hasattr(result, "evidence"):
                 evidence = getattr(result, "evidence")
@@ -3837,7 +3851,7 @@ class IndexStore:
                     "tool_calls_used": budget.tool_calls_used + 1,
                     "source_lines_used": budget.source_lines_used + source_lines,
                     "output_chars_used": budget.output_chars_used + output_chars,
-                    "events_used": budget.events_used + 1,
+                    "events_used": budget.events_used + event_count,
                 }
             )
             if updated_budget.events_used >= budget.max_events:
@@ -3861,6 +3875,8 @@ class IndexStore:
                     _json_text(result),
                 ),
             )
+            if started_event is not None:
+                self._insert_run_event(started_event)
             self._insert_run_event(event)
             updated_run = _validated_run(record.run, budget=updated_budget)
             self._update_run_row(updated_run)
@@ -5551,6 +5567,34 @@ class IndexStore:
             f"SELECT r.unresolved_id, r.source_symbol_id, r.path, r.expression, r.reason, "
             f"r.start_line, r.end_line {from_clause} WHERE {where} "
             "ORDER BY r.path COLLATE BINARY, r.start_line, r.unresolved_id LIMIT ? OFFSET ?",
+            (*parameters, limit, offset),
+        ).fetchall()
+        return count, self._unresolved_from_rows(index_id, rows)
+
+    def list_unresolved_for_sources(
+        self,
+        index_id: str,
+        source_symbol_ids: tuple[str, ...],
+        *,
+        offset: int = 0,
+        limit: int = 20,
+    ) -> tuple[int, tuple[UnresolvedReference, ...]]:
+        """Read unresolved rows for a fixed set of returned Run graph nodes."""
+
+        if not source_symbol_ids or len(set(source_symbol_ids)) != len(source_symbol_ids):
+            raise StorageInputError("Run unresolved source scope is invalid")
+        if offset < 0 or limit < 1 or limit > 100:
+            raise StorageInputError("Run unresolved page bounds are invalid")
+        placeholders = ",".join("?" for _ in source_symbol_ids)
+        where = f"index_id = ? AND source_symbol_id IN ({placeholders})"
+        parameters = (index_id, *source_symbol_ids)
+        count = int(self._connection.execute(
+            f"SELECT COUNT(*) FROM unresolved_references WHERE {where}", parameters
+        ).fetchone()[0])
+        rows = self._connection.execute(
+            "SELECT unresolved_id, source_symbol_id, path, expression, reason, start_line, end_line "
+            f"FROM unresolved_references WHERE {where} "
+            "ORDER BY path COLLATE BINARY, start_line, unresolved_id LIMIT ? OFFSET ?",
             (*parameters, limit, offset),
         ).fetchall()
         return count, self._unresolved_from_rows(index_id, rows)

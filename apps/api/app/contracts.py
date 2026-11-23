@@ -1200,8 +1200,28 @@ class GetNeighborsParams(ContractModel):
     limit: PositiveInt = Field(le=MAX_PAGE_SIZE)
 
 
-ToolParams: TypeAlias = Annotated[
+class RunGetNeighborsParams(ContractModel):
+    tool: Literal["run_get_neighbors"] = "run_get_neighbors"
+    symbol_id: Identifier
+    direction: Literal["callers", "callees", "both"]
+    depth: PositiveInt = Field(le=MAX_GRAPH_DEPTH)
+    limit: PositiveInt = Field(le=MAX_PAGE_SIZE)
+    detail: Literal["summary", "full"] = "full"
+
+
+class RunListUnresolvedParams(ContractModel):
+    tool: Literal["run_list_unresolved"] = "run_list_unresolved"
+    neighbor_request_id: Identifier
+    cursor: str | None = Field(default=None, max_length=500)
+    limit: PositiveInt = Field(default=20, le=100)
+
+
+IndexToolParams: TypeAlias = Annotated[
     SearchCodeParams | ReadSourceParams | GetNeighborsParams,
+    Field(discriminator="tool"),
+]
+ToolParams: TypeAlias = Annotated[
+    SearchCodeParams | ReadSourceParams | GetNeighborsParams | RunGetNeighborsParams | RunListUnresolvedParams,
     Field(discriminator="tool"),
 ]
 
@@ -1210,7 +1230,7 @@ class IssueModelToolCall(VersionedModel):
     """One allow-listed tool decision returned by the Issue analysis model."""
 
     kind: Literal["tool_call"] = "tool_call"
-    params: ToolParams
+    params: IndexToolParams
 
 
 class IssueModelFinal(VersionedModel):
@@ -1597,6 +1617,69 @@ class GetNeighborsSuccess(ToolResultBase):
 class GetNeighborsFailure(ToolResultBase):
     kind: Literal["get_neighbors.failed"] = "get_neighbors.failed"
     tool: Literal["get_neighbors"] = "get_neighbors"
+    error: ToolError
+
+
+class GetNeighborsSummarySuccess(GetNeighborsSuccess):
+    """Run neighbor graph with unresolved rows explicitly omitted."""
+
+    kind: Literal["get_neighbors.summary_succeeded"] = "get_neighbors.summary_succeeded"
+    unresolved: None = None
+    unresolved_summary: "RunUnresolvedSummary"
+
+    @model_validator(mode="after")
+    def validate_summary_scope(self) -> GetNeighborsSummarySuccess:
+        if self.root is None:
+            raise ValueError("Run neighbor summaries must preserve their root symbol")
+        expected_ids = list(dict.fromkeys([self.root.symbol_id, *(node.symbol_id for node in self.nodes)]))
+        if self.unresolved_summary.node_ids != expected_ids:
+            raise ValueError("Run unresolved summary must bind every returned node including the root")
+        return self
+
+
+class RunUnresolvedSummary(ContractModel):
+    detail_state: Literal["empty", "omitted", "unknown"]
+    total_indexed_in_scope: NonNegativeInt | None
+    items_in_legacy_full_result: NonNegativeInt | None
+    neighbor_request_id: Identifier
+    node_ids: list[Identifier] = Field(min_length=1, max_length=40)
+    detail_hint: str
+
+    @model_validator(mode="after")
+    def validate_detail_state(self) -> RunUnresolvedSummary:
+        if self.detail_state == "unknown" and self.total_indexed_in_scope is not None:
+            raise ValueError("unknown unresolved counts must be null")
+        if self.detail_state == "empty" and self.total_indexed_in_scope != 0:
+            raise ValueError("empty unresolved summaries must have a zero count")
+        if self.detail_state == "omitted" and (self.total_indexed_in_scope is None or self.total_indexed_in_scope < 1):
+            raise ValueError("omitted unresolved summaries must have a known positive count")
+        if len(set(self.node_ids)) != len(self.node_ids):
+            raise ValueError("unresolved summary node IDs must be unique")
+        return self
+
+
+class RunListUnresolvedSuccess(ToolResultBase):
+    kind: Literal["run_list_unresolved.succeeded"] = "run_list_unresolved.succeeded"
+    tool: Literal["run_list_unresolved"] = "run_list_unresolved"
+    neighbor_request_id: Identifier
+    items: list[UnresolvedReference] = Field(max_length=100)
+    page: OverviewPage
+    completeness: UnresolvedCompleteness
+
+    @model_validator(mode="after")
+    def validate_run_unresolved_page(self) -> RunListUnresolvedSuccess:
+        if self.page.returned != len(self.items):
+            raise ValueError("Run unresolved page returned count must match its items")
+        if any(item.index_id != self.index_id for item in self.items):
+            raise ValueError("Run unresolved page items must use the result index")
+        if self.items != sorted(self.items, key=lambda item: (item.path, item.start_line, item.unresolved_id)):
+            raise ValueError("Run unresolved page items must use path,line,id order")
+        return self
+
+
+class RunListUnresolvedFailure(ToolResultBase):
+    kind: Literal["run_list_unresolved.failed"] = "run_list_unresolved.failed"
+    tool: Literal["run_list_unresolved"] = "run_list_unresolved"
     error: ToolError
 
 
@@ -4334,11 +4417,11 @@ class McpJobResponse(McpResultBase):
 
 
 ToolSuccessResult: TypeAlias = Annotated[
-    SearchCodeSuccess | ReadSourceSuccess | GetNeighborsSuccess,
+    SearchCodeSuccess | ReadSourceSuccess | GetNeighborsSuccess | GetNeighborsSummarySuccess | RunListUnresolvedSuccess,
     Field(discriminator="kind"),
 ]
 ToolFailureResult: TypeAlias = Annotated[
-    SearchCodeFailure | ReadSourceFailure | GetNeighborsFailure,
+    SearchCodeFailure | ReadSourceFailure | GetNeighborsFailure | RunListUnresolvedFailure,
     Field(discriminator="kind"),
 ]
 ToolResult: TypeAlias = Annotated[
@@ -4347,7 +4430,10 @@ ToolResult: TypeAlias = Annotated[
     | ReadSourceSuccess
     | ReadSourceFailure
     | GetNeighborsSuccess
-    | GetNeighborsFailure,
+    | GetNeighborsFailure
+    | GetNeighborsSummarySuccess
+    | RunListUnresolvedSuccess
+    | RunListUnresolvedFailure,
     Field(discriminator="kind"),
 ]
 
