@@ -321,6 +321,45 @@ def _slim_output_schema(schema: dict[str, Any]) -> dict[str, Any]:
     compact["$defs"] = {name: value for name, value in definitions.items() if name in reachable}
     if not compact["$defs"]:
         compact.pop("$defs")
+    else:
+        # Local definition names are not part of the result contract. Keep
+        # leaf aliases such as S1, but use compact deterministic names for
+        # model definitions because each referenced name is repeated in the
+        # standalone schema advertised for every MCP tool.
+        definitions = compact["$defs"]
+        short_names = {
+            name: name
+            for name in definitions
+            if name.startswith("S") and name[1:].isdigit()
+        }
+        occupied = set(definitions)
+        suffix = 1
+        for name in sorted(set(definitions) - set(short_names)):
+            candidate = f"D{suffix}"
+            while candidate in occupied:
+                suffix += 1
+                candidate = f"D{suffix}"
+            short_names[name] = candidate
+            occupied.add(candidate)
+            suffix += 1
+
+        def rename_definition_refs(value: Any) -> Any:
+            if isinstance(value, dict):
+                renamed = map_schema_children(value, rename_definition_refs)
+                ref = renamed.get("$ref")
+                if isinstance(ref, str) and ref.startswith("#/$defs/"):
+                    name = ref.removeprefix("#/$defs/")
+                    renamed["$ref"] = f"#/$defs/{short_names.get(name, name)}"
+                return renamed
+            if isinstance(value, list):
+                return [rename_definition_refs(item) for item in value]
+            return value
+
+        compact["$defs"] = {
+            short_names[name]: rename_definition_refs(definition)
+            for name, definition in definitions.items()
+        }
+        compact = rename_definition_refs(compact)
     return compact
 
 
@@ -488,8 +527,8 @@ _RunCursor = Annotated[str | None, Field(max_length=shared.MAX_CURSOR_LENGTH, de
 _RunSequence = Annotated[int, Field(ge=shared.MIN_RUN_SEQUENCE, description="Return events or results after this sequence.")]
 _RunEventLimit = Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_RUN_EVENTS, description="Maximum Run events.")]
 _RunToolLimit = Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_RUN_TOOL_RESULTS, description="Maximum persisted tool results.")]
-_RunUnresolvedLimit = Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=100, description="Maximum unresolved items in this Run page.")]
-_RunUnresolvedCursor = Annotated[str | None, Field(max_length=500, description="Opaque cursor returned by a prior run_list_unresolved page.")]
+_RunUnresolvedLimit = Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_RUN_UNRESOLVED_PAGE_SIZE, description="Maximum unresolved items in this Run page.")]
+_RunUnresolvedCursor = Annotated[str | None, Field(max_length=shared.MAX_CURSOR_LENGTH, description="Opaque cursor returned by a prior run_list_unresolved page.")]
 _RunScenario = Literal[
     "success-timeout-missing",
     "insufficient-external-service",

@@ -111,6 +111,8 @@ MAX_FEATURE_GRAPH_EDGES = 120
 MAX_SESSION_MESSAGES = 100
 MAX_RUN_EVENTS = 100
 MAX_RUN_TOOL_RESULTS = 40
+DEFAULT_RUN_UNRESOLVED_PAGE_SIZE = DEFAULT_UNRESOLVED_PAGE_LIMIT
+MAX_RUN_UNRESOLVED_PAGE_SIZE = 100
 MAX_RUN_TOOL_CALLS = 12
 MAX_RUN_MODEL_CALLS = 6
 MAX_RUN_REPAIR_CALLS = 2
@@ -1212,8 +1214,11 @@ class RunGetNeighborsParams(ContractModel):
 class RunListUnresolvedParams(ContractModel):
     tool: Literal["run_list_unresolved"] = "run_list_unresolved"
     neighbor_request_id: Identifier
-    cursor: str | None = Field(default=None, max_length=500)
-    limit: PositiveInt = Field(default=20, le=100)
+    cursor: str | None = Field(default=None, max_length=MAX_CURSOR_LENGTH)
+    limit: PositiveInt = Field(
+        default=DEFAULT_RUN_UNRESOLVED_PAGE_SIZE,
+        le=MAX_RUN_UNRESOLVED_PAGE_SIZE,
+    )
 
 
 IndexToolParams: TypeAlias = Annotated[
@@ -1662,7 +1667,7 @@ class RunListUnresolvedSuccess(ToolResultBase):
     kind: Literal["run_list_unresolved.succeeded"] = "run_list_unresolved.succeeded"
     tool: Literal["run_list_unresolved"] = "run_list_unresolved"
     neighbor_request_id: Identifier
-    items: list[UnresolvedReference] = Field(max_length=100)
+    items: list[UnresolvedReference] = Field(max_length=MAX_RUN_UNRESOLVED_PAGE_SIZE)
     page: OverviewPage
     completeness: UnresolvedCompleteness
 

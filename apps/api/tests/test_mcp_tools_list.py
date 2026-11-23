@@ -283,8 +283,10 @@ def test_slim_output_schema_deduplicates_equivalent_definitions_and_rewrites_ref
         "additionalProperties": False,
     }
     compact = _slim_output_schema(schema)
-    assert set(compact["$defs"]) == {"First"}
-    assert compact["properties"]["second"]["$ref"] == "#/$defs/First"
+    first_ref = compact["properties"]["first"]["$ref"]
+    assert compact["properties"]["second"]["$ref"] == first_ref
+    assert set(compact["$defs"]) == {first_ref.removeprefix("#/$defs/")}
+    assert first_ref.removeprefix("#/$defs/").startswith("D")
     _validate_refs(compact)
 
     original_validator = Draft202012Validator(schema)
