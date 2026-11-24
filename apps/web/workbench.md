@@ -6,6 +6,8 @@
 
 左侧固定底部“设置”入口打开全局设置，当前只有“模型服务”一节。配置属于当前连接的 CodeTrail 服务，适用于所有项目和会话中的内置 AI 分析；Codex 外部 Agent 使用宿主模型，无需在这里配置。入口不依赖当前项目，项目功能识别和 Session real Run 缺少密钥时的“打开设置”按钮也会打开同一面板。读取接口只返回供应商、服务地址、模型和密钥是否已配置；留空保留已保存密钥，只有明确移除操作才会清除。密钥只保留在当前表单内存，保存成功后清空。保存不试连供应商、不发送源码，后续任务读取更新，活动 Run 保留启动时配置。顶栏保留 API 连接状态和重试。
 
+Run 工具历史会分别显示邻接摘要的 unresolved `detail_state`、固定返回节点范围计数和索引 coverage 状态。`omitted` 显示按页取回详情的提示；`unknown` 保持未知，`empty` 只描述该返回节点范围。历史不会为未加载项创建 unresolved 行或 evidence，也不会单凭详情省略把解释 coverage 改成 partial。
+
 ## 职责与范围
 
 同一固定概览中的入口点按实际返回的 `fastapi_route`、`python_main_module`、`python_main_guard`、`pluggy_hookimpl` 与 `python_packaging_entry` 分类：架构容器汇总实际入口所在模块，展开后只有能按同快照 handler/path 或 module path/symbol 映射到入口的模块才显示入口类型；其他可达模块单独显示“入口可达”，不会被计作入口所在模块。组直接引用了入口但无法映射所属模块的条目单独显示“入口模块未映射”；明细未返回的引用另行计数。只对有入口引用的容器显示可点击 badge。入口清单首屏显示最多 8 条，其余可展开查看。入口主行直接打开既有 calls-only neighbors 图，以同 index 的路由 handler、packaging `target_symbol` 或 Python module symbol 为起点，初始只请求向下 `calls`、深度最多 2、最多 40 个符号；之后可按选中节点做一跳 callers/callees 追踪，默认 calls 并可筛选 imports。Python main guard 不是独立 handler。独立“架构定位”操作展开并聚焦所属职责/目录、强调映射到的模块；源码操作读取当前快照 evidence。静态可达只表示快照中返回的关系，不表示运行时必然执行或数据流。HTTP 客户端到服务路由的 method/path shape 关联仍由既有独立链路展示；从入口源码返回或退出 calls 链路后保留架构聚焦，切换项目或 index 时清除入口选择和展开焦点。

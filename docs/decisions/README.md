@@ -1,5 +1,7 @@
 # 决策记录
 
+- [外部 Run 邻居摘要与 unresolved 按需分页（implemented）](2026-11-23-run-neighbor-summary.md)
+
 - [Python API 与 CLI 原生入口旅程（proposed）](2026-11-17-native-entry-journeys.md)
 
 - [固定快照内的 TypeScript path alias 解析（implemented）](2026-11-16-typescript-path-alias-resolution.md)

@@ -422,15 +422,67 @@ export type RunStreamEnd = {
   status: RunTerminalStatus;
 };
 
-export type RunToolResult = {
+type RunToolResultBase<Kind extends string, Tool extends string> = {
   request_id: string;
   run_id: string;
   index_id: string;
   completed_sequence: number;
-  kind: string;
-  tool: string;
+  kind: Kind;
+  tool: Tool;
   [key: string]: unknown;
 };
+
+export type RunUnresolvedSummary = {
+  detail_state: "empty" | "omitted" | "unknown";
+  total_indexed_in_scope: number | null;
+  items_in_legacy_full_result: number | null;
+  neighbor_request_id: string;
+  node_ids: string[];
+  detail_hint: string;
+};
+
+export type GetNeighborsSummaryRunToolResult = RunToolResultBase<
+  "get_neighbors.summary_succeeded",
+  "get_neighbors"
+> & {
+  root: SymbolRecord;
+  nodes: SymbolRecord[];
+  neighbors: Neighbor[];
+  contextual_calls: ContextualCall[];
+  unresolved: null;
+  unresolved_summary: RunUnresolvedSummary;
+  possible_unresolved_callers: UnresolvedReference[];
+  completeness: NeighborCompleteness | null;
+  truncated: boolean;
+  truncation_reason: string | null;
+  index_truncated: boolean;
+  index_truncation_reason: string | null;
+  index_unresolved_truncated: boolean | null;
+  index_unresolved_truncation_reason: string | null;
+};
+
+export type RunListUnresolvedRunToolResult = RunToolResultBase<
+  "run_list_unresolved.succeeded",
+  "run_list_unresolved"
+> & {
+  neighbor_request_id: string;
+  items: UnresolvedReference[];
+  page: { returned: number; total: number; next_cursor: string | null; order: "path,line,id" };
+  completeness: { status: "complete" | "truncated" | "possibly_incomplete"; reasons: string[]; hint: string | null };
+};
+
+type LegacyRunToolResult = RunToolResultBase<
+  | "search_code.succeeded"
+  | "search_code.failed"
+  | "read_source.succeeded"
+  | "read_source.failed"
+  | "get_neighbors.succeeded"
+  | "get_neighbors.failed"
+  | "run_list_unresolved.failed",
+  "search_code" | "read_source" | "get_neighbors" | "run_list_unresolved"
+>;
+
+export type RunToolResult = LegacyRunToolResult | GetNeighborsSummaryRunToolResult | RunListUnresolvedRunToolResult;
 
 export type RunToolResultsResponse = {
   schema_version: typeof SCHEMA_VERSION;
@@ -1663,7 +1715,7 @@ export function isRunStreamEnd(value: unknown): value is RunStreamEnd {
 }
 
 function isRunToolResult(value: unknown): value is RunToolResult {
-  return (
+  const baseIsValid = (
     isRecord(value) &&
     isString(value.request_id) &&
     isString(value.run_id) &&
@@ -1672,6 +1724,45 @@ function isRunToolResult(value: unknown): value is RunToolResult {
     isString(value.kind) &&
     isString(value.tool)
   );
+  if (!baseIsValid) return false;
+  if (value.kind === "get_neighbors.summary_succeeded") {
+    if (!isRecord(value.unresolved_summary)) return false;
+    const summary = value.unresolved_summary;
+    const graph = { ...value, schema_version: SCHEMA_VERSION, unresolved: [] };
+    if (!isNeighborsResponse(graph)) return false;
+    if (
+      value.tool !== "get_neighbors" || value.unresolved !== null ||
+      !["empty", "omitted", "unknown"].includes(String(summary.detail_state)) ||
+      !(summary.total_indexed_in_scope === null || isNonNegativeInteger(summary.total_indexed_in_scope)) ||
+      !(summary.items_in_legacy_full_result === null || isNonNegativeInteger(summary.items_in_legacy_full_result)) ||
+      !isString(summary.neighbor_request_id) || summary.neighbor_request_id !== value.request_id ||
+      !Array.isArray(summary.node_ids) || summary.node_ids.length === 0 || !summary.node_ids.every(isString) ||
+      !isString(summary.detail_hint) || typeof value.index_truncated !== "boolean" ||
+      !(typeof value.index_unresolved_truncated === "boolean" || value.index_unresolved_truncated === null)
+    ) return false;
+    if (
+      (summary.detail_state === "unknown" && summary.total_indexed_in_scope !== null) ||
+      (summary.detail_state === "empty" && summary.total_indexed_in_scope !== 0) ||
+      (summary.detail_state === "omitted" && (!isNumber(summary.total_indexed_in_scope) || summary.total_indexed_in_scope < 1))
+    ) return false;
+    const expectedNodeIds = [...new Set([graph.root.symbol_id, ...graph.nodes.map((node) => node.symbol_id)])];
+    return summary.node_ids.length === expectedNodeIds.length &&
+      summary.node_ids.every((nodeId, index) => nodeId === expectedNodeIds[index]);
+  }
+  if (value.kind === "run_list_unresolved.succeeded") {
+    if (!isRecord(value.page) || !isRecord(value.completeness)) return false;
+    return value.tool === "run_list_unresolved" && isString(value.neighbor_request_id) &&
+      Array.isArray(value.items) && value.items.every(isUnresolvedReference) && isNonNegativeInteger(value.page.returned) &&
+      isNonNegativeInteger(value.page.total) && value.page.returned === value.items.length &&
+      (value.page.next_cursor === null || isString(value.page.next_cursor)) &&
+      value.page.order === "path,line,id" &&
+      ["complete", "truncated", "possibly_incomplete"].includes(String(value.completeness.status)) &&
+      Array.isArray(value.completeness.reasons) && value.completeness.reasons.every(isString);
+  }
+  return [
+    "search_code.succeeded", "search_code.failed", "read_source.succeeded", "read_source.failed",
+    "get_neighbors.succeeded", "get_neighbors.failed", "run_list_unresolved.failed",
+  ].includes(String(value.kind));
 }
 
 export function isRunStatusResponse(value: unknown): value is RunStatusResponse {

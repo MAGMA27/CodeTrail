@@ -46,8 +46,14 @@ from .contracts import (
     FeatureGraphResponse,
     FreshnessReasonCode,
     GetNeighborsParams,
+    RunGetNeighborsParams,
     GetNeighborsFailure,
     GetNeighborsSuccess,
+    GetNeighborsSummarySuccess,
+    RunUnresolvedSummary,
+    RunListUnresolvedParams,
+    RunListUnresolvedSuccess,
+    RunListUnresolvedFailure,
     GraphUpdatedEvent,
     GraphUpdatedPayload,
     GraphSnapshot,
@@ -695,6 +701,25 @@ class RepositoryRegistry:
 
 
 T = TypeVar("T")
+
+
+def _same_external_tool_params(previous: ToolParams, current: ToolParams) -> bool:
+    """Treat legacy and Run full-neighbor params as the same saved request."""
+    if previous == current:
+        return True
+    if isinstance(previous, GetNeighborsParams) and isinstance(current, RunGetNeighborsParams):
+        legacy, run = previous, current
+    elif isinstance(previous, RunGetNeighborsParams) and isinstance(current, GetNeighborsParams):
+        legacy, run = current, previous
+    else:
+        return False
+    return (
+        run.detail == "full"
+        and legacy.symbol_id == run.symbol_id
+        and legacy.direction == run.direction
+        and legacy.depth == run.depth
+        and legacy.limit == run.limit
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -1603,7 +1628,7 @@ class IndexService:
                     completed_sequence=completed_sequence,
                     evidence=result.evidence,
                 )
-            if isinstance(request.params, GetNeighborsParams):
+            if isinstance(request.params, (GetNeighborsParams, RunGetNeighborsParams)):
                 result = self.neighbors(
                     request.index_id,
                     request.params.symbol_id,
@@ -1626,7 +1651,7 @@ class IndexService:
                 completeness = result.completeness
                 if completeness is not None and truncated:
                     completeness = _with_query_truncation(completeness, truncation_reason)
-                return GetNeighborsSuccess(
+                common = dict(
                     request_id=request.request_id,
                     run_id=request.run_id,
                     index_id=request.index_id,
@@ -1645,6 +1670,28 @@ class IndexService:
                     index_unresolved_truncated=result.index_unresolved_truncated,
                     index_unresolved_truncation_reason=result.index_unresolved_truncation_reason,
                 )
+                if isinstance(request.params, RunGetNeighborsParams) and request.params.detail == "summary":
+                    node_ids = list(dict.fromkeys(
+                        [result.root.symbol_id] + [node.symbol_id for node in result.nodes]
+                    ))
+                    total, _ = self._with_index(
+                        request.index_id,
+                        lambda store: store.list_unresolved_for_sources(
+                            request.index_id, tuple(node_ids), limit=1
+                        ),
+                    )
+                    return GetNeighborsSummarySuccess(
+                        **{**common, "unresolved": None},
+                        unresolved_summary=RunUnresolvedSummary(
+                            detail_state="empty" if total == 0 else "omitted",
+                            total_indexed_in_scope=total,
+                            items_in_legacy_full_result=len(unresolved),
+                            neighbor_request_id=request.request_id,
+                            node_ids=node_ids,
+                            detail_hint="Use run_list_unresolved with this neighbor_request_id to page the omitted details.",
+                        ),
+                    )
+                return GetNeighborsSuccess(**common)
             raise ServiceError("invalid_input", 400, "unsupported tool parameters")
         except ServiceError as exc:
             return _tool_failure(request, completed_sequence, exc.code, exc.message)
@@ -2448,7 +2495,11 @@ class WorkspaceService:
                 existing = store.load_run_tool_result(run_id, request_id)
                 if existing is not None:
                     previous_request = store.load_run_tool_request(run_id, request_id)
-                    if previous_request is None or previous_request.params != params or previous_request.index_id != index_id:
+                    if (
+                        previous_request is None
+                        or not _same_external_tool_params(previous_request.params, params)
+                        or previous_request.index_id != index_id
+                    ):
                         raise ServiceError(
                             "conflict",
                             409,
@@ -2458,7 +2509,8 @@ class WorkspaceService:
 
                 previous_request = store.load_run_tool_request(run_id, request_id)
                 if previous_request is not None and (
-                    previous_request.params != params or previous_request.index_id != index_id
+                    not _same_external_tool_params(previous_request.params, params)
+                    or previous_request.index_id != index_id
                 ):
                     raise ServiceError(
                         "conflict",
@@ -2484,7 +2536,9 @@ class WorkspaceService:
                         "Run event budget cannot fit a tool call and terminal conclusion",
                     )
 
-                if previous_request is None:
+                atomic_page = isinstance(params, RunListUnresolvedParams)
+                started_event: Event | None = None
+                if previous_request is None and not atomic_page:
                     started_event = ToolStartedEvent(
                         run_id=run_id,
                         sequence=record.run.budget.events_used + 1,
@@ -2493,12 +2547,19 @@ class WorkspaceService:
                     )
                     store.append_run_event(started_event)
                     record = store.load_run_record(run_id)
-                completed_sequence = record.run.budget.events_used + 1
+                completed_sequence = record.run.budget.events_used + (2 if atomic_page else 1)
                 try:
-                    result = self.index_service.execute_tool(
-                        request,
-                        completed_sequence=completed_sequence,
-                    )
+                    if isinstance(params, RunListUnresolvedParams):
+                        result = self._execute_run_list_unresolved(
+                            store, request, record, completed_sequence
+                        )
+                    else:
+                        result = self.index_service.execute_tool(
+                            request,
+                            completed_sequence=completed_sequence,
+                        )
+                except ServiceError:
+                    raise
                 except Exception:
                     result = _tool_failure(
                         request,
@@ -2509,7 +2570,7 @@ class WorkspaceService:
                 record = self._expire_external_run_if_needed(store, store.load_run_record(run_id))
                 if record.run.status not in {"queued", "running"}:
                     raise ServiceError("budget_exceeded", 409, "external Run time budget is exhausted")
-                if isinstance(result, (SearchCodeFailure, ReadSourceFailure, GetNeighborsFailure)):
+                if isinstance(result, (SearchCodeFailure, ReadSourceFailure, GetNeighborsFailure, RunListUnresolvedFailure)):
                     event: Event = ToolFailedEvent(
                         run_id=run_id,
                         sequence=completed_sequence,
@@ -2523,7 +2584,16 @@ class WorkspaceService:
                         timestamp=datetime.now(timezone.utc),
                         payload=ToolCompletedPayload(result=result),
                     )
-                store.append_run_tool_result(event, result)
+                if atomic_page and previous_request is None:
+                    started_event = ToolStartedEvent(
+                        run_id=run_id,
+                        sequence=completed_sequence - 1,
+                        timestamp=datetime.now(timezone.utc),
+                        payload=ToolStartedPayload(request=request),
+                    )
+                store.append_run_tool_result(
+                    event, result, started_event=started_event if atomic_page else None
+                )
                 return result
         except ServiceError:
             raise
@@ -2537,6 +2607,96 @@ class WorkspaceService:
             raise ServiceError(code, 409 if code == "budget_exceeded" else 400, message) from exc
         except StorageError as exc:
             raise ServiceError("internal_error", 500, "local external Run storage failed") from exc
+
+    def _execute_run_list_unresolved(
+        self, store: IndexStore, request: ToolRequest, record: RunRecord, completed_sequence: int
+    ) -> RunListUnresolvedSuccess:
+        params = request.params
+        if not isinstance(params, RunListUnresolvedParams):
+            raise ServiceError("invalid_input", 400, "Run unresolved page parameters are invalid")
+        anchor = store.load_run_tool_result(request.run_id, params.neighbor_request_id)
+        if not isinstance(anchor, (GetNeighborsSuccess, GetNeighborsSummarySuccess)):
+            raise ServiceError("not_found", 404, "successful neighbor request was not found in this Run")
+        if anchor.run_id != request.run_id or anchor.index_id != request.index_id:
+            raise ServiceError("conflict", 409, "neighbor request does not match this Run snapshot")
+        if isinstance(anchor, GetNeighborsSummarySuccess):
+            source_ids = tuple(anchor.unresolved_summary.node_ids)
+        else:
+            source_ids = tuple(dict.fromkeys(
+                ([anchor.root.symbol_id] if anchor.root is not None else [])
+                + [node.symbol_id for node in anchor.nodes]
+            ))
+        if not source_ids:
+            raise ServiceError("invalid_input", 400, "neighbor request has no returned node scope")
+        scope_payload = "\0".join((
+            record.run.project_id,
+            record.run.session_id,
+            request.run_id,
+            request.index_id,
+            params.neighbor_request_id,
+            *source_ids,
+        ))
+        fingerprint = hashlib.sha256(scope_payload.encode("utf-8")).hexdigest()[:8]
+        offset = 0
+        if params.cursor is not None:
+            parts = params.cursor.split(".")
+            try:
+                if (
+                    len(parts) != 4 or parts[0] != "c1" or parts[1] != "rnu"
+                    or not parts[2].isdigit() or str(int(parts[2])) != parts[2]
+                    or parts[3] != fingerprint or len(params.cursor) > 500
+                ):
+                    raise ValueError
+                offset = int(parts[2])
+            except (TypeError, ValueError):
+                raise ServiceError(
+                    "invalid_input", 400, "invalid or expired Run unresolved cursor",
+                    details=[{"field": "cursor", "problem": "invalid"}],
+                ) from None
+        total, _ = store.list_unresolved_for_sources(
+            request.index_id, source_ids, offset=0, limit=1
+        )
+        if offset > total:
+            raise ServiceError("invalid_input", 400, "Run unresolved cursor is beyond the available page range")
+        _, items = store.list_unresolved_for_sources(
+            request.index_id, source_ids, offset=offset, limit=params.limit
+        )
+        next_offset = offset + len(items)
+        next_cursor = (
+            f"c1.rnu.{next_offset}.{fingerprint}" if next_offset < total else None
+        )
+        index = store.load_index(request.index_id)
+        reasons: list[str] = []
+        if next_cursor is not None:
+            reasons.append("more_items")
+        if index.unresolved_truncated is True:
+            reasons.append("index_unresolved_truncated")
+        elif index.unresolved_truncated is None:
+            reasons.append("index_unresolved_coverage_unknown")
+        status = "truncated" if next_cursor is not None else (
+            "possibly_incomplete" if len(reasons) > 0 else "complete"
+        )
+        hint = (
+            "Fetch the next page using page.next_cursor."
+            if next_cursor
+            else "The index omitted unresolved references when it was built."
+            if index.unresolved_truncated is True
+            else "This index does not record whether unresolved references were truncated."
+            if index.unresolved_truncated is None
+            else None
+        )
+        return RunListUnresolvedSuccess(
+            request_id=request.request_id,
+            run_id=request.run_id,
+            index_id=request.index_id,
+            completed_sequence=completed_sequence,
+            neighbor_request_id=params.neighbor_request_id,
+            items=list(items),
+            page=OverviewPage(
+                returned=len(items), total=total, next_cursor=next_cursor, order="path,line,id"
+            ),
+            completeness=UnresolvedCompleteness(status=status, reasons=reasons, hint=hint),
+        )
 
     def complete_external_run(
         self,
@@ -6819,6 +6979,10 @@ def _tool_failure(
         from .contracts import ReadSourceFailure
 
         return ReadSourceFailure(**base)
+    if isinstance(request.params, RunListUnresolvedParams):
+        from .contracts import RunListUnresolvedFailure
+
+        return RunListUnresolvedFailure(**base)
     from .contracts import GetNeighborsFailure
 
     return GetNeighborsFailure(**base)
@@ -6872,7 +7036,7 @@ def _external_graph_data(
             for neighbor in result.neighbors:
                 add_item(nodes, neighbor.symbol.symbol_id, neighbor.symbol, "symbol")
                 add_item(static_edges, neighbor.edge.edge_id, neighbor.edge, "edge")
-            for item in result.unresolved:
+            for item in result.unresolved or []:
                 add_item(unresolved, item.unresolved_id, item, "unresolved reference")
             truncated = truncated or result.truncated
             truncation_reason = truncation_reason or result.truncation_reason
@@ -6884,6 +7048,19 @@ def _external_graph_data(
                     unresolved_truncation_reason=result.index_unresolved_truncation_reason,
                 )
             )
+            if isinstance(result, GetNeighborsSummarySuccess):
+                summary = result.unresolved_summary
+                count_text = (
+                    str(summary.total_indexed_in_scope)
+                    if summary.total_indexed_in_scope is not None else "unknown"
+                )
+                coverage_limitations.append(
+                    f"Neighbor request {summary.neighbor_request_id} unresolved details are {summary.detail_state}; "
+                    f"indexed matches in its returned-node scope: {count_text}."
+                )
+        elif isinstance(result, RunListUnresolvedSuccess):
+            for item in result.items:
+                add_item(unresolved, item.unresolved_id, item, "unresolved reference")
 
     if truncated and not truncation_reason:
         truncation_reason = "one or more external tool results were truncated"

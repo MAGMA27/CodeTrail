@@ -36,6 +36,8 @@ ProjectOverview 新增职责状态 `not_configured`、`ready`、`partial`、`inv
 
 Index freshness 结果绑定 `project_id`/`baseline_index_id`，检查时间、规则/配置观察、扫描计数、变化计数和原因必须与 `consistent`/`changed`/`unknown` 语义一致；GitHub 的 `remote_status=consistent|changed` 必须携带来源 URL 和远端 commit，远端未知不能被 Schema 或服务层升级为一致；`IndexRefreshResponse` 的 freshness 必须仍指向基准 index，`reused` 返回基准，`created` 返回不同 index。Run contract 要求 project/session/index 同时出现，输入消息是从 1 到 cutoff 的完整连续已保存前缀，input hash/字符数与消息一致；Run budget 记录工具、模型调用/修复、输入/输出字符、可选 token、源码、事件和总时间限制及使用量。real 模型每轮只能返回一个 `IssueModelToolCall` 或 `IssueModelFinal`；external 由外部 Agent 触发同一白名单工具，Issue 结论或代码理解步骤的 symbols/evidence/candidate links 只能引用本 Run 实际返回的同一 index 结果，代码理解不生成 findings/candidate links，原始模型文本不属于持久化契约。事件 sequence 从 1 连续递增且最后只能是一个 terminal event；terminal status 与 report outcome 必须相互一致。Report graph、evidence、candidate links 和 findings 只能引用同一 index 及实际工具返回的 evidence，取消/中断使用对应终态 outcome。Run 影响结果是按报告 ID 临时派生的只读结果，不进入 Run 持久化；root 被排除在 reachable_node_count 外，重复节点/多路径去重，循环只保留可解释的静态边，dynamic/unresolved 保持未知。四层由这次派生结果计算，不单独持久化。
 
+external Run 邻接结果仍缺省为完整 `get_neighbors.succeeded`。显式 `detail=summary` 使用 `get_neighbors.summary_succeeded`，保留图与独立 index coverage 字段、明确 `empty|omitted|unknown` 状态、固定返回节点范围计数和 node IDs；省略的详情为 null。`run_list_unresolved.succeeded` 仅从同 Run/Session/index 的成功邻居收据派生节点范围，并按 `path,line,id` 分页；每页是独立计费且幂等的 Run ToolResult。报告和网页可读取历史收据，不会借由读取创建详情页。
+
 ## 错误与限制
 
 `ModelConfigSettingsResponse` 不得含 API Key 或掩码替代值；写请求要求 loopback 客户端，有 `Origin` 时还必须匹配已配置 Web Origin，无 Origin 的本地 CLI 可写。服务层在同一 Registry 锁内读取、合并与原子持久化；Schema 本身不能证明密钥未被日志记录或浏览器持久化。

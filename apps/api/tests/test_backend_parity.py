@@ -59,6 +59,7 @@ TOOL_HTTP_ROUTES: dict[str, tuple[str, str] | tuple[None, str] | tuple[tuple[str
     "run_search_code": (None, "Records a query result inside an MCP external Run."),
     "run_read_source": (None, "Records source evidence inside an MCP external Run."),
     "run_get_neighbors": (None, "Records graph evidence inside an MCP external Run."),
+    "run_list_unresolved": (None, "Pages indexed unresolved evidence inside an MCP external Run; HTTP only reads saved Run receipts."),
     "submit_project_features": (None, "Persists host Agent feature results; HTTP generation is model-backed."),
     "submit_external_run": (None, "Persists the final result of an MCP external Run."),
     "cancel_external_run": (None, "Cancels an MCP external Run lifecycle."),

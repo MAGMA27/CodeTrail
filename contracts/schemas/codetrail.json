@@ -1603,6 +1603,179 @@
           "title": "GetNeighborsSuccess",
           "type": "object"
         },
+        "GetNeighborsSummarySuccess": {
+          "additionalProperties": false,
+          "description": "Run neighbor graph with unresolved rows explicitly omitted.",
+          "properties": {
+            "completed_sequence": {
+              "exclusiveMinimum": 0,
+              "title": "Completed Sequence",
+              "type": "integer"
+            },
+            "completeness": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/NeighborCompleteness"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "contextual_calls": {
+              "items": {
+                "$ref": "#/$defs/ContextualCall"
+              },
+              "maxItems": 200,
+              "title": "Contextual Calls",
+              "type": "array"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "index_truncated": {
+              "default": false,
+              "title": "Index Truncated",
+              "type": "boolean"
+            },
+            "index_truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Truncation Reason"
+            },
+            "index_unresolved_truncated": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Unresolved Truncated"
+            },
+            "index_unresolved_truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Unresolved Truncation Reason"
+            },
+            "kind": {
+              "const": "get_neighbors.summary_succeeded",
+              "default": "get_neighbors.summary_succeeded",
+              "title": "Kind",
+              "type": "string"
+            },
+            "neighbors": {
+              "items": {
+                "$ref": "#/$defs/Neighbor"
+              },
+              "title": "Neighbors",
+              "type": "array"
+            },
+            "nodes": {
+              "items": {
+                "$ref": "#/$defs/Symbol"
+              },
+              "maxItems": 40,
+              "title": "Nodes",
+              "type": "array"
+            },
+            "possible_unresolved_callers": {
+              "items": {
+                "$ref": "#/$defs/UnresolvedReference"
+              },
+              "maxItems": 10,
+              "title": "Possible Unresolved Callers",
+              "type": "array"
+            },
+            "request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Request Id",
+              "type": "string"
+            },
+            "root": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Symbol"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "run_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Run Id",
+              "type": "string"
+            },
+            "tool": {
+              "const": "get_neighbors",
+              "default": "get_neighbors",
+              "title": "Tool",
+              "type": "string"
+            },
+            "truncated": {
+              "default": false,
+              "title": "Truncated",
+              "type": "boolean"
+            },
+            "truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Truncation Reason"
+            },
+            "unresolved": {
+              "default": null,
+              "title": "Unresolved",
+              "type": "null"
+            },
+            "unresolved_summary": {
+              "$ref": "#/$defs/RunUnresolvedSummary"
+            }
+          },
+          "required": [
+            "request_id",
+            "run_id",
+            "index_id",
+            "completed_sequence",
+            "neighbors",
+            "unresolved_summary"
+          ],
+          "title": "GetNeighborsSummarySuccess",
+          "type": "object"
+        },
         "GraphSnapshot": {
           "additionalProperties": false,
           "properties": {
@@ -1822,6 +1995,54 @@
             "status"
           ],
           "title": "NeighborCompleteness",
+          "type": "object"
+        },
+        "OverviewPage": {
+          "additionalProperties": false,
+          "properties": {
+            "next_cursor": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Next Cursor"
+            },
+            "order": {
+              "maxLength": 100,
+              "minLength": 1,
+              "title": "Order",
+              "type": "string"
+            },
+            "returned": {
+              "minimum": 0,
+              "title": "Returned",
+              "type": "integer"
+            },
+            "total": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Total"
+            }
+          },
+          "required": [
+            "returned",
+            "total",
+            "order"
+          ],
+          "title": "OverviewPage",
           "type": "object"
         },
         "ReadSourceFailure": {
@@ -2351,6 +2572,61 @@
           "title": "RunFailedPayload",
           "type": "object"
         },
+        "RunGetNeighborsParams": {
+          "additionalProperties": false,
+          "properties": {
+            "depth": {
+              "exclusiveMinimum": 0,
+              "maximum": 2,
+              "title": "Depth",
+              "type": "integer"
+            },
+            "detail": {
+              "default": "full",
+              "enum": [
+                "summary",
+                "full"
+              ],
+              "title": "Detail",
+              "type": "string"
+            },
+            "direction": {
+              "enum": [
+                "callers",
+                "callees",
+                "both"
+              ],
+              "title": "Direction",
+              "type": "string"
+            },
+            "limit": {
+              "exclusiveMinimum": 0,
+              "maximum": 40,
+              "title": "Limit",
+              "type": "integer"
+            },
+            "symbol_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Symbol Id",
+              "type": "string"
+            },
+            "tool": {
+              "const": "run_get_neighbors",
+              "default": "run_get_neighbors",
+              "title": "Tool",
+              "type": "string"
+            }
+          },
+          "required": [
+            "symbol_id",
+            "direction",
+            "depth",
+            "limit"
+          ],
+          "title": "RunGetNeighborsParams",
+          "type": "object"
+        },
         "RunInterruptedEvent": {
           "additionalProperties": false,
           "properties": {
@@ -2409,6 +2685,172 @@
             "reason"
           ],
           "title": "RunInterruptedPayload",
+          "type": "object"
+        },
+        "RunListUnresolvedFailure": {
+          "additionalProperties": false,
+          "properties": {
+            "completed_sequence": {
+              "exclusiveMinimum": 0,
+              "title": "Completed Sequence",
+              "type": "integer"
+            },
+            "error": {
+              "$ref": "#/$defs/ToolError"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "kind": {
+              "const": "run_list_unresolved.failed",
+              "default": "run_list_unresolved.failed",
+              "title": "Kind",
+              "type": "string"
+            },
+            "request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Request Id",
+              "type": "string"
+            },
+            "run_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Run Id",
+              "type": "string"
+            },
+            "tool": {
+              "const": "run_list_unresolved",
+              "default": "run_list_unresolved",
+              "title": "Tool",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request_id",
+            "run_id",
+            "index_id",
+            "completed_sequence",
+            "error"
+          ],
+          "title": "RunListUnresolvedFailure",
+          "type": "object"
+        },
+        "RunListUnresolvedParams": {
+          "additionalProperties": false,
+          "properties": {
+            "cursor": {
+              "anyOf": [
+                {
+                  "maxLength": 500,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Cursor"
+            },
+            "limit": {
+              "default": 20,
+              "exclusiveMinimum": 0,
+              "maximum": 100,
+              "title": "Limit",
+              "type": "integer"
+            },
+            "neighbor_request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Neighbor Request Id",
+              "type": "string"
+            },
+            "tool": {
+              "const": "run_list_unresolved",
+              "default": "run_list_unresolved",
+              "title": "Tool",
+              "type": "string"
+            }
+          },
+          "required": [
+            "neighbor_request_id"
+          ],
+          "title": "RunListUnresolvedParams",
+          "type": "object"
+        },
+        "RunListUnresolvedSuccess": {
+          "additionalProperties": false,
+          "properties": {
+            "completed_sequence": {
+              "exclusiveMinimum": 0,
+              "title": "Completed Sequence",
+              "type": "integer"
+            },
+            "completeness": {
+              "$ref": "#/$defs/UnresolvedCompleteness"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "items": {
+              "items": {
+                "$ref": "#/$defs/UnresolvedReference"
+              },
+              "maxItems": 100,
+              "title": "Items",
+              "type": "array"
+            },
+            "kind": {
+              "const": "run_list_unresolved.succeeded",
+              "default": "run_list_unresolved.succeeded",
+              "title": "Kind",
+              "type": "string"
+            },
+            "neighbor_request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Neighbor Request Id",
+              "type": "string"
+            },
+            "page": {
+              "$ref": "#/$defs/OverviewPage"
+            },
+            "request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Request Id",
+              "type": "string"
+            },
+            "run_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Run Id",
+              "type": "string"
+            },
+            "tool": {
+              "const": "run_list_unresolved",
+              "default": "run_list_unresolved",
+              "title": "Tool",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request_id",
+            "run_id",
+            "index_id",
+            "completed_sequence",
+            "neighbor_request_id",
+            "items",
+            "page",
+            "completeness"
+          ],
+          "title": "RunListUnresolvedSuccess",
           "type": "object"
         },
         "RunStartedEvent": {
@@ -2549,6 +2991,75 @@
             "budget"
           ],
           "title": "RunStartedPayload",
+          "type": "object"
+        },
+        "RunUnresolvedSummary": {
+          "additionalProperties": false,
+          "properties": {
+            "detail_hint": {
+              "title": "Detail Hint",
+              "type": "string"
+            },
+            "detail_state": {
+              "enum": [
+                "empty",
+                "omitted",
+                "unknown"
+              ],
+              "title": "Detail State",
+              "type": "string"
+            },
+            "items_in_legacy_full_result": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Items In Legacy Full Result"
+            },
+            "neighbor_request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Neighbor Request Id",
+              "type": "string"
+            },
+            "node_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 40,
+              "minItems": 1,
+              "title": "Node Ids",
+              "type": "array"
+            },
+            "total_indexed_in_scope": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Total Indexed In Scope"
+            }
+          },
+          "required": [
+            "detail_state",
+            "total_indexed_in_scope",
+            "items_in_legacy_full_result",
+            "neighbor_request_id",
+            "node_ids",
+            "detail_hint"
+          ],
+          "title": "RunUnresolvedSummary",
           "type": "object"
         },
         "SearchCodeFailure": {
@@ -2925,7 +3436,9 @@
               "discriminator": {
                 "mapping": {
                   "get_neighbors.succeeded": "#/$defs/GetNeighborsSuccess",
+                  "get_neighbors.summary_succeeded": "#/$defs/GetNeighborsSummarySuccess",
                   "read_source.succeeded": "#/$defs/ReadSourceSuccess",
+                  "run_list_unresolved.succeeded": "#/$defs/RunListUnresolvedSuccess",
                   "search_code.succeeded": "#/$defs/SearchCodeSuccess"
                 },
                 "propertyName": "kind"
@@ -2939,6 +3452,12 @@
                 },
                 {
                   "$ref": "#/$defs/GetNeighborsSuccess"
+                },
+                {
+                  "$ref": "#/$defs/GetNeighborsSummarySuccess"
+                },
+                {
+                  "$ref": "#/$defs/RunListUnresolvedSuccess"
                 }
               ],
               "title": "Result"
@@ -3029,6 +3548,7 @@
                 "mapping": {
                   "get_neighbors.failed": "#/$defs/GetNeighborsFailure",
                   "read_source.failed": "#/$defs/ReadSourceFailure",
+                  "run_list_unresolved.failed": "#/$defs/RunListUnresolvedFailure",
                   "search_code.failed": "#/$defs/SearchCodeFailure"
                 },
                 "propertyName": "kind"
@@ -3042,6 +3562,9 @@
                 },
                 {
                   "$ref": "#/$defs/GetNeighborsFailure"
+                },
+                {
+                  "$ref": "#/$defs/RunListUnresolvedFailure"
                 }
               ],
               "title": "Result"
@@ -3067,6 +3590,8 @@
                 "mapping": {
                   "get_neighbors": "#/$defs/GetNeighborsParams",
                   "read_source": "#/$defs/ReadSourceParams",
+                  "run_get_neighbors": "#/$defs/RunGetNeighborsParams",
+                  "run_list_unresolved": "#/$defs/RunListUnresolvedParams",
                   "search_code": "#/$defs/SearchCodeParams"
                 },
                 "propertyName": "tool"
@@ -3080,6 +3605,12 @@
                 },
                 {
                   "$ref": "#/$defs/GetNeighborsParams"
+                },
+                {
+                  "$ref": "#/$defs/RunGetNeighborsParams"
+                },
+                {
+                  "$ref": "#/$defs/RunListUnresolvedParams"
                 }
               ],
               "title": "Params"
@@ -3155,6 +3686,49 @@
             "request"
           ],
           "title": "ToolStartedPayload",
+          "type": "object"
+        },
+        "UnresolvedCompleteness": {
+          "additionalProperties": false,
+          "properties": {
+            "hint": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Hint"
+            },
+            "reasons": {
+              "items": {
+                "enum": [
+                  "more_items",
+                  "index_unresolved_truncated",
+                  "index_unresolved_coverage_unknown"
+                ],
+                "type": "string"
+              },
+              "title": "Reasons",
+              "type": "array"
+            },
+            "status": {
+              "enum": [
+                "complete",
+                "truncated",
+                "possibly_incomplete"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "title": "UnresolvedCompleteness",
           "type": "object"
         },
         "UnresolvedReference": {
@@ -3914,6 +4488,179 @@
           "title": "GetNeighborsSuccess",
           "type": "object"
         },
+        "GetNeighborsSummarySuccess": {
+          "additionalProperties": false,
+          "description": "Run neighbor graph with unresolved rows explicitly omitted.",
+          "properties": {
+            "completed_sequence": {
+              "exclusiveMinimum": 0,
+              "title": "Completed Sequence",
+              "type": "integer"
+            },
+            "completeness": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/NeighborCompleteness"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "contextual_calls": {
+              "items": {
+                "$ref": "#/$defs/ContextualCall"
+              },
+              "maxItems": 200,
+              "title": "Contextual Calls",
+              "type": "array"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "index_truncated": {
+              "default": false,
+              "title": "Index Truncated",
+              "type": "boolean"
+            },
+            "index_truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Truncation Reason"
+            },
+            "index_unresolved_truncated": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Unresolved Truncated"
+            },
+            "index_unresolved_truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Unresolved Truncation Reason"
+            },
+            "kind": {
+              "const": "get_neighbors.summary_succeeded",
+              "default": "get_neighbors.summary_succeeded",
+              "title": "Kind",
+              "type": "string"
+            },
+            "neighbors": {
+              "items": {
+                "$ref": "#/$defs/Neighbor"
+              },
+              "title": "Neighbors",
+              "type": "array"
+            },
+            "nodes": {
+              "items": {
+                "$ref": "#/$defs/Symbol"
+              },
+              "maxItems": 40,
+              "title": "Nodes",
+              "type": "array"
+            },
+            "possible_unresolved_callers": {
+              "items": {
+                "$ref": "#/$defs/UnresolvedReference"
+              },
+              "maxItems": 10,
+              "title": "Possible Unresolved Callers",
+              "type": "array"
+            },
+            "request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Request Id",
+              "type": "string"
+            },
+            "root": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Symbol"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "run_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Run Id",
+              "type": "string"
+            },
+            "tool": {
+              "const": "get_neighbors",
+              "default": "get_neighbors",
+              "title": "Tool",
+              "type": "string"
+            },
+            "truncated": {
+              "default": false,
+              "title": "Truncated",
+              "type": "boolean"
+            },
+            "truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Truncation Reason"
+            },
+            "unresolved": {
+              "default": null,
+              "title": "Unresolved",
+              "type": "null"
+            },
+            "unresolved_summary": {
+              "$ref": "#/$defs/RunUnresolvedSummary"
+            }
+          },
+          "required": [
+            "request_id",
+            "run_id",
+            "index_id",
+            "completed_sequence",
+            "neighbors",
+            "unresolved_summary"
+          ],
+          "title": "GetNeighborsSummarySuccess",
+          "type": "object"
+        },
         "GraphSnapshot": {
           "additionalProperties": false,
           "properties": {
@@ -4133,6 +4880,54 @@
             "status"
           ],
           "title": "NeighborCompleteness",
+          "type": "object"
+        },
+        "OverviewPage": {
+          "additionalProperties": false,
+          "properties": {
+            "next_cursor": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Next Cursor"
+            },
+            "order": {
+              "maxLength": 100,
+              "minLength": 1,
+              "title": "Order",
+              "type": "string"
+            },
+            "returned": {
+              "minimum": 0,
+              "title": "Returned",
+              "type": "integer"
+            },
+            "total": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Total"
+            }
+          },
+          "required": [
+            "returned",
+            "total",
+            "order"
+          ],
+          "title": "OverviewPage",
           "type": "object"
         },
         "ReadSourceFailure": {
@@ -4662,6 +5457,61 @@
           "title": "RunFailedPayload",
           "type": "object"
         },
+        "RunGetNeighborsParams": {
+          "additionalProperties": false,
+          "properties": {
+            "depth": {
+              "exclusiveMinimum": 0,
+              "maximum": 2,
+              "title": "Depth",
+              "type": "integer"
+            },
+            "detail": {
+              "default": "full",
+              "enum": [
+                "summary",
+                "full"
+              ],
+              "title": "Detail",
+              "type": "string"
+            },
+            "direction": {
+              "enum": [
+                "callers",
+                "callees",
+                "both"
+              ],
+              "title": "Direction",
+              "type": "string"
+            },
+            "limit": {
+              "exclusiveMinimum": 0,
+              "maximum": 40,
+              "title": "Limit",
+              "type": "integer"
+            },
+            "symbol_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Symbol Id",
+              "type": "string"
+            },
+            "tool": {
+              "const": "run_get_neighbors",
+              "default": "run_get_neighbors",
+              "title": "Tool",
+              "type": "string"
+            }
+          },
+          "required": [
+            "symbol_id",
+            "direction",
+            "depth",
+            "limit"
+          ],
+          "title": "RunGetNeighborsParams",
+          "type": "object"
+        },
         "RunInterruptedEvent": {
           "additionalProperties": false,
           "properties": {
@@ -4720,6 +5570,172 @@
             "reason"
           ],
           "title": "RunInterruptedPayload",
+          "type": "object"
+        },
+        "RunListUnresolvedFailure": {
+          "additionalProperties": false,
+          "properties": {
+            "completed_sequence": {
+              "exclusiveMinimum": 0,
+              "title": "Completed Sequence",
+              "type": "integer"
+            },
+            "error": {
+              "$ref": "#/$defs/ToolError"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "kind": {
+              "const": "run_list_unresolved.failed",
+              "default": "run_list_unresolved.failed",
+              "title": "Kind",
+              "type": "string"
+            },
+            "request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Request Id",
+              "type": "string"
+            },
+            "run_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Run Id",
+              "type": "string"
+            },
+            "tool": {
+              "const": "run_list_unresolved",
+              "default": "run_list_unresolved",
+              "title": "Tool",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request_id",
+            "run_id",
+            "index_id",
+            "completed_sequence",
+            "error"
+          ],
+          "title": "RunListUnresolvedFailure",
+          "type": "object"
+        },
+        "RunListUnresolvedParams": {
+          "additionalProperties": false,
+          "properties": {
+            "cursor": {
+              "anyOf": [
+                {
+                  "maxLength": 500,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Cursor"
+            },
+            "limit": {
+              "default": 20,
+              "exclusiveMinimum": 0,
+              "maximum": 100,
+              "title": "Limit",
+              "type": "integer"
+            },
+            "neighbor_request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Neighbor Request Id",
+              "type": "string"
+            },
+            "tool": {
+              "const": "run_list_unresolved",
+              "default": "run_list_unresolved",
+              "title": "Tool",
+              "type": "string"
+            }
+          },
+          "required": [
+            "neighbor_request_id"
+          ],
+          "title": "RunListUnresolvedParams",
+          "type": "object"
+        },
+        "RunListUnresolvedSuccess": {
+          "additionalProperties": false,
+          "properties": {
+            "completed_sequence": {
+              "exclusiveMinimum": 0,
+              "title": "Completed Sequence",
+              "type": "integer"
+            },
+            "completeness": {
+              "$ref": "#/$defs/UnresolvedCompleteness"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "items": {
+              "items": {
+                "$ref": "#/$defs/UnresolvedReference"
+              },
+              "maxItems": 100,
+              "title": "Items",
+              "type": "array"
+            },
+            "kind": {
+              "const": "run_list_unresolved.succeeded",
+              "default": "run_list_unresolved.succeeded",
+              "title": "Kind",
+              "type": "string"
+            },
+            "neighbor_request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Neighbor Request Id",
+              "type": "string"
+            },
+            "page": {
+              "$ref": "#/$defs/OverviewPage"
+            },
+            "request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Request Id",
+              "type": "string"
+            },
+            "run_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Run Id",
+              "type": "string"
+            },
+            "tool": {
+              "const": "run_list_unresolved",
+              "default": "run_list_unresolved",
+              "title": "Tool",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request_id",
+            "run_id",
+            "index_id",
+            "completed_sequence",
+            "neighbor_request_id",
+            "items",
+            "page",
+            "completeness"
+          ],
+          "title": "RunListUnresolvedSuccess",
           "type": "object"
         },
         "RunStartedEvent": {
@@ -4860,6 +5876,75 @@
             "budget"
           ],
           "title": "RunStartedPayload",
+          "type": "object"
+        },
+        "RunUnresolvedSummary": {
+          "additionalProperties": false,
+          "properties": {
+            "detail_hint": {
+              "title": "Detail Hint",
+              "type": "string"
+            },
+            "detail_state": {
+              "enum": [
+                "empty",
+                "omitted",
+                "unknown"
+              ],
+              "title": "Detail State",
+              "type": "string"
+            },
+            "items_in_legacy_full_result": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Items In Legacy Full Result"
+            },
+            "neighbor_request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Neighbor Request Id",
+              "type": "string"
+            },
+            "node_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 40,
+              "minItems": 1,
+              "title": "Node Ids",
+              "type": "array"
+            },
+            "total_indexed_in_scope": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Total Indexed In Scope"
+            }
+          },
+          "required": [
+            "detail_state",
+            "total_indexed_in_scope",
+            "items_in_legacy_full_result",
+            "neighbor_request_id",
+            "node_ids",
+            "detail_hint"
+          ],
+          "title": "RunUnresolvedSummary",
           "type": "object"
         },
         "SearchCodeFailure": {
@@ -5236,7 +6321,9 @@
               "discriminator": {
                 "mapping": {
                   "get_neighbors.succeeded": "#/$defs/GetNeighborsSuccess",
+                  "get_neighbors.summary_succeeded": "#/$defs/GetNeighborsSummarySuccess",
                   "read_source.succeeded": "#/$defs/ReadSourceSuccess",
+                  "run_list_unresolved.succeeded": "#/$defs/RunListUnresolvedSuccess",
                   "search_code.succeeded": "#/$defs/SearchCodeSuccess"
                 },
                 "propertyName": "kind"
@@ -5250,6 +6337,12 @@
                 },
                 {
                   "$ref": "#/$defs/GetNeighborsSuccess"
+                },
+                {
+                  "$ref": "#/$defs/GetNeighborsSummarySuccess"
+                },
+                {
+                  "$ref": "#/$defs/RunListUnresolvedSuccess"
                 }
               ],
               "title": "Result"
@@ -5340,6 +6433,7 @@
                 "mapping": {
                   "get_neighbors.failed": "#/$defs/GetNeighborsFailure",
                   "read_source.failed": "#/$defs/ReadSourceFailure",
+                  "run_list_unresolved.failed": "#/$defs/RunListUnresolvedFailure",
                   "search_code.failed": "#/$defs/SearchCodeFailure"
                 },
                 "propertyName": "kind"
@@ -5353,6 +6447,9 @@
                 },
                 {
                   "$ref": "#/$defs/GetNeighborsFailure"
+                },
+                {
+                  "$ref": "#/$defs/RunListUnresolvedFailure"
                 }
               ],
               "title": "Result"
@@ -5378,6 +6475,8 @@
                 "mapping": {
                   "get_neighbors": "#/$defs/GetNeighborsParams",
                   "read_source": "#/$defs/ReadSourceParams",
+                  "run_get_neighbors": "#/$defs/RunGetNeighborsParams",
+                  "run_list_unresolved": "#/$defs/RunListUnresolvedParams",
                   "search_code": "#/$defs/SearchCodeParams"
                 },
                 "propertyName": "tool"
@@ -5391,6 +6490,12 @@
                 },
                 {
                   "$ref": "#/$defs/GetNeighborsParams"
+                },
+                {
+                  "$ref": "#/$defs/RunGetNeighborsParams"
+                },
+                {
+                  "$ref": "#/$defs/RunListUnresolvedParams"
                 }
               ],
               "title": "Params"
@@ -5466,6 +6571,49 @@
             "request"
           ],
           "title": "ToolStartedPayload",
+          "type": "object"
+        },
+        "UnresolvedCompleteness": {
+          "additionalProperties": false,
+          "properties": {
+            "hint": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Hint"
+            },
+            "reasons": {
+              "items": {
+                "enum": [
+                  "more_items",
+                  "index_unresolved_truncated",
+                  "index_unresolved_coverage_unknown"
+                ],
+                "type": "string"
+              },
+              "title": "Reasons",
+              "type": "array"
+            },
+            "status": {
+              "enum": [
+                "complete",
+                "truncated",
+                "possibly_incomplete"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "title": "UnresolvedCompleteness",
           "type": "object"
         },
         "UnresolvedReference": {
@@ -11049,6 +12197,179 @@
           "title": "GetNeighborsSuccess",
           "type": "object"
         },
+        "GetNeighborsSummarySuccess": {
+          "additionalProperties": false,
+          "description": "Run neighbor graph with unresolved rows explicitly omitted.",
+          "properties": {
+            "completed_sequence": {
+              "exclusiveMinimum": 0,
+              "title": "Completed Sequence",
+              "type": "integer"
+            },
+            "completeness": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/NeighborCompleteness"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "contextual_calls": {
+              "items": {
+                "$ref": "#/$defs/ContextualCall"
+              },
+              "maxItems": 200,
+              "title": "Contextual Calls",
+              "type": "array"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "index_truncated": {
+              "default": false,
+              "title": "Index Truncated",
+              "type": "boolean"
+            },
+            "index_truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Truncation Reason"
+            },
+            "index_unresolved_truncated": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Unresolved Truncated"
+            },
+            "index_unresolved_truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Unresolved Truncation Reason"
+            },
+            "kind": {
+              "const": "get_neighbors.summary_succeeded",
+              "default": "get_neighbors.summary_succeeded",
+              "title": "Kind",
+              "type": "string"
+            },
+            "neighbors": {
+              "items": {
+                "$ref": "#/$defs/Neighbor"
+              },
+              "title": "Neighbors",
+              "type": "array"
+            },
+            "nodes": {
+              "items": {
+                "$ref": "#/$defs/Symbol"
+              },
+              "maxItems": 40,
+              "title": "Nodes",
+              "type": "array"
+            },
+            "possible_unresolved_callers": {
+              "items": {
+                "$ref": "#/$defs/UnresolvedReference"
+              },
+              "maxItems": 10,
+              "title": "Possible Unresolved Callers",
+              "type": "array"
+            },
+            "request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Request Id",
+              "type": "string"
+            },
+            "root": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Symbol"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "run_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Run Id",
+              "type": "string"
+            },
+            "tool": {
+              "const": "get_neighbors",
+              "default": "get_neighbors",
+              "title": "Tool",
+              "type": "string"
+            },
+            "truncated": {
+              "default": false,
+              "title": "Truncated",
+              "type": "boolean"
+            },
+            "truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Truncation Reason"
+            },
+            "unresolved": {
+              "default": null,
+              "title": "Unresolved",
+              "type": "null"
+            },
+            "unresolved_summary": {
+              "$ref": "#/$defs/RunUnresolvedSummary"
+            }
+          },
+          "required": [
+            "request_id",
+            "run_id",
+            "index_id",
+            "completed_sequence",
+            "neighbors",
+            "unresolved_summary"
+          ],
+          "title": "GetNeighborsSummarySuccess",
+          "type": "object"
+        },
         "GraphSnapshot": {
           "additionalProperties": false,
           "properties": {
@@ -11498,6 +12819,54 @@
             "status"
           ],
           "title": "NeighborCompleteness",
+          "type": "object"
+        },
+        "OverviewPage": {
+          "additionalProperties": false,
+          "properties": {
+            "next_cursor": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Next Cursor"
+            },
+            "order": {
+              "maxLength": 100,
+              "minLength": 1,
+              "title": "Order",
+              "type": "string"
+            },
+            "returned": {
+              "minimum": 0,
+              "title": "Returned",
+              "type": "integer"
+            },
+            "total": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Total"
+            }
+          },
+          "required": [
+            "returned",
+            "total",
+            "order"
+          ],
+          "title": "OverviewPage",
           "type": "object"
         },
         "ReadSourceFailure": {
@@ -12396,6 +13765,61 @@
           "title": "RunFailedPayload",
           "type": "object"
         },
+        "RunGetNeighborsParams": {
+          "additionalProperties": false,
+          "properties": {
+            "depth": {
+              "exclusiveMinimum": 0,
+              "maximum": 2,
+              "title": "Depth",
+              "type": "integer"
+            },
+            "detail": {
+              "default": "full",
+              "enum": [
+                "summary",
+                "full"
+              ],
+              "title": "Detail",
+              "type": "string"
+            },
+            "direction": {
+              "enum": [
+                "callers",
+                "callees",
+                "both"
+              ],
+              "title": "Direction",
+              "type": "string"
+            },
+            "limit": {
+              "exclusiveMinimum": 0,
+              "maximum": 40,
+              "title": "Limit",
+              "type": "integer"
+            },
+            "symbol_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Symbol Id",
+              "type": "string"
+            },
+            "tool": {
+              "const": "run_get_neighbors",
+              "default": "run_get_neighbors",
+              "title": "Tool",
+              "type": "string"
+            }
+          },
+          "required": [
+            "symbol_id",
+            "direction",
+            "depth",
+            "limit"
+          ],
+          "title": "RunGetNeighborsParams",
+          "type": "object"
+        },
         "RunInput": {
           "additionalProperties": false,
           "description": "The complete saved Session context frozen for one Run.",
@@ -12541,6 +13965,172 @@
           "title": "RunInterruptedPayload",
           "type": "object"
         },
+        "RunListUnresolvedFailure": {
+          "additionalProperties": false,
+          "properties": {
+            "completed_sequence": {
+              "exclusiveMinimum": 0,
+              "title": "Completed Sequence",
+              "type": "integer"
+            },
+            "error": {
+              "$ref": "#/$defs/ToolError"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "kind": {
+              "const": "run_list_unresolved.failed",
+              "default": "run_list_unresolved.failed",
+              "title": "Kind",
+              "type": "string"
+            },
+            "request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Request Id",
+              "type": "string"
+            },
+            "run_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Run Id",
+              "type": "string"
+            },
+            "tool": {
+              "const": "run_list_unresolved",
+              "default": "run_list_unresolved",
+              "title": "Tool",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request_id",
+            "run_id",
+            "index_id",
+            "completed_sequence",
+            "error"
+          ],
+          "title": "RunListUnresolvedFailure",
+          "type": "object"
+        },
+        "RunListUnresolvedParams": {
+          "additionalProperties": false,
+          "properties": {
+            "cursor": {
+              "anyOf": [
+                {
+                  "maxLength": 500,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Cursor"
+            },
+            "limit": {
+              "default": 20,
+              "exclusiveMinimum": 0,
+              "maximum": 100,
+              "title": "Limit",
+              "type": "integer"
+            },
+            "neighbor_request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Neighbor Request Id",
+              "type": "string"
+            },
+            "tool": {
+              "const": "run_list_unresolved",
+              "default": "run_list_unresolved",
+              "title": "Tool",
+              "type": "string"
+            }
+          },
+          "required": [
+            "neighbor_request_id"
+          ],
+          "title": "RunListUnresolvedParams",
+          "type": "object"
+        },
+        "RunListUnresolvedSuccess": {
+          "additionalProperties": false,
+          "properties": {
+            "completed_sequence": {
+              "exclusiveMinimum": 0,
+              "title": "Completed Sequence",
+              "type": "integer"
+            },
+            "completeness": {
+              "$ref": "#/$defs/UnresolvedCompleteness"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "items": {
+              "items": {
+                "$ref": "#/$defs/UnresolvedReference"
+              },
+              "maxItems": 100,
+              "title": "Items",
+              "type": "array"
+            },
+            "kind": {
+              "const": "run_list_unresolved.succeeded",
+              "default": "run_list_unresolved.succeeded",
+              "title": "Kind",
+              "type": "string"
+            },
+            "neighbor_request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Neighbor Request Id",
+              "type": "string"
+            },
+            "page": {
+              "$ref": "#/$defs/OverviewPage"
+            },
+            "request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Request Id",
+              "type": "string"
+            },
+            "run_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Run Id",
+              "type": "string"
+            },
+            "tool": {
+              "const": "run_list_unresolved",
+              "default": "run_list_unresolved",
+              "title": "Tool",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request_id",
+            "run_id",
+            "index_id",
+            "completed_sequence",
+            "neighbor_request_id",
+            "items",
+            "page",
+            "completeness"
+          ],
+          "title": "RunListUnresolvedSuccess",
+          "type": "object"
+        },
         "RunStartedEvent": {
           "additionalProperties": false,
           "properties": {
@@ -12679,6 +14269,75 @@
             "budget"
           ],
           "title": "RunStartedPayload",
+          "type": "object"
+        },
+        "RunUnresolvedSummary": {
+          "additionalProperties": false,
+          "properties": {
+            "detail_hint": {
+              "title": "Detail Hint",
+              "type": "string"
+            },
+            "detail_state": {
+              "enum": [
+                "empty",
+                "omitted",
+                "unknown"
+              ],
+              "title": "Detail State",
+              "type": "string"
+            },
+            "items_in_legacy_full_result": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Items In Legacy Full Result"
+            },
+            "neighbor_request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Neighbor Request Id",
+              "type": "string"
+            },
+            "node_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 40,
+              "minItems": 1,
+              "title": "Node Ids",
+              "type": "array"
+            },
+            "total_indexed_in_scope": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Total Indexed In Scope"
+            }
+          },
+          "required": [
+            "detail_state",
+            "total_indexed_in_scope",
+            "items_in_legacy_full_result",
+            "neighbor_request_id",
+            "node_ids",
+            "detail_hint"
+          ],
+          "title": "RunUnresolvedSummary",
           "type": "object"
         },
         "SearchCodeFailure": {
@@ -13113,7 +14772,9 @@
               "discriminator": {
                 "mapping": {
                   "get_neighbors.succeeded": "#/$defs/GetNeighborsSuccess",
+                  "get_neighbors.summary_succeeded": "#/$defs/GetNeighborsSummarySuccess",
                   "read_source.succeeded": "#/$defs/ReadSourceSuccess",
+                  "run_list_unresolved.succeeded": "#/$defs/RunListUnresolvedSuccess",
                   "search_code.succeeded": "#/$defs/SearchCodeSuccess"
                 },
                 "propertyName": "kind"
@@ -13127,6 +14788,12 @@
                 },
                 {
                   "$ref": "#/$defs/GetNeighborsSuccess"
+                },
+                {
+                  "$ref": "#/$defs/GetNeighborsSummarySuccess"
+                },
+                {
+                  "$ref": "#/$defs/RunListUnresolvedSuccess"
                 }
               ],
               "title": "Result"
@@ -13217,6 +14884,7 @@
                 "mapping": {
                   "get_neighbors.failed": "#/$defs/GetNeighborsFailure",
                   "read_source.failed": "#/$defs/ReadSourceFailure",
+                  "run_list_unresolved.failed": "#/$defs/RunListUnresolvedFailure",
                   "search_code.failed": "#/$defs/SearchCodeFailure"
                 },
                 "propertyName": "kind"
@@ -13230,6 +14898,9 @@
                 },
                 {
                   "$ref": "#/$defs/GetNeighborsFailure"
+                },
+                {
+                  "$ref": "#/$defs/RunListUnresolvedFailure"
                 }
               ],
               "title": "Result"
@@ -13255,6 +14926,8 @@
                 "mapping": {
                   "get_neighbors": "#/$defs/GetNeighborsParams",
                   "read_source": "#/$defs/ReadSourceParams",
+                  "run_get_neighbors": "#/$defs/RunGetNeighborsParams",
+                  "run_list_unresolved": "#/$defs/RunListUnresolvedParams",
                   "search_code": "#/$defs/SearchCodeParams"
                 },
                 "propertyName": "tool"
@@ -13268,6 +14941,12 @@
                 },
                 {
                   "$ref": "#/$defs/GetNeighborsParams"
+                },
+                {
+                  "$ref": "#/$defs/RunGetNeighborsParams"
+                },
+                {
+                  "$ref": "#/$defs/RunListUnresolvedParams"
                 }
               ],
               "title": "Params"
@@ -13343,6 +15022,49 @@
             "request"
           ],
           "title": "ToolStartedPayload",
+          "type": "object"
+        },
+        "UnresolvedCompleteness": {
+          "additionalProperties": false,
+          "properties": {
+            "hint": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Hint"
+            },
+            "reasons": {
+              "items": {
+                "enum": [
+                  "more_items",
+                  "index_unresolved_truncated",
+                  "index_unresolved_coverage_unknown"
+                ],
+                "type": "string"
+              },
+              "title": "Reasons",
+              "type": "array"
+            },
+            "status": {
+              "enum": [
+                "complete",
+                "truncated",
+                "possibly_incomplete"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "title": "UnresolvedCompleteness",
           "type": "object"
         },
         "UnresolvedReference": {
@@ -13461,8 +15183,11 @@
               "mapping": {
                 "get_neighbors.failed": "#/$defs/GetNeighborsFailure",
                 "get_neighbors.succeeded": "#/$defs/GetNeighborsSuccess",
+                "get_neighbors.summary_succeeded": "#/$defs/GetNeighborsSummarySuccess",
                 "read_source.failed": "#/$defs/ReadSourceFailure",
                 "read_source.succeeded": "#/$defs/ReadSourceSuccess",
+                "run_list_unresolved.failed": "#/$defs/RunListUnresolvedFailure",
+                "run_list_unresolved.succeeded": "#/$defs/RunListUnresolvedSuccess",
                 "search_code.failed": "#/$defs/SearchCodeFailure",
                 "search_code.succeeded": "#/$defs/SearchCodeSuccess"
               },
@@ -13486,6 +15211,15 @@
               },
               {
                 "$ref": "#/$defs/GetNeighborsFailure"
+              },
+              {
+                "$ref": "#/$defs/GetNeighborsSummarySuccess"
+              },
+              {
+                "$ref": "#/$defs/RunListUnresolvedSuccess"
+              },
+              {
+                "$ref": "#/$defs/RunListUnresolvedFailure"
               }
             ]
           },
@@ -34209,6 +35943,179 @@
           "title": "GetNeighborsSuccess",
           "type": "object"
         },
+        "GetNeighborsSummarySuccess": {
+          "additionalProperties": false,
+          "description": "Run neighbor graph with unresolved rows explicitly omitted.",
+          "properties": {
+            "completed_sequence": {
+              "exclusiveMinimum": 0,
+              "title": "Completed Sequence",
+              "type": "integer"
+            },
+            "completeness": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/NeighborCompleteness"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "contextual_calls": {
+              "items": {
+                "$ref": "#/$defs/ContextualCall"
+              },
+              "maxItems": 200,
+              "title": "Contextual Calls",
+              "type": "array"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "index_truncated": {
+              "default": false,
+              "title": "Index Truncated",
+              "type": "boolean"
+            },
+            "index_truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Truncation Reason"
+            },
+            "index_unresolved_truncated": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Unresolved Truncated"
+            },
+            "index_unresolved_truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Unresolved Truncation Reason"
+            },
+            "kind": {
+              "const": "get_neighbors.summary_succeeded",
+              "default": "get_neighbors.summary_succeeded",
+              "title": "Kind",
+              "type": "string"
+            },
+            "neighbors": {
+              "items": {
+                "$ref": "#/$defs/Neighbor"
+              },
+              "title": "Neighbors",
+              "type": "array"
+            },
+            "nodes": {
+              "items": {
+                "$ref": "#/$defs/Symbol"
+              },
+              "maxItems": 40,
+              "title": "Nodes",
+              "type": "array"
+            },
+            "possible_unresolved_callers": {
+              "items": {
+                "$ref": "#/$defs/UnresolvedReference"
+              },
+              "maxItems": 10,
+              "title": "Possible Unresolved Callers",
+              "type": "array"
+            },
+            "request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Request Id",
+              "type": "string"
+            },
+            "root": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Symbol"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "run_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Run Id",
+              "type": "string"
+            },
+            "tool": {
+              "const": "get_neighbors",
+              "default": "get_neighbors",
+              "title": "Tool",
+              "type": "string"
+            },
+            "truncated": {
+              "default": false,
+              "title": "Truncated",
+              "type": "boolean"
+            },
+            "truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Truncation Reason"
+            },
+            "unresolved": {
+              "default": null,
+              "title": "Unresolved",
+              "type": "null"
+            },
+            "unresolved_summary": {
+              "$ref": "#/$defs/RunUnresolvedSummary"
+            }
+          },
+          "required": [
+            "request_id",
+            "run_id",
+            "index_id",
+            "completed_sequence",
+            "neighbors",
+            "unresolved_summary"
+          ],
+          "title": "GetNeighborsSummarySuccess",
+          "type": "object"
+        },
         "GraphSnapshot": {
           "additionalProperties": false,
           "properties": {
@@ -34489,6 +36396,54 @@
             "status"
           ],
           "title": "NeighborCompleteness",
+          "type": "object"
+        },
+        "OverviewPage": {
+          "additionalProperties": false,
+          "properties": {
+            "next_cursor": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Next Cursor"
+            },
+            "order": {
+              "maxLength": 100,
+              "minLength": 1,
+              "title": "Order",
+              "type": "string"
+            },
+            "returned": {
+              "minimum": 0,
+              "title": "Returned",
+              "type": "integer"
+            },
+            "total": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Total"
+            }
+          },
+          "required": [
+            "returned",
+            "total",
+            "order"
+          ],
+          "title": "OverviewPage",
           "type": "object"
         },
         "ReadSourceFailure": {
@@ -35131,6 +37086,61 @@
           "title": "RunFailedPayload",
           "type": "object"
         },
+        "RunGetNeighborsParams": {
+          "additionalProperties": false,
+          "properties": {
+            "depth": {
+              "exclusiveMinimum": 0,
+              "maximum": 2,
+              "title": "Depth",
+              "type": "integer"
+            },
+            "detail": {
+              "default": "full",
+              "enum": [
+                "summary",
+                "full"
+              ],
+              "title": "Detail",
+              "type": "string"
+            },
+            "direction": {
+              "enum": [
+                "callers",
+                "callees",
+                "both"
+              ],
+              "title": "Direction",
+              "type": "string"
+            },
+            "limit": {
+              "exclusiveMinimum": 0,
+              "maximum": 40,
+              "title": "Limit",
+              "type": "integer"
+            },
+            "symbol_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Symbol Id",
+              "type": "string"
+            },
+            "tool": {
+              "const": "run_get_neighbors",
+              "default": "run_get_neighbors",
+              "title": "Tool",
+              "type": "string"
+            }
+          },
+          "required": [
+            "symbol_id",
+            "direction",
+            "depth",
+            "limit"
+          ],
+          "title": "RunGetNeighborsParams",
+          "type": "object"
+        },
         "RunInterruptedEvent": {
           "additionalProperties": false,
           "properties": {
@@ -35189,6 +37199,172 @@
             "reason"
           ],
           "title": "RunInterruptedPayload",
+          "type": "object"
+        },
+        "RunListUnresolvedFailure": {
+          "additionalProperties": false,
+          "properties": {
+            "completed_sequence": {
+              "exclusiveMinimum": 0,
+              "title": "Completed Sequence",
+              "type": "integer"
+            },
+            "error": {
+              "$ref": "#/$defs/ToolError"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "kind": {
+              "const": "run_list_unresolved.failed",
+              "default": "run_list_unresolved.failed",
+              "title": "Kind",
+              "type": "string"
+            },
+            "request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Request Id",
+              "type": "string"
+            },
+            "run_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Run Id",
+              "type": "string"
+            },
+            "tool": {
+              "const": "run_list_unresolved",
+              "default": "run_list_unresolved",
+              "title": "Tool",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request_id",
+            "run_id",
+            "index_id",
+            "completed_sequence",
+            "error"
+          ],
+          "title": "RunListUnresolvedFailure",
+          "type": "object"
+        },
+        "RunListUnresolvedParams": {
+          "additionalProperties": false,
+          "properties": {
+            "cursor": {
+              "anyOf": [
+                {
+                  "maxLength": 500,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Cursor"
+            },
+            "limit": {
+              "default": 20,
+              "exclusiveMinimum": 0,
+              "maximum": 100,
+              "title": "Limit",
+              "type": "integer"
+            },
+            "neighbor_request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Neighbor Request Id",
+              "type": "string"
+            },
+            "tool": {
+              "const": "run_list_unresolved",
+              "default": "run_list_unresolved",
+              "title": "Tool",
+              "type": "string"
+            }
+          },
+          "required": [
+            "neighbor_request_id"
+          ],
+          "title": "RunListUnresolvedParams",
+          "type": "object"
+        },
+        "RunListUnresolvedSuccess": {
+          "additionalProperties": false,
+          "properties": {
+            "completed_sequence": {
+              "exclusiveMinimum": 0,
+              "title": "Completed Sequence",
+              "type": "integer"
+            },
+            "completeness": {
+              "$ref": "#/$defs/UnresolvedCompleteness"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "items": {
+              "items": {
+                "$ref": "#/$defs/UnresolvedReference"
+              },
+              "maxItems": 100,
+              "title": "Items",
+              "type": "array"
+            },
+            "kind": {
+              "const": "run_list_unresolved.succeeded",
+              "default": "run_list_unresolved.succeeded",
+              "title": "Kind",
+              "type": "string"
+            },
+            "neighbor_request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Neighbor Request Id",
+              "type": "string"
+            },
+            "page": {
+              "$ref": "#/$defs/OverviewPage"
+            },
+            "request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Request Id",
+              "type": "string"
+            },
+            "run_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Run Id",
+              "type": "string"
+            },
+            "tool": {
+              "const": "run_list_unresolved",
+              "default": "run_list_unresolved",
+              "title": "Tool",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request_id",
+            "run_id",
+            "index_id",
+            "completed_sequence",
+            "neighbor_request_id",
+            "items",
+            "page",
+            "completeness"
+          ],
+          "title": "RunListUnresolvedSuccess",
           "type": "object"
         },
         "RunStartedEvent": {
@@ -35329,6 +37505,75 @@
             "budget"
           ],
           "title": "RunStartedPayload",
+          "type": "object"
+        },
+        "RunUnresolvedSummary": {
+          "additionalProperties": false,
+          "properties": {
+            "detail_hint": {
+              "title": "Detail Hint",
+              "type": "string"
+            },
+            "detail_state": {
+              "enum": [
+                "empty",
+                "omitted",
+                "unknown"
+              ],
+              "title": "Detail State",
+              "type": "string"
+            },
+            "items_in_legacy_full_result": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Items In Legacy Full Result"
+            },
+            "neighbor_request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Neighbor Request Id",
+              "type": "string"
+            },
+            "node_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 40,
+              "minItems": 1,
+              "title": "Node Ids",
+              "type": "array"
+            },
+            "total_indexed_in_scope": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Total Indexed In Scope"
+            }
+          },
+          "required": [
+            "detail_state",
+            "total_indexed_in_scope",
+            "items_in_legacy_full_result",
+            "neighbor_request_id",
+            "node_ids",
+            "detail_hint"
+          ],
+          "title": "RunUnresolvedSummary",
           "type": "object"
         },
         "SearchCodeFailure": {
@@ -35705,7 +37950,9 @@
               "discriminator": {
                 "mapping": {
                   "get_neighbors.succeeded": "#/$defs/GetNeighborsSuccess",
+                  "get_neighbors.summary_succeeded": "#/$defs/GetNeighborsSummarySuccess",
                   "read_source.succeeded": "#/$defs/ReadSourceSuccess",
+                  "run_list_unresolved.succeeded": "#/$defs/RunListUnresolvedSuccess",
                   "search_code.succeeded": "#/$defs/SearchCodeSuccess"
                 },
                 "propertyName": "kind"
@@ -35719,6 +37966,12 @@
                 },
                 {
                   "$ref": "#/$defs/GetNeighborsSuccess"
+                },
+                {
+                  "$ref": "#/$defs/GetNeighborsSummarySuccess"
+                },
+                {
+                  "$ref": "#/$defs/RunListUnresolvedSuccess"
                 }
               ],
               "title": "Result"
@@ -35809,6 +38062,7 @@
                 "mapping": {
                   "get_neighbors.failed": "#/$defs/GetNeighborsFailure",
                   "read_source.failed": "#/$defs/ReadSourceFailure",
+                  "run_list_unresolved.failed": "#/$defs/RunListUnresolvedFailure",
                   "search_code.failed": "#/$defs/SearchCodeFailure"
                 },
                 "propertyName": "kind"
@@ -35822,6 +38076,9 @@
                 },
                 {
                   "$ref": "#/$defs/GetNeighborsFailure"
+                },
+                {
+                  "$ref": "#/$defs/RunListUnresolvedFailure"
                 }
               ],
               "title": "Result"
@@ -35847,6 +38104,8 @@
                 "mapping": {
                   "get_neighbors": "#/$defs/GetNeighborsParams",
                   "read_source": "#/$defs/ReadSourceParams",
+                  "run_get_neighbors": "#/$defs/RunGetNeighborsParams",
+                  "run_list_unresolved": "#/$defs/RunListUnresolvedParams",
                   "search_code": "#/$defs/SearchCodeParams"
                 },
                 "propertyName": "tool"
@@ -35860,6 +38119,12 @@
                 },
                 {
                   "$ref": "#/$defs/GetNeighborsParams"
+                },
+                {
+                  "$ref": "#/$defs/RunGetNeighborsParams"
+                },
+                {
+                  "$ref": "#/$defs/RunListUnresolvedParams"
                 }
               ],
               "title": "Params"
@@ -35935,6 +38200,49 @@
             "request"
           ],
           "title": "ToolStartedPayload",
+          "type": "object"
+        },
+        "UnresolvedCompleteness": {
+          "additionalProperties": false,
+          "properties": {
+            "hint": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Hint"
+            },
+            "reasons": {
+              "items": {
+                "enum": [
+                  "more_items",
+                  "index_unresolved_truncated",
+                  "index_unresolved_coverage_unknown"
+                ],
+                "type": "string"
+              },
+              "title": "Reasons",
+              "type": "array"
+            },
+            "status": {
+              "enum": [
+                "complete",
+                "truncated",
+                "possibly_incomplete"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "title": "UnresolvedCompleteness",
           "type": "object"
         },
         "UnresolvedReference": {
@@ -40212,6 +42520,179 @@
           "title": "GetNeighborsSuccess",
           "type": "object"
         },
+        "GetNeighborsSummarySuccess": {
+          "additionalProperties": false,
+          "description": "Run neighbor graph with unresolved rows explicitly omitted.",
+          "properties": {
+            "completed_sequence": {
+              "exclusiveMinimum": 0,
+              "title": "Completed Sequence",
+              "type": "integer"
+            },
+            "completeness": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/NeighborCompleteness"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "contextual_calls": {
+              "items": {
+                "$ref": "#/$defs/ContextualCall"
+              },
+              "maxItems": 200,
+              "title": "Contextual Calls",
+              "type": "array"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "index_truncated": {
+              "default": false,
+              "title": "Index Truncated",
+              "type": "boolean"
+            },
+            "index_truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Truncation Reason"
+            },
+            "index_unresolved_truncated": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Unresolved Truncated"
+            },
+            "index_unresolved_truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Unresolved Truncation Reason"
+            },
+            "kind": {
+              "const": "get_neighbors.summary_succeeded",
+              "default": "get_neighbors.summary_succeeded",
+              "title": "Kind",
+              "type": "string"
+            },
+            "neighbors": {
+              "items": {
+                "$ref": "#/$defs/Neighbor"
+              },
+              "title": "Neighbors",
+              "type": "array"
+            },
+            "nodes": {
+              "items": {
+                "$ref": "#/$defs/Symbol"
+              },
+              "maxItems": 40,
+              "title": "Nodes",
+              "type": "array"
+            },
+            "possible_unresolved_callers": {
+              "items": {
+                "$ref": "#/$defs/UnresolvedReference"
+              },
+              "maxItems": 10,
+              "title": "Possible Unresolved Callers",
+              "type": "array"
+            },
+            "request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Request Id",
+              "type": "string"
+            },
+            "root": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Symbol"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "run_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Run Id",
+              "type": "string"
+            },
+            "tool": {
+              "const": "get_neighbors",
+              "default": "get_neighbors",
+              "title": "Tool",
+              "type": "string"
+            },
+            "truncated": {
+              "default": false,
+              "title": "Truncated",
+              "type": "boolean"
+            },
+            "truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Truncation Reason"
+            },
+            "unresolved": {
+              "default": null,
+              "title": "Unresolved",
+              "type": "null"
+            },
+            "unresolved_summary": {
+              "$ref": "#/$defs/RunUnresolvedSummary"
+            }
+          },
+          "required": [
+            "request_id",
+            "run_id",
+            "index_id",
+            "completed_sequence",
+            "neighbors",
+            "unresolved_summary"
+          ],
+          "title": "GetNeighborsSummarySuccess",
+          "type": "object"
+        },
         "McpError": {
           "additionalProperties": false,
           "description": "Domain failure returned inside a read-only MCP tool result.",
@@ -40381,6 +42862,54 @@
           "title": "NeighborCompleteness",
           "type": "object"
         },
+        "OverviewPage": {
+          "additionalProperties": false,
+          "properties": {
+            "next_cursor": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Next Cursor"
+            },
+            "order": {
+              "maxLength": 100,
+              "minLength": 1,
+              "title": "Order",
+              "type": "string"
+            },
+            "returned": {
+              "minimum": 0,
+              "title": "Returned",
+              "type": "integer"
+            },
+            "total": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Total"
+            }
+          },
+          "required": [
+            "returned",
+            "total",
+            "order"
+          ],
+          "title": "OverviewPage",
+          "type": "object"
+        },
         "ReadSourceFailure": {
           "additionalProperties": false,
           "properties": {
@@ -40485,6 +43014,130 @@
           "title": "ReadSourceSuccess",
           "type": "object"
         },
+        "RunListUnresolvedFailure": {
+          "additionalProperties": false,
+          "properties": {
+            "completed_sequence": {
+              "exclusiveMinimum": 0,
+              "title": "Completed Sequence",
+              "type": "integer"
+            },
+            "error": {
+              "$ref": "#/$defs/ToolError"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "kind": {
+              "const": "run_list_unresolved.failed",
+              "default": "run_list_unresolved.failed",
+              "title": "Kind",
+              "type": "string"
+            },
+            "request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Request Id",
+              "type": "string"
+            },
+            "run_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Run Id",
+              "type": "string"
+            },
+            "tool": {
+              "const": "run_list_unresolved",
+              "default": "run_list_unresolved",
+              "title": "Tool",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request_id",
+            "run_id",
+            "index_id",
+            "completed_sequence",
+            "error"
+          ],
+          "title": "RunListUnresolvedFailure",
+          "type": "object"
+        },
+        "RunListUnresolvedSuccess": {
+          "additionalProperties": false,
+          "properties": {
+            "completed_sequence": {
+              "exclusiveMinimum": 0,
+              "title": "Completed Sequence",
+              "type": "integer"
+            },
+            "completeness": {
+              "$ref": "#/$defs/UnresolvedCompleteness"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "items": {
+              "items": {
+                "$ref": "#/$defs/UnresolvedReference"
+              },
+              "maxItems": 100,
+              "title": "Items",
+              "type": "array"
+            },
+            "kind": {
+              "const": "run_list_unresolved.succeeded",
+              "default": "run_list_unresolved.succeeded",
+              "title": "Kind",
+              "type": "string"
+            },
+            "neighbor_request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Neighbor Request Id",
+              "type": "string"
+            },
+            "page": {
+              "$ref": "#/$defs/OverviewPage"
+            },
+            "request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Request Id",
+              "type": "string"
+            },
+            "run_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Run Id",
+              "type": "string"
+            },
+            "tool": {
+              "const": "run_list_unresolved",
+              "default": "run_list_unresolved",
+              "title": "Tool",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request_id",
+            "run_id",
+            "index_id",
+            "completed_sequence",
+            "neighbor_request_id",
+            "items",
+            "page",
+            "completeness"
+          ],
+          "title": "RunListUnresolvedSuccess",
+          "type": "object"
+        },
         "RunToolResultsResponse": {
           "additionalProperties": false,
           "description": "A bounded page of persisted fixture tool results.",
@@ -40519,8 +43172,11 @@
                   "mapping": {
                     "get_neighbors.failed": "#/$defs/GetNeighborsFailure",
                     "get_neighbors.succeeded": "#/$defs/GetNeighborsSuccess",
+                    "get_neighbors.summary_succeeded": "#/$defs/GetNeighborsSummarySuccess",
                     "read_source.failed": "#/$defs/ReadSourceFailure",
                     "read_source.succeeded": "#/$defs/ReadSourceSuccess",
+                    "run_list_unresolved.failed": "#/$defs/RunListUnresolvedFailure",
+                    "run_list_unresolved.succeeded": "#/$defs/RunListUnresolvedSuccess",
                     "search_code.failed": "#/$defs/SearchCodeFailure",
                     "search_code.succeeded": "#/$defs/SearchCodeSuccess"
                   },
@@ -40544,6 +43200,15 @@
                   },
                   {
                     "$ref": "#/$defs/GetNeighborsFailure"
+                  },
+                  {
+                    "$ref": "#/$defs/GetNeighborsSummarySuccess"
+                  },
+                  {
+                    "$ref": "#/$defs/RunListUnresolvedSuccess"
+                  },
+                  {
+                    "$ref": "#/$defs/RunListUnresolvedFailure"
                   }
                 ]
               },
@@ -40576,6 +43241,75 @@
             "run_id"
           ],
           "title": "RunToolResultsResponse",
+          "type": "object"
+        },
+        "RunUnresolvedSummary": {
+          "additionalProperties": false,
+          "properties": {
+            "detail_hint": {
+              "title": "Detail Hint",
+              "type": "string"
+            },
+            "detail_state": {
+              "enum": [
+                "empty",
+                "omitted",
+                "unknown"
+              ],
+              "title": "Detail State",
+              "type": "string"
+            },
+            "items_in_legacy_full_result": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Items In Legacy Full Result"
+            },
+            "neighbor_request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Neighbor Request Id",
+              "type": "string"
+            },
+            "node_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 40,
+              "minItems": 1,
+              "title": "Node Ids",
+              "type": "array"
+            },
+            "total_indexed_in_scope": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Total Indexed In Scope"
+            }
+          },
+          "required": [
+            "detail_state",
+            "total_indexed_in_scope",
+            "items_in_legacy_full_result",
+            "neighbor_request_id",
+            "node_ids",
+            "detail_hint"
+          ],
+          "title": "RunUnresolvedSummary",
           "type": "object"
         },
         "SearchCodeFailure": {
@@ -40852,6 +43586,49 @@
             "message"
           ],
           "title": "ToolError",
+          "type": "object"
+        },
+        "UnresolvedCompleteness": {
+          "additionalProperties": false,
+          "properties": {
+            "hint": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Hint"
+            },
+            "reasons": {
+              "items": {
+                "enum": [
+                  "more_items",
+                  "index_unresolved_truncated",
+                  "index_unresolved_coverage_unknown"
+                ],
+                "type": "string"
+              },
+              "title": "Reasons",
+              "type": "array"
+            },
+            "status": {
+              "enum": [
+                "complete",
+                "truncated",
+                "possibly_incomplete"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "title": "UnresolvedCompleteness",
           "type": "object"
         },
         "UnresolvedReference": {
@@ -50239,6 +53016,179 @@
           "title": "GetNeighborsSuccess",
           "type": "object"
         },
+        "GetNeighborsSummarySuccess": {
+          "additionalProperties": false,
+          "description": "Run neighbor graph with unresolved rows explicitly omitted.",
+          "properties": {
+            "completed_sequence": {
+              "exclusiveMinimum": 0,
+              "title": "Completed Sequence",
+              "type": "integer"
+            },
+            "completeness": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/NeighborCompleteness"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "contextual_calls": {
+              "items": {
+                "$ref": "#/$defs/ContextualCall"
+              },
+              "maxItems": 200,
+              "title": "Contextual Calls",
+              "type": "array"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "index_truncated": {
+              "default": false,
+              "title": "Index Truncated",
+              "type": "boolean"
+            },
+            "index_truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Truncation Reason"
+            },
+            "index_unresolved_truncated": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Unresolved Truncated"
+            },
+            "index_unresolved_truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Unresolved Truncation Reason"
+            },
+            "kind": {
+              "const": "get_neighbors.summary_succeeded",
+              "default": "get_neighbors.summary_succeeded",
+              "title": "Kind",
+              "type": "string"
+            },
+            "neighbors": {
+              "items": {
+                "$ref": "#/$defs/Neighbor"
+              },
+              "title": "Neighbors",
+              "type": "array"
+            },
+            "nodes": {
+              "items": {
+                "$ref": "#/$defs/Symbol"
+              },
+              "maxItems": 40,
+              "title": "Nodes",
+              "type": "array"
+            },
+            "possible_unresolved_callers": {
+              "items": {
+                "$ref": "#/$defs/UnresolvedReference"
+              },
+              "maxItems": 10,
+              "title": "Possible Unresolved Callers",
+              "type": "array"
+            },
+            "request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Request Id",
+              "type": "string"
+            },
+            "root": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Symbol"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "run_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Run Id",
+              "type": "string"
+            },
+            "tool": {
+              "const": "get_neighbors",
+              "default": "get_neighbors",
+              "title": "Tool",
+              "type": "string"
+            },
+            "truncated": {
+              "default": false,
+              "title": "Truncated",
+              "type": "boolean"
+            },
+            "truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Truncation Reason"
+            },
+            "unresolved": {
+              "default": null,
+              "title": "Unresolved",
+              "type": "null"
+            },
+            "unresolved_summary": {
+              "$ref": "#/$defs/RunUnresolvedSummary"
+            }
+          },
+          "required": [
+            "request_id",
+            "run_id",
+            "index_id",
+            "completed_sequence",
+            "neighbors",
+            "unresolved_summary"
+          ],
+          "title": "GetNeighborsSummarySuccess",
+          "type": "object"
+        },
         "GraphSnapshot": {
           "additionalProperties": false,
           "properties": {
@@ -50458,6 +53408,54 @@
             "status"
           ],
           "title": "NeighborCompleteness",
+          "type": "object"
+        },
+        "OverviewPage": {
+          "additionalProperties": false,
+          "properties": {
+            "next_cursor": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Next Cursor"
+            },
+            "order": {
+              "maxLength": 100,
+              "minLength": 1,
+              "title": "Order",
+              "type": "string"
+            },
+            "returned": {
+              "minimum": 0,
+              "title": "Returned",
+              "type": "integer"
+            },
+            "total": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Total"
+            }
+          },
+          "required": [
+            "returned",
+            "total",
+            "order"
+          ],
+          "title": "OverviewPage",
           "type": "object"
         },
         "ReadSourceFailure": {
@@ -50987,6 +53985,61 @@
           "title": "RunFailedPayload",
           "type": "object"
         },
+        "RunGetNeighborsParams": {
+          "additionalProperties": false,
+          "properties": {
+            "depth": {
+              "exclusiveMinimum": 0,
+              "maximum": 2,
+              "title": "Depth",
+              "type": "integer"
+            },
+            "detail": {
+              "default": "full",
+              "enum": [
+                "summary",
+                "full"
+              ],
+              "title": "Detail",
+              "type": "string"
+            },
+            "direction": {
+              "enum": [
+                "callers",
+                "callees",
+                "both"
+              ],
+              "title": "Direction",
+              "type": "string"
+            },
+            "limit": {
+              "exclusiveMinimum": 0,
+              "maximum": 40,
+              "title": "Limit",
+              "type": "integer"
+            },
+            "symbol_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Symbol Id",
+              "type": "string"
+            },
+            "tool": {
+              "const": "run_get_neighbors",
+              "default": "run_get_neighbors",
+              "title": "Tool",
+              "type": "string"
+            }
+          },
+          "required": [
+            "symbol_id",
+            "direction",
+            "depth",
+            "limit"
+          ],
+          "title": "RunGetNeighborsParams",
+          "type": "object"
+        },
         "RunInterruptedEvent": {
           "additionalProperties": false,
           "properties": {
@@ -51045,6 +54098,172 @@
             "reason"
           ],
           "title": "RunInterruptedPayload",
+          "type": "object"
+        },
+        "RunListUnresolvedFailure": {
+          "additionalProperties": false,
+          "properties": {
+            "completed_sequence": {
+              "exclusiveMinimum": 0,
+              "title": "Completed Sequence",
+              "type": "integer"
+            },
+            "error": {
+              "$ref": "#/$defs/ToolError"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "kind": {
+              "const": "run_list_unresolved.failed",
+              "default": "run_list_unresolved.failed",
+              "title": "Kind",
+              "type": "string"
+            },
+            "request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Request Id",
+              "type": "string"
+            },
+            "run_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Run Id",
+              "type": "string"
+            },
+            "tool": {
+              "const": "run_list_unresolved",
+              "default": "run_list_unresolved",
+              "title": "Tool",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request_id",
+            "run_id",
+            "index_id",
+            "completed_sequence",
+            "error"
+          ],
+          "title": "RunListUnresolvedFailure",
+          "type": "object"
+        },
+        "RunListUnresolvedParams": {
+          "additionalProperties": false,
+          "properties": {
+            "cursor": {
+              "anyOf": [
+                {
+                  "maxLength": 500,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Cursor"
+            },
+            "limit": {
+              "default": 20,
+              "exclusiveMinimum": 0,
+              "maximum": 100,
+              "title": "Limit",
+              "type": "integer"
+            },
+            "neighbor_request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Neighbor Request Id",
+              "type": "string"
+            },
+            "tool": {
+              "const": "run_list_unresolved",
+              "default": "run_list_unresolved",
+              "title": "Tool",
+              "type": "string"
+            }
+          },
+          "required": [
+            "neighbor_request_id"
+          ],
+          "title": "RunListUnresolvedParams",
+          "type": "object"
+        },
+        "RunListUnresolvedSuccess": {
+          "additionalProperties": false,
+          "properties": {
+            "completed_sequence": {
+              "exclusiveMinimum": 0,
+              "title": "Completed Sequence",
+              "type": "integer"
+            },
+            "completeness": {
+              "$ref": "#/$defs/UnresolvedCompleteness"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "items": {
+              "items": {
+                "$ref": "#/$defs/UnresolvedReference"
+              },
+              "maxItems": 100,
+              "title": "Items",
+              "type": "array"
+            },
+            "kind": {
+              "const": "run_list_unresolved.succeeded",
+              "default": "run_list_unresolved.succeeded",
+              "title": "Kind",
+              "type": "string"
+            },
+            "neighbor_request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Neighbor Request Id",
+              "type": "string"
+            },
+            "page": {
+              "$ref": "#/$defs/OverviewPage"
+            },
+            "request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Request Id",
+              "type": "string"
+            },
+            "run_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Run Id",
+              "type": "string"
+            },
+            "tool": {
+              "const": "run_list_unresolved",
+              "default": "run_list_unresolved",
+              "title": "Tool",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request_id",
+            "run_id",
+            "index_id",
+            "completed_sequence",
+            "neighbor_request_id",
+            "items",
+            "page",
+            "completeness"
+          ],
+          "title": "RunListUnresolvedSuccess",
           "type": "object"
         },
         "RunStartedEvent": {
@@ -51185,6 +54404,75 @@
             "budget"
           ],
           "title": "RunStartedPayload",
+          "type": "object"
+        },
+        "RunUnresolvedSummary": {
+          "additionalProperties": false,
+          "properties": {
+            "detail_hint": {
+              "title": "Detail Hint",
+              "type": "string"
+            },
+            "detail_state": {
+              "enum": [
+                "empty",
+                "omitted",
+                "unknown"
+              ],
+              "title": "Detail State",
+              "type": "string"
+            },
+            "items_in_legacy_full_result": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Items In Legacy Full Result"
+            },
+            "neighbor_request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Neighbor Request Id",
+              "type": "string"
+            },
+            "node_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 40,
+              "minItems": 1,
+              "title": "Node Ids",
+              "type": "array"
+            },
+            "total_indexed_in_scope": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Total Indexed In Scope"
+            }
+          },
+          "required": [
+            "detail_state",
+            "total_indexed_in_scope",
+            "items_in_legacy_full_result",
+            "neighbor_request_id",
+            "node_ids",
+            "detail_hint"
+          ],
+          "title": "RunUnresolvedSummary",
           "type": "object"
         },
         "SearchCodeFailure": {
@@ -51561,7 +54849,9 @@
               "discriminator": {
                 "mapping": {
                   "get_neighbors.succeeded": "#/$defs/GetNeighborsSuccess",
+                  "get_neighbors.summary_succeeded": "#/$defs/GetNeighborsSummarySuccess",
                   "read_source.succeeded": "#/$defs/ReadSourceSuccess",
+                  "run_list_unresolved.succeeded": "#/$defs/RunListUnresolvedSuccess",
                   "search_code.succeeded": "#/$defs/SearchCodeSuccess"
                 },
                 "propertyName": "kind"
@@ -51575,6 +54865,12 @@
                 },
                 {
                   "$ref": "#/$defs/GetNeighborsSuccess"
+                },
+                {
+                  "$ref": "#/$defs/GetNeighborsSummarySuccess"
+                },
+                {
+                  "$ref": "#/$defs/RunListUnresolvedSuccess"
                 }
               ],
               "title": "Result"
@@ -51665,6 +54961,7 @@
                 "mapping": {
                   "get_neighbors.failed": "#/$defs/GetNeighborsFailure",
                   "read_source.failed": "#/$defs/ReadSourceFailure",
+                  "run_list_unresolved.failed": "#/$defs/RunListUnresolvedFailure",
                   "search_code.failed": "#/$defs/SearchCodeFailure"
                 },
                 "propertyName": "kind"
@@ -51678,6 +54975,9 @@
                 },
                 {
                   "$ref": "#/$defs/GetNeighborsFailure"
+                },
+                {
+                  "$ref": "#/$defs/RunListUnresolvedFailure"
                 }
               ],
               "title": "Result"
@@ -51703,6 +55003,8 @@
                 "mapping": {
                   "get_neighbors": "#/$defs/GetNeighborsParams",
                   "read_source": "#/$defs/ReadSourceParams",
+                  "run_get_neighbors": "#/$defs/RunGetNeighborsParams",
+                  "run_list_unresolved": "#/$defs/RunListUnresolvedParams",
                   "search_code": "#/$defs/SearchCodeParams"
                 },
                 "propertyName": "tool"
@@ -51716,6 +55018,12 @@
                 },
                 {
                   "$ref": "#/$defs/GetNeighborsParams"
+                },
+                {
+                  "$ref": "#/$defs/RunGetNeighborsParams"
+                },
+                {
+                  "$ref": "#/$defs/RunListUnresolvedParams"
                 }
               ],
               "title": "Params"
@@ -51791,6 +55099,49 @@
             "request"
           ],
           "title": "ToolStartedPayload",
+          "type": "object"
+        },
+        "UnresolvedCompleteness": {
+          "additionalProperties": false,
+          "properties": {
+            "hint": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Hint"
+            },
+            "reasons": {
+              "items": {
+                "enum": [
+                  "more_items",
+                  "index_unresolved_truncated",
+                  "index_unresolved_coverage_unknown"
+                ],
+                "type": "string"
+              },
+              "title": "Reasons",
+              "type": "array"
+            },
+            "status": {
+              "enum": [
+                "complete",
+                "truncated",
+                "possibly_incomplete"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "title": "UnresolvedCompleteness",
           "type": "object"
         },
         "UnresolvedReference": {
@@ -54264,6 +57615,179 @@
           "title": "GetNeighborsSuccess",
           "type": "object"
         },
+        "GetNeighborsSummarySuccess": {
+          "additionalProperties": false,
+          "description": "Run neighbor graph with unresolved rows explicitly omitted.",
+          "properties": {
+            "completed_sequence": {
+              "exclusiveMinimum": 0,
+              "title": "Completed Sequence",
+              "type": "integer"
+            },
+            "completeness": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/NeighborCompleteness"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "contextual_calls": {
+              "items": {
+                "$ref": "#/$defs/ContextualCall"
+              },
+              "maxItems": 200,
+              "title": "Contextual Calls",
+              "type": "array"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "index_truncated": {
+              "default": false,
+              "title": "Index Truncated",
+              "type": "boolean"
+            },
+            "index_truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Truncation Reason"
+            },
+            "index_unresolved_truncated": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Unresolved Truncated"
+            },
+            "index_unresolved_truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Unresolved Truncation Reason"
+            },
+            "kind": {
+              "const": "get_neighbors.summary_succeeded",
+              "default": "get_neighbors.summary_succeeded",
+              "title": "Kind",
+              "type": "string"
+            },
+            "neighbors": {
+              "items": {
+                "$ref": "#/$defs/Neighbor"
+              },
+              "title": "Neighbors",
+              "type": "array"
+            },
+            "nodes": {
+              "items": {
+                "$ref": "#/$defs/Symbol"
+              },
+              "maxItems": 40,
+              "title": "Nodes",
+              "type": "array"
+            },
+            "possible_unresolved_callers": {
+              "items": {
+                "$ref": "#/$defs/UnresolvedReference"
+              },
+              "maxItems": 10,
+              "title": "Possible Unresolved Callers",
+              "type": "array"
+            },
+            "request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Request Id",
+              "type": "string"
+            },
+            "root": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Symbol"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "run_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Run Id",
+              "type": "string"
+            },
+            "tool": {
+              "const": "get_neighbors",
+              "default": "get_neighbors",
+              "title": "Tool",
+              "type": "string"
+            },
+            "truncated": {
+              "default": false,
+              "title": "Truncated",
+              "type": "boolean"
+            },
+            "truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Truncation Reason"
+            },
+            "unresolved": {
+              "default": null,
+              "title": "Unresolved",
+              "type": "null"
+            },
+            "unresolved_summary": {
+              "$ref": "#/$defs/RunUnresolvedSummary"
+            }
+          },
+          "required": [
+            "request_id",
+            "run_id",
+            "index_id",
+            "completed_sequence",
+            "neighbors",
+            "unresolved_summary"
+          ],
+          "title": "GetNeighborsSummarySuccess",
+          "type": "object"
+        },
         "Neighbor": {
           "additionalProperties": false,
           "properties": {
@@ -54372,6 +57896,54 @@
           "title": "NeighborCompleteness",
           "type": "object"
         },
+        "OverviewPage": {
+          "additionalProperties": false,
+          "properties": {
+            "next_cursor": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Next Cursor"
+            },
+            "order": {
+              "maxLength": 100,
+              "minLength": 1,
+              "title": "Order",
+              "type": "string"
+            },
+            "returned": {
+              "minimum": 0,
+              "title": "Returned",
+              "type": "integer"
+            },
+            "total": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Total"
+            }
+          },
+          "required": [
+            "returned",
+            "total",
+            "order"
+          ],
+          "title": "OverviewPage",
+          "type": "object"
+        },
         "ReadSourceFailure": {
           "additionalProperties": false,
           "properties": {
@@ -54474,6 +58046,199 @@
             "evidence"
           ],
           "title": "ReadSourceSuccess",
+          "type": "object"
+        },
+        "RunListUnresolvedFailure": {
+          "additionalProperties": false,
+          "properties": {
+            "completed_sequence": {
+              "exclusiveMinimum": 0,
+              "title": "Completed Sequence",
+              "type": "integer"
+            },
+            "error": {
+              "$ref": "#/$defs/ToolError"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "kind": {
+              "const": "run_list_unresolved.failed",
+              "default": "run_list_unresolved.failed",
+              "title": "Kind",
+              "type": "string"
+            },
+            "request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Request Id",
+              "type": "string"
+            },
+            "run_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Run Id",
+              "type": "string"
+            },
+            "tool": {
+              "const": "run_list_unresolved",
+              "default": "run_list_unresolved",
+              "title": "Tool",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request_id",
+            "run_id",
+            "index_id",
+            "completed_sequence",
+            "error"
+          ],
+          "title": "RunListUnresolvedFailure",
+          "type": "object"
+        },
+        "RunListUnresolvedSuccess": {
+          "additionalProperties": false,
+          "properties": {
+            "completed_sequence": {
+              "exclusiveMinimum": 0,
+              "title": "Completed Sequence",
+              "type": "integer"
+            },
+            "completeness": {
+              "$ref": "#/$defs/UnresolvedCompleteness"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "items": {
+              "items": {
+                "$ref": "#/$defs/UnresolvedReference"
+              },
+              "maxItems": 100,
+              "title": "Items",
+              "type": "array"
+            },
+            "kind": {
+              "const": "run_list_unresolved.succeeded",
+              "default": "run_list_unresolved.succeeded",
+              "title": "Kind",
+              "type": "string"
+            },
+            "neighbor_request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Neighbor Request Id",
+              "type": "string"
+            },
+            "page": {
+              "$ref": "#/$defs/OverviewPage"
+            },
+            "request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Request Id",
+              "type": "string"
+            },
+            "run_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Run Id",
+              "type": "string"
+            },
+            "tool": {
+              "const": "run_list_unresolved",
+              "default": "run_list_unresolved",
+              "title": "Tool",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request_id",
+            "run_id",
+            "index_id",
+            "completed_sequence",
+            "neighbor_request_id",
+            "items",
+            "page",
+            "completeness"
+          ],
+          "title": "RunListUnresolvedSuccess",
+          "type": "object"
+        },
+        "RunUnresolvedSummary": {
+          "additionalProperties": false,
+          "properties": {
+            "detail_hint": {
+              "title": "Detail Hint",
+              "type": "string"
+            },
+            "detail_state": {
+              "enum": [
+                "empty",
+                "omitted",
+                "unknown"
+              ],
+              "title": "Detail State",
+              "type": "string"
+            },
+            "items_in_legacy_full_result": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Items In Legacy Full Result"
+            },
+            "neighbor_request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Neighbor Request Id",
+              "type": "string"
+            },
+            "node_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 40,
+              "minItems": 1,
+              "title": "Node Ids",
+              "type": "array"
+            },
+            "total_indexed_in_scope": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Total Indexed In Scope"
+            }
+          },
+          "required": [
+            "detail_state",
+            "total_indexed_in_scope",
+            "items_in_legacy_full_result",
+            "neighbor_request_id",
+            "node_ids",
+            "detail_hint"
+          ],
+          "title": "RunUnresolvedSummary",
           "type": "object"
         },
         "SearchCodeFailure": {
@@ -54752,6 +58517,49 @@
           "title": "ToolError",
           "type": "object"
         },
+        "UnresolvedCompleteness": {
+          "additionalProperties": false,
+          "properties": {
+            "hint": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Hint"
+            },
+            "reasons": {
+              "items": {
+                "enum": [
+                  "more_items",
+                  "index_unresolved_truncated",
+                  "index_unresolved_coverage_unknown"
+                ],
+                "type": "string"
+              },
+              "title": "Reasons",
+              "type": "array"
+            },
+            "status": {
+              "enum": [
+                "complete",
+                "truncated",
+                "possibly_incomplete"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "title": "UnresolvedCompleteness",
+          "type": "object"
+        },
         "UnresolvedReference": {
           "additionalProperties": false,
           "properties": {
@@ -54858,8 +58666,11 @@
               "mapping": {
                 "get_neighbors.failed": "#/$defs/GetNeighborsFailure",
                 "get_neighbors.succeeded": "#/$defs/GetNeighborsSuccess",
+                "get_neighbors.summary_succeeded": "#/$defs/GetNeighborsSummarySuccess",
                 "read_source.failed": "#/$defs/ReadSourceFailure",
                 "read_source.succeeded": "#/$defs/ReadSourceSuccess",
+                "run_list_unresolved.failed": "#/$defs/RunListUnresolvedFailure",
+                "run_list_unresolved.succeeded": "#/$defs/RunListUnresolvedSuccess",
                 "search_code.failed": "#/$defs/SearchCodeFailure",
                 "search_code.succeeded": "#/$defs/SearchCodeSuccess"
               },
@@ -54883,6 +58694,15 @@
               },
               {
                 "$ref": "#/$defs/GetNeighborsFailure"
+              },
+              {
+                "$ref": "#/$defs/GetNeighborsSummarySuccess"
+              },
+              {
+                "$ref": "#/$defs/RunListUnresolvedSuccess"
+              },
+              {
+                "$ref": "#/$defs/RunListUnresolvedFailure"
               }
             ]
           },
@@ -56443,6 +60263,179 @@
           "title": "GetNeighborsSuccess",
           "type": "object"
         },
+        "GetNeighborsSummarySuccess": {
+          "additionalProperties": false,
+          "description": "Run neighbor graph with unresolved rows explicitly omitted.",
+          "properties": {
+            "completed_sequence": {
+              "exclusiveMinimum": 0,
+              "title": "Completed Sequence",
+              "type": "integer"
+            },
+            "completeness": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/NeighborCompleteness"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "contextual_calls": {
+              "items": {
+                "$ref": "#/$defs/ContextualCall"
+              },
+              "maxItems": 200,
+              "title": "Contextual Calls",
+              "type": "array"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "index_truncated": {
+              "default": false,
+              "title": "Index Truncated",
+              "type": "boolean"
+            },
+            "index_truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Truncation Reason"
+            },
+            "index_unresolved_truncated": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Unresolved Truncated"
+            },
+            "index_unresolved_truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Unresolved Truncation Reason"
+            },
+            "kind": {
+              "const": "get_neighbors.summary_succeeded",
+              "default": "get_neighbors.summary_succeeded",
+              "title": "Kind",
+              "type": "string"
+            },
+            "neighbors": {
+              "items": {
+                "$ref": "#/$defs/Neighbor"
+              },
+              "title": "Neighbors",
+              "type": "array"
+            },
+            "nodes": {
+              "items": {
+                "$ref": "#/$defs/Symbol"
+              },
+              "maxItems": 40,
+              "title": "Nodes",
+              "type": "array"
+            },
+            "possible_unresolved_callers": {
+              "items": {
+                "$ref": "#/$defs/UnresolvedReference"
+              },
+              "maxItems": 10,
+              "title": "Possible Unresolved Callers",
+              "type": "array"
+            },
+            "request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Request Id",
+              "type": "string"
+            },
+            "root": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Symbol"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "run_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Run Id",
+              "type": "string"
+            },
+            "tool": {
+              "const": "get_neighbors",
+              "default": "get_neighbors",
+              "title": "Tool",
+              "type": "string"
+            },
+            "truncated": {
+              "default": false,
+              "title": "Truncated",
+              "type": "boolean"
+            },
+            "truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Truncation Reason"
+            },
+            "unresolved": {
+              "default": null,
+              "title": "Unresolved",
+              "type": "null"
+            },
+            "unresolved_summary": {
+              "$ref": "#/$defs/RunUnresolvedSummary"
+            }
+          },
+          "required": [
+            "request_id",
+            "run_id",
+            "index_id",
+            "completed_sequence",
+            "neighbors",
+            "unresolved_summary"
+          ],
+          "title": "GetNeighborsSummarySuccess",
+          "type": "object"
+        },
         "GraphSnapshot": {
           "additionalProperties": false,
           "properties": {
@@ -56662,6 +60655,54 @@
             "status"
           ],
           "title": "NeighborCompleteness",
+          "type": "object"
+        },
+        "OverviewPage": {
+          "additionalProperties": false,
+          "properties": {
+            "next_cursor": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Next Cursor"
+            },
+            "order": {
+              "maxLength": 100,
+              "minLength": 1,
+              "title": "Order",
+              "type": "string"
+            },
+            "returned": {
+              "minimum": 0,
+              "title": "Returned",
+              "type": "integer"
+            },
+            "total": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Total"
+            }
+          },
+          "required": [
+            "returned",
+            "total",
+            "order"
+          ],
+          "title": "OverviewPage",
           "type": "object"
         },
         "ReadSourceFailure": {
@@ -57191,6 +61232,61 @@
           "title": "RunFailedPayload",
           "type": "object"
         },
+        "RunGetNeighborsParams": {
+          "additionalProperties": false,
+          "properties": {
+            "depth": {
+              "exclusiveMinimum": 0,
+              "maximum": 2,
+              "title": "Depth",
+              "type": "integer"
+            },
+            "detail": {
+              "default": "full",
+              "enum": [
+                "summary",
+                "full"
+              ],
+              "title": "Detail",
+              "type": "string"
+            },
+            "direction": {
+              "enum": [
+                "callers",
+                "callees",
+                "both"
+              ],
+              "title": "Direction",
+              "type": "string"
+            },
+            "limit": {
+              "exclusiveMinimum": 0,
+              "maximum": 40,
+              "title": "Limit",
+              "type": "integer"
+            },
+            "symbol_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Symbol Id",
+              "type": "string"
+            },
+            "tool": {
+              "const": "run_get_neighbors",
+              "default": "run_get_neighbors",
+              "title": "Tool",
+              "type": "string"
+            }
+          },
+          "required": [
+            "symbol_id",
+            "direction",
+            "depth",
+            "limit"
+          ],
+          "title": "RunGetNeighborsParams",
+          "type": "object"
+        },
         "RunInterruptedEvent": {
           "additionalProperties": false,
           "properties": {
@@ -57249,6 +61345,172 @@
             "reason"
           ],
           "title": "RunInterruptedPayload",
+          "type": "object"
+        },
+        "RunListUnresolvedFailure": {
+          "additionalProperties": false,
+          "properties": {
+            "completed_sequence": {
+              "exclusiveMinimum": 0,
+              "title": "Completed Sequence",
+              "type": "integer"
+            },
+            "error": {
+              "$ref": "#/$defs/ToolError"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "kind": {
+              "const": "run_list_unresolved.failed",
+              "default": "run_list_unresolved.failed",
+              "title": "Kind",
+              "type": "string"
+            },
+            "request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Request Id",
+              "type": "string"
+            },
+            "run_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Run Id",
+              "type": "string"
+            },
+            "tool": {
+              "const": "run_list_unresolved",
+              "default": "run_list_unresolved",
+              "title": "Tool",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request_id",
+            "run_id",
+            "index_id",
+            "completed_sequence",
+            "error"
+          ],
+          "title": "RunListUnresolvedFailure",
+          "type": "object"
+        },
+        "RunListUnresolvedParams": {
+          "additionalProperties": false,
+          "properties": {
+            "cursor": {
+              "anyOf": [
+                {
+                  "maxLength": 500,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Cursor"
+            },
+            "limit": {
+              "default": 20,
+              "exclusiveMinimum": 0,
+              "maximum": 100,
+              "title": "Limit",
+              "type": "integer"
+            },
+            "neighbor_request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Neighbor Request Id",
+              "type": "string"
+            },
+            "tool": {
+              "const": "run_list_unresolved",
+              "default": "run_list_unresolved",
+              "title": "Tool",
+              "type": "string"
+            }
+          },
+          "required": [
+            "neighbor_request_id"
+          ],
+          "title": "RunListUnresolvedParams",
+          "type": "object"
+        },
+        "RunListUnresolvedSuccess": {
+          "additionalProperties": false,
+          "properties": {
+            "completed_sequence": {
+              "exclusiveMinimum": 0,
+              "title": "Completed Sequence",
+              "type": "integer"
+            },
+            "completeness": {
+              "$ref": "#/$defs/UnresolvedCompleteness"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "items": {
+              "items": {
+                "$ref": "#/$defs/UnresolvedReference"
+              },
+              "maxItems": 100,
+              "title": "Items",
+              "type": "array"
+            },
+            "kind": {
+              "const": "run_list_unresolved.succeeded",
+              "default": "run_list_unresolved.succeeded",
+              "title": "Kind",
+              "type": "string"
+            },
+            "neighbor_request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Neighbor Request Id",
+              "type": "string"
+            },
+            "page": {
+              "$ref": "#/$defs/OverviewPage"
+            },
+            "request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Request Id",
+              "type": "string"
+            },
+            "run_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Run Id",
+              "type": "string"
+            },
+            "tool": {
+              "const": "run_list_unresolved",
+              "default": "run_list_unresolved",
+              "title": "Tool",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request_id",
+            "run_id",
+            "index_id",
+            "completed_sequence",
+            "neighbor_request_id",
+            "items",
+            "page",
+            "completeness"
+          ],
+          "title": "RunListUnresolvedSuccess",
           "type": "object"
         },
         "RunStartedEvent": {
@@ -57389,6 +61651,75 @@
             "budget"
           ],
           "title": "RunStartedPayload",
+          "type": "object"
+        },
+        "RunUnresolvedSummary": {
+          "additionalProperties": false,
+          "properties": {
+            "detail_hint": {
+              "title": "Detail Hint",
+              "type": "string"
+            },
+            "detail_state": {
+              "enum": [
+                "empty",
+                "omitted",
+                "unknown"
+              ],
+              "title": "Detail State",
+              "type": "string"
+            },
+            "items_in_legacy_full_result": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Items In Legacy Full Result"
+            },
+            "neighbor_request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Neighbor Request Id",
+              "type": "string"
+            },
+            "node_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 40,
+              "minItems": 1,
+              "title": "Node Ids",
+              "type": "array"
+            },
+            "total_indexed_in_scope": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Total Indexed In Scope"
+            }
+          },
+          "required": [
+            "detail_state",
+            "total_indexed_in_scope",
+            "items_in_legacy_full_result",
+            "neighbor_request_id",
+            "node_ids",
+            "detail_hint"
+          ],
+          "title": "RunUnresolvedSummary",
           "type": "object"
         },
         "SearchCodeFailure": {
@@ -57765,7 +62096,9 @@
               "discriminator": {
                 "mapping": {
                   "get_neighbors.succeeded": "#/$defs/GetNeighborsSuccess",
+                  "get_neighbors.summary_succeeded": "#/$defs/GetNeighborsSummarySuccess",
                   "read_source.succeeded": "#/$defs/ReadSourceSuccess",
+                  "run_list_unresolved.succeeded": "#/$defs/RunListUnresolvedSuccess",
                   "search_code.succeeded": "#/$defs/SearchCodeSuccess"
                 },
                 "propertyName": "kind"
@@ -57779,6 +62112,12 @@
                 },
                 {
                   "$ref": "#/$defs/GetNeighborsSuccess"
+                },
+                {
+                  "$ref": "#/$defs/GetNeighborsSummarySuccess"
+                },
+                {
+                  "$ref": "#/$defs/RunListUnresolvedSuccess"
                 }
               ],
               "title": "Result"
@@ -57869,6 +62208,7 @@
                 "mapping": {
                   "get_neighbors.failed": "#/$defs/GetNeighborsFailure",
                   "read_source.failed": "#/$defs/ReadSourceFailure",
+                  "run_list_unresolved.failed": "#/$defs/RunListUnresolvedFailure",
                   "search_code.failed": "#/$defs/SearchCodeFailure"
                 },
                 "propertyName": "kind"
@@ -57882,6 +62222,9 @@
                 },
                 {
                   "$ref": "#/$defs/GetNeighborsFailure"
+                },
+                {
+                  "$ref": "#/$defs/RunListUnresolvedFailure"
                 }
               ],
               "title": "Result"
@@ -57907,6 +62250,8 @@
                 "mapping": {
                   "get_neighbors": "#/$defs/GetNeighborsParams",
                   "read_source": "#/$defs/ReadSourceParams",
+                  "run_get_neighbors": "#/$defs/RunGetNeighborsParams",
+                  "run_list_unresolved": "#/$defs/RunListUnresolvedParams",
                   "search_code": "#/$defs/SearchCodeParams"
                 },
                 "propertyName": "tool"
@@ -57920,6 +62265,12 @@
                 },
                 {
                   "$ref": "#/$defs/GetNeighborsParams"
+                },
+                {
+                  "$ref": "#/$defs/RunGetNeighborsParams"
+                },
+                {
+                  "$ref": "#/$defs/RunListUnresolvedParams"
                 }
               ],
               "title": "Params"
@@ -57995,6 +62346,49 @@
             "request"
           ],
           "title": "ToolStartedPayload",
+          "type": "object"
+        },
+        "UnresolvedCompleteness": {
+          "additionalProperties": false,
+          "properties": {
+            "hint": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Hint"
+            },
+            "reasons": {
+              "items": {
+                "enum": [
+                  "more_items",
+                  "index_unresolved_truncated",
+                  "index_unresolved_coverage_unknown"
+                ],
+                "type": "string"
+              },
+              "title": "Reasons",
+              "type": "array"
+            },
+            "status": {
+              "enum": [
+                "complete",
+                "truncated",
+                "possibly_incomplete"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "title": "UnresolvedCompleteness",
           "type": "object"
         },
         "UnresolvedReference": {
@@ -58435,6 +62829,103 @@
           "title": "ReadSourceParams",
           "type": "object"
         },
+        "RunGetNeighborsParams": {
+          "additionalProperties": false,
+          "properties": {
+            "depth": {
+              "exclusiveMinimum": 0,
+              "maximum": 2,
+              "title": "Depth",
+              "type": "integer"
+            },
+            "detail": {
+              "default": "full",
+              "enum": [
+                "summary",
+                "full"
+              ],
+              "title": "Detail",
+              "type": "string"
+            },
+            "direction": {
+              "enum": [
+                "callers",
+                "callees",
+                "both"
+              ],
+              "title": "Direction",
+              "type": "string"
+            },
+            "limit": {
+              "exclusiveMinimum": 0,
+              "maximum": 40,
+              "title": "Limit",
+              "type": "integer"
+            },
+            "symbol_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Symbol Id",
+              "type": "string"
+            },
+            "tool": {
+              "const": "run_get_neighbors",
+              "default": "run_get_neighbors",
+              "title": "Tool",
+              "type": "string"
+            }
+          },
+          "required": [
+            "symbol_id",
+            "direction",
+            "depth",
+            "limit"
+          ],
+          "title": "RunGetNeighborsParams",
+          "type": "object"
+        },
+        "RunListUnresolvedParams": {
+          "additionalProperties": false,
+          "properties": {
+            "cursor": {
+              "anyOf": [
+                {
+                  "maxLength": 500,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Cursor"
+            },
+            "limit": {
+              "default": 20,
+              "exclusiveMinimum": 0,
+              "maximum": 100,
+              "title": "Limit",
+              "type": "integer"
+            },
+            "neighbor_request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Neighbor Request Id",
+              "type": "string"
+            },
+            "tool": {
+              "const": "run_list_unresolved",
+              "default": "run_list_unresolved",
+              "title": "Tool",
+              "type": "string"
+            }
+          },
+          "required": [
+            "neighbor_request_id"
+          ],
+          "title": "RunListUnresolvedParams",
+          "type": "object"
+        },
         "SearchCodeParams": {
           "additionalProperties": false,
           "properties": {
@@ -58478,6 +62969,8 @@
             "mapping": {
               "get_neighbors": "#/$defs/GetNeighborsParams",
               "read_source": "#/$defs/ReadSourceParams",
+              "run_get_neighbors": "#/$defs/RunGetNeighborsParams",
+              "run_list_unresolved": "#/$defs/RunListUnresolvedParams",
               "search_code": "#/$defs/SearchCodeParams"
             },
             "propertyName": "tool"
@@ -58491,6 +62984,12 @@
             },
             {
               "$ref": "#/$defs/GetNeighborsParams"
+            },
+            {
+              "$ref": "#/$defs/RunGetNeighborsParams"
+            },
+            {
+              "$ref": "#/$defs/RunListUnresolvedParams"
             }
           ],
           "title": "Params"
@@ -58939,6 +63438,179 @@
           "title": "GetNeighborsSuccess",
           "type": "object"
         },
+        "GetNeighborsSummarySuccess": {
+          "additionalProperties": false,
+          "description": "Run neighbor graph with unresolved rows explicitly omitted.",
+          "properties": {
+            "completed_sequence": {
+              "exclusiveMinimum": 0,
+              "title": "Completed Sequence",
+              "type": "integer"
+            },
+            "completeness": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/NeighborCompleteness"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "contextual_calls": {
+              "items": {
+                "$ref": "#/$defs/ContextualCall"
+              },
+              "maxItems": 200,
+              "title": "Contextual Calls",
+              "type": "array"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "index_truncated": {
+              "default": false,
+              "title": "Index Truncated",
+              "type": "boolean"
+            },
+            "index_truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Truncation Reason"
+            },
+            "index_unresolved_truncated": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Unresolved Truncated"
+            },
+            "index_unresolved_truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Index Unresolved Truncation Reason"
+            },
+            "kind": {
+              "const": "get_neighbors.summary_succeeded",
+              "default": "get_neighbors.summary_succeeded",
+              "title": "Kind",
+              "type": "string"
+            },
+            "neighbors": {
+              "items": {
+                "$ref": "#/$defs/Neighbor"
+              },
+              "title": "Neighbors",
+              "type": "array"
+            },
+            "nodes": {
+              "items": {
+                "$ref": "#/$defs/Symbol"
+              },
+              "maxItems": 40,
+              "title": "Nodes",
+              "type": "array"
+            },
+            "possible_unresolved_callers": {
+              "items": {
+                "$ref": "#/$defs/UnresolvedReference"
+              },
+              "maxItems": 10,
+              "title": "Possible Unresolved Callers",
+              "type": "array"
+            },
+            "request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Request Id",
+              "type": "string"
+            },
+            "root": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Symbol"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "run_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Run Id",
+              "type": "string"
+            },
+            "tool": {
+              "const": "get_neighbors",
+              "default": "get_neighbors",
+              "title": "Tool",
+              "type": "string"
+            },
+            "truncated": {
+              "default": false,
+              "title": "Truncated",
+              "type": "boolean"
+            },
+            "truncation_reason": {
+              "anyOf": [
+                {
+                  "maxLength": 1000,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Truncation Reason"
+            },
+            "unresolved": {
+              "default": null,
+              "title": "Unresolved",
+              "type": "null"
+            },
+            "unresolved_summary": {
+              "$ref": "#/$defs/RunUnresolvedSummary"
+            }
+          },
+          "required": [
+            "request_id",
+            "run_id",
+            "index_id",
+            "completed_sequence",
+            "neighbors",
+            "unresolved_summary"
+          ],
+          "title": "GetNeighborsSummarySuccess",
+          "type": "object"
+        },
         "Neighbor": {
           "additionalProperties": false,
           "properties": {
@@ -59047,6 +63719,54 @@
           "title": "NeighborCompleteness",
           "type": "object"
         },
+        "OverviewPage": {
+          "additionalProperties": false,
+          "properties": {
+            "next_cursor": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Next Cursor"
+            },
+            "order": {
+              "maxLength": 100,
+              "minLength": 1,
+              "title": "Order",
+              "type": "string"
+            },
+            "returned": {
+              "minimum": 0,
+              "title": "Returned",
+              "type": "integer"
+            },
+            "total": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Total"
+            }
+          },
+          "required": [
+            "returned",
+            "total",
+            "order"
+          ],
+          "title": "OverviewPage",
+          "type": "object"
+        },
         "ReadSourceFailure": {
           "additionalProperties": false,
           "properties": {
@@ -59149,6 +63869,199 @@
             "evidence"
           ],
           "title": "ReadSourceSuccess",
+          "type": "object"
+        },
+        "RunListUnresolvedFailure": {
+          "additionalProperties": false,
+          "properties": {
+            "completed_sequence": {
+              "exclusiveMinimum": 0,
+              "title": "Completed Sequence",
+              "type": "integer"
+            },
+            "error": {
+              "$ref": "#/$defs/ToolError"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "kind": {
+              "const": "run_list_unresolved.failed",
+              "default": "run_list_unresolved.failed",
+              "title": "Kind",
+              "type": "string"
+            },
+            "request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Request Id",
+              "type": "string"
+            },
+            "run_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Run Id",
+              "type": "string"
+            },
+            "tool": {
+              "const": "run_list_unresolved",
+              "default": "run_list_unresolved",
+              "title": "Tool",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request_id",
+            "run_id",
+            "index_id",
+            "completed_sequence",
+            "error"
+          ],
+          "title": "RunListUnresolvedFailure",
+          "type": "object"
+        },
+        "RunListUnresolvedSuccess": {
+          "additionalProperties": false,
+          "properties": {
+            "completed_sequence": {
+              "exclusiveMinimum": 0,
+              "title": "Completed Sequence",
+              "type": "integer"
+            },
+            "completeness": {
+              "$ref": "#/$defs/UnresolvedCompleteness"
+            },
+            "index_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Index Id",
+              "type": "string"
+            },
+            "items": {
+              "items": {
+                "$ref": "#/$defs/UnresolvedReference"
+              },
+              "maxItems": 100,
+              "title": "Items",
+              "type": "array"
+            },
+            "kind": {
+              "const": "run_list_unresolved.succeeded",
+              "default": "run_list_unresolved.succeeded",
+              "title": "Kind",
+              "type": "string"
+            },
+            "neighbor_request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Neighbor Request Id",
+              "type": "string"
+            },
+            "page": {
+              "$ref": "#/$defs/OverviewPage"
+            },
+            "request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Request Id",
+              "type": "string"
+            },
+            "run_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Run Id",
+              "type": "string"
+            },
+            "tool": {
+              "const": "run_list_unresolved",
+              "default": "run_list_unresolved",
+              "title": "Tool",
+              "type": "string"
+            }
+          },
+          "required": [
+            "request_id",
+            "run_id",
+            "index_id",
+            "completed_sequence",
+            "neighbor_request_id",
+            "items",
+            "page",
+            "completeness"
+          ],
+          "title": "RunListUnresolvedSuccess",
+          "type": "object"
+        },
+        "RunUnresolvedSummary": {
+          "additionalProperties": false,
+          "properties": {
+            "detail_hint": {
+              "title": "Detail Hint",
+              "type": "string"
+            },
+            "detail_state": {
+              "enum": [
+                "empty",
+                "omitted",
+                "unknown"
+              ],
+              "title": "Detail State",
+              "type": "string"
+            },
+            "items_in_legacy_full_result": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Items In Legacy Full Result"
+            },
+            "neighbor_request_id": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Neighbor Request Id",
+              "type": "string"
+            },
+            "node_ids": {
+              "items": {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 40,
+              "minItems": 1,
+              "title": "Node Ids",
+              "type": "array"
+            },
+            "total_indexed_in_scope": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Total Indexed In Scope"
+            }
+          },
+          "required": [
+            "detail_state",
+            "total_indexed_in_scope",
+            "items_in_legacy_full_result",
+            "neighbor_request_id",
+            "node_ids",
+            "detail_hint"
+          ],
+          "title": "RunUnresolvedSummary",
           "type": "object"
         },
         "SearchCodeFailure": {
@@ -59427,6 +64340,49 @@
           "title": "ToolError",
           "type": "object"
         },
+        "UnresolvedCompleteness": {
+          "additionalProperties": false,
+          "properties": {
+            "hint": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Hint"
+            },
+            "reasons": {
+              "items": {
+                "enum": [
+                  "more_items",
+                  "index_unresolved_truncated",
+                  "index_unresolved_coverage_unknown"
+                ],
+                "type": "string"
+              },
+              "title": "Reasons",
+              "type": "array"
+            },
+            "status": {
+              "enum": [
+                "complete",
+                "truncated",
+                "possibly_incomplete"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "title": "UnresolvedCompleteness",
+          "type": "object"
+        },
         "UnresolvedReference": {
           "additionalProperties": false,
           "properties": {
@@ -59504,8 +64460,11 @@
         "mapping": {
           "get_neighbors.failed": "#/$defs/GetNeighborsFailure",
           "get_neighbors.succeeded": "#/$defs/GetNeighborsSuccess",
+          "get_neighbors.summary_succeeded": "#/$defs/GetNeighborsSummarySuccess",
           "read_source.failed": "#/$defs/ReadSourceFailure",
           "read_source.succeeded": "#/$defs/ReadSourceSuccess",
+          "run_list_unresolved.failed": "#/$defs/RunListUnresolvedFailure",
+          "run_list_unresolved.succeeded": "#/$defs/RunListUnresolvedSuccess",
           "search_code.failed": "#/$defs/SearchCodeFailure",
           "search_code.succeeded": "#/$defs/SearchCodeSuccess"
         },
@@ -59529,6 +64488,15 @@
         },
         {
           "$ref": "#/$defs/GetNeighborsFailure"
+        },
+        {
+          "$ref": "#/$defs/GetNeighborsSummarySuccess"
+        },
+        {
+          "$ref": "#/$defs/RunListUnresolvedSuccess"
+        },
+        {
+          "$ref": "#/$defs/RunListUnresolvedFailure"
         }
       ]
     },

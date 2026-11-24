@@ -94,6 +94,8 @@ from .contracts import (
     RunToolResultsResponse,
     SearchCodeParams,
     GetNeighborsParams,
+    RunGetNeighborsParams,
+    RunListUnresolvedParams,
     ToolResult,
     SessionListResponse,
     SessionMessage,
@@ -144,6 +146,14 @@ def _slim_output_schema(schema: dict[str, Any]) -> dict[str, Any]:
 
     def has_schema_children(value: dict[str, Any]) -> bool:
         return any(schema_child(key, child) for key, child in value.items())
+
+    def rewrite_discriminator_refs(value: dict[str, Any], rename: Any) -> None:
+        discriminator = value.get("discriminator")
+        mapping = discriminator.get("mapping") if isinstance(discriminator, dict) else None
+        if isinstance(mapping, dict):
+            for key, ref in mapping.items():
+                if isinstance(ref, str) and ref.startswith("#/$defs/"):
+                    mapping[key] = rename(ref.removeprefix("#/$defs/"))
 
     def clean(value: Any, *, schema_node: bool = True) -> Any:
         if isinstance(value, list):
@@ -234,6 +244,10 @@ def _slim_output_schema(schema: dict[str, Any]) -> dict[str, Any]:
                 while name in replacements:
                     name = replacements[name]
                 rewritten["$ref"] = f"#/$defs/{name}"
+            rewrite_discriminator_refs(
+                rewritten,
+                lambda name: f"#/$defs/{replacements.get(name, name)}",
+            )
             return rewritten
         if isinstance(value, list):
             return [rewrite_refs(item) for item in value]
@@ -309,6 +323,15 @@ def _slim_output_schema(schema: dict[str, Any]) -> dict[str, Any]:
                 if name not in reachable and name in definitions:
                     reachable.add(name)
                     visit(definitions[name])
+            discriminator = value.get("discriminator")
+            mapping = discriminator.get("mapping") if isinstance(discriminator, dict) else None
+            if isinstance(mapping, dict):
+                for mapped_ref in mapping.values():
+                    if isinstance(mapped_ref, str) and mapped_ref.startswith("#/$defs/"):
+                        name = mapped_ref.removeprefix("#/$defs/")
+                        if name not in reachable and name in definitions:
+                            reachable.add(name)
+                            visit(definitions[name])
             map_schema_children(value, visit)
         elif isinstance(value, list):
             for item in value:
@@ -319,6 +342,49 @@ def _slim_output_schema(schema: dict[str, Any]) -> dict[str, Any]:
     compact["$defs"] = {name: value for name, value in definitions.items() if name in reachable}
     if not compact["$defs"]:
         compact.pop("$defs")
+    else:
+        # Local definition names are not part of the result contract. Keep
+        # leaf aliases such as S1, but use compact deterministic names for
+        # model definitions because each referenced name is repeated in the
+        # standalone schema advertised for every MCP tool.
+        definitions = compact["$defs"]
+        short_names = {
+            name: name
+            for name in definitions
+            if name.startswith("S") and name[1:].isdigit()
+        }
+        occupied = set(definitions)
+        suffix = 1
+        for name in sorted(set(definitions) - set(short_names)):
+            candidate = f"D{suffix}"
+            while candidate in occupied:
+                suffix += 1
+                candidate = f"D{suffix}"
+            short_names[name] = candidate
+            occupied.add(candidate)
+            suffix += 1
+
+        def rename_definition_refs(value: Any) -> Any:
+            if isinstance(value, dict):
+                renamed = map_schema_children(value, rename_definition_refs)
+                ref = renamed.get("$ref")
+                if isinstance(ref, str) and ref.startswith("#/$defs/"):
+                    name = ref.removeprefix("#/$defs/")
+                    renamed["$ref"] = f"#/$defs/{short_names.get(name, name)}"
+                rewrite_discriminator_refs(
+                    renamed,
+                    lambda name: f"#/$defs/{short_names.get(name, name)}",
+                )
+                return renamed
+            if isinstance(value, list):
+                return [rename_definition_refs(item) for item in value]
+            return value
+
+        compact["$defs"] = {
+            short_names[name]: rename_definition_refs(definition)
+            for name, definition in definitions.items()
+        }
+        compact = rename_definition_refs(compact)
     return compact
 
 
@@ -486,6 +552,8 @@ _RunCursor = Annotated[str | None, Field(max_length=shared.MAX_CURSOR_LENGTH, de
 _RunSequence = Annotated[int, Field(ge=shared.MIN_RUN_SEQUENCE, description="Return events or results after this sequence.")]
 _RunEventLimit = Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_RUN_EVENTS, description="Maximum Run events.")]
 _RunToolLimit = Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_RUN_TOOL_RESULTS, description="Maximum persisted tool results.")]
+_RunUnresolvedLimit = Annotated[int, Field(ge=shared.MIN_REQUEST_VALUE, le=shared.MAX_RUN_UNRESOLVED_PAGE_SIZE, description="Maximum unresolved items in this Run page.")]
+_RunUnresolvedCursor = Annotated[str | None, Field(max_length=shared.MAX_CURSOR_LENGTH, description="Opaque cursor returned by a prior run_list_unresolved page.")]
 _RunScenario = Literal[
     "success-timeout-missing",
     "insufficient-external-service",
@@ -514,6 +582,8 @@ def create_mcp_server(
     call_flow = (
         "Call list_projects → check_index_freshness → get_overview (skeleton) → "
         "list_overview_items/get_module → search_code/get_neighbors/list_unresolved as needed → read_source; "
+        "For Run neighbor investigation, prefer run_get_neighbors(detail='summary') first and use run_list_unresolved "
+        "to page details from that saved node scope; omitted detail on run_get_neighbors still defaults to legacy full. "
         "request detail='full' only when required. Round-trip cursors unchanged. "
         "If completeness is not complete, do not conclude absence. "
         "Discover CodeTrail projects and query one explicitly selected immutable index. "
@@ -1712,7 +1782,9 @@ def create_mcp_server(
                 "Traverse bounded static callers/callees and persist the actual result on one active Codex external Run. "
                 "The result may separately include constructor-bound contextual_calls; these are conditional records, "
                 "not static call edges or confirmed impact. binding_mutation_after_escape_unverified marks an object "
-                "stored through an attribute whose later mutation is unknown. Unresolved references remain explicit."
+                "stored through an attribute whose later mutation is unknown. Prefer detail='summary': it preserves the "
+                "returned graph and index coverage while omitting unresolved rows; expand the fixed returned-node scope "
+                "with run_list_unresolved. Omitted detail defaults to legacy full for compatibility."
             ),
             structured_output=True,
         )
@@ -1726,6 +1798,7 @@ def create_mcp_server(
             direction: Literal["callers", "callees", "both"],
             depth: _Depth = shared.MAX_GRAPH_DEPTH,
             limit: _Limit = shared.MAX_PAGE_SIZE,
+            detail: Literal["summary", "full"] = "full",
         ) -> McpExternalToolResponse:
             try:
                 result = service.execute_external_tool(
@@ -1734,11 +1807,12 @@ def create_mcp_server(
                     run_id,
                     request_id,
                     index_id,
-                    GetNeighborsParams(
+                    RunGetNeighborsParams(
                         symbol_id=symbol_id,
                         direction=direction,
                         depth=depth,
                         limit=limit,
+                        detail=detail,
                     ),
                 )
                 return _mcp_external_tool_response(result, citation_url, project_id)
@@ -1746,6 +1820,38 @@ def create_mcp_server(
                 return _failure(McpExternalToolResponse, exc)
             except Exception:
                 return _unexpected_failure("run_get_neighbors", McpExternalToolResponse)
+
+        @server.tool(
+            name="run_list_unresolved",
+            title="Page unresolved details inside an external Run",
+            description=(
+                "Page indexed unresolved references from every node returned by one successful run_get_neighbors request. "
+                "Use the neighbor_request_id and next_cursor returned by the saved Run results; pages are metered and persisted."
+            ),
+            structured_output=True,
+        )
+        def run_list_unresolved(
+            project_id: _ProjectId,
+            session_id: _SessionId,
+            run_id: _RunId,
+            index_id: _IndexId,
+            request_id: _RequestId,
+            neighbor_request_id: _RequestId,
+            cursor: _RunUnresolvedCursor = None,
+            limit: _RunUnresolvedLimit = 20,
+        ) -> McpExternalToolResponse:
+            try:
+                result = service.execute_external_tool(
+                    project_id, session_id, run_id, request_id, index_id,
+                    RunListUnresolvedParams(
+                        neighbor_request_id=neighbor_request_id, cursor=cursor, limit=limit
+                    ),
+                )
+                return _mcp_external_tool_response(result, citation_url, project_id)
+            except ServiceError as exc:
+                return _failure(McpExternalToolResponse, exc)
+            except Exception:
+                return _unexpected_failure("run_list_unresolved", McpExternalToolResponse)
 
         @server.tool(
             name="submit_project_features",
